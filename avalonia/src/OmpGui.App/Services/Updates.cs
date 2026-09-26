@@ -32,7 +32,7 @@ public sealed record UpdateCheck(bool Available, string Current, string? Latest,
 public sealed class UpdateChecker(HttpClient http, string feedUrl, string currentVersion, string rid, string? publicKey = null)
 {
     /// <summary>Where the releases of this client publish their manifest.</summary>
-    public const string DefaultFeed = "https://github.com/samnolak/oh-my-pi-gui/releases/latest/download/update.json";
+    public const string DefaultFeed = "https://github.com/samnolak/omp-gui/releases/latest/download/update.json";
     private const long MaxPackageBytes = 1L << 30;
 
     /// <summary>
