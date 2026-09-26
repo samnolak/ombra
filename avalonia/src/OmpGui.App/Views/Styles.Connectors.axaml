@@ -1,0 +1,85 @@
+<!-- Styles for the Connectors (MCP), Plugins and Skills settings, on the design system's tokens (Tokens.axaml), as in Styles.axaml. -->
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctl="using:OmpGui.App.Controls">
+  <!-- The square in front of a row (connector, plugin, marketplace): fill 1, radius 8, a 16 px line icon -->
+  <Style Selector="Border.conn-tile">
+    <Setter Property="Width" Value="36" />
+    <Setter Property="Height" Value="36" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="VerticalAlignment" Value="Top" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="Border.conn-tile > ctl|Icon">
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <!-- A row's name: 14 medium, one line -->
+  <Style Selector="TextBlock.conn-name">
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <!-- Command line or address under the name -->
+  <Style Selector="TextBlock.conn-detail">
+    <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, DejaVu Sans Mono, monospace" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+  <!-- Small tags beside a name (scope, transport, source): 11 px on fill 2, radius 4 (as Border.tag) -->
+  <Style Selector="Border.conn-tag">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius4}" />
+    <Setter Property="Padding" Value="6,1" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.conn-tag > TextBlock">
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <!-- Hairline between rows of a list -->
+  <Style Selector="Border.conn-sep">
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Background" Value="{DynamicResource GuiBorderSoft}" />
+  </Style>
+  <!-- An inline panel under a row (confirmation, sign-in steps, test output) -->
+  <Style Selector="Border.conn-inset">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1OnSurface1}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="Padding" Value="12,10" />
+  </Style>
+  <!-- A form inside a card (add / edit a connector): outlined, so its filled fields keep their contrast -->
+  <Style Selector="Border.conn-form">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+    <Setter Property="Padding" Value="16,14" />
+  </Style>
+  <!-- Success line: primary text with a positive check (the mark carries the colour) -->
+  <Style Selector="ctl|Icon.positive-mark">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiStatusSuccess}" />
+  </Style>
+  <!-- A command to type in omp's terminal -->
+  <Style Selector="Border.conn-code">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius4}" />
+    <Setter Property="Padding" Value="6,2" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+  </Style>
+  <Style Selector="Border.conn-code > SelectableTextBlock">
+    <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, DejaVu Sans Mono, monospace" />
+    <Setter Property="FontSize" Value="12.5" />
+  </Style>
+  <!-- The form's multi-line fields (arguments, environment, headers) -->
+  <Style Selector="TextBox.conn-lines">
+    <Setter Property="AcceptsReturn" Value="True" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="MinHeight" Value="68" />
+    <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, DejaVu Sans Mono, monospace" />
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+</Styles>

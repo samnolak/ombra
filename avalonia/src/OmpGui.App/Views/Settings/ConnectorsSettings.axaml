@@ -1,0 +1,393 @@
+<!-- Settings → Connectors: omp's MCP servers (its /mcp builtin over RPC; see ViewModels/ConnectorsViewModel.cs). -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             xmlns:settings="using:OmpGui.App.Views.Settings"
+             x:Class="OmpGui.App.Views.Settings.ConnectorsSettings"
+             x:DataType="vm:MainViewModel">
+  <Panel DataContext="{Binding Connectors}">
+    <StackPanel x:Name="ConnectorsPage" Spacing="16" x:DataType="vm:ConnectorsViewModel">
+
+      <!-- ── Connectors: the list, its states and the add / edit form ── -->
+      <Border Classes="section-card">
+        <StackPanel Spacing="14">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="4" Margin="0,0,16,0">
+              <TextBlock Classes="section" Text="Connectors" />
+              <TextBlock Classes="muted" TextWrapping="Wrap"
+                         Text="MCP servers give omp tools and data from other apps and services. omp connects to them when it starts." />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top">
+              <Button x:Name="RefreshConnectorsButton" Classes="icon" Command="{Binding RefreshCommand}" IsEnabled="{Binding !IsLoading}"
+                      ToolTip.Tip="Refresh" AutomationProperties.Name="Refresh connectors">
+                <ctl:Icon Data="{StaticResource IconReload}" Size="16" />
+              </Button>
+              <Button x:Name="AddConnectorButton" Command="{Binding OpenAddFormCommand}" IsEnabled="{Binding CanChange}" AutomationProperties.Name="Add connector">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <ctl:Icon Data="{StaticResource IconPlus}" Size="14" VerticalAlignment="Center" />
+                  <TextBlock Text="Add connector" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+            </StackPanel>
+          </Grid>
+
+          <settings:ConnectorsSettingsFeedback DataContext="{Binding Feedback}" />
+
+          <!-- Add / edit -->
+          <Border x:Name="ConnectorForm" Classes="conn-form" IsVisible="{Binding IsFormOpen}">
+            <StackPanel Spacing="12">
+              <TextBlock Text="{Binding FormTitle}" FontWeight="SemiBold" FontSize="15" TextTrimming="CharacterEllipsis" />
+              <StackPanel Spacing="4" IsVisible="{Binding CanEditName}">
+                <TextBlock Classes="label" Text="Name" />
+                <TextBox x:Name="ConnectorNameBox" Text="{Binding FormName}" PlaceholderText="github" AutomationProperties.Name="Connector name" />
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <TextBlock Classes="label" Text="Type" />
+                <Border Classes="segmented" HorizontalAlignment="Left">
+                  <StackPanel Orientation="Horizontal" Spacing="2">
+                    <Button x:Name="TransportStdio" Classes="segment" Classes.selected="{Binding FormIsStdio}" Content="Local command"
+                            Command="{Binding SetTransportCommand}" CommandParameter="stdio" AutomationProperties.Name="Type: local command (stdio)" />
+                    <Button x:Name="TransportHttp" Classes="segment" Classes.selected="{Binding FormIsHttp}" Content="HTTP"
+                            Command="{Binding SetTransportCommand}" CommandParameter="http" AutomationProperties.Name="Type: HTTP" />
+                    <Button x:Name="TransportSse" Classes="segment" Classes.selected="{Binding FormIsSse}" Content="SSE"
+                            Command="{Binding SetTransportCommand}" CommandParameter="sse" AutomationProperties.Name="Type: SSE" />
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+              <StackPanel Spacing="4">
+                <TextBlock Classes="label" Text="Available in" />
+                <Border Classes="segmented" HorizontalAlignment="Left" IsVisible="{Binding CanEditName}">
+                  <StackPanel Orientation="Horizontal" Spacing="2">
+                    <Button x:Name="ScopeUser" Classes="segment" Classes.selected="{Binding FormIsUser}" Content="All projects"
+                            Command="{Binding SetScopeCommand}" CommandParameter="user" AutomationProperties.Name="Available in all projects" />
+                    <Button x:Name="ScopeProject" Classes="segment" Classes.selected="{Binding FormIsProject}" Content="This project"
+                            Command="{Binding SetScopeCommand}" CommandParameter="project" AutomationProperties.Name="Available in this project" />
+                  </StackPanel>
+                </Border>
+                <TextBlock Classes="tertiary" Text="{Binding FormScopeLabel}" TextWrapping="Wrap" />
+              </StackPanel>
+
+              <StackPanel Spacing="12" IsVisible="{Binding FormIsStdio}">
+                <StackPanel Spacing="4">
+                  <TextBlock Classes="label" Text="Command" />
+                  <TextBox x:Name="ConnectorCommandBox" Text="{Binding FormCommand}" PlaceholderText="npx" AutomationProperties.Name="Command" />
+                </StackPanel>
+                <StackPanel Spacing="4">
+                  <TextBlock Classes="label" Text="Arguments, one per line" />
+                  <TextBox x:Name="ConnectorArgsBox" Classes="conn-lines" Text="{Binding FormArgs}" PlaceholderText="-y&#x0a;@modelcontextprotocol/server-github" AutomationProperties.Name="Arguments" />
+                </StackPanel>
+                <StackPanel Spacing="4">
+                  <TextBlock Classes="label" Text="Environment variables, NAME=value per line" />
+                  <TextBox x:Name="ConnectorEnvBox" Classes="conn-lines" Text="{Binding FormEnv}" PlaceholderText="GITHUB_TOKEN=…" AutomationProperties.Name="Environment variables" />
+                </StackPanel>
+              </StackPanel>
+
+              <StackPanel Spacing="12" IsVisible="{Binding FormIsRemote}">
+                <StackPanel Spacing="4">
+                  <TextBlock Classes="label" Text="URL" />
+                  <TextBox x:Name="ConnectorUrlBox" Text="{Binding FormUrl}" PlaceholderText="https://example.com/mcp" AutomationProperties.Name="URL" />
+                </StackPanel>
+                <StackPanel Spacing="4">
+                  <TextBlock Classes="label" Text="Bearer token (optional)" />
+                  <TextBox x:Name="ConnectorTokenBox" Text="{Binding FormToken}" PasswordChar="•" AutomationProperties.Name="Bearer token" />
+                </StackPanel>
+                <StackPanel Spacing="4">
+                  <TextBlock Classes="label" Text="Other headers, Name: value per line (optional)" />
+                  <TextBox x:Name="ConnectorHeadersBox" Classes="conn-lines" Text="{Binding FormHeaders}" PlaceholderText="X-Api-Key: …" AutomationProperties.Name="Headers" />
+                </StackPanel>
+              </StackPanel>
+
+              <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasFormError}">
+                <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
+                <SelectableTextBlock Grid.Column="1" x:Name="ConnectorFormError" Classes="error" Text="{Binding FormError}" TextWrapping="Wrap" FontSize="13" />
+              </Grid>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button x:Name="SubmitConnectorButton" Classes="accent" Content="{Binding FormSubmitLabel}" Command="{Binding SubmitFormCommand}"
+                        IsEnabled="{Binding !IsSubmitting}" AutomationProperties.Name="{Binding FormSubmitLabel}" />
+                <Button x:Name="CancelConnectorButton" Classes="flat" Content="Cancel" Command="{Binding CancelFormCommand}" />
+              </StackPanel>
+              <TextBlock Classes="tertiary" TextWrapping="Wrap"
+                         Text="omp checks the connector and saves it in its own settings. It connects to it the next time it starts." />
+            </StackPanel>
+          </Border>
+
+          <!-- States -->
+          <TextBlock x:Name="ConnectorsLoading" Classes="muted" Text="Loading connectors from omp…" IsVisible="{Binding ShowLoading}" />
+          <StackPanel x:Name="ConnectorsNotRunning" Spacing="10" IsVisible="{Binding ShowNotRunning}">
+            <TextBlock Text="omp isn't running" FontWeight="Medium" />
+            <TextBlock Classes="muted" TextWrapping="Wrap"
+                       Text="Connectors are read from omp and changed through it, so this list appears while omp runs." />
+            <Button Content="Start omp" Command="{Binding StartOmpCommand}" IsVisible="{Binding CanStartOmp}" HorizontalAlignment="Left" />
+          </StackPanel>
+          <Border x:Name="ConnectorsLoadError" Classes="notice error" IsVisible="{Binding HasLoadError}">
+            <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
+              <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
+              <StackPanel Grid.Column="1" Spacing="4">
+                <TextBlock Classes="error" Text="omp couldn't list the connectors" FontWeight="Medium" FontSize="13" />
+                <SelectableTextBlock Text="{Binding LoadError}" TextWrapping="Wrap" FontSize="13" />
+              </StackPanel>
+              <Button Grid.Row="1" Grid.Column="1" Content="Try again" Command="{Binding RefreshCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" />
+            </Grid>
+          </Border>
+          <StackPanel x:Name="ConnectorsEmpty" Spacing="6" IsVisible="{Binding ShowEmpty}" Margin="0,4,0,4">
+            <TextBlock Text="No connectors yet" FontWeight="Medium" />
+            <TextBlock Classes="muted" TextWrapping="Wrap"
+                       Text="Add an MCP server: a local command omp starts (stdio), or a remote server by its URL (HTTP or SSE). Or find one on Smithery below." />
+          </StackPanel>
+
+          <!-- The list -->
+          <ItemsControl x:Name="ConnectorList" ItemsSource="{Binding Servers}" IsVisible="{Binding ShowList}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:McpServerRowViewModel">
+                <StackPanel>
+                  <Border Classes="conn-sep" />
+                  <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto" Margin="0,14,0,14">
+                    <Border Classes="conn-tile">
+                      <Panel>
+                        <ctl:Icon Data="{StaticResource IconTerminal}" Size="16" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !IsRemote}" />
+                        <ctl:Icon Data="{StaticResource IconGlobe}" Size="16" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsRemote}" />
+                      </Panel>
+                    </Border>
+                    <StackPanel Grid.Column="1" Spacing="3" Margin="12,0,12,0">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Classes="conn-name" Text="{Binding Name}" MaxWidth="240" />
+                        <Border Classes="conn-tag" ToolTip.Tip="{Binding ScopeTip}"><TextBlock Text="{Binding ScopeLabel}" /></Border>
+                        <Border Classes="conn-tag"><TextBlock Text="{Binding TransportLabel}" /></Border>
+                      </StackPanel>
+                      <TextBlock Classes="conn-detail" Text="{Binding Detail}" ToolTip.Tip="{Binding Detail}" />
+                      <TextBlock Classes="tertiary" Text="{Binding Extras}" IsVisible="{Binding HasExtras}" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Classes="tertiary" Text="{Binding FileNote}" IsVisible="{Binding IsFromProjectFile}" TextWrapping="Wrap" />
+                      <Border Classes="status" Classes.done="{Binding IsConnected}" Classes.failed="{Binding IsFailed}" Classes.running="{Binding IsWorking}"
+                              HorizontalAlignment="Left" Margin="0,4,0,0">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <Ellipse />
+                          <TextBlock Text="{Binding StateText}" VerticalAlignment="Center" />
+                        </StackPanel>
+                      </Border>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Top">
+                      <ToggleButton Classes="switch" IsChecked="{Binding IsEnabled}" IsEnabled="{Binding CanToggle}" VerticalAlignment="Center"
+                                    ToolTip.Tip="On: omp connects to it when it starts" AutomationProperties.Name="{Binding Name, StringFormat='Use {0}'}" />
+                      <Panel Width="32">
+                        <Button Classes="icon conn-more" IsVisible="{Binding HasMenu}" ToolTip.Tip="More" AutomationProperties.Name="{Binding Name, StringFormat='More for {0}'}">
+                          <ctl:Icon Data="{StaticResource IconMoreHorizontal}" Filled="True" Size="16" />
+                          <Button.Flyout>
+                            <Flyout Placement="BottomEdgeAlignedRight">
+                              <StackPanel Width="230" Spacing="2">
+                                <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding TestCommand}"
+                                        IsEnabled="{Binding CanTest}" AutomationProperties.Name="Test connection">
+                                  <Grid ColumnDefinitions="Auto,*">
+                                    <ctl:Icon Data="{StaticResource IconPulse}" Size="16" Margin="0,0,10,0" />
+                                    <TextBlock Grid.Column="1" Text="Test connection" VerticalAlignment="Center" />
+                                  </Grid>
+                                </Button>
+                                <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding EditCommand}"
+                                        IsEnabled="{Binding CanEdit}" AutomationProperties.Name="Edit">
+                                  <Grid ColumnDefinitions="Auto,*">
+                                    <ctl:Icon Data="{StaticResource IconPencil}" Size="16" Margin="0,0,10,0" />
+                                    <TextBlock Grid.Column="1" Text="Edit…" VerticalAlignment="Center" />
+                                  </Grid>
+                                </Button>
+                                <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding ShowSignInCommand}"
+                                        IsVisible="{Binding IsRemote}" AutomationProperties.Name="Sign in">
+                                  <Grid ColumnDefinitions="Auto,*">
+                                    <ctl:Icon Data="{StaticResource IconKey}" Size="16" Margin="0,0,10,0" />
+                                    <TextBlock Grid.Column="1" Text="Sign in…" VerticalAlignment="Center" />
+                                  </Grid>
+                                </Button>
+                                <Border Classes="conn-sep" Margin="4,2" />
+                                <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding AskRemoveCommand}"
+                                        AutomationProperties.Name="Remove">
+                                  <Grid ColumnDefinitions="Auto,*">
+                                    <ctl:Icon Data="{StaticResource IconTrash}" Size="16" Margin="0,0,10,0" />
+                                    <TextBlock Grid.Column="1" Text="Remove…" VerticalAlignment="Center" />
+                                  </Grid>
+                                </Button>
+                              </StackPanel>
+                            </Flyout>
+                          </Button.Flyout>
+                        </Button>
+                      </Panel>
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Spacing="8" Margin="12,0,0,0">
+                      <TextBlock Classes="tertiary" Text="{Binding Tools, StringFormat='Tools: {0}'}" TextWrapping="Wrap" IsVisible="{Binding HasTools}" Margin="0,8,0,0" />
+                      <Border Classes="conn-inset" IsVisible="{Binding HasFailure}" Margin="0,8,0,0">
+                        <StackPanel Spacing="6">
+                          <Grid ColumnDefinitions="Auto,*">
+                            <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
+                            <SelectableTextBlock Grid.Column="1" Text="{Binding Failure}" TextWrapping="Wrap" FontSize="13" />
+                          </Grid>
+                          <Button Classes="link action" Content="Sign in to this server…" Command="{Binding ShowSignInCommand}" IsVisible="{Binding SuggestSignIn}" Margin="24,0,0,0" />
+                        </StackPanel>
+                      </Border>
+                      <Border Classes="conn-inset" IsVisible="{Binding IsConfirmingRemove}" Margin="0,8,0,0">
+                        <StackPanel Spacing="10">
+                          <StackPanel Spacing="2">
+                            <TextBlock Text="{Binding RemoveQuestion}" TextWrapping="Wrap" FontWeight="Medium" FontSize="13" />
+                            <TextBlock Classes="muted" TextWrapping="Wrap" Text="omp deletes it from its settings file. This session keeps its tools until omp restarts." />
+                          </StackPanel>
+                          <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Remove" Command="{Binding RemoveCommand}" IsEnabled="{Binding CanToggle}" AutomationProperties.Name="{Binding Name, StringFormat='Remove {0}'}" />
+                            <Button Classes="flat" Content="Cancel" Command="{Binding CancelRemoveCommand}" />
+                          </StackPanel>
+                        </StackPanel>
+                      </Border>
+                      <Border Classes="conn-inset" IsVisible="{Binding IsSignInOpen}" Margin="0,8,0,0">
+                        <StackPanel Spacing="10">
+                          <TextBlock TextWrapping="Wrap" FontSize="13"
+                                     Text="omp signs in to MCP servers in its own terminal. Open it, type this command, and finish the sign-in in your browser. Then restart omp here so it connects with the new sign-in." />
+                          <Border Classes="conn-code"><SelectableTextBlock Text="{Binding ReauthCommand}" /></Border>
+                          <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Open omp terminal" Command="{Binding OpenTerminalCommand}" />
+                            <Button Classes="flat" Content="Copy command" Command="{Binding CopyReauthCommand}" />
+                          </StackPanel>
+                        </StackPanel>
+                      </Border>
+                    </StackPanel>
+                  </Grid>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <TextBlock x:Name="OtherMcpTools" Classes="tertiary" TextWrapping="Wrap" IsVisible="{Binding HasOtherTools}"
+                     Text="{Binding OtherTools, StringFormat='This session also has MCP tools from servers set up for other tools (Claude Code, Cursor, VS Code…): {0}'}" />
+        </StackPanel>
+      </Border>
+
+      <!-- ── Resources and prompts ── -->
+      <Border Classes="section-card">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="4" Margin="0,0,16,0">
+              <TextBlock Classes="section" Text="Resources and prompts" />
+              <TextBlock Classes="muted" TextWrapping="Wrap"
+                         Text="What the servers offer besides tools: data omp can read, and prompts you can run as commands. omp asks each server in turn." />
+            </StackPanel>
+            <Button x:Name="ShowMcpItemsButton" Grid.Column="1" Content="Show" Command="{Binding LoadItemsCommand}" IsEnabled="{Binding !IsLoadingItems}" VerticalAlignment="Top" />
+          </Grid>
+          <TextBlock Classes="muted" Text="Asking the servers…" IsVisible="{Binding IsLoadingItems}" />
+          <TextBlock x:Name="McpItemsMessage" Classes="muted" Text="{Binding ItemsMessage}" TextWrapping="Wrap" IsVisible="{Binding HasItemsMessage}" />
+          <StackPanel Spacing="8" IsVisible="{Binding HasPrompts}">
+            <TextBlock Classes="caps" Text="PROMPTS" />
+            <ItemsControl ItemsSource="{Binding Prompts}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:McpItemViewModel">
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,4">
+                    <StackPanel Spacing="2" Margin="0,0,12,0" VerticalAlignment="Center">
+                      <TextBlock Classes="conn-detail" Text="{Binding Command}" Foreground="{DynamicResource GuiTextPrimary}" />
+                      <TextBlock Classes="muted" Text="{Binding Description}" TextWrapping="Wrap" IsVisible="{Binding HasDescription}" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Classes="flat" Content="Use" Command="{Binding UseCommand}" IsVisible="{Binding CanUse}" VerticalAlignment="Center"
+                            AutomationProperties.Name="{Binding Command, StringFormat='Use {0}'}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+          <StackPanel Spacing="8" IsVisible="{Binding HasResources}">
+            <TextBlock Classes="caps" Text="RESOURCES" />
+            <ItemsControl ItemsSource="{Binding Resources}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:McpItemViewModel">
+                  <TextBlock Classes="conn-detail" Text="{Binding Label}" ToolTip.Tip="{Binding Label}" Margin="0,3" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- ── Find connectors (Smithery) ── -->
+      <Border Classes="section-card">
+        <StackPanel Spacing="12">
+          <StackPanel Spacing="4">
+            <TextBlock Classes="section" Text="Find connectors" />
+            <TextBlock Classes="muted" TextWrapping="Wrap" Text="Search Smithery, a public registry of MCP servers." />
+          </StackPanel>
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBox x:Name="SmitherySearchBox" Classes="search" Text="{Binding SearchQuery}" PlaceholderText="Search, e.g. github" AutomationProperties.Name="Search Smithery">
+              <TextBox.InnerLeftContent>
+                <ctl:Icon Data="{StaticResource IconSearch}" Size="16" Margin="12,0,0,0" VerticalAlignment="Center" TextElement.Foreground="{DynamicResource GuiTextTertiary}" />
+              </TextBox.InnerLeftContent>
+              <TextBox.KeyBindings>
+                <KeyBinding Gesture="Enter" Command="{Binding SearchCommand}" />
+              </TextBox.KeyBindings>
+            </TextBox>
+            <Button x:Name="SmitherySearchButton" Grid.Column="1" Content="Search" Command="{Binding SearchCommand}" IsEnabled="{Binding !IsSearching}" Margin="8,0,0,0" />
+          </Grid>
+          <TextBlock Classes="muted" Text="Searching…" IsVisible="{Binding IsSearching}" />
+          <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasSearchMessage}">
+            <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
+            <SelectableTextBlock Grid.Column="1" x:Name="SmitheryMessage" Text="{Binding SearchMessage}" TextWrapping="Wrap" FontSize="13" />
+          </Grid>
+          <Border Classes="conn-inset" IsVisible="{Binding SearchNeedsSignIn}">
+            <StackPanel Spacing="10">
+              <TextBlock TextWrapping="Wrap" FontSize="13"
+                         Text="Smithery needs a sign-in, which omp does in its own terminal: open it and type this command. The search here works once you're signed in." />
+              <Border Classes="conn-code"><SelectableTextBlock Text="{Binding SmitheryLoginCommand}" /></Border>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="Open omp terminal" Command="{Binding OpenOmpTerminalCommand}" />
+                <Button Classes="flat" Content="Copy command" Command="{Binding CopySmitheryLoginCommand}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+          <ItemsControl x:Name="SmitheryResults" ItemsSource="{Binding SearchResults}" IsVisible="{Binding HasSearchResults}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SmitheryResultViewModel">
+                <StackPanel>
+                  <Border Classes="conn-sep" />
+                  <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" Margin="0,12">
+                    <StackPanel Spacing="2" Margin="0,0,12,0">
+                      <TextBlock Classes="conn-name" Text="{Binding DisplayName}" />
+                      <TextBlock Classes="conn-detail" Text="{Binding QualifiedName}" />
+                      <TextBlock Classes="muted" Text="{Binding Description}" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" IsVisible="{Binding HasDescription}" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="Add…" Command="{Binding ToggleAddCommand}" VerticalAlignment="Top"
+                            AutomationProperties.Name="{Binding DisplayName, StringFormat='Add {0}'}" />
+                    <Border Grid.Row="1" Grid.ColumnSpan="2" Classes="conn-inset" IsVisible="{Binding IsAddOpen}" Margin="0,10,0,0">
+                      <StackPanel Spacing="10">
+                        <TextBlock TextWrapping="Wrap" FontSize="13"
+                                   Text="{Binding DisplayName, StringFormat='omp sets up Smithery servers in its own terminal (it signs in to Smithery and creates the connection). Open it, type this command and pick “{0}”. Then restart omp here.'}" />
+                        <Border Classes="conn-code">
+                          <SelectableTextBlock Text="{Binding $parent[ItemsControl].((vm:ConnectorsViewModel)DataContext).SmitheryCommand}" />
+                        </Border>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <Button Content="Open omp terminal" Command="{Binding OpenTerminalCommand}" />
+                          <Button Classes="flat" Content="Copy command" Command="{Binding CopySearchCommand}" />
+                        </StackPanel>
+                      </StackPanel>
+                    </Border>
+                  </Grid>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <!-- ── Option ── -->
+      <Border Classes="section-card">
+        <StackPanel Spacing="14">
+          <TextBlock Classes="section" Text="Options" />
+          <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding HasOptions}">
+            <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
+              <TextBlock Text="Servers from project files" FontWeight="Medium" />
+              <TextBlock Classes="muted" TextWrapping="Wrap"
+                         Text="Load the MCP servers a project brings (.omp/mcp.json, .mcp.json). Turn off for projects you don't trust." />
+            </StackPanel>
+            <ToggleButton x:Name="ProjectServersSwitch" Grid.Column="1" Classes="switch" IsChecked="{Binding ProjectServers}" VerticalAlignment="Center"
+                          AutomationProperties.Name="Servers from project files" />
+          </Grid>
+          <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasOptionsError}">
+            <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
+            <SelectableTextBlock Grid.Column="1" x:Name="OptionsError" Classes="error" Text="{Binding OptionsError}" TextWrapping="Wrap" FontSize="13" />
+          </Grid>
+          <settings:ConnectorsSettingsFeedback DataContext="{Binding OptionsFeedback}" />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </Panel>
+</UserControl>

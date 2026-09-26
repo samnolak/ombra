@@ -1,0 +1,153 @@
+<!-- Settings page "SSH hosts": the hosts omp's ssh tool can use (/ssh list|add|remove over RPC; ssh.json of the user and of
+     the project), with a harmless connection test. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Views.Settings.SshSettings"
+             x:DataType="vm:MainViewModel">
+  <Panel DataContext="{Binding SshSettings}">
+    <StackPanel x:DataType="vm:SshSettingsViewModel" Spacing="16">
+
+      <Border x:Name="MessageBar" Classes="ws-note" Classes.ok="{Binding !MessageIsError}" Classes.error="{Binding MessageIsError}" IsVisible="{Binding HasMessage}">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <Panel Margin="0,0,10,0" VerticalAlignment="Top">
+            <ctl:Icon Classes="ok-mark" Data="{StaticResource IconCheckCircle}" Size="16" IsVisible="{Binding !MessageIsError}" />
+            <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" IsVisible="{Binding MessageIsError}" />
+          </Panel>
+          <SelectableTextBlock x:Name="SshMessage" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" />
+          <Button Grid.Column="2" Classes="icon" Width="24" Height="24" Margin="8,-4,-6,-4" VerticalAlignment="Top" Command="{Binding DismissMessageCommand}"
+                  ToolTip.Tip="Dismiss" AutomationProperties.Name="Dismiss">
+            <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+          </Button>
+        </Grid>
+      </Border>
+
+      <Border Classes="section-card">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="section" Text="SSH hosts" VerticalAlignment="Center" />
+            <Button Grid.Column="1" x:Name="AddHostButton" Content="Add host…" Command="{Binding BeginAddCommand}" IsVisible="{Binding !IsAdding}" IsEnabled="{Binding CanChange}" />
+          </Grid>
+          <TextBlock Classes="muted" TextWrapping="Wrap"
+                     Text="Computers omp can run commands on with its ssh tool. It signs in with SSH keys only, never with a password." />
+          <Border Classes="ws-note" IsVisible="{Binding ReadOnly}">
+            <TextBlock x:Name="SshReadOnlyNote" TextWrapping="Wrap" Text="omp isn't running: these are the saved hosts. Start omp to add or remove them." />
+          </Border>
+
+          <!-- Add a host: omp's /ssh add (name, host, user, port, key file, scope user or project) -->
+          <Border x:Name="AddHostForm" Classes="ws-form" IsVisible="{Binding IsAdding}">
+            <StackPanel Spacing="10">
+              <TextBlock Classes="ws-title" Text="Add an SSH host" />
+              <Grid ColumnDefinitions="*,12,*">
+                <StackPanel Spacing="4">
+                  <TextBlock Classes="label" Text="Name" />
+                  <TextBox x:Name="SshNameBox" Classes="sm" Text="{Binding NewName}" PlaceholderText="build-box" AutomationProperties.Name="Host name" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Spacing="4">
+                  <TextBlock Classes="label" Text="Address" />
+                  <TextBox x:Name="SshHostBox" Classes="sm" Text="{Binding NewHost}" PlaceholderText="build.example.com" AutomationProperties.Name="Address" />
+                </StackPanel>
+              </Grid>
+              <Grid ColumnDefinitions="*,12,*">
+                <StackPanel Spacing="4">
+                  <TextBlock Classes="label" Text="User (optional)" />
+                  <TextBox x:Name="SshUserBox" Classes="sm" Text="{Binding NewUser}" PlaceholderText="your user name there" AutomationProperties.Name="User" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Spacing="4">
+                  <TextBlock Classes="label" Text="Port (optional)" />
+                  <TextBox x:Name="SshPortBox" Classes="sm" Text="{Binding NewPort}" PlaceholderText="22" AutomationProperties.Name="Port" />
+                </StackPanel>
+              </Grid>
+              <StackPanel Spacing="4">
+                <TextBlock Classes="label" Text="Key file (optional)" />
+                <TextBox x:Name="SshKeyBox" Classes="sm" Text="{Binding NewKey}" PlaceholderText="~/.ssh/id_ed25519" AutomationProperties.Name="Key file" />
+              </StackPanel>
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Classes="label" Text="Available in" VerticalAlignment="Center" />
+                <Border Grid.Column="1" Classes="segmented">
+                  <StackPanel Orientation="Horizontal" Spacing="2">
+                    <Button x:Name="SshScopeUser" Classes="segment" Classes.selected="{Binding NewScopeIsUser}" Content="All projects" Command="{Binding SetScopeCommand}" CommandParameter="user"
+                            AutomationProperties.Name="Available in all projects" />
+                    <Button x:Name="SshScopeProject" Classes="segment" Classes.selected="{Binding NewScopeIsProject}" Content="This project" Command="{Binding SetScopeCommand}" CommandParameter="project"
+                            AutomationProperties.Name="Available in this project" />
+                  </StackPanel>
+                </Border>
+              </Grid>
+              <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasFormError}">
+                <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" Margin="0,0,8,0" VerticalAlignment="Top" />
+                <SelectableTextBlock x:Name="SshFormError" Grid.Column="1" Text="{Binding FormError}" TextWrapping="Wrap" FontSize="13" />
+              </Grid>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button x:Name="SshAddConfirm" Classes="accent" Content="Add host" Command="{Binding AddCommand}" IsEnabled="{Binding !Adding}" />
+                <Button Content="Cancel" Classes="flat" Command="{Binding CancelAddCommand}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <TextBlock Classes="muted" Text="Loading…" IsVisible="{Binding IsLoading}" />
+          <Border Classes="ws-note error" IsVisible="{Binding HasLoadError}">
+            <SelectableTextBlock x:Name="SshLoadError" Text="{Binding LoadError}" TextWrapping="Wrap" FontSize="13" />
+          </Border>
+          <Border Classes="ws-note" IsVisible="{Binding IsEmpty}">
+            <TextBlock x:Name="SshEmpty" TextWrapping="Wrap" Text="{Binding EmptyText}" />
+          </Border>
+
+          <ItemsControl x:Name="SshHostList" ItemsSource="{Binding Hosts}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SshHostRowViewModel">
+                <Border Classes="ws-row">
+                  <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                      <ctl:Icon Data="{StaticResource IconServer}" Size="16" Margin="0,0.5,12,0" VerticalAlignment="Top" TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
+                      <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <TextBlock Classes="ws-title" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                          <Border Classes="tag">
+                            <TextBlock Text="{Binding ScopeLabel}" FontSize="11" FontWeight="Medium" />
+                          </Border>
+                        </StackPanel>
+                        <TextBlock Classes="tertiary" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Detail}" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0" VerticalAlignment="Center">
+                        <Button Content="Test" Command="{Binding TestCommand}" IsEnabled="{Binding !Testing}"
+                                ToolTip.Tip="Connects without a password prompt and exits" AutomationProperties.Name="{Binding Name, StringFormat='Test {0}'}" />
+                        <Button Classes="flat" Content="Remove" Command="{Binding AskRemoveCommand}"
+                                IsEnabled="{Binding $parent[ItemsControl].((vm:SshSettingsViewModel)DataContext).CanChange}"
+                                AutomationProperties.Name="{Binding Name, StringFormat='Remove {0}'}" />
+                      </StackPanel>
+                    </Grid>
+                    <TextBlock Classes="muted" Text="Connecting…" IsVisible="{Binding Testing}" Margin="28,0,0,0" />
+                    <Border Classes="ws-note" Classes.ok="{Binding TestOk}" Classes.error="{Binding !TestOk}" IsVisible="{Binding HasTestResult}">
+                      <Grid ColumnDefinitions="Auto,*">
+                        <Panel Margin="0,0,10,0" VerticalAlignment="Top">
+                          <ctl:Icon Classes="ok-mark" Data="{StaticResource IconCheckCircle}" Size="16" IsVisible="{Binding TestOk}" />
+                          <ctl:Icon Classes="error-mark" Data="{StaticResource IconCrossCircle}" Size="16" IsVisible="{Binding !TestOk}" />
+                        </Panel>
+                        <SelectableTextBlock Grid.Column="1" Text="{Binding TestResult}" TextWrapping="Wrap" FontSize="13" />
+                      </Grid>
+                    </Border>
+                    <Border Classes="ws-note warning" IsVisible="{Binding IsConfirming}">
+                      <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Text="{Binding RemoveQuestion}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                          <Button Content="Remove" Command="{Binding ConfirmRemoveCommand}" />
+                          <Button Content="Cancel" Classes="flat" Command="{Binding CancelRemoveCommand}" />
+                        </StackPanel>
+                      </Grid>
+                    </Border>
+                    <Border Classes="ws-note error" IsVisible="{Binding HasProblem}">
+                      <SelectableTextBlock Text="{Binding Problem}" TextWrapping="Wrap" FontSize="13" />
+                    </Border>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Border Classes="ws-sep" />
+          <TextBlock x:Name="SshFiles" Classes="tertiary" Text="{Binding FilesLabel}" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </Panel>
+</UserControl>

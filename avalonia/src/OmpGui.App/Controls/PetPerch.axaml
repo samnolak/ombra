@@ -1,0 +1,25 @@
+<!-- The pet on the message box's top edge, at its right end, and its speech bubble. It lives in a band above the box
+     (PetsViewModel.ComposerMargin) as tall as the pet, so it never covers the conversation, a card or a question.
+     Same column as the message box: same side margins and max width. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Controls.PetPerch"
+             x:DataType="vm:MainViewModel"
+             VerticalAlignment="Top" Margin="24,0,24,0" MaxWidth="768"
+             Height="{Binding Pets.PerchHeight}" IsVisible="{Binding Pets.IsOnScreen}">
+  <Panel>
+    <StackPanel x:Name="PetBubble" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top"
+                Margin="{Binding Pets.BubbleMargin}" IsVisible="{Binding Pets.IsBubbleOpen}" IsHitTestVisible="False">
+      <Border Classes="pet-bubble">
+        <TextBlock x:Name="PetBubbleText" Text="{Binding Pets.BubbleText}" TextTrimming="CharacterEllipsis" MaxWidth="300" />
+      </Border>
+      <Path Classes="pet-bubble-tail" Data="M0,0 L6,5 L0,10" Margin="-1,9,0,0" VerticalAlignment="Top" />
+    </StackPanel>
+    <ctl:PetView x:Name="Pet" Classes="perched" Look="{Binding Pets.ChosenLook}" Mood="{Binding Pets.Mood}" PixelScale="{Binding Pets.PixelScale}"
+                 Attention="{Binding Pets.Attention}" ToolTip.Tip="{Binding Pets.AccessibleName}"
+                 HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="{x:Static vm:PetsViewModel.PetMargin}"
+                 AutomationProperties.Name="{Binding Pets.AccessibleName}" />
+  </Panel>
+</UserControl>

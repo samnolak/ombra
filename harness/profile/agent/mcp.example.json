@@ -1,0 +1,18 @@
+{
+  "_comment": "Reference for the harness profile's mcp.json (mcp.json is yours once created; this example is part of the template). codebase-memory is a local stdio server (the pinned binary goes into <profile>/vendor, see docs/harness.md in the template's repository; index cache in <profile>/cbm-cache); context7 is a public remote server that needs no key. Put server tokens in environment variables, not in this file.",
+  "mcpServers": {
+    "codebase-memory": {
+      "command": "<profile>/vendor/codebase-memory-mcp-v0.10.8/bin/codebase-memory-mcp.exe",
+      "args": [],
+      "env": {
+        "CBM_CACHE_DIR": "<profile>/cbm-cache",
+        "CBM_LOG_LEVEL": "warn"
+      }
+    },
+    "context7": {
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp",
+      "timeout": 30000
+    }
+  }
+}

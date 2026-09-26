@@ -1,0 +1,131 @@
+<!-- Browser preview (as Claude Code's Preview pane): the web app the agent is building, usually a dev server on localhost.
+     DataContext = PreviewViewModel. A 48 px toolbar (back, forward, reload, address, open in browser, close), suggestion
+     chips while nothing is open, then the page. The native web view is created in code only once a page is navigated;
+     where the platform's engine is missing a card offers the system browser instead. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Controls.PreviewPanel"
+             x:DataType="vm:PreviewViewModel"
+             Background="{DynamicResource GuiWindow}"
+             AutomationProperties.Name="Preview">
+  <UserControl.Styles>
+    <Style Selector="Border.preview-toolbar">
+      <!-- level with the main window's 48 px header -->
+      <Setter Property="Height" Value="48" />
+      <Setter Property="Padding" Value="8,0" />
+      <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+    <Style Selector="ProgressBar.preview-loading">
+      <Setter Property="MinHeight" Value="2" />
+      <Setter Property="Height" Value="2" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+  </UserControl.Styles>
+
+  <DockPanel>
+    <!-- ── Toolbar ── -->
+    <Panel DockPanel.Dock="Top">
+      <Border Classes="preview-toolbar">
+        <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto" VerticalAlignment="Center">
+          <Button x:Name="BackButton" Grid.Column="0" Classes="icon" Command="{Binding BackCommand}"
+                  ToolTip.Tip="Back" AutomationProperties.Name="Back">
+            <ctl:Icon Data="{StaticResource IconArrowLeft}" Size="18" />
+          </Button>
+          <Button x:Name="ForwardButton" Grid.Column="1" Classes="icon" Command="{Binding ForwardCommand}"
+                  ToolTip.Tip="Forward" AutomationProperties.Name="Forward">
+            <ctl:Icon Data="{StaticResource IconArrowRight}" Size="18" />
+          </Button>
+          <Button x:Name="ReloadButton" Grid.Column="2" Classes="icon" Command="{Binding ReloadCommand}"
+                  ToolTip.Tip="Reload" AutomationProperties.Name="Reload">
+            <ctl:Icon Data="{StaticResource IconReload}" Size="18" />
+          </Button>
+          <TextBox x:Name="AddressBox" Grid.Column="3" Classes="sm" Margin="6,0"
+                   Text="{Binding Address}" PlaceholderText="localhost:3000"
+                   AutomationProperties.Name="Address" ToolTip.Tip="{Binding Title}">
+            <TextBox.KeyBindings>
+              <KeyBinding Gesture="Enter" Command="{Binding NavigateCommand}" />
+            </TextBox.KeyBindings>
+            <!-- Open in the system browser: part of the address, as in browsers -->
+            <TextBox.InnerRightContent>
+              <Button x:Name="OpenExternallyButton" Classes="icon" Width="26" Height="26" Margin="0,0,2,0" Command="{Binding OpenExternallyCommand}"
+                      ToolTip.Tip="Open in the browser" AutomationProperties.Name="Open in browser">
+                <ctl:Icon Data="{StaticResource IconExternal}" Size="15" />
+              </Button>
+            </TextBox.InnerRightContent>
+          </TextBox>
+          <!-- Select element (Claude Code's name; Codex's page comments): click an element, write what to change -->
+          <Button x:Name="AnnotateButton" Grid.Column="4" Classes="icon" Classes.on="{Binding IsAnnotating}" Command="{Binding ToggleAnnotateCommand}"
+                  ToolTip.Tip="Select an element to comment on (Ctrl/⌘+Shift+S)" AutomationProperties.Name="Select element">
+            <ctl:Icon Data="{StaticResource IconSelect}" Size="18" />
+          </Button>
+          <Button x:Name="ClosePreviewButton" Grid.Column="5" Classes="icon" Command="{Binding CloseCommand}"
+                  ToolTip.Tip="Close preview" AutomationProperties.Name="Close preview">
+            <ctl:Icon Data="{StaticResource IconClose}" Size="18" />
+          </Button>
+        </Grid>
+      </Border>
+      <ProgressBar Classes="preview-loading" VerticalAlignment="Bottom" IsIndeterminate="{Binding IsLoading}"
+                   IsVisible="{Binding IsLoading}" />
+    </Panel>
+
+    <!-- ── Suggestions (local addresses from tool output) while nothing is open ── -->
+    <ItemsControl x:Name="SuggestionRow" DockPanel.Dock="Top" ItemsSource="{Binding Suggestions}"
+                  IsVisible="{Binding ShowSuggestionRow}" Margin="10,10,10,0">
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate>
+          <WrapPanel ItemSpacing="6" LineSpacing="6" />
+        </ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="x:String">
+          <Button Classes="chip" Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).NavigateCommand}"
+                  CommandParameter="{Binding}" ToolTip.Tip="Open in the preview" AutomationProperties.Name="{Binding}">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <ctl:Icon Data="{StaticResource IconGlobe}" Size="14" />
+              <TextBlock Text="{Binding}" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+
+    <!-- ── Why an address was refused or a page failed ── -->
+    <Border x:Name="MessageBar" DockPanel.Dock="Top" Classes="notice error" Margin="10,10,10,0" IsVisible="{Binding HasMessage}">
+      <DockPanel>
+        <ctl:Icon DockPanel.Dock="Left" Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,0,8,0" VerticalAlignment="Top" />
+        <TextBlock Classes="error" Text="{Binding Message}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+      </DockPanel>
+    </Border>
+
+    <Panel>
+      <!-- Empty: nothing opened yet -->
+      <StackPanel x:Name="EmptyState" IsVisible="{Binding ShowEmptyState}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                  Spacing="10" Margin="24" MaxWidth="360">
+        <ctl:Icon Data="{StaticResource IconGlobe}" Size="28" HorizontalAlignment="Center"
+                  TextElement.Foreground="{DynamicResource GuiTextTertiary}" />
+        <TextBlock Classes="muted" Text="{Binding EmptyText}" TextWrapping="Wrap" TextAlignment="Center" />
+      </StackPanel>
+
+      <!-- The platform's engine is missing: offer the system browser -->
+      <Border x:Name="FallbackCard" Classes="card" IsVisible="{Binding ShowFallback}" HorizontalAlignment="Center" VerticalAlignment="Center"
+              Margin="24" MaxWidth="420">
+        <StackPanel Spacing="10">
+          <DockPanel>
+            <ctl:Icon DockPanel.Dock="Left" Classes="warning-mark" Data="{StaticResource IconAlert}" Size="18" Margin="0,0,10,0" VerticalAlignment="Top" />
+            <TextBlock Classes="section" Text="{Binding FallbackText}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontM}" />
+          </DockPanel>
+          <TextBlock Classes="muted" Text="{Binding EngineDetail}" TextWrapping="Wrap" IsVisible="{Binding EngineDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          <Button x:Name="FallbackOpenButton" Classes="accent" Content="Open in browser" Command="{Binding OpenExternallyCommand}"
+                  HorizontalAlignment="Left" />
+        </StackPanel>
+      </Border>
+
+      <!-- The page: PreviewPanel.axaml.cs puts the NativeWebView here on the first navigation -->
+      <Border x:Name="WebHost" IsVisible="{Binding ShowWebView}" />
+    </Panel>
+  </DockPanel>
+</UserControl>

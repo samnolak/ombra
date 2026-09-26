@@ -1,0 +1,38 @@
+# Example providers for the harness profile (reference only — copy what you need into models.yml).
+# models.yml is yours once created; this example is part of the template and changes with it.
+providers:
+  # An OpenAI-compatible server you run (vLLM, SGLang, llama.cpp server, LM Studio, …).
+  my-local-server:
+    baseUrl: http://127.0.0.1:8000/v1
+    api: openai-completions
+    # the key is read from this environment variable (or use "!command" that prints it)
+    apiKey: MY_LOCAL_SERVER_API_KEY
+    models:
+      - id: my-model
+        name: My local model
+        reasoning: true
+        input: [text]
+        maxTokens: 8192
+        contextWindow: 131072
+        # servers that accept only some reasoning_effort values can map omp's levels:
+        # thinking:
+        #   mode: effort
+        #   efforts: [minimal, low, medium]
+        #   effortMap: { minimal: none }
+
+  # A hosted OpenAI-compatible API.
+  my-hosted-api:
+    baseUrl: https://api.example.com/v1
+    api: openai-responses
+    apiKey: MY_HOSTED_API_KEY
+    models:
+      - id: example-model
+        name: Example hosted model
+        reasoning: true
+        maxTokens: 8192
+        contextWindow: 262144
+
+# Then point the harness roles at a model in config.yml, for example:
+# modelRoles:
+#   default: my-local-server/my-model
+#   task: my-local-server/my-model

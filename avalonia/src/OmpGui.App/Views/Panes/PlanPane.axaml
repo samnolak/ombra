@@ -1,0 +1,141 @@
+<!-- The Plan pane (Claude Code's plan with checkboxes): omp's todo list by phase. Each task has a drawn box — checked
+     when done, an info box with a dot while in progress (the current one on a fill, with what the run does now under
+     it), a warning box and what it waits on when blocked, a cross and struck text when dropped. Earlier plans and every
+     change stay below, folded. DataContext: PlanViewModel. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Views.Panes.PlanPane"
+             x:DataType="vm:PlanViewModel">
+  <UserControl.Resources>
+    <DataTemplate x:Key="PlanTaskTemplate" x:DataType="vm:PlanTaskViewModel">
+      <Border Classes="plan-task" Classes.current="{Binding IsCurrent}" ToolTip.Tip="{Binding StatusName}"
+              AutomationProperties.Name="{Binding AccessibleName}">
+        <Grid ColumnDefinitions="Auto,*">
+          <!-- The box sits on the text's first line (20 px line: 2 above, 16 box, 2 below) -->
+          <Border Classes="md-check" Classes.checked="{Binding IsDone}" Classes.active="{Binding IsActive}" Classes.dropped="{Binding IsDropped}"
+                  Classes.blocked="{Binding IsBlocked}" Width="16" Height="16" VerticalAlignment="Top" Margin="0,2,0,0">
+            <Panel>
+              <ctl:Icon Data="{StaticResource IconCheck}" Size="12" StrokeThickness="2" IsVisible="{Binding IsDone}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+              <Ellipse Classes="todo-active-dot" IsVisible="{Binding IsActive}" />
+              <ctl:Icon Data="{StaticResource IconClose}" Size="12" IsVisible="{Binding IsDropped}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+              <Border Classes="plan-hold" IsVisible="{Binding IsBlocked}" />
+            </Panel>
+          </Border>
+          <StackPanel Grid.Column="1" Margin="10,0,0,0" Spacing="3">
+            <TextBlock Classes="plan-text" Classes.done="{Binding IsDone}" Classes.dropped="{Binding IsDropped}" Classes.current="{Binding IsCurrent}"
+                       Text="{Binding Content}" />
+            <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding IsBlocked}">
+              <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="13" Margin="0,2,6,0" VerticalAlignment="Top" />
+              <TextBlock Grid.Column="1" Classes="plan-note" Text="{Binding BlockerText}" />
+            </Grid>
+            <TextBlock Classes="plan-activity" Text="{Binding Activity}" IsVisible="{Binding HasActivity}" TextTrimming="CharacterEllipsis" />
+          </StackPanel>
+        </Grid>
+      </Border>
+    </DataTemplate>
+    <DataTemplate x:Key="PlanPhaseTemplate" x:DataType="vm:PlanPhaseViewModel">
+      <StackPanel Spacing="2">
+        <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding HasName}" Margin="8,0,8,4">
+          <TextBlock Classes="pane-group" Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+          <TextBlock Grid.Column="1" Classes="pane-count" Text="{Binding Count}" Margin="8,0,0,0" VerticalAlignment="Center" />
+        </Grid>
+        <ItemsControl ItemsSource="{Binding Tasks}" ItemTemplate="{StaticResource PlanTaskTemplate}" />
+      </StackPanel>
+    </DataTemplate>
+  </UserControl.Resources>
+
+  <ScrollViewer x:Name="PlanScroll" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="12,14,12,24" Spacing="16">
+
+      <!-- Nothing yet: when a plan appears -->
+      <StackPanel x:Name="PlanEmpty" IsVisible="{Binding ShowEmptyHint}" Spacing="8" Margin="12,48,12,0" MaxWidth="300" HorizontalAlignment="Center">
+        <ctl:Icon Classes="pane-empty-mark" Data="{StaticResource IconChecklist}" Size="28" />
+        <TextBlock Text="No plan yet" FontWeight="Medium" HorizontalAlignment="Center" />
+        <TextBlock Classes="muted" TextWrapping="Wrap" TextAlignment="Center"
+                   Text="When the agent breaks the work into steps (its todo list), the plan shows here and each step is checked off as it is done." />
+      </StackPanel>
+
+      <!-- The current plan -->
+      <StackPanel Spacing="14" IsVisible="{Binding HasPlan}">
+        <ProgressBar x:Name="PlanProgressBar" Classes="plan-progress" Value="{Binding Progress}" Maximum="100" Margin="8,0" />
+        <ItemsControl x:Name="PlanPhases" ItemsSource="{Binding Phases}" ItemTemplate="{StaticResource PlanPhaseTemplate}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel Spacing="14" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+        </ItemsControl>
+      </StackPanel>
+      <TextBlock Classes="muted" Text="No plan right now. The last one is below." Margin="8,0" TextWrapping="Wrap">
+        <TextBlock.IsVisible>
+          <MultiBinding Converter="{x:Static BoolConverters.And}">
+            <Binding Path="!HasPlan" />
+            <Binding Path="HasEarlierPlans" />
+          </MultiBinding>
+        </TextBlock.IsVisible>
+      </TextBlock>
+
+      <!-- Earlier plans: replaced or cleared, kept folded -->
+      <ItemsControl x:Name="EarlierPlans" ItemsSource="{Binding EarlierPlans}" IsVisible="{Binding HasEarlierPlans}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:EarlierPlanViewModel">
+            <Border Classes="plan-earlier">
+              <StackPanel Spacing="4">
+                <ToggleButton Classes="pane-fold flat" IsChecked="{Binding IsExpanded}" AutomationProperties.Name="Earlier plan">
+                  <Grid ColumnDefinitions="Auto,Auto,*">
+                    <ctl:Icon Classes="chevron" Data="{StaticResource IconChevronRight}" Size="14" Margin="0,0,6,0" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="Earlier plan" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Classes="pane-count" Text="{Binding Summary}" Margin="8,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                               ToolTip.Tip="{Binding When}" />
+                  </Grid>
+                </ToggleButton>
+                <StackPanel Spacing="8" IsVisible="{Binding IsExpanded}" Margin="0,0,0,4">
+                  <TextBlock Classes="pane-count" Text="{Binding When}" Margin="8,0" />
+                  <ItemsControl ItemsSource="{Binding Phases}" ItemTemplate="{StaticResource PlanPhaseTemplate}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate><StackPanel Spacing="10" /></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                  </ItemsControl>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <!-- Every change, newest first -->
+      <StackPanel x:Name="PlanHistory" Spacing="4" IsVisible="{Binding HasHistory}">
+        <ToggleButton x:Name="PlanHistoryToggle" Classes="pane-fold flat" IsChecked="{Binding IsHistoryOpen}" AutomationProperties.Name="History">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Classes="chevron" Data="{StaticResource IconChevronRight}" Size="14" Margin="0,0,6,0" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Text="{Binding HistoryTitle}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+          </Grid>
+        </ToggleButton>
+        <!-- The times in one column ("14:32", or "Sep 24 14:32" before today) -->
+        <ItemsControl ItemsSource="{Binding Changes}" IsVisible="{Binding IsHistoryOpen}" Margin="8,0,8,0" Grid.IsSharedSizeScope="True">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel Spacing="6" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:PlanChangeViewModel">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" SharedSizeGroup="PlanTime" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Classes="plan-note" Text="{Binding Time}" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Classes="plan-note">
+                  <Run Text="{Binding What}" FontWeight="SemiBold" Foreground="{DynamicResource GuiTextPrimary}" />
+                  <Run Text="{Binding Content}" />
+                </TextBlock>
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

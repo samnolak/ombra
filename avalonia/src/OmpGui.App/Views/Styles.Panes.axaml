@@ -1,0 +1,234 @@
+<!-- Styles for the side panes (Views menu, Plan, Background tasks), on the design system's tokens (Tokens.axaml), as in Styles.axaml. -->
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctl="using:OmpGui.App.Controls">
+
+  <!-- ─────────────── Views menu (⋮ in the header) ─────────────── -->
+  <!-- Running background tasks while their pane is closed: a small info dot on the ⋮ (static, never blinking) -->
+  <Style Selector="Border.views-dot">
+    <Setter Property="Width" Value="7" />
+    <Setter Property="Height" Value="7" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="Background" Value="{DynamicResource GuiStatusInfo}" />
+    <Setter Property="HorizontalAlignment" Value="Right" />
+    <Setter Property="VerticalAlignment" Value="Top" />
+    <!-- Off the icon's own dots: at the top right corner of the 20 px glyph -->
+    <Setter Property="Margin" Value="0,-2,-4,0" />
+  </Style>
+  <!-- How many run now, after "Background tasks" -->
+  <Style Selector="Border.views-count">
+    <Setter Property="MinWidth" Value="18" />
+    <Setter Property="Height" Value="18" />
+    <Setter Property="Padding" Value="5,0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="Background" Value="{DynamicResource GuiStatusInfoSoft}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.views-count TextBlock">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.views-separator">
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Background" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="Margin" Value="6,4" />
+  </Style>
+  <Style Selector="ctl|Icon.views-check">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextLink}" />
+  </Style>
+
+  <!-- ─────────────── Side pane host ─────────────── -->
+  <!-- The pane's own header: level with the window's 48 px header, like the preview's toolbar -->
+  <Style Selector="Border.pane-header">
+    <Setter Property="Height" Value="48" />
+    <Setter Property="Padding" Value="16,0,8,0" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+  </Style>
+  <Style Selector="TextBlock.pane-title">
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="TextBlock.pane-subtitle">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <!-- A group inside a pane (a phase, Subagents, Background jobs) -->
+  <Style Selector="TextBlock.pane-group">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="TextBlock.pane-count">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <!-- Empty states: a quiet mark and plain words -->
+  <Style Selector="ctl|Icon.pane-empty-mark">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextTertiary}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+  </Style>
+  <!-- A collapsible part (History, Earlier plan): a flat row with a chevron that turns when open -->
+  <Style Selector="ToggleButton.pane-fold">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="Padding" Value="8,0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+  </Style>
+  <Style Selector="ToggleButton.pane-fold:checked /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="ToggleButton.pane-fold:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="ToggleButton.pane-fold ctl|Icon.chevron">
+    <Setter Property="RenderTransform" Value="rotate(0deg)" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+  <Style Selector="ToggleButton.pane-fold:checked ctl|Icon.chevron">
+    <Setter Property="RenderTransform" Value="rotate(90deg)" />
+  </Style>
+
+  <!-- ─────────────── Plan ─────────────── -->
+  <Style Selector="ProgressBar.plan-progress">
+    <Setter Property="MinHeight" Value="4" />
+    <Setter Property="Height" Value="4" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiStatusSuccess}" />
+  </Style>
+  <!-- One task: its box on the first line of its text; the current one on a neutral fill -->
+  <Style Selector="Border.plan-task">
+    <Setter Property="Padding" Value="8,5" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+  </Style>
+  <Style Selector="Border.plan-task.current">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="Padding" Value="8,7" />
+  </Style>
+  <Style Selector="TextBlock.plan-text">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="LineHeight" Value="20" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="TextBlock.plan-text.current">
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <!-- Finished and dropped tasks stay readable (secondary, not tertiary), struck through -->
+  <Style Selector="TextBlock.plan-text.done, TextBlock.plan-text.dropped">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="TextDecorations" Value="Strikethrough" />
+  </Style>
+  <Style Selector="Border.md-check.blocked">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiStatusWarning}" />
+  </Style>
+  <!-- On hold: a short bar in the warning colour inside the box -->
+  <Style Selector="Border.plan-hold">
+    <Setter Property="Width" Value="8" />
+    <Setter Property="Height" Value="2" />
+    <Setter Property="CornerRadius" Value="1" />
+    <Setter Property="Background" Value="{DynamicResource GuiStatusWarning}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="TextBlock.plan-note">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="LineHeight" Value="17" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <!-- The run's activity under the current task -->
+  <Style Selector="TextBlock.plan-activity">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextLink}" />
+  </Style>
+  <Style Selector="Border.plan-earlier">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+    <Setter Property="Padding" Value="4" />
+  </Style>
+
+  <!-- ─────────────── Background tasks ─────────────── -->
+  <Style Selector="Border.task-card">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+  </Style>
+  <Style Selector="Border.task-card.running">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
+  </Style>
+  <!-- The card's summary is a toggle: opens the task, its output and its conversation -->
+  <Style Selector="ToggleButton.task-row">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="12,10" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Top" />
+  </Style>
+  <Style Selector="ToggleButton.task-row:checked /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="ToggleButton.task-row:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="ToggleButton.task-row ctl|Icon.chevron">
+    <Setter Property="RenderTransform" Value="rotate(0deg)" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+  <Style Selector="ToggleButton.task-row:checked ctl|Icon.chevron">
+    <Setter Property="RenderTransform" Value="rotate(90deg)" />
+  </Style>
+  <Style Selector="TextBlock.task-title">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LineHeight" Value="18" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="MaxLines" Value="2" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+  <Style Selector="TextBlock.task-line">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+  <!-- The pill's dot on the middle of its capitals (the text's box centre is lower than its letters' middle) -->
+  <Style Selector="Border.task-card Border.status Ellipse">
+    <Setter Property="Margin" Value="0,0,0,3" />
+  </Style>
+  <Style Selector="Border.status.stopped Ellipse">
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusWarning}" />
+  </Style>
+  <Style Selector="Border.status.stopped">
+    <Setter Property="Background" Value="{DynamicResource GuiStatusWarningSoft}" />
+  </Style>
+  <Style Selector="Border.task-code">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1OnWindow}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="Padding" Value="10,6" />
+  </Style>
+  <Style Selector="TextBlock.task-message-role">
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LetterSpacing" Value="0.4" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+</Styles>

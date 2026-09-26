@@ -1,0 +1,164 @@
+<!-- Settings page "Computer use": omp's computer prelude (computer.enabled, /computer on|off|status), its screenshot
+     settings, the permission for computer actions (tools.approval.computer) and what this computer needs. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Views.Settings.ComputerSettings"
+             x:DataType="vm:MainViewModel">
+  <Panel DataContext="{Binding ComputerSettings}">
+    <StackPanel x:DataType="vm:ComputerSettingsViewModel" Spacing="16">
+
+      <!-- Feedback: what just happened, and settings that wait for omp's next start -->
+      <Border x:Name="MessageBar" Classes="ws-note" Classes.ok="{Binding !MessageIsError}" Classes.error="{Binding MessageIsError}" IsVisible="{Binding HasMessage}">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <Panel Margin="0,0,10,0" VerticalAlignment="Top">
+            <ctl:Icon Classes="ok-mark" Data="{StaticResource IconCheckCircle}" Size="16" IsVisible="{Binding !MessageIsError}" />
+            <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" IsVisible="{Binding MessageIsError}" />
+          </Panel>
+          <SelectableTextBlock Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" />
+          <Button Grid.Column="2" Classes="icon" Width="24" Height="24" Margin="8,-4,-6,-4" VerticalAlignment="Top" Command="{Binding DismissMessageCommand}"
+                  ToolTip.Tip="Dismiss" AutomationProperties.Name="Dismiss">
+            <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+          </Button>
+        </Grid>
+      </Border>
+      <Border Classes="ws-note" IsVisible="{Binding NeedsRestart}">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Text="{Binding RestartHint}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0" />
+          <Button Grid.Column="1" x:Name="ComputerRestartButton" Content="Restart omp" Command="{Binding RestartOmpCommand}" IsVisible="{Binding IsOmpRunning}" VerticalAlignment="Center" />
+        </Grid>
+      </Border>
+
+      <!-- Computer use: the switch, what it means, and the session's state -->
+      <Border Classes="section-card">
+        <StackPanel Spacing="14">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="section" Text="Computer use" VerticalAlignment="Center" />
+            <Border Grid.Column="1" Classes="status" Classes.done="{Binding SessionOn}" Classes.failed="{Binding SessionBlocked}" IsVisible="{Binding HasSessionStatus}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <Ellipse />
+                <TextBlock x:Name="ComputerSessionLabel" Text="{Binding SessionLabel}" VerticalAlignment="Center" />
+              </StackPanel>
+            </Border>
+          </Grid>
+          <TextBlock Classes="muted" TextWrapping="Wrap"
+                     Text="omp can take screenshots, move the mouse, click, type and read what is on screen through the system's accessibility interface. It works from its eval tool, so it can script whole sequences of steps." />
+          <Border Classes="ws-sep" />
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2" Margin="0,0,16,0" VerticalAlignment="Center">
+              <TextBlock Classes="ws-title" Text="Allow omp to use this computer" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="Saved in omp's settings for new sessions, and switched on or off in this one right away." />
+            </StackPanel>
+            <ToggleButton Grid.Column="1" x:Name="ComputerSwitch" Classes="switch" IsChecked="{Binding Enabled}" IsEnabled="{Binding CanToggle}"
+                          AutomationProperties.Name="Allow omp to use this computer" VerticalAlignment="Center" />
+          </Grid>
+          <Border Classes="ws-note warning">
+            <Grid ColumnDefinitions="Auto,*">
+              <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,0,10,0" VerticalAlignment="Top" />
+              <TextBlock Grid.Column="1" TextWrapping="Wrap"
+                         Text="While it's on, omp can click and type anywhere: in any app, window or browser tab where you are signed in. It sees everything on your screens, messages and passwords included. Stay close while it works, and turn it off when you're done." />
+            </Grid>
+          </Border>
+          <TextBlock Classes="muted" Text="{Binding SessionDetail}" TextWrapping="Wrap" IsVisible="{Binding HasSessionStatus}" />
+          <TextBlock Classes="muted" TextWrapping="Wrap" IsVisible="{Binding !IsOmpRunning}"
+                     Text="omp isn't running: the switch saves the setting, and omp uses it when it starts." />
+          <TextBlock Classes="muted" Text="Loading…" IsVisible="{Binding IsLoading}" />
+          <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasLoadError}">
+            <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" Margin="0,0,8,0" VerticalAlignment="Top" />
+            <SelectableTextBlock Grid.Column="1" Text="{Binding LoadError}" TextWrapping="Wrap" FontSize="13" />
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <!-- Permission for computer actions: tools.approval.computer -->
+      <Border Classes="section-card">
+        <StackPanel Spacing="14">
+          <TextBlock Classes="section" Text="Permission for computer actions" />
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2" Margin="0,0,16,0" VerticalAlignment="Center">
+              <TextBlock Classes="ws-title" Text="Before omp acts" />
+              <TextBlock x:Name="ComputerPolicyText" Classes="muted" TextWrapping="Wrap" Text="{Binding PolicyDescription}" />
+            </StackPanel>
+            <Border Grid.Column="1" Classes="segmented" VerticalAlignment="Center">
+              <StackPanel Orientation="Horizontal" Spacing="2">
+                <Button x:Name="PolicyDefault" Classes="segment" Content="Default" Command="{Binding SetPolicyCommand}" CommandParameter="default"
+                        Classes.selected="{Binding Policy, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=default}" AutomationProperties.Name="Computer actions: follow the permission mode" />
+                <Button x:Name="PolicyAsk" Classes="segment" Content="Ask" Command="{Binding SetPolicyCommand}" CommandParameter="prompt"
+                        Classes.selected="{Binding Policy, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=prompt}" AutomationProperties.Name="Computer actions: ask every time" />
+                <Button x:Name="PolicyAllow" Classes="segment" Content="Allow" Command="{Binding SetPolicyCommand}" CommandParameter="allow"
+                        Classes.selected="{Binding Policy, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=allow}" AutomationProperties.Name="Computer actions: allow" />
+                <Button x:Name="PolicyDeny" Classes="segment" Content="Deny" Command="{Binding SetPolicyCommand}" CommandParameter="deny"
+                        Classes.selected="{Binding Policy, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=deny}" AutomationProperties.Name="Computer actions: deny" />
+              </StackPanel>
+            </Border>
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <!-- Screenshots: computer.display, computer.maxWidth, computer.maxHeight -->
+      <Border Classes="section-card">
+        <StackPanel Spacing="14">
+          <TextBlock Classes="section" Text="Screenshots" />
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2" Margin="0,0,16,0" VerticalAlignment="Center">
+              <TextBlock Classes="ws-title" Text="Display" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="“all” puts every display in one picture; or the id of one display, as omp lists them." />
+            </StackPanel>
+            <TextBox Grid.Column="1" x:Name="ComputerDisplayBox" Classes="sm" Width="140" Text="{Binding Display}" PlaceholderText="all"
+                     AutomationProperties.Name="Display" VerticalAlignment="Center" />
+          </Grid>
+          <Border Classes="ws-sep" />
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2" Margin="0,0,16,0" VerticalAlignment="Center">
+              <TextBlock Classes="ws-title" Text="Largest size" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="Bigger screens are scaled down to fit. Claude models, and models that can't take full-detail images, get at most 1280 × 896 so their clicks land where they look." />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <TextBox x:Name="ComputerWidthBox" Classes="sm" Width="72" Text="{Binding MaxWidth}" PlaceholderText="3840" AutomationProperties.Name="Largest width in pixels" />
+              <TextBlock Classes="muted" Text="×" VerticalAlignment="Center" />
+              <TextBox x:Name="ComputerHeightBox" Classes="sm" Width="72" Text="{Binding MaxHeight}" PlaceholderText="2400" AutomationProperties.Name="Largest height in pixels" />
+              <TextBlock Classes="muted" Text="px" VerticalAlignment="Center" />
+            </StackPanel>
+          </Grid>
+          <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding ScreenChanged}">
+            <Button x:Name="ComputerSaveScreen" Content="Save" Command="{Binding SaveScreenCommand}" />
+            <Button Content="Undo" Classes="flat" Command="{Binding RevertScreenCommand}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- What this computer needs -->
+      <Border Classes="section-card">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="section" Text="{Binding PlatformName, StringFormat='What omp needs on {0}'}" VerticalAlignment="Center" />
+            <Button Grid.Column="1" x:Name="ComputerCheckAgain" Classes="flat" Content="Check again" Command="{Binding CheckAgainCommand}" IsEnabled="{Binding !Checking}" />
+          </Grid>
+          <ItemsControl x:Name="ComputerRequirements" ItemsSource="{Binding Requirements}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:RequirementCheck">
+                <Border Classes="ws-row">
+                  <Grid ColumnDefinitions="Auto,*,Auto">
+                    <Panel Margin="0,1,12,0" VerticalAlignment="Top">
+                      <ctl:Icon Classes="ok-mark" Data="{StaticResource IconCheckCircle}" Size="18" IsVisible="{Binding IsOk}" />
+                      <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlertCircle}" Size="18" IsVisible="{Binding IsWarning}" />
+                      <ctl:Icon Classes="error-mark" Data="{StaticResource IconCrossCircle}" Size="18" IsVisible="{Binding IsFailed}" />
+                      <ctl:Icon Classes="unknown-mark" Data="{StaticResource IconDashCircle}" Size="18" IsVisible="{Binding IsUnknown}" />
+                    </Panel>
+                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Classes="ws-title" Text="{Binding Title}" TextWrapping="Wrap" />
+                      <TextBlock Classes="muted" Text="{Binding Detail}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button Grid.Column="2" Content="{Binding ActionLabel}" IsVisible="{Binding HasAction}" Margin="12,0,0,0" VerticalAlignment="Center"
+                            Command="{Binding $parent[ItemsControl].((vm:ComputerSettingsViewModel)DataContext).RunCheckActionCommand}" CommandParameter="{Binding}" />
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </Panel>
+</UserControl>

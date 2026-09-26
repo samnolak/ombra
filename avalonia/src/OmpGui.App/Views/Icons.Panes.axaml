@@ -1,0 +1,4 @@
+<!-- Line icons for the side panes (Views menu, Plan, Background tasks), same rules as Icons.axaml (24-unit grid, stroked; Filled for solid shapes). -->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+</ResourceDictionary>

@@ -1,0 +1,33 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="OmpGui.App.App"
+             RequestedThemeVariant="Default">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <!-- The client's design tokens and line icons -->
+        <ResourceInclude Source="avares://OmpGui/Views/Tokens.axaml" />
+        <ResourceInclude Source="avares://OmpGui/Views/Icons.axaml" />
+        <ResourceInclude Source="avares://OmpGui/Views/Icons.Panes.axaml" />
+        <ResourceInclude Source="avares://OmpGui/Views/Icons.Files.axaml" />
+        <ResourceInclude Source="avares://OmpGui/Views/Icons.Pets.axaml" />
+        <ResourceInclude Source="avares://OmpGui/Views/Icons.Connectors.axaml" />
+        <ResourceInclude Source="avares://OmpGui/Views/Icons.Workspace.axaml" />
+        <ResourceInclude Source="avares://OmpGui/Views/Icons.Session.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+  <Application.Styles>
+    <FluentTheme />
+    <!-- The terminal's own theme, included here rather than injected by the library on first use: its injection is
+         guarded by a process-wide flag, so an Application created later in the same process (the test host) never got it. -->
+    <StyleInclude Source="avares://Iciclecreek.Avalonia.Terminal/Themes/Generic.axaml" />
+    <StyleInclude Source="avares://OmpGui/Views/Styles.axaml" />
+    <StyleInclude Source="avares://OmpGui/Views/Styles.Panes.axaml" />
+    <StyleInclude Source="avares://OmpGui/Views/Styles.Files.axaml" />
+    <StyleInclude Source="avares://OmpGui/Views/Styles.Pets.axaml" />
+    <StyleInclude Source="avares://OmpGui/Views/Styles.Connectors.axaml" />
+    <StyleInclude Source="avares://OmpGui/Views/Styles.Workspace.axaml" />
+    <StyleInclude Source="avares://OmpGui/Views/Styles.Session.axaml" />
+  </Application.Styles>
+</Application>

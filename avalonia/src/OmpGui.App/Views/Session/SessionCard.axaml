@@ -1,0 +1,94 @@
+<!-- The session card above the message box: what a session action will do (and the one field it may need), that it
+     runs, and what came of it, with the next step as buttons (SessionCardViewModel). Also the answer to a command that
+     runs only in omp's terminal. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Views.Session.SessionCard"
+             x:DataType="vm:SessionCardViewModel">
+  <Border x:Name="Card" Classes="banner session-card" Classes.failed="{Binding IsFailed}" AutomationProperties.Name="{Binding Title}">
+    <StackPanel Spacing="10">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <Border Classes="card-mark" VerticalAlignment="Center">
+          <Panel>
+            <ctl:Icon Data="{Binding Icon}" Size="16" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !IsRunning}" />
+            <Ellipse Classes="state-dot running" IsVisible="{Binding IsRunning}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Panel>
+        </Border>
+        <TextBlock Grid.Column="1" Classes="card-title" Text="{Binding Title}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="12,0,8,0" />
+        <Button Grid.Column="2" Classes="icon" Width="26" Height="26" VerticalAlignment="Center" Command="{Binding DismissCommand}"
+                ToolTip.Tip="Close (a running action goes on in omp)" AutomationProperties.Name="Close">
+          <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+        </Button>
+      </Grid>
+      <StackPanel Spacing="10" Margin="44,0,0,0">
+        <SelectableTextBlock x:Name="CardMessage" Classes="card-message" Text="{Binding Message}" TextWrapping="Wrap" IsVisible="{Binding HasMessage}" />
+        <TextBox x:Name="CardInput" Classes="sm" Text="{Binding Input}" PlaceholderText="{Binding InputHint}" IsVisible="{Binding ShowInput}"
+                 AutomationProperties.Name="{Binding InputHint}" />
+        <Border Classes="details" IsVisible="{Binding HasDetail}">
+          <ScrollViewer MaxHeight="{Binding IsDetailLong, Converter={x:Static vm:SessionConverters.DetailHeight}}" HorizontalScrollBarVisibility="Disabled">
+            <SelectableTextBlock x:Name="CardDetail" Classes="mono details" Text="{Binding Detail}" TextWrapping="Wrap" />
+          </ScrollViewer>
+        </Border>
+        <ItemsControl x:Name="FolderList" ItemsSource="{Binding Folders}" IsVisible="{Binding HasFolders}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:WorkspaceFolderViewModel">
+              <Grid Classes="folder-row" ColumnDefinitions="Auto,*,Auto" ToolTip.Tip="{Binding Path}">
+                <ctl:Icon Data="{StaticResource IconFolder}" Size="16" Margin="0,0,10,0" VerticalAlignment="Center"
+                          TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                  <TextBlock Text="{Binding Name}" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Classes="tertiary" Text="{Binding Path}" TextTrimming="PrefixCharacterEllipsis" />
+                </StackPanel>
+                <Border Grid.Column="2" Classes="tag" IsVisible="{Binding IsWorkingDirectory}" VerticalAlignment="Center" Margin="8,0,0,0">
+                  <TextBlock Text="project" FontSize="11" FontWeight="Medium" />
+                </Border>
+                <Button Grid.Column="2" Classes="icon" Width="28" Height="28" Command="{Binding Remove}" IsVisible="{Binding CanRemove}"
+                        VerticalAlignment="Center" Margin="8,0,0,0" ToolTip.Tip="Take this folder out of the workspace (the files stay)"
+                        AutomationProperties.Name="{Binding Name, StringFormat='Remove {0} from the workspace'}">
+                  <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+                </Button>
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <!-- Choices (Rewind: the conversation's messages, newest first) -->
+        <ScrollViewer MaxHeight="220" HorizontalScrollBarVisibility="Disabled" IsVisible="{Binding HasChoices}">
+          <ItemsControl x:Name="ChoiceList" ItemsSource="{Binding Choices}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SessionCardChoice">
+                <Button Classes="menu-item choice" Command="{Binding Command}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                        AutomationProperties.Name="{Binding Label}" ToolTip.Tip="{Binding Label}">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <ctl:Icon Data="{StaticResource IconRewind}" Size="14" Margin="0,0,10,0" VerticalAlignment="Center"
+                              TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
+                    <TextBlock Grid.Column="1" Text="{Binding Label}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                  </Grid>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+        <WrapPanel ItemSpacing="8" LineSpacing="8" IsVisible="{Binding !IsRunning}">
+          <Button x:Name="CardPrimary" Classes.accent="{Binding IsAsking}" Content="{Binding Primary.Label, FallbackValue=''}"
+                  Command="{Binding Primary.Command, FallbackValue={x:Null}}" IsVisible="{Binding HasPrimary}" />
+          <Button x:Name="CardSecondary" Content="{Binding Secondary.Label, FallbackValue=''}" Command="{Binding Secondary.Command, FallbackValue={x:Null}}"
+                  IsVisible="{Binding HasSecondary}" />
+          <Button x:Name="CardTertiary" Classes="flat" Content="{Binding Tertiary.Label, FallbackValue=''}" Command="{Binding Tertiary.Command, FallbackValue={x:Null}}"
+                  IsVisible="{Binding HasTertiary}" />
+        </WrapPanel>
+        <!-- While it runs: Stop, when omp can stop it -->
+        <Button x:Name="CardStop" Content="{Binding Primary.Label, FallbackValue=''}" Command="{Binding Primary.Command, FallbackValue={x:Null}}"
+                HorizontalAlignment="Left">
+          <Button.IsVisible>
+            <MultiBinding Converter="{x:Static BoolConverters.And}">
+              <Binding Path="IsRunning" />
+              <Binding Path="HasPrimary" />
+            </MultiBinding>
+          </Button.IsVisible>
+        </Button>
+      </StackPanel>
+    </StackPanel>
+  </Border>
+</UserControl>

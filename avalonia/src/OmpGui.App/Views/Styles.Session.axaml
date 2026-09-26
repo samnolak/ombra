@@ -1,0 +1,143 @@
+<!-- Styles for the session menu, usage and model options, on the design system's tokens (Tokens.axaml), as in Styles.axaml. -->
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctl="using:OmpGui.App.Controls">
+
+  <!-- ─────────────── Session menu (the title's flyout) ─────────────── -->
+  <Style Selector="StackPanel.session-menu > Button.menu-item">
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="Padding" Value="10,6" />
+  </Style>
+  <!-- The command omp runs, on the right of the item (Claude Code shows shortcuts there) -->
+  <Style Selector="TextBlock.menu-hint">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Margin" Value="12,0,0,0" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="Button.menu-item:disabled TextBlock.menu-hint">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+  <!-- The destructive item: the negative colour (large enough in the menu's 14 px, with its icon) -->
+  <Style Selector="Button.menu-item.danger">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextError}" />
+  </Style>
+  <Style Selector="Border.menu-separator">
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Background" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="Margin" Value="6,4" />
+  </Style>
+
+  <!-- A pinned session in the sidebar (where the running dot goes) -->
+  <Style Selector="ctl|Icon.session-pin">
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+
+  <!-- ─────────────── Session card ─────────────── -->
+  <Style Selector="Border.session-card">
+    <Setter Property="Padding" Value="16,12,12,14" />
+  </Style>
+  <Style Selector="Border.card-mark">
+    <Setter Property="Width" Value="32" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="Border.session-card.failed Border.card-mark">
+    <Setter Property="Background" Value="{DynamicResource GuiStatusErrorSoft}" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextError}" />
+  </Style>
+  <Style Selector="TextBlock.card-title">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontM}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="SelectableTextBlock.card-message">
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="LineHeight" Value="20" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="Grid.folder-row">
+    <Setter Property="MinHeight" Value="40" />
+  </Style>
+
+  <!-- ─────────────── Context ring and its popover ─────────────── -->
+  <Style Selector="ctl|UsageRing">
+    <Setter Property="TrackBrush" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="ArcBrush" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="ctl|UsageRing.warn">
+    <Setter Property="TrackBrush" Value="{DynamicResource GuiStatusWarning}" />
+    <Setter Property="ArcBrush" Value="{DynamicResource GuiStatusWarning}" />
+  </Style>
+  <Style Selector="ctl|UsageRing.full">
+    <Setter Property="TrackBrush" Value="{DynamicResource GuiStatusError}" />
+    <Setter Property="ArcBrush" Value="{DynamicResource GuiStatusError}" />
+  </Style>
+  <Style Selector="Button.usage-ring">
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="Padding" Value="8,0,9,0" />
+  </Style>
+  <Style Selector="TextBlock.usage-percent">
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+  <Style Selector="TextBlock.usage-headline">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontM}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="Grid.usage-row">
+    <Setter Property="Height" Value="26" />
+  </Style>
+  <Style Selector="TextBlock.usage-label">
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+  <Style Selector="TextBlock.usage-value">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="MinWidth" Value="60" />
+    <Setter Property="TextAlignment" Value="Right" />
+  </Style>
+  <!-- One hue for what is used (magnitude); the reserve and the free room in quieter tones -->
+  <Style Selector="ProgressBar.usage-bar">
+    <Setter Property="MinHeight" Value="6" />
+    <Setter Property="Height" Value="6" />
+    <Setter Property="MinWidth" Value="40" />
+    <Setter Property="CornerRadius" Value="3" />
+    <Setter Property="Margin" Value="0,0,10,0" />
+    <Setter Property="Background" Value="{DynamicResource GuiProgressTrack}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiStatusInfo}" />
+  </Style>
+  <Style Selector="ProgressBar.usage-bar.reserve">
+    <Setter Property="Foreground" Value="{DynamicResource GuiFill3}" />
+  </Style>
+  <Style Selector="ProgressBar.usage-bar.free">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+  <Style Selector="ProgressBar.usage-bar.high">
+    <Setter Property="Foreground" Value="{DynamicResource GuiStatusWarning}" />
+  </Style>
+  <Style Selector="StackPanel > ProgressBar.usage-bar">
+    <Setter Property="Margin" Value="0" />
+  </Style>
+
+  <!-- ─────────────── Model options (under the model list) ─────────────── -->
+  <Style Selector="Grid.option-row">
+    <Setter Property="Height" Value="34" />
+    <Setter Property="Margin" Value="10,0,10,0" />
+  </Style>
+  <Style Selector="Grid.option-row > ctl|Icon">
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Margin" Value="0,0,10,0" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="TextBlock.option-label">
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="TextBlock.option-note">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="Margin" Value="36,0,10,4" />
+  </Style>
+</Styles>

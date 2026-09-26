@@ -1,0 +1,10 @@
+bin/
+obj/
+*.user
+.vs/
+artifacts/
+TestResults/
+*.log
+
+# recorded omp stdout fixtures are test data (the repo root ignores *.jsonl session logs)
+!tests/OmpGui.Tests/Fixtures/*.jsonl

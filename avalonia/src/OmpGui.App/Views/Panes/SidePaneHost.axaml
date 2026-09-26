@@ -1,0 +1,48 @@
+<!-- The side pane right of the conversation (Views menu ⋮): a 48 px header level with the window's (the pane's name,
+     what it counts, close) over one of Plan, Background tasks, Files. MainWindow.FitPanels docks it beside the
+     conversation or, in a narrow window, lays it over the conversation until it is closed. DataContext: MainViewModel. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             xmlns:panes="using:OmpGui.App.Views.Panes"
+             x:Class="OmpGui.App.Views.Panes.SidePaneHost"
+             x:DataType="vm:MainViewModel"
+             Background="{DynamicResource GuiWindow}"
+             AutomationProperties.Name="{Binding SidePaneTitle}">
+  <DockPanel>
+    <Border x:Name="PaneHeader" DockPanel.Dock="Top" Classes="pane-header">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <TextBlock x:Name="PaneTitle" Classes="pane-title" Text="{Binding SidePaneTitle}" />
+        <Panel Grid.Column="1" Margin="10,0,8,0" VerticalAlignment="Center">
+          <TextBlock Classes="pane-subtitle" Text="{Binding Plan.ProgressText}" IsVisible="{Binding IsPlanPaneShown}" TextTrimming="CharacterEllipsis" />
+          <TextBlock Classes="pane-subtitle" Text="{Binding Tasks.Summary}" IsVisible="{Binding IsTasksPaneShown}" TextTrimming="CharacterEllipsis" />
+          <TextBlock Classes="pane-subtitle" Text="{Binding Files.RootName}" IsVisible="{Binding IsFilesPaneShown}" TextTrimming="CharacterEllipsis"
+                     ToolTip.Tip="{Binding Files.Root}" />
+        </Panel>
+        <!-- One header for every pane: the Files pane's own toolbar (for it on its own) is hidden here (Styles.Files) -->
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+          <Button x:Name="RefreshFilesButton" Classes="icon" Command="{Binding Files.RefreshNowCommand}"
+                  IsVisible="{Binding IsFilesPaneShown}" ToolTip.Tip="Read the files again" AutomationProperties.Name="Refresh files">
+            <ctl:Icon Data="{StaticResource IconReload}" Size="18" />
+          </Button>
+          <Button x:Name="ClosePaneButton" Classes="icon" Command="{Binding ClosePaneCommand}"
+                  ToolTip.Tip="Close the pane" AutomationProperties.Name="Close pane">
+            <ctl:Icon Data="{StaticResource IconClose}" Size="18" />
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+    <Panel>
+      <Panel IsVisible="{Binding IsPlanPaneShown}">
+        <panes:PlanPane x:Name="PlanPane" DataContext="{Binding Plan}" />
+      </Panel>
+      <Panel IsVisible="{Binding IsTasksPaneShown}">
+        <panes:TasksPane x:Name="TasksPane" DataContext="{Binding Tasks}" />
+      </Panel>
+      <Panel IsVisible="{Binding IsFilesPaneShown}">
+        <panes:FilesPane x:Name="FilesPane" DataContext="{Binding Files}" />
+      </Panel>
+    </Panel>
+  </DockPanel>
+</UserControl>

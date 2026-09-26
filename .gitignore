@@ -1,0 +1,31 @@
+# Build output, test results and local reference paths of the desktop client: avalonia/.gitignore
+
+# ===== Secrets and machine-local settings: never committed =====
+.env
+.env.*
+omp-gui.local.json
+*.pem
+*.key
+*.p12
+*.pfx
+harness/profile/agent/*.yml
+!harness/profile/agent/*.example.yml
+harness/profile/agent/mcp.json
+
+# ===== omp RPC session / transcript dumps (runtime artifacts) =====
+# avalonia/.gitignore re-includes the recorded omp output the tests use as fixtures
+*.jsonl
+
+# ===== Logs =====
+*.log
+
+# ===== OS / editor cruft =====
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# ===== Local agent / IDE workspace data (not source) =====
+.workbuddy/
+.qoder/
+.temp/

@@ -1,0 +1,27 @@
+# harness profile — base settings for omp.
+# Created once from the template (harness/profile); after that the file is yours.
+# Model roles are not set here: pick a model in your omp client, or add modelRoles (and a provider in models.yml).
+task:
+  maxConcurrency: 1
+tier:
+  subagent: inherit
+memories:
+  stage1Concurrency: 1
+  enabled: true
+defaultThinkingLevel: low
+images:
+  describeForTextModels: false
+providers:
+  webSearchOrder:
+    - duckduckgo
+  webSearchTimeoutSeconds: 20
+exa:
+  enabled: false
+skills:
+  customDirectories:
+    - ~/.omp/profiles/harness/skills
+tools:
+  xdevInlineDevices:
+    []
+memory:
+  backend: "off"

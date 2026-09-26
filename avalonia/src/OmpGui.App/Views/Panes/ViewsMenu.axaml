@@ -1,0 +1,91 @@
+<!-- The Views menu (Claude Code's ⋮ in the session toolbar): the side panes — Files, Background tasks (with how many
+     run now), Plan (with its progress) — then the browser preview and the terminal. A tick marks what is shown; the
+     keyboard shortcut is on the right. DataContext: MainViewModel. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Views.Panes.ViewsMenu"
+             x:DataType="vm:MainViewModel">
+  <Button x:Name="ViewsButton" Classes="icon" ToolTip.Tip="Views: plan, background tasks, files" AutomationProperties.Name="Views">
+    <Panel>
+      <ctl:Icon Data="{StaticResource IconMoreVertical}" Size="20" Filled="True" />
+      <Border x:Name="ViewsDot" Classes="views-dot" IsHitTestVisible="False">
+        <Border.IsVisible>
+          <MultiBinding Converter="{x:Static BoolConverters.And}">
+            <Binding Path="Tasks.HasRunning" />
+            <Binding Path="!IsTasksPaneShown" />
+          </MultiBinding>
+        </Border.IsVisible>
+      </Border>
+    </Panel>
+    <Button.Flyout>
+      <Flyout Placement="BottomEdgeAlignedRight">
+        <StackPanel x:Name="ViewsList" Width="300" Spacing="2">
+          <Button x:Name="ViewFilesItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                  Command="{Binding TogglePaneCommand}" CommandParameter="{x:Static vm:SidePane.Files}" AutomationProperties.Name="Files">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+              <ctl:Icon Data="{StaticResource IconFile}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="Files" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="2" Classes="tertiary" Text="{x:Static vm:MainViewModel.FilesShortcut}" Margin="12,0,0,0" VerticalAlignment="Center" />
+              <Panel Grid.Column="3" Width="16" Margin="10,0,0,0">
+                <ctl:Icon Classes="views-check" Data="{StaticResource IconCheck}" Size="16" IsVisible="{Binding IsFilesPaneShown}" VerticalAlignment="Center" />
+              </Panel>
+            </Grid>
+          </Button>
+          <Button x:Name="ViewTasksItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                  Command="{Binding TogglePaneCommand}" CommandParameter="{x:Static vm:SidePane.Tasks}" AutomationProperties.Name="Background tasks">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+              <ctl:Icon Data="{StaticResource IconLayers}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="Background tasks" VerticalAlignment="Center" />
+              <Border x:Name="TasksCount" Grid.Column="2" Classes="views-count" Margin="8,0,0,0" HorizontalAlignment="Left" IsVisible="{Binding Tasks.HasRunning}"
+                      ToolTip.Tip="Running now">
+                <TextBlock Text="{Binding Tasks.RunningCount}" />
+              </Border>
+              <TextBlock Grid.Column="3" Classes="tertiary" Text="{x:Static vm:MainViewModel.TasksShortcut}" Margin="12,0,0,0" VerticalAlignment="Center" />
+              <Panel Grid.Column="4" Width="16" Margin="10,0,0,0">
+                <ctl:Icon Classes="views-check" Data="{StaticResource IconCheck}" Size="16" IsVisible="{Binding IsTasksPaneShown}" VerticalAlignment="Center" />
+              </Panel>
+            </Grid>
+          </Button>
+          <Button x:Name="ViewPlanItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                  Command="{Binding TogglePaneCommand}" CommandParameter="{x:Static vm:SidePane.Plan}" AutomationProperties.Name="Plan">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+              <ctl:Icon Data="{StaticResource IconChecklist}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="Plan" VerticalAlignment="Center" />
+              <TextBlock x:Name="PlanProgress" Grid.Column="2" Classes="tertiary" Text="{Binding Plan.ShortProgress}" IsVisible="{Binding Plan.HasPlan}"
+                         Margin="8,0,0,0" VerticalAlignment="Center" ToolTip.Tip="Tasks done" />
+              <TextBlock Grid.Column="3" Classes="tertiary" Text="{x:Static vm:MainViewModel.PlanShortcut}" Margin="12,0,0,0" VerticalAlignment="Center" />
+              <Panel Grid.Column="4" Width="16" Margin="10,0,0,0">
+                <ctl:Icon Classes="views-check" Data="{StaticResource IconCheck}" Size="16" IsVisible="{Binding IsPlanPaneShown}" VerticalAlignment="Center" />
+              </Panel>
+            </Grid>
+          </Button>
+          <Border Classes="views-separator" />
+          <Button x:Name="ViewBrowserItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                  Command="{Binding TogglePreviewCommand}" AutomationProperties.Name="Browser">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+              <ctl:Icon Data="{StaticResource IconGlobe}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="Browser" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="2" Classes="tertiary" Text="{x:Static vm:MainViewModel.BrowserShortcut}" Margin="12,0,0,0" VerticalAlignment="Center" />
+              <Panel Grid.Column="3" Width="16" Margin="10,0,0,0">
+                <ctl:Icon Classes="views-check" Data="{StaticResource IconCheck}" Size="16" IsVisible="{Binding IsPreviewOpen}" VerticalAlignment="Center" />
+              </Panel>
+            </Grid>
+          </Button>
+          <Button x:Name="ViewTerminalItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                  Command="{Binding ToggleTerminalCommand}" AutomationProperties.Name="Terminal">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+              <ctl:Icon Data="{StaticResource IconTerminal}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="Terminal" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="2" Classes="tertiary" Text="{x:Static vm:MainViewModel.TerminalShortcut}" Margin="12,0,0,0" VerticalAlignment="Center" />
+              <Panel Grid.Column="3" Width="16" Margin="10,0,0,0">
+                <ctl:Icon Classes="views-check" Data="{StaticResource IconCheck}" Size="16" IsVisible="{Binding IsTerminalOpen}" VerticalAlignment="Center" />
+              </Panel>
+            </Grid>
+          </Button>
+        </StackPanel>
+      </Flyout>
+    </Button.Flyout>
+  </Button>
+</UserControl>

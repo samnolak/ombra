@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Scripted stand-in for omp's RPC side, for failure scenarios the real binary cannot be made to produce. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>OmpGui.FakeOmp</RootNamespace>
+  </PropertyGroup>
+</Project>

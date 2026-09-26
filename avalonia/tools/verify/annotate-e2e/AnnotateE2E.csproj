@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Real-window check of page comments (annotate mode) in the preview: run.sh. Not part of OmpGui.sln. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/OmpGui.App/OmpGui.App.csproj" />
+  </ItemGroup>
+</Project>

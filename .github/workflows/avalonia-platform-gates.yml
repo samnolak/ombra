@@ -1,0 +1,95 @@
+name: Avalonia platform gates
+
+# Manual only (workflow_dispatch): the macOS and Windows gates for a candidate commit, the same scripts a person runs
+# on a Mac or a Windows machine. Read-only token, no secrets, nothing published; results are workflow artifacts.
+#   tools/verify/macos-gate.sh              build, tests, osx packages, package smoke, real omp, $SHELL, packaged run
+#   tools/verify/windows-package-gate.ps1   package checks, self-test, $SHELL, client tests, packaged run via Win32 input
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: 'macos, windows, or both'
+        default: both
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    if: ${{ inputs.platforms != 'windows' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15]          # arm64; osx-x64 is packaged there and its smoke runs under Rosetta in the package workflow
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+        working-directory: avalonia
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: .NET 10 SDK
+        run: |
+          if dotnet --list-sdks 2>/dev/null | grep -q '^10\.'; then dotnet --version; exit 0; fi
+          curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --install-dir "$HOME/.dotnet"
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
+      - name: macOS gate
+        run: tools/verify/macos-gate.sh "$RUNNER_TEMP/gate"
+      - name: Result
+        if: ${{ !cancelled() }}
+        run: cat "$RUNNER_TEMP/gate/result.txt" || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: macos-gate-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/gate/result.txt
+            ${{ runner.temp }}/gate/*.log
+            ${{ runner.temp }}/gate/*.csv
+            ${{ runner.temp }}/gate/trx
+            ${{ runner.temp }}/gate/dist/*.sha256
+
+  windows:
+    if: ${{ inputs.platforms != 'macos' }}
+    runs-on: windows-2025
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+        working-directory: avalonia
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: .NET 10 SDK
+        run: |
+          if dotnet --list-sdks 2>/dev/null | grep -q '^10\.'; then dotnet --version; exit 0; fi
+          curl -sSL -o "$RUNNER_TEMP/dotnet-install.ps1" https://dot.net/v1/dotnet-install.ps1
+          pwsh -NoProfile -File "$RUNNER_TEMP/dotnet-install.ps1" -Channel 10.0 -InstallDir "$HOME/.dotnet"
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
+      - name: Package win-x64 from this commit
+        run: |
+          V="0.1.0-rc.1.${GITHUB_SHA::7}"
+          dotnet publish src/OmpGui.App -c Release -r win-x64 --self-contained -o "$RUNNER_TEMP/pub" -p:Version=0.1.0 -p:InformationalVersion="$V"
+          tools/package/package.sh win-x64 "$RUNNER_TEMP/pub" "$RUNNER_TEMP/dist" "$V"
+          (cd "$RUNNER_TEMP/dist" && cat *.sha256 > SHA256SUMS)
+          echo "ZIP=$RUNNER_TEMP/dist/omp-gui-$V-win-x64.zip" >> "$GITHUB_ENV"
+      - name: Windows gate
+        shell: pwsh
+        run: tools/verify/windows-package-gate.ps1 -Zip $env:ZIP -Source (Get-Location).Path -Out "$env:RUNNER_TEMP/windows-gate-result.txt"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: windows-gate
+          path: ${{ runner.temp }}/windows-gate-result.txt

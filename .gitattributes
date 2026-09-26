@@ -1,0 +1,8 @@
+# Source and text files use LF in every checkout (the Windows CI runner checks out with core.autocrlf=true;
+# CRLF broke imports of hashbang .mjs fixtures and makes lockfile/manifest bytes differ between machines).
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.png binary
+*.ico binary
+*.exe binary

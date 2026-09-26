@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=OMP GUI
+GenericName=Coding agent
+Comment=Desktop client for the original omp coding agent
+Exec=OMPGUI_DIR/OmpGui
+Icon=OMPGUI_DIR/omp-gui.png
+Terminal=false
+Categories=Development;
+StartupWMClass=OmpGui

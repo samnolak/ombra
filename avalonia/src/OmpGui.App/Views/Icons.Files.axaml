@@ -1,0 +1,11 @@
+<!-- Line icons for the Files pane and the project menu, same rules as Icons.axaml (24-unit grid, stroked; Filled for solid shapes). -->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Browse files: two sheets -->
+  <StreamGeometry x:Key="IconFiles">M5.5 7 H12.5 L16.5 11 V19 A1.5 1.5 0 0 1 15 20.5 H5.5 A1.5 1.5 0 0 1 4 19 V8.5 A1.5 1.5 0 0 1 5.5 7 Z M12.5 7 V11 H16.5 M8 7 V5 A1.5 1.5 0 0 1 9.5 3.5 H15.5 L19.5 7.5 V15.5 A1.5 1.5 0 0 1 18 17 H16.5</StreamGeometry>
+  <!-- Add to message: an @ (omp reads @path in a message) -->
+  <StreamGeometry x:Key="IconAt">M15.5 12 A3.5 3.5 0 1 1 8.5 12 A3.5 3.5 0 1 1 15.5 12 Z M15.5 9 V13.5 A2.5 2.5 0 0 0 20.5 13.5 V12 A8.5 8.5 0 1 0 17 18.8</StreamGeometry>
+  <!-- The viewer takes the whole pane, and back -->
+  <StreamGeometry x:Key="IconExpand">M14 4.5 H19.5 V10 M19.5 4.5 L13.5 10.5 M10 19.5 H4.5 V14 M4.5 19.5 L10.5 13.5</StreamGeometry>
+  <StreamGeometry x:Key="IconCollapse">M19.5 4.5 L13.5 10.5 M13.5 5 V10.5 H19 M4.5 19.5 L10.5 13.5 M10.5 19 V13.5 H5</StreamGeometry>
+</ResourceDictionary>

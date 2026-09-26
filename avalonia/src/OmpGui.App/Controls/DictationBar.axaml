@@ -1,0 +1,75 @@
+<!-- Dictation mode: replaces the composer's text area while dictating (MainViewModel.IsDictationBarVisible).
+     Cancel (X, Esc) · live waveform / "Transcribing…" / the error · elapsed time · Finish (✓, Enter).
+     Only the client's tokens and classes (docs/design/DESIGN_SYSTEM.md); its own styles are below. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Controls.DictationBar"
+             x:DataType="vm:MainViewModel"
+             Focusable="True"
+             MinHeight="48"
+             AutomationProperties.Name="Dictation">
+  <UserControl.Styles>
+    <!-- Finish: a 32 px accent circle with a check, like the composer's Send -->
+    <Style Selector="Button.dictation-finish">
+      <Setter Property="Width" Value="32" />
+      <Setter Property="Height" Value="32" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.dictation-elapsed">
+      <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+      <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="ProgressBar.dictation-progress">
+      <Setter Property="Width" Value="40" />
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="Height" Value="3" />
+      <Setter Property="MinHeight" Value="3" />
+      <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid ColumnDefinitions="Auto,*,Auto,Auto" MinHeight="48">
+    <Button x:Name="CancelButton" Grid.Column="0" Classes="icon round" VerticalAlignment="Center"
+            Command="{Binding CancelDictationCommand}"
+            ToolTip.Tip="Cancel (Esc)" AutomationProperties.Name="Cancel dictation">
+      <ctl:Icon Data="{StaticResource IconClose}" Size="20" />
+    </Button>
+
+    <Panel Grid.Column="1" Margin="8,0" VerticalAlignment="Center">
+      <ctl:Waveform x:Name="Wave" Levels="{Binding DictationLevels}" Foreground="{DynamicResource GuiTextPrimary}"
+                    Slots="{x:Static vm:MainViewModel.DictationLevelCount}"
+                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                    IsVisible="{Binding ShowDictationWaveform}" />
+      <StackPanel x:Name="TranscribingPanel" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Center"
+                  VerticalAlignment="Center" IsVisible="{Binding IsTranscribing}">
+        <ProgressBar Classes="dictation-progress" IsIndeterminate="{Binding IsTranscribing}" />
+        <TextBlock Classes="muted" Text="Transcribing…" VerticalAlignment="Center" />
+      </StackPanel>
+      <Grid x:Name="ErrorPanel" ColumnDefinitions="Auto,*" VerticalAlignment="Center" IsVisible="{Binding HasDictationError}">
+        <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,0,8,0" VerticalAlignment="Center" />
+        <TextBlock x:Name="ErrorText" Grid.Column="1" Classes="error" Text="{Binding DictationError}"
+                   FontSize="{DynamicResource GuiFontS}" TextWrapping="Wrap" VerticalAlignment="Center" />
+      </Grid>
+    </Panel>
+
+    <TextBlock x:Name="Elapsed" Grid.Column="2" Classes="mono dictation-elapsed" Margin="0,0,10,0"
+               Text="{Binding DictationElapsed}" IsVisible="{Binding ShowDictationWaveform}" />
+
+    <Button x:Name="FinishButton" Grid.Column="3" Classes="accent dictation-finish"
+            Command="{Binding FinishDictationCommand}" IsVisible="{Binding !HasDictationError}"
+            ToolTip.Tip="Insert the text (Enter)" AutomationProperties.Name="Finish dictation">
+      <ctl:Icon Data="{StaticResource IconCheck}" Size="18" StrokeThickness="2.25" />
+    </Button>
+    <Button x:Name="RetryButton" Grid.Column="3" VerticalAlignment="Center" Content="Try again"
+            Command="{Binding StartDictationCommand}" IsVisible="{Binding HasDictationError}" />
+  </Grid>
+</UserControl>

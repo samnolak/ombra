@@ -1,0 +1,66 @@
+name: Avalonia client CI
+
+# The new cross-platform client in avalonia/. Read-only token, no secrets, no publishing.
+# Every OS: restore, build, all platform-independent tests (protocol, transport, process, reducer, controller,
+# headless UI), then a real Original OMP Core smoke (omp 18.2.0 on Bun 1.4.2, harness profile, STAND-IN model).
+# Manual runs only (Actions → Run workflow): the account's Actions quota is not paid for; checks run before a
+# merge in a Claude Code session (README → Build, run, test).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+        working-directory: avalonia
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: .NET 10 SDK
+        run: |
+          if dotnet --list-sdks 2>/dev/null | grep -q '^10\.'; then dotnet --version; exit 0; fi
+          if [ "$RUNNER_OS" = Windows ]; then
+            curl -sSL -o "$RUNNER_TEMP/dotnet-install.ps1" https://dot.net/v1/dotnet-install.ps1
+            pwsh -NoProfile -File "$RUNNER_TEMP/dotnet-install.ps1" -Channel 10.0 -InstallDir "$HOME/.dotnet"
+          else
+            curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --install-dir "$HOME/.dotnet"
+          fi
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
+      - run: dotnet --info | head -20
+      - run: dotnet restore OmpGui.sln
+      - id: build
+        run: dotnet build OmpGui.sln -c Release --no-restore
+      - name: Tests (protocol, transport, process, reducer, controller, headless UI)
+        run: dotnet test tests/OmpGui.Tests -c Release --no-build --logger "console;verbosity=normal"
+      # The same tests on one CPU core: slow machines expose ordering races that fast runners hide.
+      - name: Tests on one CPU core (Linux)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'Linux' }}
+        run: |
+          taskset -c 0 dotnet test tests/OmpGui.Tests -c Release --no-build --logger "console;verbosity=normal" \
+            --logger "trx;LogFileName=one-core.trx" --results-directory "$RUNNER_TEMP/one-core"
+      - name: One-core results (name, message and stack of any failure)
+        if: ${{ failure() && runner.os == 'Linux' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: one-core-trx
+          path: ${{ runner.temp }}/one-core/*.trx
+          retention-days: 14
+      - name: Real Original OMP Core smoke (stand-in model)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: tools/ci/real-omp-smoke.sh "$RUNNER_TEMP/omp-smoke"

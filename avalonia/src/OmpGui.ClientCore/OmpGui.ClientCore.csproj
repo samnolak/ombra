@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>OmpGui.ClientCore</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OmpGui.Rpc\OmpGui.Rpc.csproj" />
+    <InternalsVisibleTo Include="OmpGui.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,234 @@
+<!-- Styles for the Files pane and the project menu, on the design system's tokens (Tokens.axaml), as in Styles.axaml. -->
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctl="using:OmpGui.App.Controls"
+        xmlns:session="using:OmpGui.App.Views.Session"
+        xmlns:panes="using:OmpGui.App.Views.Panes">
+
+  <!-- ─────────────── The pane ─────────────── -->
+  <!-- Level with the window's 48 px header -->
+  <!-- In the side pane the host's header names the pane and has Refresh and close: the pane's own toolbar is for it alone -->
+  <Style Selector="panes|SidePaneHost Border.files-toolbar">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <Style Selector="Border.files-toolbar">
+    <Setter Property="Height" Value="48" />
+    <Setter Property="Padding" Value="16,0,8,0" />
+  </Style>
+  <Style Selector="TextBlock.files-title">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontM}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <!-- A list of files: rows of 28, radius 8, hover fill 1, the chosen row fill 2; no Fluent accent -->
+  <Style Selector="ListBox.file-list">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="8,0,8,8" />
+  </Style>
+  <Style Selector="ListBox.file-list ListBoxItem">
+    <Setter Property="Padding" Value="6,0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Height" Value="28" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="ListBox.file-list ListBoxItem /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+  </Style>
+  <Style Selector="ListBox.file-list ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="ListBox.file-list ListBoxItem:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="ListBox.file-list ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="ListBox.file-list ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+  </Style>
+  <Style Selector="ListBox.file-list ListBoxItem:selected:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+  </Style>
+  <Style Selector="TextBlock.file-name">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <!-- Dependencies, build output, what .gitignore excludes: there, but out of the way -->
+  <Style Selector="TextBlock.file-name.dim">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+  <Style Selector="TextBlock.file-name.deleted">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="TextDecorations" Value="Strikethrough" />
+  </Style>
+  <Style Selector="Run.file-detail">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+  <Style Selector="ctl|Icon.file-icon">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="ctl|Icon.file-icon.dim">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+  <Style Selector="ctl|Icon.tree-chevron">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextTertiary}" />
+    <Setter Property="RenderTransform" Value="rotate(0deg)" />
+  </Style>
+  <Style Selector="ctl|Icon.tree-chevron.open">
+    <Setter Property="RenderTransform" Value="rotate(90deg)" />
+  </Style>
+  <!-- git's mark: a dot in the status colour and the letter in secondary text (status is never coloured small text) -->
+  <Style Selector="Ellipse.git-dot">
+    <Setter Property="Width" Value="6" />
+    <Setter Property="Height" Value="6" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusNeutral}" />
+  </Style>
+  <Style Selector="Ellipse.git-dot.modified, Ellipse.git-dot.folder">
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusWarning}" />
+  </Style>
+  <Style Selector="Ellipse.git-dot.added">
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusSuccess}" />
+  </Style>
+  <Style Selector="Ellipse.git-dot.removed, Ellipse.git-dot.conflicted">
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusError}" />
+  </Style>
+  <Style Selector="TextBlock.git-letter">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="MinWidth" Value="9" />
+    <Setter Property="TextAlignment" Value="Center" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <!-- Changed by omp in this session: its sparkle, in the info colour -->
+  <Style Selector="ctl|Icon.session-mark">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiStatusInfo}" />
+  </Style>
+  <Style Selector="TextBlock.files-message">
+    <Setter Property="Margin" Value="20,12" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="VerticalAlignment" Value="Top" />
+  </Style>
+  <!-- An empty or unusual state: a disc with an icon, a title, a sentence, the way out -->
+  <Style Selector="StackPanel.files-state">
+    <Setter Property="Spacing" Value="8" />
+    <Setter Property="Margin" Value="24" />
+    <Setter Property="MaxWidth" Value="300" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.files-disc">
+    <Setter Property="Width" Value="40" />
+    <Setter Property="Height" Value="40" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="TextBlock.files-state-title">
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="Border.files-notice">
+    <Setter Property="Background" Value="{DynamicResource GuiStatusWarningSoft}" />
+  </Style>
+
+  <!-- ─────────────── The viewer ─────────────── -->
+  <Style Selector="DockPanel.file-viewer">
+    <Setter Property="Background" Value="{DynamicResource GuiWindow}" />
+  </Style>
+  <Style Selector="Border.viewer-header">
+    <Setter Property="Padding" Value="16,8,8,8" />
+    <Setter Property="MinHeight" Value="52" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+  </Style>
+  <Style Selector="TextBlock.viewer-name">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="Button.icon.viewer-action">
+    <Setter Property="Width" Value="28" />
+    <Setter Property="Height" Value="28" />
+  </Style>
+  <Style Selector="Border.viewer-notice">
+    <Setter Property="Padding" Value="16,6" />
+    <Setter Property="Background" Value="{DynamicResource GuiFill1OnWindow}" />
+  </Style>
+  <Style Selector="TextBlock.code-numbers">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+  <Style Selector="SelectableTextBlock.code-text">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <!-- The line opened from the conversation -->
+  <Style Selector="Border.code-mark">
+    <Setter Property="Background" Value="{DynamicResource GuiStatusWarningSoft}" />
+  </Style>
+  <Style Selector="Border.image-frame">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+
+  <!-- ─────────────── The project in the header ─────────────── -->
+  <Style Selector="Button.header-project">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="Padding" Value="6,0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Height" Value="30" />
+    <Setter Property="MaxWidth" Value="260" />
+    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.header-project:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.header-project:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="Button.header-project ctl|Icon.project-chevron">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+  <!-- A narrower conversation column (a side pane open): a shorter name, trimmed. Only a narrow one leaves the folder icon
+       alone (the menu stays one click away): at 580 px the bare icon had looked broken beside plenty of room. -->
+  <Style Selector="Border.header.tight Button.header-project">
+    <Setter Property="MaxWidth" Value="170" />
+  </Style>
+  <!-- "· worktree" goes before the branch name is cut (its tooltip keeps it) -->
+  <Style Selector="Border.header.narrow Panel.worktree-slot">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <Style Selector="Border.header.narrow Button.header-project TextBlock.project-name, Border.header.narrow Button.header-project ctl|Icon.project-chevron">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <Style Selector="TextBlock.project-menu-name">
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <!-- ─────────────── File paths in the conversation: they open the file ─────────────── -->
+  <Style Selector="Button.tool-path, Button.diff-path-link">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <!-- the path keeps the weight it had as plain text (buttons are medium) -->
+    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius4}" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+  <Style Selector="Button.tool-path:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.tool-path:pressed /template/ ContentPresenter#PART_ContentPresenter, Button.diff-path-link:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.diff-path-link:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.tool-path:pointerover TextBlock.tool-summary, Button.diff-path-link:pointerover TextBlock.diff-path">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+    <Setter Property="TextDecorations" Value="Underline" />
+  </Style>
+</Styles>

@@ -1,0 +1,115 @@
+<!-- Styles for pets, on the design system's tokens (Tokens.axaml), as in Styles.axaml. -->
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctl="using:OmpGui.App.Controls">
+
+  <!-- The pet on the message box: a hand cursor says it can be clicked -->
+  <Style Selector="ctl|PetView.perched">
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+
+  <!-- Its speech bubble: a small menu surface with a tail pointing at the pet -->
+  <Style Selector="Border.pet-bubble">
+    <Setter Property="Background" Value="{DynamicResource GuiSurface2}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+    <Setter Property="BoxShadow" Value="{DynamicResource GuiShadow}" />
+    <Setter Property="Padding" Value="10,5" />
+  </Style>
+  <Style Selector="Border.pet-bubble TextBlock">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="Path.pet-bubble-tail">
+    <Setter Property="Fill" Value="{DynamicResource GuiSurface2}" />
+    <Setter Property="Stroke" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="StrokeThickness" Value="1" />
+  </Style>
+
+  <!-- My pets: a tile per pet; the chosen one ringed in the accent -->
+  <Style Selector="Button.pet-tile">
+    <Setter Property="Width" Value="112" />
+    <Setter Property="Height" Value="112" />
+    <Setter Property="Padding" Value="6" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+    <Setter Property="Background" Value="{DynamicResource GuiFill1OnSurface1}" />
+    <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="FontWeight" Value="Normal" />
+  </Style>
+  <Style Selector="Button.pet-tile:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1Hover}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.pet-tile.chosen /template/ ContentPresenter#PART_ContentPresenter, Button.pet-tile.chosen:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiAccent}" />
+  </Style>
+
+  <!-- Editor: the preview stage, body buttons, color swatches, choices -->
+  <Style Selector="Border.pet-stage">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1OnSurface1}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+  </Style>
+  <Style Selector="Button.pet-body">
+    <Setter Property="Width" Value="44" />
+    <Setter Property="Height" Value="44" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.pet-body:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.pet-body.selected /template/ ContentPresenter#PART_ContentPresenter, Button.pet-body.selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiAccent}" />
+  </Style>
+  <Style Selector="Button.pet-swatch">
+    <Setter Property="Width" Value="32" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.pet-swatch Ellipse">
+    <Setter Property="Stroke" Value="{DynamicResource GuiBorder}" />
+    <Setter Property="StrokeThickness" Value="1" />
+  </Style>
+  <Style Selector="Button.pet-swatch:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderHover}" />
+  </Style>
+  <Style Selector="Button.pet-swatch.selected /template/ ContentPresenter#PART_ContentPresenter, Button.pet-swatch.selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiInverse}" />
+  </Style>
+  <Style Selector="Button.chip.pet-choice">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="Padding" Value="12,0" />
+    <Setter Property="FontWeight" Value="Normal" />
+  </Style>
+  <Style Selector="Button.chip.pet-choice.small">
+    <Setter Property="MinHeight" Value="26" />
+    <Setter Property="Height" Value="26" />
+    <Setter Property="Padding" Value="9,0" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+  <Style Selector="Button.chip.pet-choice.selected">
+    <Setter Property="Background" Value="{DynamicResource GuiInverse}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnInverse}" />
+  </Style>
+  <Style Selector="Button.chip.pet-choice.selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiInverseHover}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnInverse}" />
+  </Style>
+  <Style Selector="Button.flat.danger-text">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextError}" />
+  </Style>
+</Styles>

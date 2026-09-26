@@ -1,0 +1,1222 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:OmpGui.App.ViewModels"
+        xmlns:ctl="using:OmpGui.App.Controls"
+        xmlns:settings="using:OmpGui.App.Views.Settings"
+        xmlns:panes="using:OmpGui.App.Views.Panes"
+        xmlns:session="using:OmpGui.App.Views.Session"
+        x:Class="OmpGui.App.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="{Binding WindowTitle}"
+        Icon="/Assets/icon.ico"
+        Width="1100" Height="760" MinWidth="480" MinHeight="360"
+        Background="{DynamicResource GuiWindow}"
+        WindowStartupLocation="CenterScreen">
+
+  <Grid ColumnDefinitions="Auto,*">
+
+    <!-- ── Sidebar (Claude Code): toggle · name · new session; search; sessions by project; open folder, settings ── -->
+    <!-- In a narrow window (under 760 px) the sidebar is a drawer over the conversation, which keeps its width; the
+         dimmed rest of the window closes it (MainWindow.FitSidebar) -->
+    <Border x:Name="SidebarScrim" Grid.Column="1" Classes="scrim" IsVisible="False" ZIndex="19" />
+    <Border x:Name="Sidebar" Grid.Column="0" Classes="sidebar" Width="260" IsVisible="{Binding ShowSidebar}">
+      <DockPanel>
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Height="48" Margin="8,0,8,0">
+          <Button Classes="icon" Command="{Binding ToggleSidebarCommand}" ToolTip.Tip="Hide sessions (Ctrl+B)" AutomationProperties.Name="Hide sessions">
+            <ctl:Icon Data="{StaticResource IconPanelLeft}" Size="20" />
+          </Button>
+          <TextBlock Grid.Column="1" Text="OMP" FontWeight="SemiBold" FontSize="{DynamicResource GuiFontM}" VerticalAlignment="Center" Margin="6,0,0,0" />
+        </Grid>
+        <StackPanel DockPanel.Dock="Top" Margin="8,0,8,4" Spacing="2">
+          <Button AutomationProperties.Name="New session" x:Name="NewSessionButton" Classes="sidebar-action" Command="{Binding NewSessionCommand}"
+                  HorizontalAlignment="Stretch" ToolTip.Tip="Start a new session in this project (Ctrl+N)">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <ctl:Icon Data="{StaticResource IconCompose}" />
+              <TextBlock Text="New session" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+          <TextBox x:Name="SessionFilterBox" Classes="search sidebar-search" Text="{Binding SessionFilter}" PlaceholderText="Search"
+                   AutomationProperties.Name="Filter sessions" Margin="0,4,0,0">
+            <!-- On the grey sidebar the field fill (fill 1 on surface 1) is the sidebar's own colour:
+                 the field sits on surface 1 there instead (white in light; fill 1 on window in dark). -->
+            <TextBox.Resources>
+              <ResourceDictionary>
+                <ResourceDictionary.ThemeDictionaries>
+                  <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="TextControlBackground" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="TextControlBorderBrush" Color="#12001024" />
+                  </ResourceDictionary>
+                  <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="TextControlBackground" Color="#FF2C2C2E" />
+                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#FF2C2C2E" />
+                    <SolidColorBrush x:Key="TextControlBorderBrush" Color="#00000000" />
+                  </ResourceDictionary>
+                </ResourceDictionary.ThemeDictionaries>
+              </ResourceDictionary>
+            </TextBox.Resources>
+            <TextBox.InnerLeftContent>
+              <ctl:Icon Data="{StaticResource IconSearch}" Size="16" Margin="10,0,0,0" VerticalAlignment="Center" TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
+            </TextBox.InnerLeftContent>
+          </TextBox>
+        </StackPanel>
+        <!-- Bottom: the other places to go -->
+        <StackPanel DockPanel.Dock="Bottom" Margin="8,4,8,10" Spacing="2">
+          <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="2,0,2,6" />
+          <Button x:Name="UpdatePill" Classes="sidebar-action update" Command="{Binding OpenUpdatesCommand}" IsVisible="{Binding ShowUpdatePill}"
+                  HorizontalAlignment="Stretch" ToolTip.Tip="Settings → Updates" AutomationProperties.Name="{Binding UpdatePill}">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <ctl:Icon Data="{StaticResource IconDownload}" />
+              <TextBlock Text="{Binding UpdatePill}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+          </Button>
+          <Button AutomationProperties.Name="Settings" x:Name="SidebarSettingsButton" Classes="sidebar-action" Classes.current="{Binding IsSettingsOpen}" Command="{Binding OpenSettingsCommand}"
+                  HorizontalAlignment="Stretch" ToolTip.Tip="Settings (Ctrl+,)">
+            <StackPanel Orientation="Horizontal" Spacing="10">
+              <ctl:Icon Data="{StaticResource IconSettings}" />
+              <TextBlock Text="Settings" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+        </StackPanel>
+        <!-- Sessions, grouped by project -->
+        <ListBox x:Name="SessionList" Classes="sessions" ItemsSource="{Binding SessionGroups}"
+                 AutomationProperties.Name="Sessions" ScrollViewer.HorizontalScrollBarVisibility="Disabled" Margin="0,6,0,0">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:SessionGroupViewModel">
+              <StackPanel Spacing="1" Margin="0,0,0,10">
+                <Grid Classes="group-header" ColumnDefinitions="Auto,*,Auto" ToolTip.Tip="{Binding Cwd}">
+                  <ctl:Icon Data="{StaticResource IconFolder}" Size="14" Margin="10,0,6,0" VerticalAlignment="Center" TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
+                  <TextBlock Grid.Column="1" Classes="group-label" Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                  <Button Grid.Column="2" Classes="icon group-action" Width="28" Height="28"
+                          Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).NewSessionInProjectCommand}" CommandParameter="{Binding}"
+                          ToolTip.Tip="New session in this project" AutomationProperties.Name="{Binding Name, StringFormat='New session in {0}'}">
+                    <ctl:Icon Data="{StaticResource IconPlus}" Size="16" />
+                  </Button>
+                </Grid>
+                <ItemsControl ItemsSource="{Binding Items}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:SessionItemViewModel">
+                      <Button AutomationProperties.Name="{Binding Title}" Classes="session" Classes.current="{Binding IsCurrent}"
+                              Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenSessionCommand}"
+                              CommandParameter="{Binding}" ToolTip.Tip="{Binding Tooltip}"
+                              HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                        <Grid ColumnDefinitions="Auto,*,Auto">
+                          <Ellipse Classes="session-dot" IsVisible="{Binding IsActive}" Margin="0,0,8,0" />
+                          <ctl:Icon Classes="session-pin" Data="{StaticResource IconPin}" Size="14" Margin="0,0,6,0" IsVisible="{Binding ShowPin}" ToolTip.Tip="Pinned" />
+                          <TextBlock Grid.Column="1" Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                          <TextBlock Grid.Column="2" Classes="session-age" Text="{Binding When}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                        </Grid>
+                      </Button>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Border>
+
+  <Grid x:Name="MainColumn" Grid.Column="1" RowDefinitions="Auto,*,Auto,Auto,Auto" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">
+
+    <!-- ── Header: sessions toggle, title (rename) and project; terminal and settings. Model, thinking and approvals
+         live in the composer, next to the message they apply to (as in Claude Code). ── -->
+    <Border x:Name="HeaderBar" Grid.Row="0" Grid.Column="0" Classes="header">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <!-- The sidebar has its own toggle; this one brings it back when it is hidden -->
+        <Button Grid.Column="0" Classes="icon" Command="{Binding ToggleSidebarCommand}" IsVisible="{Binding !ShowSidebar}"
+                ToolTip.Tip="Show sessions (Ctrl+B)" AutomationProperties.Name="Toggle sessions" Margin="0,0,6,0">
+          <ctl:Icon Data="{StaticResource IconPanelLeft}" Size="20" />
+        </Button>
+        <!-- A DockPanel, not an Auto column: the title gets at most the room that is left and trims with an ellipsis
+             (an Auto column took its full width and drew over the model chip in narrow windows); the project trims first. -->
+        <DockPanel Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center" ClipToBounds="True">
+          <!-- The title opens the session menu (rename, compact, export, share…: Views/Session/SessionTitle); not on the
+               setup screen, where there is no session to act on yet -->
+          <session:SessionTitle x:Name="SessionTitle" DockPanel.Dock="Left">
+            <session:SessionTitle.IsVisible>
+              <MultiBinding Converter="{x:Static BoolConverters.And}">
+                <Binding Path="!IsRenaming" />
+                <Binding Path="!ShowSetupScreen" />
+              </MultiBinding>
+            </session:SessionTitle.IsVisible>
+          </session:SessionTitle>
+          <TextBox x:Name="RenameBox" DockPanel.Dock="Left" Classes="sm" Text="{Binding RenameText}" IsVisible="{Binding IsRenaming}" MinWidth="240"
+                   MaxWidth="420" AutomationProperties.Name="Session name" />
+          <!-- The project: a menu (browse files, file manager, editor, terminal, copy path, another project) -->
+          <panes:ProjectMenuButton x:Name="ProjectMenu" Margin="2,0,0,0" VerticalAlignment="Center"
+                                   IsVisible="{Binding ProjectName, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          <!-- The project's branch (and worktree), last so it trims first: Controls/BranchChip -->
+          <ctl:BranchChip x:Name="HeaderBranch" Margin="4,0,0,0" />
+        </DockPanel>
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+          <Button x:Name="PreviewButton" Classes="icon" Classes.on="{Binding IsPreviewOpen}" Command="{Binding TogglePreviewCommand}"
+                  ToolTip.Tip="Browser: the web app on a local server (Ctrl/⌘+Shift+B)" AutomationProperties.Name="Preview">
+            <ctl:Icon Data="{StaticResource IconGlobe}" Size="20" />
+          </Button>
+          <Button x:Name="TerminalButton" Classes="icon" Classes.on="{Binding IsTerminalOpen}" Command="{Binding ToggleTerminalCommand}"
+                  ToolTip.Tip="Terminal (Ctrl+`)" AutomationProperties.Name="Terminal">
+            <ctl:Icon Data="{StaticResource IconTerminal}" Size="20" />
+          </Button>
+          <Button x:Name="SettingsButton" Classes="icon" Command="{Binding OpenSettingsCommand}" IsVisible="{Binding !ShowSidebar}"
+                  ToolTip.Tip="Settings (Ctrl+,)" AutomationProperties.Name="Settings">
+            <ctl:Icon Data="{StaticResource IconSettings}" Size="20" />
+          </Button>
+          <!-- Views (⋮): Files, Background tasks, Plan in the side pane; Browser, Terminal (Views/Panes/ViewsMenu) -->
+          <panes:ViewsMenu x:Name="ViewsMenu" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- ── Transcript, and the terminal panel below it ── -->
+    <!-- Clipped, and the terminal capped to what the row has (MainWindow.axaml.cs): in a short window its 280 px had
+         drawn under the cards and the plan strip below -->
+    <Grid x:Name="ConversationArea" Grid.Row="1" Grid.Column="0" RowDefinitions="*,Auto,Auto" ClipToBounds="True">
+    <Panel Grid.Row="0">
+      <ListBox x:Name="Transcript" Classes="transcript" ItemsSource="{Binding Rows}"
+               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+               AutomationProperties.Name="Conversation" Padding="24,8,24,16">
+        <ListBox.DataTemplates>
+          <DataTemplate DataType="vm:UserRowViewModel">
+            <Border Classes="user-bubble" Margin="96,18,0,8" HorizontalAlignment="Right" MaxWidth="600">
+              <StackPanel Spacing="4">
+                <SelectableTextBlock Classes="body" Text="{Binding DisplayText}" IsVisible="{Binding HasOwnText}" />
+                <!-- Page comments sent with the message: a chip, like an attachment (the full text on request) -->
+                <Border Classes="bubble-chip" IsVisible="{Binding HasComments}" HorizontalAlignment="Left">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <ctl:Icon Data="{StaticResource IconComment}" Size="15" />
+                    <TextBlock Text="{Binding CommentsLabel}" FontSize="13" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Border>
+                <Button Classes="link" Content="{Binding FoldLabel}" Command="{Binding ToggleFoldCommand}" IsVisible="{Binding IsLong}"
+                        HorizontalAlignment="Left" Padding="0" MinHeight="0" />
+                <TextBlock Classes="muted" Text="{Binding ImagesText, StringFormat='🖼 {0}'}" IsVisible="{Binding HasImages}" />
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+          <DataTemplate DataType="vm:AssistantRowViewModel">
+            <!-- Nothing until there is something to read: a reply that only calls tools takes no room. No "…" line
+                 while it streams (it came and went with every message): the activity line above the composer says it. -->
+            <StackPanel Classes="assistant" Margin="0,6,0,6" Spacing="4" IsVisible="{Binding HasContent}">
+              <ToggleButton Classes="thinking-toggle" IsChecked="{Binding IsThinkingOpen}" IsVisible="{Binding HasThinking}"
+                            AutomationProperties.Name="Show thinking">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                  <TextBlock Classes="thinking-label" Classes.live="{Binding IsThinkingLive}" Text="{Binding ThinkingLabel}" VerticalAlignment="Center" />
+                  <ctl:Icon Classes="chevron" Data="{StaticResource IconChevronRight}" Size="14" />
+                </StackPanel>
+              </ToggleButton>
+              <Border Classes="thinking-body" IsVisible="{Binding IsThinkingOpen}">
+                <SelectableTextBlock Classes="muted" Text="{Binding Thinking}" TextWrapping="Wrap" />
+              </Border>
+              <ctl:MarkdownView Markdown="{Binding Text}" IsStreaming="{Binding Streaming}" IsVisible="{Binding HasText}" />
+              <!-- A failed reply: the provider's words, wrapped, and "Retry" (omp's /retry) while it ends the conversation -->
+              <Border x:Name="ReplyError" Classes="notice error" IsVisible="{Binding HasError}" Margin="0,4,0,0">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,1,8,0" VerticalAlignment="Top" />
+                  <SelectableTextBlock Grid.Column="1" Classes="error" Text="{Binding ErrorText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                  <Button x:Name="RetryReplyButton" Grid.Column="2" Content="Retry" Margin="12,-6,-6,-6" VerticalAlignment="Center"
+                          IsVisible="{Binding CanRetry}" Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RetryLastTurnCommand}"
+                          ToolTip.Tip="Run the last turn again (/retry)" AutomationProperties.Name="Retry" />
+                </Grid>
+              </Border>
+              <StackPanel Orientation="Horizontal" Spacing="12" Height="28" Margin="0,2,0,0" IsVisible="{Binding ShowActions}">
+                <TextBlock Classes="tertiary" Text="{Binding Footer}" IsVisible="{Binding HasFooter}" VerticalAlignment="Center" />
+                <Button Classes="icon" Width="28" Height="28" Margin="-6,0,0,0" Command="{Binding CopyCommand}" IsVisible="{Binding HasText}"
+                        ToolTip.Tip="Copy the message as Markdown" AutomationProperties.Name="Copy message">
+                  <ctl:Icon Data="{StaticResource IconCopy}" Size="16" />
+                </Button>
+              </StackPanel>
+            </StackPanel>
+          </DataTemplate>
+          <DataTemplate DataType="vm:ToolRowViewModel">
+            <!-- Pulled out by the line's inner padding so the dot sits on the text edge of the column -->
+            <StackPanel Classes="tool" Margin="-8,1,-8,1" Spacing="4">
+              <ToggleButton Classes="tool-row" IsChecked="{Binding IsExpanded}" HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch" AutomationProperties.Name="Show tool output" ToolTip.Tip="{Binding Title}">
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto">
+                  <Ellipse Classes="tool-dot" Classes.running="{Binding IsRunning}" Classes.done="{Binding IsDone}" Classes.failed="{Binding IsFailed}" />
+                  <TextBlock Grid.Column="1" Classes="tool-name" Text="{Binding Name}" Margin="8,0,0,0" />
+                  <TextBlock Grid.Column="2" Classes="mono tool-summary" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" Margin="8,0" IsVisible="{Binding !HasFile}" />
+                  <!-- A file the tool reads or changes: its path opens it in the Files pane -->
+                  <Button Grid.Column="2" Classes="tool-path" Margin="8,0" HorizontalAlignment="Left" IsVisible="{Binding HasFile}"
+                          Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).Files.OpenToolFileCommand}" CommandParameter="{Binding}"
+                          ToolTip.Tip="Open in the Files pane" AutomationProperties.Name="{Binding Summary, StringFormat='Open {0}'}">
+                    <TextBlock Classes="mono tool-summary" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
+                  </Button>
+                  <!-- What a file change adds and removes, like Claude Code's +12 −1 -->
+                  <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" IsVisible="{Binding ShowRowStats}" Margin="0,0,8,0" VerticalAlignment="Center">
+                    <TextBlock Classes="mono diff-added" Text="{Binding AddedText}" VerticalAlignment="Center" />
+                    <TextBlock Classes="mono diff-removed" Text="{Binding RemovedText}" VerticalAlignment="Center" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="4" Classes="tool-took" Text="{Binding TookText}" Margin="0,0,6,0"
+                             IsVisible="{Binding TookText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  <!-- Words only when the dot is not enough: failed, interrupted (running pulses, done is green) -->
+                  <TextBlock Grid.Column="5" Classes="tool-state" Classes.failed="{Binding IsFailed}" Text="{Binding StatusText}" Margin="0,0,6,0">
+                    <TextBlock.IsVisible>
+                      <MultiBinding Converter="{x:Static BoolConverters.And}">
+                        <Binding Path="!IsDone" />
+                        <Binding Path="!IsRunning" />
+                      </MultiBinding>
+                    </TextBlock.IsVisible>
+                  </TextBlock>
+                  <ctl:Icon Grid.Column="6" Classes="chevron" Data="{StaticResource IconChevronRight}" Size="14" />
+                </Grid>
+              </ToggleButton>
+              <Border Classes="tool-tail" IsVisible="{Binding ShowTail}">
+                <TextBlock Classes="mono" Text="{Binding Tail}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource GuiTextSecondary}" />
+              </Border>
+              <!-- The change itself, open as it happens -->
+              <ctl:DiffView Classes="tool-diff" Diff="{Binding Diff}" FilePath="{Binding FilePath}" IsVisible="{Binding ShowDiff}"
+                            OpenFileCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).Files.OpenLinkCommand}" />
+              <Border Classes="tool-output" IsVisible="{Binding ShowOutput}">
+                <SelectableTextBlock Classes="mono" Text="{Binding Output}" TextWrapping="Wrap" MaxLines="40"
+                                     Foreground="{DynamicResource GuiTextSecondary}" />
+              </Border>
+            </StackPanel>
+          </DataTemplate>
+          <DataTemplate DataType="vm:TurnEndRowViewModel">
+            <!-- The end of a run stays in the conversation: how long, how many tools, how many files -->
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,6,0,10" AutomationProperties.Name="{Binding Text}">
+              <ctl:Icon Data="{StaticResource IconSparkle}" Size="14" TextElement.Foreground="{DynamicResource GuiTextTertiary}" VerticalAlignment="Center" />
+              <TextBlock Classes="turn-end" Text="{Binding Text}" VerticalAlignment="Center" />
+            </StackPanel>
+          </DataTemplate>
+          <DataTemplate DataType="vm:CommandOutputRowViewModel">
+            <Panel>
+              <Border Classes="command-output" Margin="0,4" IsVisible="{Binding !IsMarker}">
+                <SelectableTextBlock Classes="mono" Text="{Binding Text}" TextWrapping="Wrap" />
+              </Border>
+              <!-- A point in the conversation (compacted here): a divider with what happened -->
+              <Grid ColumnDefinitions="*,Auto,*" Margin="0,10" IsVisible="{Binding IsMarker}">
+                <Border Height="1" Background="{DynamicResource GuiBorder}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Classes="tertiary" Text="{Binding Marker}" FontSize="12" Margin="12,0" VerticalAlignment="Center" />
+                <Border Grid.Column="2" Height="1" Background="{DynamicResource GuiBorder}" VerticalAlignment="Center" />
+              </Grid>
+            </Panel>
+          </DataTemplate>
+          <DataTemplate DataType="vm:NoticeRowViewModel">
+            <Border Classes="notice" Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" Margin="0,4">
+              <Grid ColumnDefinitions="Auto,*">
+                <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,1,8,0" VerticalAlignment="Top" IsVisible="{Binding IsError}" />
+                <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,1,8,0" VerticalAlignment="Top" IsVisible="{Binding IsWarning}" />
+                <SelectableTextBlock Grid.Column="1" Classes="muted" Text="{Binding Text}" TextWrapping="Wrap"
+                                     Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" />
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ListBox.DataTemplates>
+      </ListBox>
+      <StackPanel x:Name="EmptyState" IsVisible="{Binding ShowGreeting}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                  Spacing="8" Margin="24,0,24,48" MaxWidth="560" IsHitTestVisible="False">
+        <Image Source="/Assets/icon-256.png" Width="40" Height="40" HorizontalAlignment="Center" RenderOptions.BitmapInterpolationMode="HighQuality" />
+        <TextBlock Classes="greeting" Text="What should we work on?" HorizontalAlignment="Center" />
+      </StackPanel>
+      <Button x:Name="JumpToLatest" IsVisible="False" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,12"
+              AutomationProperties.Name="Jump to latest">
+        <StackPanel Orientation="Horizontal" Spacing="6">
+          <TextBlock Text="Jump to latest" VerticalAlignment="Center" />
+          <ctl:Icon Data="{StaticResource IconChevronDown}" Size="16" />
+        </StackPanel>
+      </Button>
+    </Panel>
+    <GridSplitter Grid.Row="1" Height="1" ResizeDirection="Rows" IsVisible="{Binding IsTerminalOpen}" />
+    <Border x:Name="TerminalPanel" Grid.Row="2" Height="280" MinHeight="120" IsVisible="{Binding IsTerminalOpen}" Classes="terminal-panel">
+      <DockPanel>
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="10,6">
+          <ItemsControl ItemsSource="{Binding Terminals}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:TerminalViewModel">
+                <Border Classes="tab" Classes.selected="{Binding IsSelected}">
+                  <StackPanel Orientation="Horizontal" Spacing="2">
+                    <Button AutomationProperties.Name="{Binding Title}" Classes="link" Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SelectTerminalCommand}" CommandParameter="{Binding}">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="{Binding Title}" Foreground="{DynamicResource GuiTextPrimary}" FontSize="13" />
+                        <TextBlock Classes="tertiary" Text="{Binding Status}" />
+                      </StackPanel>
+                    </Button>
+                    <Button AutomationProperties.Name="Close terminal" Classes="icon" Width="24" Height="24" ToolTip.Tip="Close this terminal (ends its process)"
+                            Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).CloseTerminalCommand}" CommandParameter="{Binding}">
+                      <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+                    </Button>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
+            <Button x:Name="NewShellButton" Classes="link action" Content="+ Shell" Command="{Binding NewShellCommand}" ToolTip.Tip="A shell in the project folder" />
+            <Button x:Name="OmpTuiButton" Classes="link action" Content="+ omp TUI" Command="{Binding OpenOmpTuiCommand}"
+                    ToolTip.Tip="omp's own terminal UI (plan, goal, vibe…): a separate omp with its own session" />
+            <Button AutomationProperties.Name="Hide terminal panel" Classes="icon" Width="28" Height="28" Command="{Binding ToggleTerminalCommand}" ToolTip.Tip="Hide the terminal panel (Ctrl+`)">
+              <ctl:Icon Data="{StaticResource IconChevronDown}" Size="16" />
+            </Button>
+          </StackPanel>
+        </Grid>
+        <Panel x:Name="TerminalHost" />
+      </DockPanel>
+    </Border>
+    </Grid>
+
+    <!-- ── Side pane (Views menu ⋮: Plan, Background tasks, Files): right of the conversation, full height, resizable.
+         Docked beside the conversation when both fit, else over it until closed (MainWindow.FitPanels). ── -->
+    <GridSplitter x:Name="SidePaneSplitter" Grid.Row="0" Grid.RowSpan="5" Grid.Column="1" Width="1" ResizeDirection="Columns" IsVisible="False" />
+    <panes:SidePaneHost x:Name="SidePanePanel" Grid.Row="0" Grid.RowSpan="5" Grid.Column="2" IsVisible="{Binding IsSidePaneOpen}" />
+
+    <!-- ── Event / debug panel ── -->
+    <!-- ── Browser preview (Claude Code's Preview): right of the conversation, full height, resizable ── -->
+    <!-- Its width is the column's (MainWindow.FitPanels): never less than the conversation needs; too narrow for both, it
+         covers the conversation until closed. -->
+    <GridSplitter x:Name="PreviewSplitter" Grid.Row="0" Grid.RowSpan="5" Grid.Column="1" Width="1" ResizeDirection="Columns" IsVisible="False" />
+    <ctl:PreviewPanel x:Name="PreviewPanel" Grid.Row="0" Grid.RowSpan="5" Grid.Column="2"
+                      DataContext="{Binding Preview}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).IsPreviewOpen}" />
+
+    <GridSplitter Grid.Row="0" Grid.RowSpan="5" Grid.Column="5" Width="1" ResizeDirection="Columns" IsVisible="{Binding IsDebugVisible}" />
+    <Border Grid.Row="0" Grid.RowSpan="5" Grid.Column="6" Width="420" IsVisible="{Binding IsDebugVisible}" Classes="events">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Top" Classes="caps" Text="RPC EVENTS" Margin="14,14,0,8" />
+        <ListBox x:Name="DebugList" Classes="events" ItemsSource="{Binding DebugLog}" Background="Transparent"
+                 AutomationProperties.Name="Event log">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="x:String">
+              <TextBlock Classes="mono" Text="{Binding}" TextTrimming="CharacterEllipsis" />
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Border>
+
+    <!-- ── What omp is waiting on or publishing: setup / recovery, link, sign-in, todos, widgets, the pending dialog.
+         Scrolls when the window is too low for it and the composer (MainWindow.FitPanels): the composer stays on screen. ── -->
+    <!-- Room under the cards for their shadow (the scroller clips: it had ended in a hard line with square corners), taken
+         back from the space above the message box so the gap stays as it was; not while the cards scroll (a low window),
+         where a card cut by the scroller's edge would come too close to the message box (MainWindow.FitCardsShadowRoom) -->
+    <ScrollViewer x:Name="CardsScroll" Grid.Row="2" Grid.Column="0" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto"
+                  Margin="0,0,0,-20">
+    <StackPanel x:Name="CardsStack" Margin="24,4,24,26" Spacing="8" MaxWidth="768">
+      <!-- omp cannot run. A new session: the setup screen in the middle of the page (MainWindow.UpdateEmptyLayout centres
+           this row and hides the message box). Mid-conversation: a card above the disabled message box. Said once, here:
+           the raw error is under "Show details", not in the conversation or the activity line. -->
+      <Border x:Name="RecoverCard" Classes="banner" Classes.setup="{Binding ShowSetupScreen}" IsVisible="{Binding CanRecover}">
+        <StackPanel Spacing="14">
+          <Grid ColumnDefinitions="Auto,*">
+            <Panel VerticalAlignment="Top" Margin="0,0,14,0">
+              <Border x:Name="RecoverMark" Classes="recover-mark" IsVisible="{Binding !IsOnboarding}">
+                <ctl:Icon Data="{StaticResource IconAlert}" Size="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Border>
+              <Image Source="/Assets/icon-256.png" Width="40" Height="40" IsVisible="{Binding IsOnboarding}" RenderOptions.BitmapInterpolationMode="HighQuality" />
+            </Panel>
+            <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+              <TextBlock Classes="recover-title" Text="{Binding RecoverTitle}" TextWrapping="Wrap" />
+              <TextBlock Classes="muted recover-hint" Text="{Binding RecoverHint}" TextWrapping="Wrap" />
+            </StackPanel>
+          </Grid>
+          <StackPanel Spacing="6" IsVisible="{Binding IsInstallingRuntime}">
+            <TextBlock x:Name="RuntimeInstallProgressText" Text="{Binding RuntimeInstallText}" TextWrapping="Wrap" FontSize="13" />
+            <ProgressBar Value="{Binding RuntimeInstallPercent}" IsIndeterminate="{Binding RuntimeInstallIndeterminate}" Maximum="100" />
+          </StackPanel>
+          <TextBlock Classes="warning" Text="{Binding RuntimeInstallText}" TextWrapping="Wrap" FontSize="13"
+                     IsVisible="{Binding ShowRuntimeInstallResult}" />
+          <!-- The one thing to do first; then the ways around it -->
+          <WrapPanel Orientation="Horizontal" ItemSpacing="8" LineSpacing="8">
+            <Button x:Name="InstallRuntimeButton" Content="{Binding InstallRuntimeLabel}" Classes="accent md"
+                    Command="{Binding InstallRuntimeCommand}" IsVisible="{Binding ShowInstallRuntime}" />
+            <Button Content="Cancel" Classes="md" Command="{Binding CancelRuntimeInstallCommand}" IsVisible="{Binding IsInstallingRuntime}" />
+            <Button x:Name="SetUpProviderButton" Content="Open omp setup" Classes="accent md"
+                    Command="{Binding SetUpProviderCommand}" IsVisible="{Binding NeedsProvider}" />
+            <!-- The main action unless "Open omp setup" comes first (a provider to connect) -->
+            <Button x:Name="RecoverButton" Content="{Binding RecoverLabel}" Classes="md" Classes.accent="{Binding !NeedsProvider}"
+                    Command="{Binding RecoverCommand}" IsEnabled="{Binding !IsInstallingRuntime}" IsVisible="{Binding ShowRecoverButton}" />
+            <Button Content="{Binding RecoverSettingsLabel}" Classes="md flat" Command="{Binding OpenSettingsCommand}" />
+          </WrapPanel>
+          <StackPanel Spacing="6" IsVisible="{Binding HasErrorDetail}">
+            <ToggleButton Classes="thinking-toggle" IsChecked="{Binding IsErrorDetailOpen}" AutomationProperties.Name="Show details">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="Show details" VerticalAlignment="Center" />
+                <ctl:Icon Classes="chevron" Data="{StaticResource IconChevronRight}" Size="14" />
+              </StackPanel>
+            </ToggleButton>
+            <Border Classes="details" IsVisible="{Binding IsErrorDetailOpen}">
+              <ScrollViewer MaxHeight="140" HorizontalScrollBarVisibility="Disabled">
+                <SelectableTextBlock x:Name="ErrorDetailText" Classes="mono details" Text="{Binding ErrorDetail}" TextWrapping="Wrap" />
+              </ScrollViewer>
+            </Border>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+      <Border Classes="banner" IsVisible="{Binding HasPendingUrl}">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <Border Width="36" Height="36" CornerRadius="{DynamicResource GuiRadiusFull}" Background="{DynamicResource GuiStatusInfoSoft}"
+                  VerticalAlignment="Top" Margin="0,0,14,0" TextElement.Foreground="{DynamicResource GuiTextLink}">
+            <ctl:Icon Data="{StaticResource IconLink}" Size="18" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <StackPanel Grid.Column="1" Spacing="3">
+            <TextBlock Text="omp wants to open a link (sign-in)" FontWeight="SemiBold" FontSize="{DynamicResource GuiFontM}" />
+            <SelectableTextBlock Classes="mono" Text="{Binding PendingUrl}" TextWrapping="Wrap" MaxLines="3" Foreground="{DynamicResource GuiTextSecondary}" />
+            <SelectableTextBlock Text="{Binding PendingUrlInstructions}" IsVisible="{Binding HasPendingUrlInstructions}"
+                                 TextWrapping="Wrap" FontWeight="SemiBold" />
+          </StackPanel>
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="12,0,0,0">
+            <Button Content="Open in browser" Classes="accent" Command="{Binding OpenPendingUrlCommand}" />
+            <Button Content="Copy" Command="{Binding CopyPendingUrlCommand}" />
+            <Button Content="Dismiss" Classes="flat" Command="{Binding DismissPendingUrlCommand}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+      <Border Classes="banner" IsVisible="{Binding IsSigningIn}">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Text="{Binding SigningInText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+          <Button x:Name="CancelSignInButton" Grid.Column="1" Content="Cancel sign-in" Command="{Binding CancelSignInCommand}"
+                  Margin="12,0,0,0" ToolTip.Tip="Restarts omp on this session (omp has no other way to cancel a sign-in)" />
+        </Grid>
+      </Border>
+      <!-- Todo progress from omp (get_state.todoPhases): one line (the task in progress, done/total) that opens the list.
+           Hidden while the Plan pane shows the same list (MainViewModel.Panes.cs). -->
+      <Border x:Name="TodoCard" Classes="widgets todo" IsVisible="{Binding ShowTodoCard}">
+        <StackPanel>
+          <ToggleButton x:Name="TodoHeader" Classes="todo-head" IsChecked="{Binding IsTodoExpanded}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                        ToolTip.Tip="Show or hide the task list" AutomationProperties.Name="{Binding TodoSummary}">
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+              <Border Classes="md-check" Classes.active="{Binding !IsTodoAllDone}" Classes.checked="{Binding IsTodoAllDone}" Width="16" Height="16" VerticalAlignment="Center">
+                <Panel>
+                  <Ellipse Classes="todo-active-dot" IsVisible="{Binding !IsTodoAllDone}" />
+                  <ctl:Icon Data="{StaticResource IconCheck}" Size="12" StrokeThickness="2" IsVisible="{Binding IsTodoAllDone}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Panel>
+              </Border>
+              <TextBlock Grid.Column="1" Text="{Binding TodoCurrent}" FontWeight="Medium" FontSize="13" Margin="10,0,8,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+              <TextBlock Grid.Column="2" Classes="tertiary" Text="{Binding TodoProgress}" FontSize="12" VerticalAlignment="Center" Margin="0,0,6,0" />
+              <ctl:Icon Grid.Column="3" Classes="chevron" Data="{StaticResource IconChevronDown}" Size="14" VerticalAlignment="Center" />
+            </Grid>
+          </ToggleButton>
+          <ScrollViewer MaxHeight="180" IsVisible="{Binding IsTodoExpanded}" HorizontalScrollBarVisibility="Disabled" Margin="0,4,0,0">
+            <ItemsControl ItemsSource="{Binding TodoPhases}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:TodoPhaseViewModel">
+                  <StackPanel>
+                    <TextBlock Classes="caps" Text="{Binding Name}" IsVisible="{Binding HasName}" Margin="8,6,0,2" />
+                    <ItemsControl ItemsSource="{Binding Tasks}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:TodoTaskViewModel">
+                          <Grid ColumnDefinitions="Auto,*" Margin="8,0" Height="28" AutomationProperties.Name="{Binding Content}">
+                            <Border Classes="md-check" Classes.checked="{Binding IsDone}" Classes.active="{Binding IsActive}" Classes.dropped="{Binding IsDropped}"
+                                    Width="16" Height="16" VerticalAlignment="Center">
+                              <Panel>
+                                <ctl:Icon Data="{StaticResource IconCheck}" Size="12" StrokeThickness="2" IsVisible="{Binding IsDone}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <Ellipse Classes="todo-active-dot" IsVisible="{Binding IsActive}" />
+                                <ctl:Icon Data="{StaticResource IconClose}" Size="12" IsVisible="{Binding IsDropped}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                              </Panel>
+                            </Border>
+                            <TextBlock Grid.Column="1" Classes="todo-task" Classes.done="{Binding IsDone}" Classes.dropped="{Binding IsDropped}" Text="{Binding Content}"
+                                       Margin="10,0,0,0" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                       FontWeight="{Binding IsActive, Converter={x:Static vm:Converters.BoolToWeight}}" />
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </StackPanel>
+      </Border>
+      <Border Classes="widgets" IsVisible="{Binding HasWidgets}">
+        <SelectableTextBlock Classes="mono" Text="{Binding WidgetsText}" TextWrapping="Wrap" MaxLines="12" />
+      </Border>
+      <!-- A session action (compact, export, share…) or a terminal-only command: Views/Session/SessionCard -->
+      <session:SessionCard x:Name="SessionCardHost" DataContext="{Binding SessionCard}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).HasSessionCard}" />
+      <!-- Activity (Claude Code's spinner line): what the run does now — Thinking, Writing, Running bash, Waiting for your
+           approval — and for how long. Its slot keeps its height when idle, so starting and ending a run never moves the
+           conversation or the composer; details in the tooltip. -->
+      <Panel x:Name="ActivitySlot" Height="20" IsVisible="{Binding !!Rows.Count}">
+        <Grid x:Name="ActivityLine" ColumnDefinitions="Auto,Auto,*" Margin="2,0,0,0" ToolTip.Tip="{Binding StatusDetail}">
+          <Grid.IsVisible><Binding Path="IsRunning" /></Grid.IsVisible>
+          <Ellipse Classes="state-dot" Classes.running="{Binding IsRunning}" Classes.waiting="{Binding IsWaitingOnUser}" Classes.error="{Binding HasError}" Margin="0,0,8,0" />
+          <TextBlock Grid.Column="1" Classes="activity" Text="{Binding StatusText}" Classes.error="{Binding HasError}" Classes.waiting="{Binding IsWaitingOnUser}"
+                     VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+          <TextBlock Grid.Column="2" Classes="activity-hint" Text="· Esc to stop" IsVisible="{Binding IsRunning}" Margin="6,0,0,0" VerticalAlignment="Center"
+                     TextTrimming="CharacterEllipsis" />
+        </Grid>
+      </Panel>
+      <ContentControl x:Name="DialogHost" Content="{Binding CurrentDialog}" IsVisible="{Binding HasDialog}">
+        <ContentControl.ContentTemplate>
+          <DataTemplate x:DataType="vm:DialogViewModel">
+            <Border Classes="dialog" Classes.approval="{Binding IsApproval}" x:Name="DialogCard"
+                    AutomationProperties.Name="{Binding Caption}">
+              <StackPanel Spacing="10">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <ctl:Icon Classes="caption-icon" Data="{StaticResource IconShield}" Size="16" Margin="0,0,6,0" IsVisible="{Binding IsApproval}" />
+                  <TextBlock Grid.Column="1" Classes="caption" Text="{Binding Caption}" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10">
+                    <TextBlock Classes="tertiary" Text="{Binding QueueText}" VerticalAlignment="Center" />
+                    <TextBlock Classes="tertiary" Text="{Binding Remaining}" IsVisible="{Binding HasDeadline}" VerticalAlignment="Center" />
+                    <!-- Close without answering, in the corner where cards close (Esc) -->
+                    <Button AutomationProperties.Name="Dismiss" Classes="icon" Width="26" Height="26" Margin="0,-4,-6,-4" Command="{Binding DismissCommand}"
+                            ToolTip.Tip="Close without answering (Esc); omp treats it as no answer">
+                      <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+                    </Button>
+                  </StackPanel>
+                </Grid>
+                <SelectableTextBlock Text="{Binding Headline}" FontWeight="SemiBold" FontSize="{DynamicResource GuiFontL}" TextWrapping="Wrap" />
+                <Border Classes="details" IsVisible="{Binding HasDetails}">
+                  <ScrollViewer MaxHeight="160" HorizontalScrollBarVisibility="Disabled">
+                    <SelectableTextBlock Classes="mono details" Text="{Binding Details}" TextWrapping="Wrap" />
+                  </ScrollViewer>
+                </Border>
+                <SelectableTextBlock Text="{Binding Message}" IsVisible="{Binding HasMessage}" TextWrapping="Wrap" FontSize="14" />
+
+                <!-- Tool approval -->
+                <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsApproval}">
+                  <Button AutomationProperties.Name="Allow" x:Name="AllowButton" Classes="accent md" MinWidth="120" Command="{Binding AllowCommand}" ToolTip.Tip="Run this tool call (1 or Alt+A)">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <AccessText Text="_Allow" VerticalAlignment="Center" />
+                      <TextBlock Classes="key-hint" Text="1" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Button>
+                  <Button AutomationProperties.Name="Deny" x:Name="DenyButton" Classes="md" MinWidth="120" Command="{Binding DenyCommand}" ToolTip.Tip="Do not run it; the agent is told it was denied (2 or Alt+D)">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <AccessText Text="_Deny" VerticalAlignment="Center" />
+                      <TextBlock Classes="key-hint" Text="2" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Button>
+                </StackPanel>
+
+                <!-- Select (ask tool, extensions) -->
+                <ItemsControl ItemsSource="{Binding Options}" IsVisible="{Binding IsSelect}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><StackPanel Spacing="6" /></ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:DialogOptionViewModel">
+                      <Button AutomationProperties.Name="{Binding Label}" Classes="option" Command="{Binding ChooseCommand}" HorizontalAlignment="Stretch"
+                              HorizontalContentAlignment="Left">
+                        <Grid ColumnDefinitions="Auto,*">
+                          <!-- The key that picks it (1–9), as in Claude Code's menus -->
+                          <Border Classes="key-badge" IsVisible="{Binding HasNumber}" VerticalAlignment="Top" Margin="0,1,10,0">
+                            <TextBlock Text="{Binding Number}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                          </Border>
+                          <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="{Binding Label}" TextWrapping="Wrap" FontWeight="Medium" />
+                            <TextBlock Classes="muted" Text="{Binding Description}" IsVisible="{Binding HasDescription}" TextWrapping="Wrap" FontWeight="Normal" />
+                          </StackPanel>
+                        </Grid>
+                      </Button>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- Confirm -->
+                <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsConfirm}">
+                  <Button AutomationProperties.Name="Yes" Classes="accent md" MinWidth="96" Command="{Binding YesCommand}"><AccessText Text="_Yes" /></Button>
+                  <Button AutomationProperties.Name="No" Classes="md" MinWidth="96" Command="{Binding NoCommand}"><AccessText Text="_No" /></Button>
+                </StackPanel>
+
+                <!-- Input / editor -->
+                <TextBox x:Name="DialogInput" Text="{Binding InputText}" IsVisible="{Binding IsInput}"
+                         PlaceholderText="{Binding Placeholder}" AutomationProperties.Name="Answer" />
+                <TextBox Text="{Binding InputText}" IsVisible="{Binding IsEditor}" AcceptsReturn="True" TextWrapping="Wrap"
+                         MinHeight="80" MaxHeight="260" Classes="mono" AutomationProperties.Name="Answer" />
+                <Button Classes="accent md" Command="{Binding SubmitCommand}" IsVisible="{Binding IsTextEntry}" Content="Submit" HorizontalAlignment="Left" />
+
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ContentControl.ContentTemplate>
+      </ContentControl>
+    </StackPanel>
+    </ScrollViewer>
+
+    <!-- ── Composer: the message field on its own card, its tools below it ── -->
+    <Border x:Name="ComposerBox" Grid.Row="3" Grid.Column="0" Margin="{Binding Pets.ComposerMargin}" Padding="10,6,10,10" MaxWidth="768" ClipToBounds="True"
+            DragDrop.AllowDrop="True">
+      <StackPanel Spacing="6">
+        <!-- Dictation needs a local speech model: asked once, downloaded only on consent -->
+        <Border x:Name="DictationOffer" Classes="notice warning" IsVisible="{Binding IsDictationOfferOpen}">
+          <StackPanel Spacing="8">
+            <TextBlock Text="Dictation runs on this computer" FontWeight="SemiBold" />
+            <TextBlock TextWrapping="Wrap" Classes="muted"
+                       Text="It needs a speech model (NVIDIA Parakeet TDT 0.6B v3, 25 languages incl. English and Russian), downloaded once from Hugging Face and checked against pinned SHA-256 hashes. Audio never leaves this computer." />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button x:Name="DownloadModelButton" Classes="accent" Command="{Binding DownloadSpeechModelCommand}"
+                      IsVisible="{Binding !IsDownloadingModel}" Content="{Binding ModelSizeText, StringFormat='Download ({0})'}" />
+              <Button Content="Cancel download" Command="{Binding CancelSpeechDownloadCommand}" IsVisible="{Binding IsDownloadingModel}" />
+              <Button Content="Not now" Classes="flat" Command="{Binding CloseDictationOfferCommand}" />
+              <TextBlock Text="{Binding DownloadText}" VerticalAlignment="Center" FontSize="13" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+        <!-- Slash commands omp can run (its own catalog) -->
+        <Border x:Name="CommandMenu" Classes="menu" IsVisible="{Binding IsCommandMenuOpen}" MaxHeight="260">
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl ItemsSource="{Binding CommandSuggestions}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:CommandSuggestionViewModel">
+                  <Button AutomationProperties.Name="{Binding Label}" Classes="menu-item" Classes.current="{Binding IsSelected}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                          Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ChooseSuggestionCommand}" CommandParameter="{Binding}">
+                    <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+                      <TextBlock Classes="mono" Text="{Binding Label}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="1" Classes="mono tertiary" Text="{Binding Hint}" IsVisible="{Binding HasHint}" Margin="6,0,0,0" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="2" Classes="muted" Text="{Binding Description}" TextTrimming="CharacterEllipsis" Margin="12,0,0,0" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="3" Classes="tertiary" Text="{Binding Source}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                    </Grid>
+                  </Button>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Border>
+        <!-- Messages sent while the agent works, until omp delivers them -->
+        <ItemsControl x:Name="QueuedList" ItemsSource="{Binding QueuedMessages}" IsVisible="{Binding HasQueued}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:QueuedItemViewModel">
+              <Grid ColumnDefinitions="Auto,*" Margin="2,2" ToolTip.Tip="{Binding Tooltip}">
+                <Border Classes="tag"><TextBlock Text="{Binding Kind}" FontSize="11" FontWeight="Medium" /></Border>
+                <TextBlock Grid.Column="1" Text="{Binding Text}" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" FontSize="13" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <!-- Comments on the previewed page, attached to this message like files (Codex): one chip each, with its pin's number -->
+        <ItemsControl x:Name="PageCommentsChip" ItemsSource="{Binding Preview.Annotations}" IsVisible="{Binding Preview.HasAnnotations}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><WrapPanel ItemSpacing="6" LineSpacing="6" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:AnnotationViewModel">
+              <Border Classes="attachment comment-chip" ToolTip.Tip="{Binding ElementLabel}">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Border Classes="pin" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Number}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </Border>
+                  <TextBlock Text="{Binding Comment}" MaxWidth="220" TextTrimming="CharacterEllipsis" FontSize="13" VerticalAlignment="Center" />
+                  <Button Classes="icon" Width="22" Height="22" Command="{Binding RemoveCommand}" ToolTip.Tip="Remove this comment"
+                          AutomationProperties.Name="Remove page comment" VerticalAlignment="Center">
+                    <ctl:Icon Data="{StaticResource IconClose}" Size="13" />
+                  </Button>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <!-- Attached images -->
+        <ItemsControl x:Name="AttachmentList" ItemsSource="{Binding Attachments}" IsVisible="{Binding HasAttachments}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:AttachmentViewModel">
+              <Border Classes="attachment" Margin="0,0,6,6" ToolTip.Tip="{Binding Name}">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Border CornerRadius="{DynamicResource GuiRadius8}" ClipToBounds="True">
+                    <Image Source="{Binding Thumbnail}" Height="36" MaxWidth="64" Stretch="Uniform" />
+                  </Border>
+                  <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Name}" MaxWidth="160" TextTrimming="CharacterEllipsis" FontSize="12" FontWeight="Medium" />
+                    <TextBlock Classes="tertiary" Text="{Binding Size}" FontSize="11" />
+                  </StackPanel>
+                  <Button Classes="icon" Width="24" Height="24" Command="{Binding RemoveCommand}" ToolTip.Tip="Remove"
+                          AutomationProperties.Name="Remove attachment" VerticalAlignment="Center">
+                    <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+                  </Button>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasComposerMessage}" Margin="4,2,4,0">
+          <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="15" Margin="0,0,6,0" VerticalAlignment="Top" />
+          <TextBlock Grid.Column="1" Classes="warning" Text="{Binding ComposerMessage}" TextWrapping="Wrap" FontSize="12" />
+        </Grid>
+        <!-- The message field; while dictating, the dictation bar takes its place (level, time, cancel, finish) -->
+        <Panel>
+          <TextBox x:Name="Composer" Text="{Binding ComposerText}" CaretIndex="{Binding ComposerCaretIndex, Mode=TwoWay}"
+                   IsVisible="{Binding !IsDictationBarVisible}"
+                   AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44" MaxHeight="214"
+                   BorderThickness="0" Background="Transparent"
+                   PlaceholderText="{Binding ComposerHint}"
+                   AutomationProperties.Name="Message to omp">
+            <!-- The card around it is the field: the text box itself stays bare when hovered and focused -->
+            <TextBox.Resources>
+              <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+              <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+              <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+              <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+              <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+            </TextBox.Resources>
+          </TextBox>
+          <ctl:DictationBar x:Name="DictationBar" IsVisible="{Binding IsDictationBarVisible}" />
+        </Panel>
+        <!-- Under the message, as in Claude Code: "+" on the left opens what can go with the message; on the right, how
+             hard it thinks, which model answers, then voice and send. The permission mode and the context sit below the box. -->
+        <Grid x:Name="ComposerToolbar" ColumnDefinitions="Auto,*,Auto">
+          <StackPanel x:Name="ComposerLeft" Grid.Column="0" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+            <Button x:Name="AttachButton" Classes="icon round attach" ToolTip.Tip="Add to the message" AutomationProperties.Name="Add to the message">
+              <ctl:Icon Data="{StaticResource IconPlus}" Size="18" />
+              <Button.Flyout>
+                <Flyout Placement="TopEdgeAlignedLeft">
+                  <StackPanel Width="300" Spacing="2">
+                    <Button x:Name="AttachImagesItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding AttachImagesCommand}"
+                            AutomationProperties.Name="Attach images">
+                      <Grid ColumnDefinitions="Auto,*,Auto">
+                        <ctl:Icon Data="{StaticResource IconAttach}" Size="16" Margin="0,0,10,0" />
+                        <TextBlock Grid.Column="1" Text="Attach images" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Classes="tertiary" Text="Paste or drop" Margin="12,0,0,0" VerticalAlignment="Center" />
+                      </Grid>
+                    </Button>
+                    <Button x:Name="SlashCommandsItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding StartSlashCommandCommand}"
+                            AutomationProperties.Name="Commands">
+                      <Grid ColumnDefinitions="Auto,*,Auto">
+                        <TextBlock Classes="mono" Text="/" Width="16" TextAlignment="Center" Margin="0,0,10,0" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="1" Text="Commands and skills" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Classes="tertiary" Text="/" VerticalAlignment="Center" />
+                      </Grid>
+                    </Button>
+                    <Button x:Name="ConnectorsItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding OpenConnectorsPageCommand}"
+                            AutomationProperties.Name="Connectors">
+                      <Grid ColumnDefinitions="Auto,*">
+                        <ctl:Icon Data="{StaticResource IconPlug}" Size="16" Margin="0,0,10,0" />
+                        <TextBlock Grid.Column="1" Text="Connectors" VerticalAlignment="Center" />
+                      </Grid>
+                    </Button>
+                    <Button x:Name="PluginsItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding OpenPluginsPageCommand}"
+                            AutomationProperties.Name="Plugins">
+                      <Grid ColumnDefinitions="Auto,*">
+                        <ctl:Icon Data="{StaticResource IconGrid}" Size="16" Margin="0,0,10,0" />
+                        <TextBlock Grid.Column="1" Text="Plugins" VerticalAlignment="Center" />
+                      </Grid>
+                    </Button>
+                    <Button x:Name="SelectElementItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding SelectElementCommand}"
+                            AutomationProperties.Name="Select an element on the page">
+                      <Grid ColumnDefinitions="Auto,*,Auto">
+                        <ctl:Icon Data="{StaticResource IconSelect}" Size="16" Margin="0,0,10,0" />
+                        <TextBlock Grid.Column="1" Text="Comment on the page" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Classes="tertiary" Text="Ctrl+Shift+S" Margin="12,0,0,0" VerticalAlignment="Center" />
+                      </Grid>
+                    </Button>
+                  </StackPanel>
+                </Flyout>
+              </Button.Flyout>
+            </Button>
+          </StackPanel>
+          <StackPanel x:Name="ComposerRight" Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+              <!-- Thinking -->
+              <Panel x:Name="ThinkingSlot">
+              <Button x:Name="ThinkingBox" Classes="chip ghost" IsVisible="{Binding ShowThinking}"
+                    ToolTip.Tip="{Binding SelectedThinking, StringFormat='Thinking effort: {0}', TargetNullValue='Thinking effort'}"
+                    AutomationProperties.Name="Thinking effort">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <ctl:Icon Data="{StaticResource IconBrain}" Size="14" />
+                <TextBlock Classes="thinking-label" Text="{Binding SelectedThinking, TargetNullValue=thinking}" VerticalAlignment="Center" />
+                <ctl:Icon Data="{StaticResource IconChevronDown}" Size="14" TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
+              </StackPanel>
+              <Button.Flyout>
+                <Flyout Placement="TopEdgeAlignedRight">
+                  <StackPanel Width="200" Spacing="2">
+                    <TextBlock Classes="group-label" Text="Thinking effort" Margin="10,4,0,4" />
+                    <ItemsControl ItemsSource="{x:Static vm:MainViewModel.ThinkingLevels}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                          <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                  AutomationProperties.Name="{Binding}"
+                                  Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SetThinkingCommand}" CommandParameter="{Binding}">
+                            <Grid ColumnDefinitions="*,Auto">
+                              <TextBlock Text="{Binding}" VerticalAlignment="Center" />
+                              <ctl:Icon Grid.Column="1" Data="{StaticResource IconCheck}" Size="16" VerticalAlignment="Center" TextElement.Foreground="{DynamicResource GuiTextLink}">
+                                <ctl:Icon.IsVisible>
+                                  <MultiBinding Converter="{x:Static vm:Converters.AreEqual}">
+                                    <Binding />
+                                    <Binding Path="$parent[Window].((vm:MainViewModel)DataContext).SelectedThinking" />
+                                  </MultiBinding>
+                                </ctl:Icon.IsVisible>
+                              </ctl:Icon>
+                            </Grid>
+                          </Button>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Flyout>
+              </Button.Flyout>
+            </Button>
+              </Panel>
+              <Button x:Name="ModelButton" Classes="chip ghost" Command="{Binding OpenModelMenuCommand}"
+                      ToolTip.Tip="{Binding CurrentModel, StringFormat='Model for this session: {0}'}" AutomationProperties.Name="Model">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <ctl:Icon Data="{StaticResource IconSparkle}" Size="14" />
+                  <TextBlock Classes="model-label" Text="{Binding CurrentModel}" MaxWidth="220" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                  <ctl:Icon Data="{StaticResource IconChevronDown}" Size="14" TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
+                </StackPanel>
+              </Button>
+              <Popup x:Name="ModelPopup" IsOpen="{Binding IsModelMenuOpen, Mode=TwoWay}" PlacementTarget="{Binding #ModelButton}"
+                     Placement="TopEdgeAlignedRight" IsLightDismissEnabled="True" VerticalOffset="-6">
+                <Border x:Name="ModelMenu" Classes="menu" Width="380" Margin="12">
+                  <DockPanel>
+                    <TextBox x:Name="ModelFilterBox" DockPanel.Dock="Top" Classes="search" Text="{Binding ModelFilter}" PlaceholderText="Search models"
+                             Margin="0,0,0,6" AutomationProperties.Name="Filter models">
+                      <TextBox.InnerLeftContent>
+                        <ctl:Icon Data="{StaticResource IconSearch}" Size="16" Margin="12,0,0,0" VerticalAlignment="Center" TextElement.Foreground="{DynamicResource GuiTextTertiary}" />
+                      </TextBox.InnerLeftContent>
+                    </TextBox>
+                    <TextBlock DockPanel.Dock="Top" Classes="muted" Text="Loading models…" IsVisible="{Binding ModelsLoading}" Margin="10,6" />
+                    <!-- Fast mode, extended context, advisor, auto-compact, auto-retry (Views/Session/ModelOptions) -->
+                    <session:ModelOptions x:Name="ModelOptions" DockPanel.Dock="Bottom" />
+                    <ListBox x:Name="ModelList" ItemsSource="{Binding Models}" MaxHeight="300" Classes="menu-list">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ModelItemViewModel">
+                          <Button AutomationProperties.Name="{Binding Name}" Classes="menu-item" Classes.current="{Binding IsCurrent}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                  Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ChooseModelCommand}" CommandParameter="{Binding}">
+                            <StackPanel Spacing="2">
+                              <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                              <TextBlock Classes="tertiary" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                          </Button>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                  </DockPanel>
+                </Border>
+              </Popup>
+            <Button x:Name="SteerButton" Content="Steer" Command="{Binding SteerCommand}" IsVisible="{Binding CanQueue}"
+                    ToolTip.Tip="Give the agent this now, at its next step (Alt+Enter)" />
+            <Button x:Name="QueueButton" Content="Queue" Command="{Binding SendCommand}" IsVisible="{Binding CanQueue}"
+                    ToolTip.Tip="Send when the agent finishes its current work (Enter)" />
+            <Button x:Name="DictateButton" Classes="icon round" Classes.recording="{Binding IsRecording}" Command="{Binding ToggleDictationCommand}"
+                    ToolTip.Tip="{Binding DictationTip}" AutomationProperties.Name="Dictate">
+              <ctl:Icon Data="{StaticResource IconMic}" Size="18" />
+            </Button>
+            <Button x:Name="SendButton" Command="{Binding SendCommand}" IsVisible="{Binding IsIdle}"
+                    Classes="accent send" ToolTip.Tip="Send (Enter)" AutomationProperties.Name="Send">
+              <ctl:Icon Data="{StaticResource IconArrowUp}" Size="18" StrokeThickness="2.25" />
+            </Button>
+            <Button x:Name="StopButton" Command="{Binding AbortCommand}" IsVisible="{Binding IsRunning}"
+                    Classes="inverse send" ToolTip.Tip="{Binding StopLabel, StringFormat='{}{0} (Esc). If stopping hangs, press again to restart omp on this session.'}"
+                    AutomationProperties.Name="{Binding StopLabel}">
+              <ctl:Icon Data="{StaticResource IconStop}" Size="14" Filled="True" />
+            </Button>
+          </StackPanel>
+        </Grid>
+      </StackPanel>
+    </Border>
+    <!-- Under the message box, as in Claude Code and Codex: how this session runs (the project before the first
+         message, the permission mode) and how full the context is. The box keeps what goes with the message. -->
+    <Grid x:Name="ComposerFooter" Grid.Row="4" Grid.Column="0" ColumnDefinitions="Auto,*,Auto" MaxWidth="768" Margin="24,-12,24,10"
+          VerticalAlignment="Top">
+      <StackPanel x:Name="FooterLeft" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+        <!-- A new session picks its project here, before the first message (Claude Code's prompt area) -->
+        <Button x:Name="ProjectButton" Classes="chip ghost" IsVisible="{Binding ShowGreeting}" ToolTip.Tip="{Binding ProjectPath}"
+                AutomationProperties.Name="Project folder">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <ctl:Icon Data="{StaticResource IconFolder}" Size="14" />
+            <TextBlock Classes="project-label" Text="{Binding ProjectName, TargetNullValue='Choose a folder'}" MaxWidth="180" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+            <ctl:Icon Data="{StaticResource IconChevronDown}" Size="14" TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
+          </StackPanel>
+          <Button.Flyout>
+            <Flyout Placement="TopEdgeAlignedLeft">
+              <StackPanel Width="320" Spacing="2">
+                <TextBlock Classes="caps" Text="PROJECT" Margin="10,4,0,4" />
+                <ItemsControl ItemsSource="{Binding SessionGroups}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:SessionGroupViewModel">
+                      <Button Classes="menu-item" Classes.current="{Binding IsCurrentProject}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                              Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).NewSessionInProjectCommand}" CommandParameter="{Binding}"
+                              AutomationProperties.Name="{Binding Name}" ToolTip.Tip="{Binding Cwd}">
+                        <Grid ColumnDefinitions="Auto,*">
+                          <ctl:Icon Data="{StaticResource IconFolder}" Size="16" Margin="0,0,10,0" VerticalAlignment="Top" />
+                          <StackPanel Grid.Column="1" Spacing="1">
+                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Classes="tertiary" Text="{Binding Cwd}" TextTrimming="PrefixCharacterEllipsis" />
+                          </StackPanel>
+                        </Grid>
+                      </Button>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="6,4" />
+                <Button x:Name="OpenFolderButton" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding OpenFolderCommand}"
+                        AutomationProperties.Name="Open folder">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <ctl:Icon Data="{StaticResource IconPlus}" Size="16" Margin="0,0,10,0" />
+                    <TextBlock Grid.Column="1" Text="Open folder…" VerticalAlignment="Center" />
+                  </Grid>
+                </Button>
+              </StackPanel>
+            </Flyout>
+          </Button.Flyout>
+        </Button>
+        <Button x:Name="ApprovalButton" Classes="chip ghost" Classes.danger="{Binding IsYolo}" ToolTip.Tip="Permission mode: when omp asks before running tools"
+                AutomationProperties.Name="Permission mode">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <ctl:Icon Data="{StaticResource IconShield}" Size="14" />
+            <TextBlock Classes="approval-label" Text="{Binding ApprovalLabel}" MaxWidth="200" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+            <ctl:Icon Data="{StaticResource IconChevronDown}" Size="14" TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
+          </StackPanel>
+          <Button.Flyout>
+            <Flyout Placement="TopEdgeAlignedRight">
+              <StackPanel Width="340" Spacing="4">
+                <TextBlock Classes="caps" Text="PERMISSION MODE" Margin="10,4,0,4" />
+                <ItemsControl ItemsSource="{x:Static vm:MainViewModel.ApprovalModes}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ApprovalModeOption">
+                      <Button AutomationProperties.Name="{Binding Label}" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                              Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SetApprovalModeCommand}" CommandParameter="{Binding Mode}">
+                        <Grid ColumnDefinitions="*,Auto">
+                          <StackPanel Spacing="2">
+                            <TextBlock Text="{Binding Label}" FontWeight="Medium" />
+                            <TextBlock Classes="muted" Text="{Binding Description}" TextWrapping="Wrap" />
+                          </StackPanel>
+                          <!-- The current mode (Claude Code's menus tick it) -->
+                          <ctl:Icon Grid.Column="1" Data="{StaticResource IconCheck}" Size="16" VerticalAlignment="Top" Margin="10,1,0,0"
+                                    TextElement.Foreground="{DynamicResource GuiTextLink}">
+                            <ctl:Icon.IsVisible>
+                              <MultiBinding Converter="{x:Static vm:Converters.AreEqual}">
+                                <Binding Path="Mode" />
+                                <Binding Path="$parent[Window].((vm:MainViewModel)DataContext).ApprovalMode" />
+                              </MultiBinding>
+                            </ctl:Icon.IsVisible>
+                          </ctl:Icon>
+                        </Grid>
+                      </Button>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Border Classes="notice error" IsVisible="{Binding ConfirmYolo}">
+                  <StackPanel Spacing="8">
+                    <TextBlock Text="Run every tool without asking?" FontWeight="SemiBold" />
+                    <TextBlock Text="omp will run shell commands and edits with no confirmation. omp restarts on this session." TextWrapping="Wrap" FontSize="13" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Button x:Name="ConfirmYoloButton" Classes="inverse" Content="Never ask" Command="{Binding SetApprovalModeCommand}" CommandParameter="yolo" />
+                      <Button Content="Cancel" Command="{Binding CancelYoloCommand}" />
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+            </Flyout>
+          </Button.Flyout>
+        </Button>
+      </StackPanel>
+      <!-- How full the context is (Views/Session/UsageIndicator) -->
+      <session:UsageIndicator x:Name="UsageIndicator" Grid.Column="2" VerticalAlignment="Center" />
+    </Grid>
+    <!-- The pet, sitting on the message box's top edge (Controls/PetPerch; the box's top margin is its band) -->
+    <ctl:PetPerch x:Name="PetPerch" Grid.Row="3" Grid.Column="0" />
+
+    <!-- ── Settings page (covers the conversation area) ── -->
+    <Border x:Name="SettingsPage" Grid.Row="0" Grid.RowSpan="5" Grid.Column="0" Grid.ColumnSpan="7" Classes="page"
+            IsVisible="{Binding IsSettingsOpen}">
+      <DockPanel>
+        <Border DockPanel.Dock="Top" Classes="header" Padding="24,0">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Classes="page-title" Text="Settings" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Content="Done" Command="{Binding CloseSettingsCommand}" VerticalAlignment="Center" />
+          </Grid>
+        </Border>
+        <!-- Pages on the left (as in Claude Code's settings); a strip across the top in a narrow window -->
+        <ScrollViewer DockPanel.Dock="Left" x:Name="SettingsNav" Classes="settings-nav" IsVisible="{Binding !IsSettingsNarrow}"
+                      HorizontalScrollBarVisibility="Disabled">
+          <ItemsControl ItemsSource="{Binding SettingsCategories}" Margin="12,16,8,16">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SettingsCategoryViewModel">
+                <Button Classes="settings-nav" Classes.current="{Binding IsCurrent}" AutomationProperties.Name="{Binding Title}"
+                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ShowSettingsCategoryCommand}" CommandParameter="{Binding Key}">
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <ctl:Icon Data="{Binding Icon}" Size="16" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Title}" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+        <ScrollViewer DockPanel.Dock="Top" x:Name="SettingsNavStrip" IsVisible="{Binding IsSettingsNarrow}"
+                      HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+          <ItemsControl ItemsSource="{Binding SettingsCategories}" Margin="16,10,16,4">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="2" /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SettingsCategoryViewModel">
+                <Button Classes="settings-nav" Classes.current="{Binding IsCurrent}" Content="{Binding Title}" AutomationProperties.Name="{Binding Title}"
+                        Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ShowSettingsCategoryCommand}" CommandParameter="{Binding Key}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+        <ScrollViewer x:Name="SettingsScroll" HorizontalScrollBarVisibility="Disabled">
+          <!-- One width on every page (MainWindow.axaml.cs sets it: the room there is, at most 720): sized to its widest
+               card, each page had ended at another x and the cards' right edge jumped from page to page -->
+          <StackPanel x:Name="SettingsColumn" Margin="24,20,24,32" Spacing="16" MaxWidth="720" HorizontalAlignment="Left">
+            <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding SettingsMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+              <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,1,8,0" VerticalAlignment="Top" />
+              <TextBlock Grid.Column="1" Classes="warning" Text="{Binding SettingsMessage}" TextWrapping="Wrap" />
+            </Grid>
+
+            <!-- General -->
+            <Border Classes="section-card" IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=general}">
+              <StackPanel Spacing="14">
+                <TextBlock Classes="section" Text="General" />
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="Appearance" FontWeight="Medium" />
+                    <TextBlock Classes="muted" Text="Light, dark, or follow the system" />
+                  </StackPanel>
+                  <!-- Segmented choice: the pressed segment is surface 1 on the fill track -->
+                  <Border Grid.Column="1" Classes="segmented" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="2">
+                      <Button x:Name="ThemeSystem" Classes="segment" Classes.selected="{Binding SettingsTheme, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=system}"
+                              Content="System" Command="{Binding SetThemeCommand}" CommandParameter="system" AutomationProperties.Name="Theme: system" />
+                      <Button x:Name="ThemeLight" Classes="segment" Classes.selected="{Binding SettingsTheme, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=light}"
+                              Content="Light" Command="{Binding SetThemeCommand}" CommandParameter="light" AutomationProperties.Name="Theme: light" />
+                      <Button x:Name="ThemeDark" Classes="segment" Classes.selected="{Binding SettingsTheme, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=dark}"
+                              Content="Dark" Command="{Binding SetThemeCommand}" CommandParameter="dark" AutomationProperties.Name="Theme: dark" />
+                    </StackPanel>
+                  </Border>
+                </Grid>
+                <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
+                    <TextBlock Text="Notifications" FontWeight="Medium" />
+                    <TextBlock Classes="muted" Text="When a run ends or omp asks something while the window is in the background" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <ToggleButton x:Name="NotificationsBox" Grid.Column="1" Classes="switch" IsChecked="{Binding NotificationsEnabled}"
+                                AutomationProperties.Name="Notifications" VerticalAlignment="Center" />
+                </Grid>
+              </StackPanel>
+            </Border>
+
+            <!-- Sign in -->
+            <Border Classes="section-card" IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=providers}">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="section" Text="Model providers" />
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="Sign in to the providers omp can use. The browser link and any code appear above the message box. API keys stay in omp's own configuration; this app never stores them." />
+                <TextBlock Classes="muted" Text="The list appears while omp is running." IsVisible="{Binding !LoginProviders.Count}" FontStyle="Italic" />
+                <TextBlock Classes="muted" Text="Loading…" IsVisible="{Binding ProvidersLoading}" />
+                <ScrollViewer MaxHeight="300" HorizontalScrollBarVisibility="Disabled">
+                  <ItemsControl ItemsSource="{Binding LoginProviders}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:LoginProviderViewModel">
+                        <Grid ColumnDefinitions="*,Auto" Margin="0,3,12,3">
+                          <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" FontSize="14" />
+                          <Border Grid.Column="1" Classes="status done" IsVisible="{Binding IsAuthenticated}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                              <Ellipse />
+                              <TextBlock Text="Signed in" />
+                            </StackPanel>
+                          </Border>
+                          <Button Grid.Column="1" Content="Sign in" IsVisible="{Binding !IsAuthenticated}" IsEnabled="{Binding CanSignIn}"
+                                  Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SignInCommand}" CommandParameter="{Binding}" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </StackPanel>
+            </Border>
+
+            <!-- Pages of their own (Views/Settings) -->
+            <settings:ConnectorsSettings IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=connectors}" />
+            <settings:PluginsSettings IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=plugins}" />
+            <settings:ComputerSettings IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=computer}" />
+            <settings:GitSettings IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=git}" />
+            <settings:SshSettings IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=ssh}" />
+            <settings:PetsSettings IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=pets}" />
+
+            <!-- Updates -->
+            <Border Classes="section-card" IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=updates}">
+              <StackPanel Spacing="10">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Classes="section" Text="Updates" />
+                  <TextBlock Grid.Column="1" x:Name="AppVersion" Classes="muted" Text="{Binding AppVersionText}" VerticalAlignment="Bottom" Margin="0,0,0,1" />
+                </Grid>
+                <TextBlock x:Name="UpdateHow" Classes="muted" TextWrapping="Wrap" Text="{Binding UpdateHowText}" />
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
+                    <TextBlock Text="Check automatically" FontWeight="Medium" />
+                    <TextBlock Classes="muted" Text="Shortly after start and once a day. Nothing is installed without you" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <ToggleButton x:Name="AutoUpdateBox" Grid.Column="1" Classes="switch" IsChecked="{Binding CheckForUpdatesAutomatically}"
+                                AutomationProperties.Name="Check for updates automatically" VerticalAlignment="Center" />
+                </Grid>
+                <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
+                <WrapPanel>
+                  <Button x:Name="CheckUpdatesButton" Content="Check for updates" Command="{Binding CheckForUpdatesCommand}" Margin="0,0,8,6" />
+                  <Button x:Name="DownloadUpdateButton" Content="{Binding UpdateActionLabel}" Classes="accent" Command="{Binding DownloadUpdateCommand}"
+                          IsVisible="{Binding UpdateAvailable}" Margin="0,0,8,6" />
+                  <Button x:Name="RestartToUpdateButton" Content="Restart now" Classes="accent" Command="{Binding RestartToUpdateCommand}"
+                          IsVisible="{Binding UpdateReady}" Margin="0,0,8,6" />
+                  <Button Content="Show in folder" Classes="flat" Command="{Binding ShowDownloadedUpdateCommand}"
+                          IsVisible="{Binding DownloadedUpdate, Converter={x:Static ObjectConverters.IsNotNull}}" Margin="0,0,8,6" />
+                </WrapPanel>
+                <ProgressBar x:Name="UpdateProgress" Value="{Binding UpdatePercent}" Maximum="100" Height="4" MinHeight="4"
+                             IsVisible="{Binding IsUpdateBusy}" />
+                <SelectableTextBlock x:Name="UpdateStatus" Text="{Binding UpdateText}" TextWrapping="Wrap" FontSize="13"
+                                     IsVisible="{Binding UpdateText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <TextBlock x:Name="UpdateOmp" Classes="muted" Text="{Binding UpdateOmpText}" TextWrapping="Wrap"
+                           IsVisible="{Binding UpdateOmpText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <StackPanel Spacing="4" IsVisible="{Binding UpdateNotes, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                  <TextBlock Text="What is new" FontWeight="Medium" />
+                  <SelectableTextBlock x:Name="UpdateNotesText" Text="{Binding UpdateNotes}" TextWrapping="Wrap" FontSize="13" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <!-- Advanced: which omp runs (most people never change it) -->
+            <Border Classes="section-card" IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=advanced}">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="section" Text="Advanced: omp runtime" />
+                <TextBlock Classes="muted" TextWrapping="Wrap"
+                           Text="Which omp the app starts. Leave the command empty to use the omp the app installed (below), or else omp from PATH. For your own Bun setup, the command is bun and the first argument lines are --no-install and the path to omp's cli.ts." />
+                <StackPanel Spacing="4" Margin="0,4,0,0">
+                  <TextBlock Classes="label" Text="Command" />
+                  <TextBox x:Name="SettingsCommandBox" Text="{Binding SettingsCommand}" PlaceholderText="omp" AutomationProperties.Name="omp command" />
+                </StackPanel>
+                <StackPanel Spacing="4">
+                  <TextBlock Classes="label" Text="Arguments before omp's own (one per line)" />
+                  <TextBox Text="{Binding SettingsPrefixArgs}" AcceptsReturn="True" MinHeight="60" Classes="mono" AutomationProperties.Name="Prefix arguments" />
+                </StackPanel>
+                <StackPanel Spacing="4">
+                  <TextBlock Classes="label" Text="Profile (OMP_PROFILE)" />
+                  <TextBox Text="{Binding SettingsProfile}" PlaceholderText="default profile" AutomationProperties.Name="Profile" />
+                </StackPanel>
+                <Button x:Name="SaveRuntimeButton" Content="Save and restart omp" Classes="md" Command="{Binding SaveRuntimeCommand}" Margin="0,4,0,0" />
+                <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="0,4"
+                        IsVisible="{Binding RuntimeStatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <TextBlock x:Name="RuntimeStatus" Classes="muted" Text="{Binding RuntimeStatusText}" TextWrapping="Wrap"
+                           IsVisible="{Binding RuntimeStatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding RuntimeInstaller.Supported, FallbackValue=False}">
+                  <Button x:Name="SettingsInstallRuntimeButton" Content="{Binding InstallRuntimeLabel}" Command="{Binding InstallRuntimeCommand}" />
+                  <Button Content="Cancel" Classes="flat" Command="{Binding CancelRuntimeInstallCommand}" IsVisible="{Binding IsInstallingRuntime}" />
+                </StackPanel>
+                <TextBlock Text="{Binding RuntimeInstallText}" TextWrapping="Wrap" FontSize="13"
+                           IsVisible="{Binding RuntimeInstallText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+              </StackPanel>
+            </Border>
+
+            <!-- Diagnostics and files -->
+            <Border Classes="section-card" IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=diagnostics}">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="section" Text="Diagnostics" />
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="RPC events" FontWeight="Medium" />
+                    <TextBlock Classes="muted" Text="The raw event stream from omp beside the conversation (F12)" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <ToggleButton Grid.Column="1" Classes="switch" IsChecked="{Binding IsDebugVisible}" AutomationProperties.Name="Show RPC events" VerticalAlignment="Center" />
+                </Grid>
+                <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="0,4" />
+                <TextBlock Classes="muted" TextWrapping="Wrap"
+                           Text="A zip to attach to a bug report: versions, platform, these settings with every environment value and API key removed, the omp runtime record, omp's state and last error, and event names. No conversation text. Nothing is sent anywhere; you choose where to save it." />
+                <Button x:Name="SaveDiagnosticsButton" Content="Save diagnostics…" Command="{Binding SaveDiagnosticsCommand}" HorizontalAlignment="Left" />
+                <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="0,4" />
+                <TextBlock Classes="label" Text="Client settings file (saved atomically, previous version kept as .bak)" TextWrapping="Wrap" />
+                <SelectableTextBlock Classes="mono" Text="{Binding SettingsPath}" TextWrapping="Wrap" Foreground="{DynamicResource GuiTextSecondary}" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+  </Grid>
+  </Grid>
+</Window>

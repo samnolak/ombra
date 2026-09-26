@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "codebase-memory": {
+      "command": "{{PROFILE_DIR}}/vendor/codebase-memory-mcp-v0.10.8/bin/codebase-memory-mcp.exe",
+      "args": [],
+      "env": {
+        "CBM_CACHE_DIR": "{{PROFILE_DIR}}/cbm-cache",
+        "CBM_LOG_LEVEL": "warn"
+      }
+    },
+    "context7": {
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp",
+      "timeout": 30000
+    }
+  }
+}

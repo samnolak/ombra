@@ -1,0 +1,63 @@
+<!-- Under the model list: omp's model options as switches (ModelOptionsViewModel): fast mode, extended context, the
+     advisor, auto-compact and auto-retry. Each shows omp's own state, read when the menu opens. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Views.Session.ModelOptions"
+             x:DataType="vm:MainViewModel">
+  <StackPanel x:Name="OptionsPanel" Spacing="0" Margin="0,6,0,0">
+    <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="4,0,4,6" />
+    <Grid Classes="option-row" ColumnDefinitions="Auto,*,Auto" ToolTip.Tip="The model provider's priority tier for this session: faster replies, higher price (OpenAI service_tier=priority, Anthropic speed=fast)">
+      <ctl:Icon Data="{StaticResource IconBolt}" Size="16" />
+      <TextBlock Grid.Column="1" Classes="option-label" Text="Fast mode" />
+      <ToggleButton x:Name="FastSwitch" Grid.Column="2" Classes="switch" IsChecked="{Binding ModelOptions.FastMode}" AutomationProperties.Name="Fast mode"
+                    IsEnabled="{Binding ModelOptions.IsLoaded}" />
+    </Grid>
+    <TextBlock Classes="option-note warning" Text="{Binding ModelOptions.FastNote}" IsVisible="{Binding ModelOptions.HasFastNote}" TextWrapping="Wrap" />
+    <Grid Classes="option-row" ColumnDefinitions="Auto,*,Auto" ToolTip.Tip="Larger context windows where the model offers them; they may cost more. Saved in omp's settings.">
+      <ctl:Icon Data="{StaticResource IconExpand}" Size="16" />
+      <TextBlock Grid.Column="1" Classes="option-label" Text="Extended context" />
+      <ToggleButton x:Name="ExtendedSwitch" Grid.Column="2" Classes="switch" IsChecked="{Binding ModelOptions.ExtendedContext}" AutomationProperties.Name="Extended context"
+                    IsEnabled="{Binding ModelOptions.IsLoaded}" />
+    </Grid>
+    <TextBlock Classes="option-note warning" Text="{Binding ModelOptions.ExtendedNote}" IsVisible="{Binding ModelOptions.HasExtendedNote}" TextWrapping="Wrap" />
+    <Grid Classes="option-row" ColumnDefinitions="Auto,*,Auto" ToolTip.Tip="A second model (omp's advisor role) reviews each turn and adds notes, for this session">
+      <ctl:Icon Data="{StaticResource IconAdvisor}" Size="16" />
+      <TextBlock Grid.Column="1" Classes="option-label" Text="Advisor" />
+      <ToggleButton x:Name="AdvisorSwitch" Grid.Column="2" Classes="switch" IsChecked="{Binding ModelOptions.Advisor}" AutomationProperties.Name="Advisor"
+                    IsEnabled="{Binding ModelOptions.IsLoaded}" />
+    </Grid>
+    <Grid ColumnDefinitions="*,Auto" Margin="36,0,10,4" IsVisible="{Binding ModelOptions.HasAdvisorNote}">
+      <TextBlock Classes="option-note" Classes.warning="{Binding ModelOptions.AdvisorNeedsModel}" Margin="0" Text="{Binding ModelOptions.AdvisorNote}"
+                 TextWrapping="Wrap" VerticalAlignment="Center" />
+      <Button x:Name="ChooseAdvisorModel" Grid.Column="1" Classes="link action" Content="Choose model" Command="{Binding ModelOptions.ChooseAdvisorModelCommand}"
+              IsVisible="{Binding ModelOptions.AdvisorNeedsModel}" VerticalAlignment="Center" Margin="8,0,0,0" />
+    </Grid>
+    <ItemsControl x:Name="AdvisorModels" ItemsSource="{Binding Models}" IsVisible="{Binding ModelOptions.IsChoosingAdvisorModel}" Margin="26,0,0,4">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:ModelItemViewModel">
+          <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" AutomationProperties.Name="{Binding Name, StringFormat='Advisor: {0}'}"
+                  Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).ModelOptions.SetAdvisorModelCommand}" CommandParameter="{Binding}">
+            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+          </Button>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+    <Grid Classes="option-row" ColumnDefinitions="Auto,*,Auto" ToolTip.Tip="omp compacts the conversation by itself when the context fills up. Saved in omp's settings.">
+      <ctl:Icon Data="{StaticResource IconCompact}" Size="16" />
+      <TextBlock Grid.Column="1" Classes="option-label" Text="Auto-compact" />
+      <ToggleButton x:Name="AutoCompactSwitch" Grid.Column="2" Classes="switch" IsChecked="{Binding ModelOptions.AutoCompaction}" AutomationProperties.Name="Auto-compact"
+                    IsEnabled="{Binding ModelOptions.IsLoaded}" />
+    </Grid>
+    <!-- Only when omp's setting could be read (omp config get; get_state has no auto-retry state) -->
+    <Grid Classes="option-row" ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding ModelOptions.AutoRetryKnown}"
+          ToolTip.Tip="omp retries a request after a provider error (rate limits, overload). Saved in omp's settings.">
+      <ctl:Icon Data="{StaticResource IconRetry}" Size="16" />
+      <TextBlock Grid.Column="1" Classes="option-label" Text="Auto-retry" />
+      <ToggleButton x:Name="AutoRetrySwitch" Grid.Column="2" Classes="switch" IsChecked="{Binding ModelOptions.AutoRetry}" AutomationProperties.Name="Auto-retry"
+                    IsEnabled="{Binding ModelOptions.AutoRetryKnown}" />
+    </Grid>
+    <TextBlock Classes="option-note warning" Text="{Binding ModelOptions.SettingsNote}" IsVisible="{Binding ModelOptions.HasSettingsNote}" TextWrapping="Wrap" />
+  </StackPanel>
+</UserControl>

@@ -1,0 +1,103 @@
+<!-- The project in the header (Claude Code keeps it in the session toolbar): its name opens a menu to browse its files,
+     open it in the file manager, an editor found on PATH or a terminal, copy its path, or start a new session in another
+     project. DataContext: MainViewModel (the header's). -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             xmlns:svc="using:OmpGui.App.Services"
+             x:Class="OmpGui.App.Views.Panes.ProjectMenuButton"
+             x:DataType="vm:MainViewModel">
+  <Button x:Name="MenuButton" Classes="header-project" ToolTip.Tip="{Binding ProjectPath}"
+          AutomationProperties.Name="{Binding ProjectName, StringFormat='Project {0}'}">
+    <Grid ColumnDefinitions="Auto,*,Auto">
+      <ctl:Icon Data="{StaticResource IconFolder}" Size="15" VerticalAlignment="Center" />
+      <TextBlock Grid.Column="1" Classes="project-name" Text="{Binding ProjectName}" Margin="6,0,0,0" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+      <ctl:Icon Grid.Column="2" Classes="project-chevron" Data="{StaticResource IconChevronDown}" Size="14" Margin="3,0,0,0" VerticalAlignment="Center" />
+    </Grid>
+    <Button.Flyout>
+      <Flyout Placement="BottomEdgeAlignedLeft" ctl:ChoiceMenu.CloseOnChoice="True">
+        <StackPanel x:Name="MenuPanel" Width="300" Spacing="2">
+          <StackPanel Margin="10,4,10,6" Spacing="2">
+            <TextBlock Classes="project-menu-name" Text="{Binding ProjectName}" TextTrimming="CharacterEllipsis" />
+            <TextBlock Classes="tertiary" Text="{Binding ProjectPath}" TextTrimming="PrefixCharacterEllipsis" />
+          </StackPanel>
+          <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="6,2,6,4" />
+          <Button x:Name="BrowseFilesItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                  Command="{Binding Files.BrowseFilesCommand}" AutomationProperties.Name="Browse files">
+            <Grid ColumnDefinitions="Auto,*">
+              <ctl:Icon Data="{StaticResource IconFiles}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="Browse files" VerticalAlignment="Center" />
+            </Grid>
+          </Button>
+          <Button x:Name="FileManagerItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                  Command="{Binding Files.OpenProjectInFileManagerCommand}" AutomationProperties.Name="{Binding Files.FileManagerLabel}">
+            <Grid ColumnDefinitions="Auto,*">
+              <ctl:Icon Data="{StaticResource IconFolder}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="{Binding Files.FileManagerLabel}" VerticalAlignment="Center" />
+            </Grid>
+          </Button>
+          <ItemsControl x:Name="EditorItems" ItemsSource="{Binding Files.Editors}" IsVisible="{Binding Files.HasEditors}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel Spacing="2" /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="svc:EditorApp">
+                <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" AutomationProperties.Name="{Binding Label}"
+                        Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).Files.OpenProjectInEditorCommand}" CommandParameter="{Binding}">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <ctl:Icon Data="{StaticResource IconCode}" Size="16" Margin="0,0,10,0" />
+                    <TextBlock Grid.Column="1" Text="{Binding Label}" VerticalAlignment="Center" />
+                  </Grid>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Button x:Name="TerminalItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                  Command="{Binding Files.OpenProjectTerminalCommand}" AutomationProperties.Name="Open terminal here">
+            <Grid ColumnDefinitions="Auto,*">
+              <ctl:Icon Data="{StaticResource IconTerminal}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="Open terminal here" VerticalAlignment="Center" />
+            </Grid>
+          </Button>
+          <Button x:Name="CopyPathItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                  Command="{Binding Files.CopyProjectPathCommand}" AutomationProperties.Name="Copy path">
+            <Grid ColumnDefinitions="Auto,*">
+              <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="Copy path" VerticalAlignment="Center" />
+            </Grid>
+          </Button>
+          <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="6,4" />
+          <TextBlock Classes="caps" Text="NEW SESSION IN" Margin="10,4,0,4" IsVisible="{Binding Files.HasRecentProjects}" />
+          <ItemsControl x:Name="RecentProjectItems" ItemsSource="{Binding Files.RecentProjects}" IsVisible="{Binding Files.HasRecentProjects}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel Spacing="2" /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SessionGroupViewModel">
+                <Button Classes="menu-item" Classes.current="{Binding IsCurrentProject}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                        Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).NewSessionInProjectCommand}" CommandParameter="{Binding}"
+                        AutomationProperties.Name="{Binding Name, StringFormat='New session in {0}'}" ToolTip.Tip="{Binding Cwd}">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <ctl:Icon Data="{StaticResource IconFolder}" Size="16" Margin="0,0,10,0" VerticalAlignment="Top" />
+                    <StackPanel Grid.Column="1" Spacing="1">
+                      <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Classes="tertiary" Text="{Binding Cwd}" TextTrimming="PrefixCharacterEllipsis" />
+                    </StackPanel>
+                  </Grid>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Button x:Name="OpenFolderItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                  Command="{Binding OpenFolderCommand}" AutomationProperties.Name="Open folder">
+            <Grid ColumnDefinitions="Auto,*">
+              <ctl:Icon Data="{StaticResource IconPlus}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="Open folder…" VerticalAlignment="Center" />
+            </Grid>
+          </Button>
+        </StackPanel>
+      </Flyout>
+    </Button.Flyout>
+  </Button>
+</UserControl>

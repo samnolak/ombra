@@ -1,0 +1,162 @@
+<!-- The Background tasks pane: omp's subagents (its task tool) as they run and after they end — status, how long,
+     what each does now, tools and tokens; a card opens to its task, latest output and own conversation — then omp's
+     background jobs (/jobs: long commands, async tasks). DataContext: TasksViewModel. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Views.Panes.TasksPane"
+             x:DataType="vm:TasksViewModel">
+  <ScrollViewer x:Name="TasksScroll" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="12,14,12,24" Spacing="18">
+
+      <!-- Nothing yet -->
+      <StackPanel x:Name="TasksEmpty" IsVisible="{Binding IsEmpty}" Spacing="8" Margin="12,48,12,0" MaxWidth="300" HorizontalAlignment="Center">
+        <ctl:Icon Classes="pane-empty-mark" Data="{StaticResource IconLayers}" Size="28" />
+        <TextBlock Text="No background tasks" FontWeight="Medium" HorizontalAlignment="Center" />
+        <TextBlock Classes="muted" TextWrapping="Wrap" TextAlignment="Center" IsVisible="{Binding !IsUnsupported}"
+                   Text="Subagents the agent starts and commands it leaves running in the background show here while they work, and stay listed after they finish." />
+        <TextBlock Classes="muted" TextWrapping="Wrap" TextAlignment="Center" IsVisible="{Binding IsUnsupported}"
+                   Text="Commands the agent leaves running in the background show here while they run and for a few minutes after." />
+      </StackPanel>
+      <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding IsUnsupported}" Margin="8,0">
+        <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="15" Margin="0,1,8,0" VerticalAlignment="Top" />
+        <TextBlock Grid.Column="1" Classes="muted" TextWrapping="Wrap"
+                   Text="This omp does not report its subagents to the app, so only background jobs are listed." />
+      </Grid>
+
+      <!-- Subagents -->
+      <StackPanel x:Name="SubagentsSection" Spacing="8" IsVisible="{Binding HasSubagents}">
+        <TextBlock Classes="pane-group" Text="Subagents" Margin="8,0" />
+        <ItemsControl x:Name="SubagentList" ItemsSource="{Binding Subagents}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:SubagentRowViewModel">
+              <Border Classes="task-card" Classes.running="{Binding IsRunning}">
+                <StackPanel>
+                  <ToggleButton Classes="task-row flat" IsChecked="{Binding IsExpanded}" AutomationProperties.Name="{Binding AccessibleName}"
+                                ToolTip.Tip="Show its task, output and conversation">
+                    <StackPanel Spacing="6">
+                      <Grid ColumnDefinitions="*,Auto,Auto">
+                        <TextBlock Classes="task-title" Text="{Binding Title}" />
+                        <TextBlock Grid.Column="1" Classes="task-line" Text="{Binding ElapsedText}" Margin="8,2,0,0" VerticalAlignment="Top" />
+                        <ctl:Icon Grid.Column="2" Classes="chevron" Data="{StaticResource IconChevronRight}" Size="14" Margin="6,2,0,0" VerticalAlignment="Top" />
+                      </Grid>
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Border Classes="status" Classes.running="{Binding IsRunning}" Classes.done="{Binding IsDone}" Classes.failed="{Binding IsFailed}">
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse />
+                            <TextBlock Text="{Binding StatusText}" />
+                          </StackPanel>
+                        </Border>
+                        <TextBlock Classes="task-line" Text="{Binding Agent}" VerticalAlignment="Center" />
+                        <!-- A space's width after the agent, as in "bash · running", not the row's 8 px -->
+                        <TextBlock Classes="task-line" Text="· in the background" IsVisible="{Binding IsBackground}" VerticalAlignment="Center" Margin="-4,0,0,0" />
+                      </StackPanel>
+                      <!-- Two lines: a failed task's reason ("… refused the request (rate limited)") had lost its end -->
+                      <TextBlock Classes="task-line" Text="{Binding ActivityText}" IsVisible="{Binding HasActivity}" TextWrapping="Wrap" MaxLines="2" />
+                      <TextBlock Classes="task-line" Text="{Binding MetaText}" IsVisible="{Binding HasMeta}" />
+                      <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasRetryNote}">
+                        <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="13" Margin="0,1,6,0" VerticalAlignment="Top" />
+                        <TextBlock Grid.Column="1" Classes="plan-note" Text="{Binding RetryNote}" />
+                      </Grid>
+                    </StackPanel>
+                  </ToggleButton>
+                  <!-- Open: the task, what it used and printed lately, its own conversation -->
+                  <StackPanel IsVisible="{Binding IsExpanded}" Margin="12,0,12,12" Spacing="10">
+                    <StackPanel Spacing="4" IsVisible="{Binding HasTask}">
+                      <TextBlock Classes="pane-group" Text="Task" />
+                      <SelectableTextBlock Classes="plan-note" Text="{Binding TaskText}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Spacing="4" IsVisible="{Binding HasTools}">
+                      <TextBlock Classes="pane-group" Text="Recent tools" />
+                      <Border Classes="task-code">
+                        <SelectableTextBlock Classes="mono" Text="{Binding ToolsText}" TextWrapping="Wrap" Foreground="{DynamicResource GuiTextSecondary}" />
+                      </Border>
+                    </StackPanel>
+                    <StackPanel Spacing="4" IsVisible="{Binding HasOutput}">
+                      <TextBlock Classes="pane-group" Text="Latest output" />
+                      <Border Classes="task-code">
+                        <SelectableTextBlock Classes="mono" Text="{Binding OutputText}" TextWrapping="Wrap" Foreground="{DynamicResource GuiTextSecondary}" />
+                      </Border>
+                    </StackPanel>
+                    <StackPanel Spacing="6">
+                      <TextBlock Classes="pane-group" Text="Conversation" IsVisible="{Binding MessagesLoaded}" />
+                      <Button Classes="link action" Content="Show its conversation" Command="{Binding LoadMessagesCommand}" IsVisible="{Binding !MessagesLoaded}"
+                              IsEnabled="{Binding !IsLoadingMessages}" HorizontalAlignment="Left" Padding="0" MinHeight="0"
+                              ToolTip.Tip="The subagent's own messages and tool calls, as omp saved them" />
+                      <TextBlock Classes="muted" Text="Reading…" IsVisible="{Binding IsLoadingMessages}" />
+                      <TextBlock Classes="muted" Text="{Binding MessagesNote}" IsVisible="{Binding HasMessagesNote}" TextWrapping="Wrap" />
+                      <ItemsControl ItemsSource="{Binding Messages}" IsVisible="{Binding MessagesLoaded}">
+                        <ItemsControl.ItemsPanel>
+                          <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:SubagentMessageViewModel">
+                            <StackPanel Spacing="2">
+                              <TextBlock Classes="task-message-role" Text="{Binding Label}" />
+                              <SelectableTextBlock Classes="plan-note" Text="{Binding Text}" TextWrapping="Wrap" IsVisible="{Binding !IsTool}"
+                                                   Foreground="{DynamicResource GuiTextPrimary}" />
+                              <SelectableTextBlock Classes="mono" Text="{Binding Text}" TextWrapping="Wrap" IsVisible="{Binding IsTool}"
+                                                   Foreground="{DynamicResource GuiTextSecondary}" />
+                            </StackPanel>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                      <Button Classes="link action" Content="Read again" Command="{Binding LoadMessagesCommand}" IsVisible="{Binding MessagesLoaded}"
+                              IsEnabled="{Binding !IsLoadingMessages}" HorizontalAlignment="Left" Padding="0" MinHeight="0" />
+                    </StackPanel>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+
+      <!-- Background jobs (omp's /jobs) -->
+      <StackPanel x:Name="JobsSection" Spacing="8">
+        <StackPanel.IsVisible>
+          <MultiBinding Converter="{x:Static BoolConverters.Or}">
+            <Binding Path="HasJobs" />
+            <Binding Path="HasJobsText" />
+            <Binding Path="HasJobsError" />
+          </MultiBinding>
+        </StackPanel.IsVisible>
+        <TextBlock Classes="pane-group" Text="Background jobs" Margin="8,0" />
+        <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasJobsError}" Margin="8,0">
+          <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="15" Margin="0,1,8,0" VerticalAlignment="Top" />
+          <TextBlock Grid.Column="1" Classes="muted" Text="{Binding JobsError}" TextWrapping="Wrap" />
+        </Grid>
+        <Border Classes="task-code" IsVisible="{Binding HasJobsText}">
+          <SelectableTextBlock Classes="mono" Text="{Binding JobsText}" TextWrapping="Wrap" />
+        </Border>
+        <ItemsControl x:Name="JobList" ItemsSource="{Binding Jobs}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:JobRowViewModel">
+              <Border Classes="task-card" Classes.running="{Binding IsRunning}" Padding="12,10" AutomationProperties.Name="{Binding AccessibleName}">
+                <StackPanel Spacing="6">
+                  <TextBlock Classes="task-title" Text="{Binding Title}" />
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Border Classes="status" Classes.running="{Binding IsRunning}" Classes.done="{Binding IsDone}" Classes.failed="{Binding IsFailed}">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Ellipse />
+                        <TextBlock Text="{Binding StatusText}" />
+                      </StackPanel>
+                    </Border>
+                    <TextBlock Classes="task-line" Text="{Binding Detail}" VerticalAlignment="Center" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

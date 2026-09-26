@@ -1,0 +1,230 @@
+name: Avalonia packages
+
+# Self-contained per-platform packages of the Avalonia client as workflow artifacts (never a public release).
+# Each package is unpacked into a clean folder and checked with a HOME that has no omp, no settings and no model:
+#   --self-test: native libraries, the client installs the pinned runtime, omp starts over RPC and stops (no orphan)
+#   GUI smoke:   the real window starts, reaches omp's first-run state, closes normally, leaves no omp behind
+# linux-arm64 and win-arm64 are cross-built only (arm64 runners are paid for private repos): NOT VERIFIED.
+# osx-x64 is run under Rosetta 2 on the arm64 runner. Signing (tools/package/sign.sh) runs only with the owner's
+# certificates in the secrets below; without them every package is built unsigned and says so in <package>.signing.txt.
+# Manual runs only (Actions → Run workflow): the account's Actions quota is not paid for; checks run before a
+# merge in a Claude Code session (README → Build, run, test).
+# A release (the update feed the client reads) is made only when a run is started with "release" set to draft or
+# published and a version given; update.json is then signed with the UPDATE_SIGNING_KEY secret (tools/release).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (SemVer, e.g. 0.6.0). Empty: a CI build 0.1.0-ci.<run>.<sha>'
+        type: string
+        default: ''
+      release:
+        description: 'none: packages as artifacts only. draft: a draft GitHub release. published: the release clients update to'
+        type: choice
+        options: [none, draft, published]
+        default: none
+      notes:
+        description: 'Release notes (shown in the app before updating)'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: ${{ matrix.rid }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: linux-x64, os: ubuntu-24.04, smoke: native }
+          - { rid: linux-arm64, os: ubuntu-24.04, smoke: none }
+          - { rid: win-x64, os: windows-2025, smoke: native }
+          - { rid: win-arm64, os: windows-2025, smoke: none }
+          - { rid: osx-arm64, os: macos-15, smoke: native }
+          - { rid: osx-x64, os: macos-15, smoke: rosetta }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+        working-directory: avalonia
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      RID: ${{ matrix.rid }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: .NET 10 SDK
+        run: |
+          if dotnet --list-sdks 2>/dev/null | grep -q '^10\.'; then dotnet --version; exit 0; fi
+          if [ "$RUNNER_OS" = Windows ]; then
+            curl -sSL -o "$RUNNER_TEMP/dotnet-install.ps1" https://dot.net/v1/dotnet-install.ps1
+            pwsh -NoProfile -File "$RUNNER_TEMP/dotnet-install.ps1" -Channel 10.0 -InstallDir "$HOME/.dotnet"
+          else
+            curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --install-dir "$HOME/.dotnet"
+          fi
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
+      - name: Version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_RELEASE: ${{ inputs.release }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "$INPUT_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' || { echo "not a SemVer version: $INPUT_VERSION"; exit 1; }
+            echo "VERSION=$INPUT_VERSION" >> "$GITHUB_ENV"
+          elif [ "${INPUT_RELEASE:-none}" != none ]; then
+            echo "a release needs a version"; exit 1
+          else
+            echo "VERSION=0.1.0-ci.${GITHUB_RUN_NUMBER}.${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
+      - name: Publish (self-contained)
+        run: |
+          dotnet publish src/OmpGui.App -c Release -r "$RID" --self-contained -o "$RUNNER_TEMP/pub" \
+            -p:Version="${VERSION%%-*}" -p:InformationalVersion="$VERSION"
+          du -sh "$RUNNER_TEMP/pub"
+      - name: Package (signed only when the owner's certificates are in the secrets)
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: tools/package/package.sh "$RID" "$RUNNER_TEMP/pub" "$RUNNER_TEMP/dist" "$VERSION"
+      - name: Signing script check (Windows; throwaway self-signed certificate on a copy, never shipped)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: avalonia
+        run: |
+          # Exercises sign.sh's Authenticode path end to end without the owner's certificate: a self-signed code
+          # signing certificate, trusted only on this throwaway runner and removed after, signs a copy of the publish folder. The shipped
+          # package above is untouched and stays as its .signing.txt says.
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=OMP GUI signing check (throwaway)" -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddDays(1)
+          $pw = [guid]::NewGuid().ToString()
+          $pfx = Join-Path $env:RUNNER_TEMP "check.pfx"
+          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password (ConvertTo-SecureString $pw -AsPlainText -Force) | Out-Null
+          Export-Certificate -Cert $cert -FilePath (Join-Path $env:RUNNER_TEMP "check.cer") | Out-Null
+          Import-Certificate -FilePath (Join-Path $env:RUNNER_TEMP "check.cer") -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+          Copy-Item -Recurse "$env:RUNNER_TEMP\pub" "$env:RUNNER_TEMP\signcheck"
+          $env:WINDOWS_CERT_PFX_BASE64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($pfx))
+          $env:WINDOWS_CERT_PASSWORD = $pw
+          & "C:\Program Files\Git\bin\bash.exe" tools/package/sign.sh windows "$($env:RUNNER_TEMP -replace '\\','/')/signcheck" "$($env:RUNNER_TEMP -replace '\\','/')/signcheck.txt"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $sig = Get-AuthenticodeSignature "$env:RUNNER_TEMP\signcheck\OmpGui.exe"
+          "$($sig.Status) $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') { exit 1 }
+          Remove-Item -Recurse -Force "$env:RUNNER_TEMP\signcheck", $pfx
+          Get-ChildItem Cert:\LocalMachine\Root | Where-Object Thumbprint -eq $cert.Thumbprint | Remove-Item
+          Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)"
+      - name: Rosetta 2
+        if: matrix.smoke == 'rosetta'
+        run: arch -x86_64 /usr/bin/true || sudo softwareupdate --install-rosetta --agree-to-license
+      - name: Package smoke (clean HOME, no omp, no model)
+        if: matrix.smoke != 'none'
+        run: tools/package/smoke.sh "$RID" "$RUNNER_TEMP/dist" "$RUNNER_TEMP/smoke" "$VERSION"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: omp-gui-${{ matrix.rid }}
+          path: |
+            ${{ runner.temp }}/dist/*
+            ${{ runner.temp }}/smoke/*.json
+            ${{ runner.temp }}/smoke/*.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  checksums:
+    needs: package
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.manifest.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: omp-gui-*
+          path: all
+          merge-multiple: true
+      - name: SHA256SUMS (verified against each package's own .sha256)
+        run: |
+          # The artifacts keep their folders: packages in dist/, smoke reports in smoke/.
+          cd all/dist
+          for f in *.sha256; do sha256sum -c "$f"; done
+          cat *.sha256 | sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+          for r in ../smoke/*-selftest.json; do [ -f "$r" ] && echo "== $r" && cat "$r"; done || true
+      - name: update.json (the manifest the client's update check reads; URLs are where the release puts the packages)
+        id: manifest
+        env:
+          NOTES: ${{ inputs.notes }}
+        run: |
+          VERSION=$(ls all/dist | sed -nE 's/^omp-gui-(.+)-(linux|win|osx)-(x64|arm64)\.(tar\.gz|zip)$/\1/p' | sort -u)
+          [ "$(echo "$VERSION" | wc -l)" = 1 ] || { echo "packages of several versions: $VERSION"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          avalonia/tools/release/make-manifest.py all/dist --version "$VERSION" --repo "$GITHUB_REPOSITORY" --notes "${NOTES:-CI build $VERSION}"
+      - name: Sign update.json (release key from the secrets; without it the manifest stays unsigned and no client trusts it)
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -z "$UPDATE_SIGNING_KEY" ]; then echo "UPDATE_SIGNING_KEY is not set: update.json is not signed"; exit 0; fi
+          umask 077
+          printf '%s\n' "$UPDATE_SIGNING_KEY" > "$RUNNER_TEMP/key.pem"
+          avalonia/tools/release/sign-manifest.sh all/dist/update.json "$RUNNER_TEMP/key.pem"
+          rm -f "$RUNNER_TEMP/key.pem"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: omp-gui-SHA256SUMS
+          path: |
+            all/dist/SHA256SUMS
+            all/dist/update.json
+            all/dist/update.json.sig
+          retention-days: 14
+
+  release:
+    # Only on request (release: draft or published), only when every package was built and checked, and only with a
+    # signed manifest: a release is what every installed client updates to.
+    needs: [package, checksums]
+    if: ${{ inputs.release == 'draft' || inputs.release == 'published' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: omp-gui-*
+          path: all
+          merge-multiple: true
+      - name: Check the signature as a client would
+        run: |
+          test -f all/dist/update.json.sig || { echo "update.json is not signed (UPDATE_SIGNING_KEY missing): no release"; exit 1; }
+          PUB=avalonia/packaging/update-signing.pub
+          { echo "-----BEGIN PUBLIC KEY-----"; tr -d ' \r\n' < "$PUB" | fold -w 64; echo; echo "-----END PUBLIC KEY-----"; } > "$RUNNER_TEMP/pub.pem"
+          base64 -d < all/dist/update.json.sig > "$RUNNER_TEMP/sig.der"
+          openssl dgst -sha256 -verify "$RUNNER_TEMP/pub.pem" -signature "$RUNNER_TEMP/sig.der" all/dist/update.json
+      - name: GitHub release v${{ needs.checksums.outputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.checksums.outputs.version }}
+          KIND: ${{ inputs.release }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          cd all/dist
+          DRAFT=; [ "$KIND" = draft ] && DRAFT=--draft
+          PRE=; case "$VERSION" in *-*) PRE=--prerelease ;; esac
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "OMP GUI $VERSION" \
+            --notes "${NOTES:-OMP GUI $VERSION}" $DRAFT $PRE \
+            omp-gui-*.tar.gz omp-gui-*.zip ./*.sha256 SHA256SUMS update.json update.json.sig

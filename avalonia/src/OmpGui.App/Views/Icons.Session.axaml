@@ -1,0 +1,25 @@
+<!-- Line icons for the session menu, usage and model options, same rules as Icons.axaml (24-unit grid, stroked; Filled for solid shapes). -->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Session menu -->
+  <StreamGeometry x:Key="IconPencil">M4.5 19.5 L5.3 15.7 L15.6 5.4 A2.1 2.1 0 0 1 18.6 8.4 L8.3 18.7 Z M13.8 7.2 L16.8 10.2</StreamGeometry>
+  <StreamGeometry x:Key="IconCompact">M12 3.5 V9 M9 6.5 L12 9 L15 6.5 M12 20.5 V15 M9 17.5 L12 15 L15 17.5 M5 12 H19</StreamGeometry>
+  <StreamGeometry x:Key="IconHandoff">M13.5 3.5 H7 A1.5 1.5 0 0 0 5.5 5 V19 A1.5 1.5 0 0 0 7 20.5 H12 M13.5 3.5 L18 8 V11.5 M13.5 3.5 V8 H18 M8.5 12 H13 M8.5 15.5 H11 M14.5 17 H20.5 M18 14.5 L20.5 17 L18 19.5</StreamGeometry>
+  <StreamGeometry x:Key="IconFresh">M19 12 A7 7 0 1 1 16.95 7.05 M17.5 3.5 V7.5 H13.5 M12 10.25 V13.75 M10.25 12 H13.75</StreamGeometry>
+  <StreamGeometry x:Key="IconRetry">M5 12 A7 7 0 1 0 7.05 7.05 M6.5 3.5 V7.5 H10.5</StreamGeometry>
+  <StreamGeometry x:Key="IconRewind">M9.5 7.5 L5 12 L9.5 16.5 M5 12 H14.5 A4.5 4.5 0 0 1 19 16.5 V18</StreamGeometry>
+  <StreamGeometry x:Key="IconTrash">M4.5 6.5 H19.5 M9.5 6.5 V4.5 A1 1 0 0 1 10.5 3.5 H13.5 A1 1 0 0 1 14.5 4.5 V6.5 M6.5 6.5 L7.4 19.1 A1.5 1.5 0 0 0 8.9 20.5 H15.1 A1.5 1.5 0 0 0 16.6 19.1 L17.5 6.5 M10 10.5 V16.5 M14 10.5 V16.5</StreamGeometry>
+  <StreamGeometry x:Key="IconExport">M12 4 V14 M8 8 L12 4 L16 8 M5 13 V18.5 A1.5 1.5 0 0 0 6.5 20 H17.5 A1.5 1.5 0 0 0 19 18.5 V13</StreamGeometry>
+  <StreamGeometry x:Key="IconShare">M17 3.5 A2.5 2.5 0 1 1 17 8.5 A2.5 2.5 0 1 1 17 3.5 Z M7 9.5 A2.5 2.5 0 1 1 7 14.5 A2.5 2.5 0 1 1 7 9.5 Z M17 15.5 A2.5 2.5 0 1 1 17 20.5 A2.5 2.5 0 1 1 17 15.5 Z M9.2 10.8 L14.8 7.2 M9.2 13.2 L14.8 16.8</StreamGeometry>
+  <StreamGeometry x:Key="IconFolders">M3.5 7.5 A1.5 1.5 0 0 1 5 6 H9.2 L11.2 8 H19 A1.5 1.5 0 0 1 20.5 9.5 V17.5 A1.5 1.5 0 0 1 19 19 H5 A1.5 1.5 0 0 1 3.5 17.5 Z M12 11 V16 M9.5 13.5 H14.5</StreamGeometry>
+  <StreamGeometry x:Key="IconMove">M3.5 7.5 A1.5 1.5 0 0 1 5 6 H9.2 L11.2 8 H19 A1.5 1.5 0 0 1 20.5 9.5 V17.5 A1.5 1.5 0 0 1 19 19 H5 A1.5 1.5 0 0 1 3.5 17.5 Z M8.5 13.5 H15 M12.5 11 L15 13.5 L12.5 16</StreamGeometry>
+  <StreamGeometry x:Key="IconPin">M9 4 H15 M10 4 V9.5 L7 13.5 H17 L14 9.5 V4 M12 13.5 V20.5</StreamGeometry>
+  <StreamGeometry x:Key="IconChart">M4 20 H20 M6.5 20 V13 M11 20 V8 M15.5 20 V11 M20 20 V5</StreamGeometry>
+  <StreamGeometry x:Key="IconMemory">M6.5 3.5 H17.5 A1.5 1.5 0 0 1 19 5 V19 A1.5 1.5 0 0 1 17.5 20.5 H6.5 A1 1 0 0 1 5.5 19.5 V4.5 A1 1 0 0 1 6.5 3.5 Z M9 3.5 V20.5 M12 8 H16 M12 11.5 H16</StreamGeometry>
+  <StreamGeometry x:Key="IconHash">M9.5 4 L7.5 20 M16.5 4 L14.5 20 M5 9 H19.5 M4.5 15 H19</StreamGeometry>
+  <StreamGeometry x:Key="IconFileText">M13.5 3.5 H7 A1.5 1.5 0 0 0 5.5 5 V19 A1.5 1.5 0 0 0 7 20.5 H17 A1.5 1.5 0 0 0 18.5 19 V8.5 Z M13.5 3.5 V8.5 H18.5 M8.5 13 H15.5 M8.5 16.5 H13.5</StreamGeometry>
+  <!-- Model options -->
+  <StreamGeometry x:Key="IconBolt">M13 3 L5.5 13.5 H11.5 L10.5 21 L18.5 10 H12.5 Z</StreamGeometry>
+  <StreamGeometry x:Key="IconExpand">M3.5 12 H20.5 M7 8.5 L3.5 12 L7 15.5 M17 8.5 L20.5 12 L17 15.5</StreamGeometry>
+  <StreamGeometry x:Key="IconAdvisor">M2.5 12 C5 7.5 8.3 5.5 12 5.5 C15.7 5.5 19 7.5 21.5 12 C19 16.5 15.7 18.5 12 18.5 C8.3 18.5 5 16.5 2.5 12 Z M12 9 A3 3 0 1 1 12 15 A3 3 0 1 1 12 9 Z</StreamGeometry>
+</ResourceDictionary>

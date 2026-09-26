@@ -1,0 +1,48 @@
+name: Avalonia dictation engine (real model)
+
+# Downloads the pinned dictation model (~670 MB) with the client's own downloader, which checks every file against
+# its pinned SHA-256, and transcribes a sample recording from the same model repository. Linux only; runs when
+# the speech code changes or on demand. Read-only token, no secrets.
+# Manual runs only (Actions → Run workflow): the account's Actions quota is not paid for; checks run before a
+# merge in a Claude Code session (README → Build, run, test).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  speech:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+        working-directory: avalonia
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: .NET 10 SDK
+        run: |
+          if dotnet --list-sdks 2>/dev/null | grep -q '^10\.'; then dotnet --version; exit 0; fi
+          curl -sSL -o "$RUNNER_TEMP/dotnet-install.sh" https://dot.net/v1/dotnet-install.sh
+          bash "$RUNNER_TEMP/dotnet-install.sh" --channel 10.0 --install-dir "$HOME/.dotnet"
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+      - run: dotnet build tests/OmpGui.Tests -c Release
+      - name: Sample recording from the model repository (same pinned revision)
+        run: |
+          rev=$(grep -oP 'Revision = "\K[0-9a-f]+' src/OmpGui.App/Services/Speech/SpeechModel.cs)
+          base="https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8/resolve/$rev"
+          for name in en.wav 0.wav 1.wav; do
+            if curl -sfL -o "$RUNNER_TEMP/sample.wav" "$base/test_wavs/$name"; then echo "sample: test_wavs/$name"; break; fi
+          done
+          ls -la "$RUNNER_TEMP/sample.wav" || true
+      - name: Download (hash-checked) and transcribe
+        env:
+          OMPGUI_SPEECH_MODEL_DIR: ${{ runner.temp }}/speech-model
+          OMPGUI_SPEECH_WAV: ${{ runner.temp }}/sample.wav
+        run: dotnet test tests/OmpGui.Tests -c Release --no-build --filter "FullyQualifiedName~RealSpeechTests" --logger "console;verbosity=detailed"

@@ -1,0 +1,4 @@
+# harness profile — your model providers.
+# Created once from the template (harness/profile); after that the file is yours. See models.example.yml next to it.
+# Keys: prefer an environment variable name or a "!command" that prints the key over a literal key.
+providers: {}

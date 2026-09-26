@@ -1,0 +1,180 @@
+<!-- Settings page "Pets": show a pet and its size; "My pets" (the chosen one ringed); create a pet or customize the
+     chosen one (name, body, color, accessory) with a live, animated preview. All of it is the app's: omp has no pets. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Views.Settings.PetsSettings"
+             x:DataType="vm:MainViewModel">
+  <Panel DataContext="{Binding Pets}">
+    <StackPanel x:DataType="vm:PetsViewModel" Spacing="16">
+
+      <!-- Show a pet, size -->
+      <Border Classes="section-card">
+        <StackPanel Spacing="14">
+          <StackPanel Spacing="6">
+            <TextBlock Classes="section" Text="Pets" />
+            <TextBlock Classes="muted" TextWrapping="Wrap"
+                       Text="A little pixel companion on the message box. It thinks and works along with omp, waits with you when omp asks something, cheers when a run is done and winces when something fails. Click it to see what omp is doing." />
+          </StackPanel>
+          <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
+              <TextBlock Text="Show a pet" FontWeight="Medium" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="On the top edge of the message box. It falls asleep when nothing happens and then stops moving." />
+            </StackPanel>
+            <ToggleButton x:Name="ShowPetSwitch" Grid.Column="1" Classes="switch" IsChecked="{Binding ShowPet}"
+                          AutomationProperties.Name="Show a pet" VerticalAlignment="Center" />
+          </Grid>
+          <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
+              <TextBlock Text="Size" FontWeight="Medium" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="Small is 32 pixels tall, medium 48" />
+            </StackPanel>
+            <Border Grid.Column="1" Classes="segmented" VerticalAlignment="Center">
+              <StackPanel Orientation="Horizontal" Spacing="2">
+                <Button x:Name="PetSizeSmall" Classes="segment" Classes.selected="{Binding IsSmall}" Content="Small"
+                        Command="{Binding SetSizeCommand}" CommandParameter="small" AutomationProperties.Name="Pet size: small" />
+                <Button x:Name="PetSizeMedium" Classes="segment" Classes.selected="{Binding IsMedium}" Content="Medium"
+                        Command="{Binding SetSizeCommand}" CommandParameter="medium" AutomationProperties.Name="Pet size: medium" />
+              </StackPanel>
+            </Border>
+          </Grid>
+        </StackPanel>
+      </Border>
+
+      <!-- My pets -->
+      <Border Classes="section-card">
+        <StackPanel Spacing="14">
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <TextBlock Classes="section" Text="My pets" VerticalAlignment="Center" />
+            <Button x:Name="CustomizePetButton" Grid.Column="1" Classes="flat" Command="{Binding StartCustomizeCommand}"
+                    AutomationProperties.Name="{Binding CustomizeTitle}" ToolTip.Tip="{Binding CustomizeTitle}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <ctl:Icon Data="{StaticResource IconPetEdit}" Size="16" VerticalAlignment="Center" />
+                <TextBlock Text="Customize" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button x:Name="CreatePetButton" Grid.Column="2" Command="{Binding StartCreateCommand}" Margin="8,0,0,0"
+                    AutomationProperties.Name="Create a pet">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <ctl:Icon Data="{StaticResource IconPlus}" Size="16" VerticalAlignment="Center" />
+                <TextBlock Text="Create pet" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+          </Grid>
+          <ItemsControl x:Name="PetGallery" ItemsSource="{Binding Gallery}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:PetCardViewModel">
+                <Button Classes="pet-tile" Classes.chosen="{Binding IsChosen}" AutomationProperties.Name="{Binding Name}"
+                        Command="{Binding $parent[ItemsControl].((vm:PetsViewModel)DataContext).ChoosePetCommand}" CommandParameter="{Binding}">
+                  <StackPanel Spacing="8">
+                    <ctl:PetView Look="{Binding Look}" BodyOnly="True" PixelScale="2" HorizontalAlignment="Center" />
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="{Binding Name}" FontWeight="Medium" FontSize="13" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="96" />
+                      <TextBlock Classes="tertiary" Text="{Binding Detail}" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="96" />
+                    </StackPanel>
+                  </StackPanel>
+                </Button>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <!-- Create a pet / customize the chosen one -->
+      <Border x:Name="PetEditor" Classes="section-card" IsVisible="{Binding IsEditorOpen}">
+        <StackPanel Spacing="16">
+          <TextBlock Classes="section" Text="{Binding EditorTitle}" />
+          <Grid ColumnDefinitions="Auto,*">
+            <!-- Live preview, in every mood it has -->
+            <StackPanel Spacing="10" Width="168" VerticalAlignment="Top">
+              <Border Classes="pet-stage" Height="120">
+                <ctl:PetView x:Name="PetPreview" Look="{Binding DraftLook}" Mood="{Binding PreviewMood}" PixelScale="3"
+                             HorizontalAlignment="Center" VerticalAlignment="Center" AutomationProperties.Name="Preview" />
+              </Border>
+              <ItemsControl ItemsSource="{Binding MoodOptions}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate><WrapPanel ItemSpacing="4" LineSpacing="4" /></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:PetMoodOptionViewModel">
+                    <Button Classes="chip pet-choice small" Classes.selected="{Binding IsSelected}" Content="{Binding Label}"
+                            AutomationProperties.Name="{Binding Label, StringFormat='Preview: {0}'}"
+                            Command="{Binding $parent[ItemsControl].((vm:PetsViewModel)DataContext).ChoosePreviewMoodCommand}" CommandParameter="{Binding}" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Spacing="14" Margin="20,0,0,0">
+              <StackPanel Spacing="6">
+                <TextBlock Classes="label" Text="Name" />
+                <TextBox x:Name="PetNameBox" Classes="sm" Text="{Binding DraftName}" PlaceholderText="{Binding NamePlaceholder}" MaxLength="24"
+                         AutomationProperties.Name="Pet name" />
+              </StackPanel>
+              <StackPanel Spacing="6" IsVisible="{Binding CanChangeBody}">
+                <TextBlock Classes="label" Text="Body" />
+                <ItemsControl ItemsSource="{Binding BodyOptions}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><WrapPanel ItemSpacing="4" LineSpacing="4" /></ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:PetBodyOptionViewModel">
+                      <Button Classes="pet-body" Classes.selected="{Binding IsSelected}" ToolTip.Tip="{Binding Label}" AutomationProperties.Name="{Binding Label}"
+                              Command="{Binding $parent[ItemsControl].((vm:PetsViewModel)DataContext).ChooseBodyCommand}" CommandParameter="{Binding}">
+                        <ctl:PetView Look="{Binding Look}" BodyOnly="True" PixelScale="1.5" Animate="False" />
+                      </Button>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+              <StackPanel Spacing="6">
+                <TextBlock Classes="label" Text="Color" />
+                <ItemsControl ItemsSource="{Binding CoatOptions}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><WrapPanel ItemSpacing="4" LineSpacing="4" /></ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:PetCoatOptionViewModel">
+                      <Button Classes="pet-swatch" Classes.selected="{Binding IsSelected}" ToolTip.Tip="{Binding Name}" AutomationProperties.Name="{Binding Name, StringFormat='Color: {0}'}"
+                              Command="{Binding $parent[ItemsControl].((vm:PetsViewModel)DataContext).ChooseCoatCommand}" CommandParameter="{Binding}">
+                        <Ellipse Width="22" Height="22" Fill="{Binding Swatch}" />
+                      </Button>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+              <StackPanel Spacing="6">
+                <TextBlock Classes="label" Text="Accessory" />
+                <ItemsControl ItemsSource="{Binding AccessoryOptions}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><WrapPanel ItemSpacing="4" LineSpacing="4" /></ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:PetAccessoryOptionViewModel">
+                      <Button Classes="chip pet-choice" Classes.selected="{Binding IsSelected}" Content="{Binding Name}" AutomationProperties.Name="{Binding Name, StringFormat='Accessory: {0}'}"
+                              Command="{Binding $parent[ItemsControl].((vm:PetsViewModel)DataContext).ChooseAccessoryCommand}" CommandParameter="{Binding}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </StackPanel>
+          </Grid>
+          <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
+          <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+            <Button x:Name="SavePetButton" Classes="accent" Content="{Binding EditorSaveLabel}" Command="{Binding SaveEditorCommand}" />
+            <Button Grid.Column="1" Classes="flat" Content="Cancel" Command="{Binding CancelEditorCommand}" Margin="8,0,0,0" />
+            <Button x:Name="DeletePetButton" Grid.Column="3" Classes="flat danger-text" Content="Delete pet" IsVisible="{Binding CanDelete}"
+                    Command="{Binding DeleteChosenCommand}" />
+            <Button x:Name="ResetPetButton" Grid.Column="3" Classes="flat" Content="Reset to original" IsVisible="{Binding CanReset}"
+                    Command="{Binding ResetChosenCommand}" />
+          </Grid>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </Panel>
+</UserControl>

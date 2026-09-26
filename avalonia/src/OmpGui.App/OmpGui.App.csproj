@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>OmpGui.App</RootNamespace>
+    <AssemblyName>OmpGui</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+    <!-- Precompiled startup code: 0.70 s instead of 1.37 s to a painted window on Linux (docs/research results). -->
+    <PublishReadyToRun Condition="'$(RuntimeIdentifier)' != ''">true</PublishReadyToRun>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Controls.WebView" Version="12.1.0" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.3" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.3" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Iciclecreek.Avalonia.Terminal" Version="4.0.2" />
+    <PackageReference Include="Markdig" Version="1.4.0" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.8" />
+    <PackageReference Include="PortAudioSharp2" Version="1.0.6" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OmpGui.ClientCore\OmpGui.ClientCore.csproj" />
+    <InternalsVisibleTo Include="OmpGui.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The pinned runtime pack the client installs (RuntimePack): the same files in runtime/packs that CI installs. -->
+    <EmbeddedResource Include="Controls\Preview\annotate.js" LogicalName="preview/annotate.js" />
+    <EmbeddedResource Include="..\..\..\runtime\packs\omp-18.2.0-bun-1.4.2\package.json" LogicalName="runtime-pack/package.json" />
+    <EmbeddedResource Include="..\..\..\runtime\packs\omp-18.2.0-bun-1.4.2\bun.lock" LogicalName="runtime-pack/bun.lock" />
+    <EmbeddedResource Include="..\..\..\runtime\packs\omp-18.2.0-bun-1.4.2\bunfig.toml" LogicalName="runtime-pack/bunfig.toml" />
+    <EmbeddedResource Include="..\..\packaging\update-signing.pub" LogicalName="update-signing.pub" />
+  </ItemGroup>
+</Project>

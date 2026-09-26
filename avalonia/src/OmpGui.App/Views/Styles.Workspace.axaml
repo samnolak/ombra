@@ -1,0 +1,85 @@
+<!-- Styles for the Computer use, Git and worktrees and SSH settings, on the design system's tokens (Tokens.axaml), as in Styles.axaml. -->
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctl="using:OmpGui.App.Controls">
+
+  <!-- A 1 px separator between rows of a settings card -->
+  <Style Selector="Border.ws-sep">
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Background" Value="{DynamicResource GuiBorderSoft}" />
+  </Style>
+
+  <!-- A row's name (as the General page: medium weight, UI size) -->
+  <Style Selector="TextBlock.ws-title">
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="FontSize" Value="14" />
+  </Style>
+  <!-- A value in a label / value line (same size as its muted label, so both share a baseline) -->
+  <Style Selector="TextBlock.ws-value, SelectableTextBlock.ws-value">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+  </Style>
+
+  <!-- Feedback and notes inside a page: a pale fill in the status colour and a mark in the status colour; the text stays
+       primary (status colours on their pale fill are below 4.5:1) -->
+  <Style Selector="Border.ws-note">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="Padding" Value="12,9" />
+  </Style>
+  <Style Selector="Border.ws-note.ok">
+    <Setter Property="Background" Value="{DynamicResource GuiStatusSuccessSoft}" />
+  </Style>
+  <Style Selector="Border.ws-note.warning">
+    <Setter Property="Background" Value="{DynamicResource GuiStatusWarningSoft}" />
+  </Style>
+  <Style Selector="Border.ws-note.error">
+    <Setter Property="Background" Value="{DynamicResource GuiStatusErrorSoft}" />
+  </Style>
+  <Style Selector="Border.ws-note TextBlock">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+  </Style>
+  <Style Selector="ctl|Icon.ok-mark">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiStatusSuccess}" />
+  </Style>
+  <Style Selector="ctl|Icon.unknown-mark">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+
+  <!-- A form opened inside a card (new worktree, add a host): a pale outline, so its filled fields read as on the card -->
+  <Style Selector="Border.ws-form">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+    <Setter Property="Padding" Value="16,14" />
+  </Style>
+
+  <!-- A list row (worktree, SSH host): 10 px above and below, separated by the pale line -->
+  <Style Selector="Border.ws-row">
+    <Setter Property="Padding" Value="0,10" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="0,1,0,0" />
+  </Style>
+
+  <!-- The header's branch chip: quiet like the project name beside it, a hover fill like the title button -->
+  <Style Selector="Button.branch-chip">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="Height" Value="28" />
+    <Setter Property="Padding" Value="6,0,8,0" />
+    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+  </Style>
+  <Style Selector="Button.branch-chip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="Button.branch-chip ctl|Icon.project-chevron">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+  <!-- "· worktree" after the branch: the same quiet colour, even while the chip is hovered -->
+  <Style Selector="Button.branch-chip TextBlock.worktree-mark">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+</Styles>

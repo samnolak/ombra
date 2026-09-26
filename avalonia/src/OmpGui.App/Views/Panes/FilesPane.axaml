@@ -1,0 +1,332 @@
+<!-- The Files pane (Claude Code's Files view): the project folder as a tree, "Go to file", git's marks and the files omp
+     changed in this session; the open file below the list (or over it, expanded). DataContext: FilesViewModel. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             xmlns:svc="using:OmpGui.App.Services"
+             x:Class="OmpGui.App.Views.Panes.FilesPane"
+             x:DataType="vm:FilesViewModel"
+             Background="{DynamicResource GuiWindow}"
+             AutomationProperties.Name="Files">
+  <Grid x:Name="Layout" RowDefinitions="Auto,Auto,*,Auto,0">
+
+    <!-- ── Toolbar, level with the window header ── -->
+    <Border Grid.Row="0" Classes="files-toolbar">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <TextBlock Classes="files-title" Text="Files" VerticalAlignment="Center" />
+        <TextBlock Grid.Column="1" Classes="muted" Text="{Binding RootName}" Margin="8,0,8,0" VerticalAlignment="Center"
+                   TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Root}" />
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+          <Button x:Name="RefreshButton" Classes="icon" Command="{Binding RefreshNowCommand}" IsVisible="{Binding HasProject}"
+                  ToolTip.Tip="Read the files again" AutomationProperties.Name="Refresh files">
+            <ctl:Icon Data="{StaticResource IconReload}" Size="18" />
+          </Button>
+          <Button x:Name="ClosePaneButton" Classes="icon" Command="{Binding ClosePaneCommand}"
+                  ToolTip.Tip="Close" AutomationProperties.Name="Close files">
+            <ctl:Icon Data="{StaticResource IconClose}" Size="18" />
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- ── Go to file; which files ── -->
+    <StackPanel x:Name="FilterArea" Grid.Row="1" Margin="12,2,12,8" Spacing="8" IsVisible="{Binding HasProject}">
+      <TextBox x:Name="FilterBox" Classes="search" Text="{Binding Filter}" PlaceholderText="Go to file"
+               AutomationProperties.Name="Find a file by name">
+        <TextBox.InnerLeftContent>
+          <ctl:Icon Data="{StaticResource IconSearch}" Size="16" Margin="10,0,0,0" VerticalAlignment="Center" TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
+        </TextBox.InnerLeftContent>
+        <TextBox.InnerRightContent>
+          <Button Classes="icon" Width="24" Height="24" Margin="0,0,4,0" Command="{Binding ClearFilterCommand}" IsVisible="{Binding HasFilter}"
+                  ToolTip.Tip="Clear (Esc)" AutomationProperties.Name="Clear the search">
+            <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+          </Button>
+        </TextBox.InnerRightContent>
+      </TextBox>
+      <Border Classes="segmented" HorizontalAlignment="Left">
+        <StackPanel Orientation="Horizontal" Spacing="2">
+          <Button x:Name="AllModeButton" Classes="segment" Classes.selected="{Binding IsAllMode}" Content="All"
+                  Command="{Binding SetModeCommand}" CommandParameter="{x:Static vm:FilesMode.All}"
+                  ToolTip.Tip="Every file of the project" AutomationProperties.Name="All files" />
+          <Button x:Name="ChangedModeButton" Classes="segment" Classes.selected="{Binding IsChangedMode}" Content="{Binding ChangedLabel}"
+                  IsVisible="{Binding IsGitRepo}" Command="{Binding SetModeCommand}" CommandParameter="{x:Static vm:FilesMode.Changed}"
+                  ToolTip.Tip="Files with changes git has not committed" AutomationProperties.Name="Changed files" />
+          <Button x:Name="SessionModeButton" Classes="segment" Classes.selected="{Binding IsSessionMode}" Content="{Binding SessionLabel}"
+                  Command="{Binding SetModeCommand}" CommandParameter="{x:Static vm:FilesMode.Session}"
+                  ToolTip.Tip="Files omp changed in this session" AutomationProperties.Name="Changed in this session" />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+
+    <!-- ── The tree, or a flat list, or why there is nothing ── -->
+    <Panel x:Name="ListArea" Grid.Row="2">
+      <ListBox x:Name="Tree" Classes="file-list" ItemsSource="{Binding Nodes}" SelectedItem="{Binding SelectedNode}"
+               IsVisible="{Binding ShowTree}" AutomationProperties.Name="Project files"
+               ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+        <ListBox.ItemTemplate>
+          <DataTemplate x:DataType="vm:FileNodeViewModel">
+            <Grid Classes="file-row" ColumnDefinitions="Auto,Auto,*,Auto" ToolTip.Tip="{Binding Tip}" AutomationProperties.Name="{Binding Name}">
+              <Panel Width="16" Margin="{Binding Indent}">
+                <ctl:Icon Classes="tree-chevron" Classes.open="{Binding IsExpanded}" Data="{StaticResource IconChevronRight}" Size="14"
+                          IsVisible="{Binding IsDirectory}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </Panel>
+              <ctl:Icon Grid.Column="1" Classes="file-icon" Classes.dim="{Binding IsDimmed}" Data="{StaticResource IconFolder}" Size="16"
+                        Margin="2,0,7,0" VerticalAlignment="Center" IsVisible="{Binding IsDirectory}" />
+              <ctl:Icon Grid.Column="1" Classes="file-icon" Classes.dim="{Binding IsDimmed}" Data="{StaticResource IconFile}" Size="16"
+                        Margin="2,0,7,0" VerticalAlignment="Center" IsVisible="{Binding IsFile}" />
+              <TextBlock Grid.Column="2" Classes="file-name" Classes.dim="{Binding IsDimmed}" Classes.deleted="{Binding IsDeleted}"
+                         Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+              <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" Margin="8,0,4,0" VerticalAlignment="Center">
+                <ctl:Icon Classes="session-mark" Data="{StaticResource IconSparkle}" Size="14" IsVisible="{Binding IsSessionChanged}" VerticalAlignment="Center" />
+                <Ellipse Classes="git-dot folder" IsVisible="{Binding ShowFolderDot}" />
+                <Ellipse Classes="git-dot" Classes.modified="{Binding IsModified}" Classes.added="{Binding IsAdded}" Classes.removed="{Binding IsRemoved}"
+                         Classes.conflicted="{Binding IsConflicted}" IsVisible="{Binding HasGitMark}" />
+                <TextBlock Classes="git-letter" Text="{Binding GitLetter}" IsVisible="{Binding HasGitMark}" VerticalAlignment="Center" />
+              </StackPanel>
+            </Grid>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+        <ListBox.ContextFlyout>
+          <Flyout Placement="Pointer" ctl:ChoiceMenu.CloseOnChoice="True">
+            <StackPanel Width="250" Spacing="2">
+              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                      Command="{Binding ActivateCommand}" CommandParameter="{Binding SelectedNode}" AutomationProperties.Name="Open">
+                <Grid ColumnDefinitions="Auto,*">
+                  <ctl:Icon Data="{StaticResource IconFile}" Size="16" Margin="0,0,10,0" />
+                  <TextBlock Grid.Column="1" Text="Open" VerticalAlignment="Center" />
+                </Grid>
+              </Button>
+              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                      Command="{Binding AddToMessageCommand}" CommandParameter="{Binding SelectedNode}" AutomationProperties.Name="Add to message">
+                <Grid ColumnDefinitions="Auto,*">
+                  <ctl:Icon Data="{StaticResource IconAt}" Size="16" Margin="0,0,10,0" />
+                  <TextBlock Grid.Column="1" Text="Add to message" VerticalAlignment="Center" />
+                </Grid>
+              </Button>
+              <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="6,4" />
+              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                      Command="{Binding OpenInDefaultAppCommand}" CommandParameter="{Binding SelectedNode}" AutomationProperties.Name="Open in default app">
+                <Grid ColumnDefinitions="Auto,*">
+                  <ctl:Icon Data="{StaticResource IconExternal}" Size="16" Margin="0,0,10,0" />
+                  <TextBlock Grid.Column="1" Text="Open in default app" VerticalAlignment="Center" />
+                </Grid>
+              </Button>
+              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                      Command="{Binding RevealInFileManagerCommand}" CommandParameter="{Binding SelectedNode}" AutomationProperties.Name="{Binding RevealLabel}">
+                <Grid ColumnDefinitions="Auto,*">
+                  <ctl:Icon Data="{StaticResource IconFolder}" Size="16" Margin="0,0,10,0" />
+                  <TextBlock Grid.Column="1" Text="{Binding RevealLabel}" VerticalAlignment="Center" />
+                </Grid>
+              </Button>
+              <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="6,4" />
+              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                      Command="{Binding CopyPathCommand}" CommandParameter="{Binding SelectedNode}" AutomationProperties.Name="Copy path">
+                <Grid ColumnDefinitions="Auto,*">
+                  <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
+                  <TextBlock Grid.Column="1" Text="Copy path" VerticalAlignment="Center" />
+                </Grid>
+              </Button>
+              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                      Command="{Binding CopyRelativePathCommand}" CommandParameter="{Binding SelectedNode}" AutomationProperties.Name="Copy relative path">
+                <Grid ColumnDefinitions="Auto,*">
+                  <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
+                  <TextBlock Grid.Column="1" Text="Copy relative path" VerticalAlignment="Center" />
+                </Grid>
+              </Button>
+            </StackPanel>
+          </Flyout>
+        </ListBox.ContextFlyout>
+      </ListBox>
+
+      <DockPanel IsVisible="{Binding ShowResults}">
+        <TextBlock DockPanel.Dock="Bottom" Classes="tertiary" Text="{Binding ResultsNote}" IsVisible="{Binding HasResultsNote}"
+                   Margin="16,4,16,8" TextTrimming="CharacterEllipsis" />
+        <Panel>
+          <ListBox x:Name="Results" Classes="file-list" ItemsSource="{Binding Results}" SelectedItem="{Binding SelectedResult}"
+                   AutomationProperties.Name="Matching files" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:FileNodeViewModel">
+                <Grid Classes="file-row" ColumnDefinitions="Auto,*,Auto" ToolTip.Tip="{Binding Tip}" AutomationProperties.Name="{Binding RelativePath}">
+                  <ctl:Icon Classes="file-icon" Data="{StaticResource IconFolder}" Size="16" Margin="2,0,8,0" VerticalAlignment="Center" IsVisible="{Binding IsDirectory}" />
+                  <ctl:Icon Classes="file-icon" Data="{StaticResource IconFile}" Size="16" Margin="2,0,8,0" VerticalAlignment="Center" IsVisible="{Binding IsFile}" />
+                  <!-- The name, then its folder in the secondary colour (trimmed at the end together) -->
+                  <TextBlock Grid.Column="1" Classes="file-name" Classes.deleted="{Binding IsDeleted}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
+                    <Run Text="{Binding Name}" />
+                    <Run Text="  " />
+                    <Run Classes="file-detail" Text="{Binding Detail}" />
+                  </TextBlock>
+                  <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="8,0,4,0" VerticalAlignment="Center">
+                    <ctl:Icon Classes="session-mark" Data="{StaticResource IconSparkle}" Size="14" IsVisible="{Binding IsSessionChanged}" VerticalAlignment="Center" />
+                    <Ellipse Classes="git-dot" Classes.modified="{Binding IsModified}" Classes.added="{Binding IsAdded}" Classes.removed="{Binding IsRemoved}"
+                             Classes.conflicted="{Binding IsConflicted}" IsVisible="{Binding HasGitMark}" />
+                    <TextBlock Classes="git-letter" Text="{Binding GitLetter}" IsVisible="{Binding HasGitMark}" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <TextBlock Classes="muted files-message" Text="{Binding ResultsMessage}" IsVisible="{Binding HasResultsMessage}" />
+          <TextBlock Classes="muted files-message" Text="Searching…" IsVisible="{Binding IsSearching}" />
+        </Panel>
+      </DockPanel>
+
+      <TextBlock Classes="muted files-message" Text="Loading files…" IsVisible="{Binding IsLoading}" />
+      <TextBlock Classes="muted files-message" Text="{Binding TreeMessage}">
+        <TextBlock.IsVisible>
+          <MultiBinding Converter="{x:Static BoolConverters.And}">
+            <Binding Path="HasTreeMessage" />
+            <Binding Path="ShowTree" />
+          </MultiBinding>
+        </TextBlock.IsVisible>
+      </TextBlock>
+
+      <!-- No project yet: say so and offer the way to one -->
+      <StackPanel x:Name="NoProject" Classes="files-state" IsVisible="{Binding ShowNoProject}">
+        <Border Classes="files-disc">
+          <ctl:Icon Data="{StaticResource IconFolder}" Size="20" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+        <TextBlock Classes="files-state-title" Text="No project folder" HorizontalAlignment="Center" />
+        <TextBlock Classes="muted" Text="Open a folder to browse its files here." TextWrapping="Wrap" TextAlignment="Center" />
+        <Button x:Name="OpenFolderButton" Content="Open folder…" Command="{Binding Owner.OpenFolderCommand}" HorizontalAlignment="Center" Margin="0,4,0,0" />
+      </StackPanel>
+    </Panel>
+
+    <!-- A hairline between list and file; the splitter over it is wider, to grab -->
+    <Border x:Name="ViewerLine" Grid.Row="3" Height="1" VerticalAlignment="Bottom" Background="{DynamicResource GuiBorderSoft}" IsVisible="False" />
+    <GridSplitter x:Name="ViewerSplitter" Grid.Row="3" Height="6" MinHeight="6" Background="Transparent" ResizeDirection="Rows" IsVisible="False"
+                  AutomationProperties.Name="Resize the file list" />
+
+    <!-- ── The open file ── -->
+    <ContentControl x:Name="ViewerHost" Grid.Row="4" Content="{Binding Viewer}" IsVisible="{Binding HasViewer}">
+      <ContentControl.ContentTemplate>
+        <DataTemplate x:DataType="vm:FileViewerViewModel">
+          <DockPanel Classes="file-viewer">
+            <Border DockPanel.Dock="Top" Classes="viewer-header">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon Classes="file-icon" Data="{StaticResource IconFile}" Size="16" Margin="0,0,8,0" VerticalAlignment="Center" />
+                <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center" ToolTip.Tip="{Binding FullPath}">
+                  <TextBlock x:Name="ViewerName" Classes="viewer-name" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                  <TextBlock Classes="tertiary" Text="{Binding Subtitle}" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="0" VerticalAlignment="Center" Margin="6,0,0,0">
+                  <Button Classes="icon viewer-action" Classes.on="{Binding ShowSource}" Command="{Binding ToggleSourceCommand}" IsVisible="{Binding CanToggleSource}"
+                          ToolTip.Tip="{Binding SourceTip}" AutomationProperties.Name="Show the Markdown source">
+                    <ctl:Icon Data="{StaticResource IconCode}" Size="16" />
+                  </Button>
+                  <Button x:Name="AddToMessageButton" Classes="icon viewer-action" Command="{Binding Owner.AddToMessageCommand}" CommandParameter="{Binding}"
+                          ToolTip.Tip="Add to message: omp reads the file with it (@path)" AutomationProperties.Name="Add to message">
+                    <ctl:Icon Data="{StaticResource IconAt}" Size="16" />
+                  </Button>
+                  <Button x:Name="ViewerMoreButton" Classes="icon viewer-action" ToolTip.Tip="More" AutomationProperties.Name="More actions for this file">
+                    <ctl:Icon Data="{StaticResource IconMoreHorizontal}" Size="16" Filled="True" />
+                    <Button.Flyout>
+                      <Flyout Placement="BottomEdgeAlignedRight" ctl:ChoiceMenu.CloseOnChoice="True">
+                        <StackPanel Width="250" Spacing="2">
+                          <ItemsControl ItemsSource="{Binding Owner.Editors}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="svc:EditorApp">
+                                <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" AutomationProperties.Name="{Binding Label}"
+                                        Command="{Binding $parent[ItemsControl].((vm:FileViewerViewModel)DataContext).Owner.OpenInEditorCommand}" CommandParameter="{Binding}">
+                                  <Grid ColumnDefinitions="Auto,*">
+                                    <ctl:Icon Data="{StaticResource IconCode}" Size="16" Margin="0,0,10,0" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Label}" VerticalAlignment="Center" />
+                                  </Grid>
+                                </Button>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                          <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                  Command="{Binding Owner.OpenInDefaultAppCommand}" CommandParameter="{Binding}" AutomationProperties.Name="Open in default app">
+                            <Grid ColumnDefinitions="Auto,*">
+                              <ctl:Icon Data="{StaticResource IconExternal}" Size="16" Margin="0,0,10,0" />
+                              <TextBlock Grid.Column="1" Text="Open in default app" VerticalAlignment="Center" />
+                            </Grid>
+                          </Button>
+                          <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                  Command="{Binding Owner.RevealInFileManagerCommand}" CommandParameter="{Binding}" AutomationProperties.Name="{Binding Owner.RevealLabel}">
+                            <Grid ColumnDefinitions="Auto,*">
+                              <ctl:Icon Data="{StaticResource IconFolder}" Size="16" Margin="0,0,10,0" />
+                              <TextBlock Grid.Column="1" Text="{Binding Owner.RevealLabel}" VerticalAlignment="Center" />
+                            </Grid>
+                          </Button>
+                          <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="6,4" />
+                          <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                  Command="{Binding Owner.CopyPathCommand}" CommandParameter="{Binding}" AutomationProperties.Name="Copy path">
+                            <Grid ColumnDefinitions="Auto,*">
+                              <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
+                              <TextBlock Grid.Column="1" Text="Copy path" VerticalAlignment="Center" />
+                            </Grid>
+                          </Button>
+                          <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                  Command="{Binding Owner.CopyRelativePathCommand}" CommandParameter="{Binding}" AutomationProperties.Name="Copy relative path">
+                            <Grid ColumnDefinitions="Auto,*">
+                              <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
+                              <TextBlock Grid.Column="1" Text="Copy relative path" VerticalAlignment="Center" />
+                            </Grid>
+                          </Button>
+                        </StackPanel>
+                      </Flyout>
+                    </Button.Flyout>
+                  </Button>
+                  <Button Classes="icon viewer-action" Command="{Binding Owner.ToggleViewerExpandedCommand}"
+                          ToolTip.Tip="{Binding Owner.ExpandTip}" AutomationProperties.Name="Expand the file">
+                    <Panel>
+                      <ctl:Icon Data="{StaticResource IconExpand}" Size="16" IsVisible="{Binding !Owner.IsViewerExpanded}" />
+                      <ctl:Icon Data="{StaticResource IconCollapse}" Size="16" IsVisible="{Binding Owner.IsViewerExpanded}" />
+                    </Panel>
+                  </Button>
+                  <Button x:Name="CloseViewerButton" Classes="icon viewer-action" Command="{Binding Owner.CloseViewerCommand}"
+                          ToolTip.Tip="Close the file" AutomationProperties.Name="Close the file">
+                    <ctl:Icon Data="{StaticResource IconClose}" Size="16" />
+                  </Button>
+                </StackPanel>
+              </Grid>
+            </Border>
+            <Border DockPanel.Dock="Top" Classes="viewer-notice" IsVisible="{Binding HasNotice}">
+              <TextBlock Classes="tertiary" Text="{Binding Notice}" TextWrapping="Wrap" />
+            </Border>
+            <Panel>
+              <ctl:CodeView x:Name="Code" Text="{Binding Text}" FileName="{Binding Name}" TargetLine="{Binding TargetLine}" IsVisible="{Binding ShowCode}" />
+              <ScrollViewer IsVisible="{Binding ShowMarkdown}" HorizontalScrollBarVisibility="Disabled">
+                <ctl:MarkdownView Markdown="{Binding MarkdownText}" Margin="16,12,16,24" />
+              </ScrollViewer>
+              <ScrollViewer IsVisible="{Binding ShowImage}" HorizontalScrollBarVisibility="Auto">
+                <Border Classes="image-frame" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="16">
+                  <Image Source="{Binding Image}" Stretch="Uniform" StretchDirection="DownOnly" RenderOptions.BitmapInterpolationMode="HighQuality" />
+                </Border>
+              </ScrollViewer>
+              <!-- Scrolls in a short viewer (a 360 px window had cut its buttons) -->
+              <ScrollViewer IsVisible="{Binding ShowState}" HorizontalScrollBarVisibility="Disabled" VerticalContentAlignment="Center">
+              <StackPanel Classes="files-state">
+                <Border Classes="files-disc">
+                  <ctl:Icon Data="{StaticResource IconFile}" Size="20" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Classes="files-state-title" Text="{Binding StateTitle}" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" />
+                <TextBlock Classes="muted" Text="{Binding StateDetail}" TextWrapping="Wrap" TextAlignment="Center" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8" Margin="0,4,0,0">
+                  <Button Content="Show the start" Command="{Binding ShowHeadCommand}" IsVisible="{Binding CanShowHead}" />
+                  <Button Content="Open in default app" Command="{Binding Owner.OpenInDefaultAppCommand}" CommandParameter="{Binding}" IsVisible="{Binding !IsMissing}" />
+                </StackPanel>
+              </StackPanel>
+              </ScrollViewer>
+              <TextBlock Classes="muted files-message" Text="Opening…" IsVisible="{Binding IsLoading}" />
+            </Panel>
+          </DockPanel>
+        </DataTemplate>
+      </ContentControl.ContentTemplate>
+    </ContentControl>
+
+    <!-- ── An action that failed ── -->
+    <Border Grid.Row="0" Grid.RowSpan="5" Classes="notice warning files-notice" IsVisible="{Binding HasNotice}" VerticalAlignment="Bottom" Margin="12">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,1,8,0" VerticalAlignment="Top" />
+        <TextBlock Grid.Column="1" Text="{Binding Notice}" TextWrapping="Wrap" FontSize="13" />
+        <Button Grid.Column="2" Classes="icon" Width="24" Height="24" Margin="8,-3,-4,-3" VerticalAlignment="Top" Command="{Binding DismissNoticeCommand}"
+                ToolTip.Tip="Dismiss" AutomationProperties.Name="Dismiss">
+          <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+        </Button>
+      </Grid>
+    </Border>
+  </Grid>
+</UserControl>
