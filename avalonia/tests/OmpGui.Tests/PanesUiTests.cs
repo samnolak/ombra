@@ -318,9 +318,9 @@ public sealed class PanesUiTests
     {
         var (w, vm) = await OpenAsync("subagents", 1180);
         await SendAsync(vm, "look into it", () => vm.Tasks.Subagents.Count == 3);
-        // After the turn the jobs are read even with the pane closed: the ⋮ shows that something runs
+        // After the turn the jobs are read even with the pane closed: the Background tasks toggle shows that something runs
         await Until(() => vm.Tasks.RunningCount == 2, "jobs read after the turn");
-        Assert.True(Named<Border>(w, "ViewsDot").IsEffectivelyVisible);
+        Assert.True(Named<Border>(w, "TasksDot").IsEffectivelyVisible);
         vm.ShowPaneCommand.Execute(SidePane.Tasks);
         await Until(() => vm.Tasks.HasJobs, "jobs read");
         await Settle();
@@ -330,6 +330,9 @@ public sealed class PanesUiTests
         Assert.Equal(["Running", "Failed", "Done"], vm.Tasks.Subagents.Select(r => r.StatusText));
         Assert.Equal(3, Named<ItemsControl>(w, "SubagentList").GetVisualDescendants().OfType<ToggleButton>().Count());
 
+        // A narrow column folds the pane toggles into ⋮, whose menu counts what runs
+        w.Width = 500;
+        await Settle();
         var menu = OpenViewsMenu(w);
         await Settle();
         var count = Named<Border>(Item(menu, "ViewTasksItem"), "TasksCount");

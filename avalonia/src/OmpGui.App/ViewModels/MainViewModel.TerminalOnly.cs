@@ -83,6 +83,9 @@ public sealed partial class MainViewModel
             case GuiEquivalent.BackgroundTasks:
                 ShowPaneCommand.Execute(SidePane.Tasks);
                 return true;
+            case GuiEquivalent.Shortcuts:
+                IsShortcutsOpen = true;
+                return true;
             case GuiEquivalent.Explain:
                 ShowCard(ExplainCard(cmd, cmd.Explanation));
                 return true;
@@ -127,15 +130,20 @@ public sealed partial class MainViewModel
     private static SessionCardViewModel ExplainCard(TerminalOnlyCommand cmd, string message) =>
         new("explain", "IconSparkle", $"/{cmd.Name} in this window", message);
 
+    /// <summary>The source the slash menu gives commands that run only in omp's terminal UI.</summary>
+    private const string TerminalOnlySource = "tui";
+
     /// <summary>
-    /// omp's catalog for the slash menu, plus its terminal-only builtins marked with where they go in the GUI
-    /// ("Settings", "terminal"…), so the menu shows what typing them does.
+    /// omp's catalog for the slash menu, plus its terminal-only builtins: the ones this window answers itself with its
+    /// own commands, the ones only omp's terminal runs marked <see cref="TerminalOnlySource"/> (listed last). Those the
+    /// window does another way (quit, copy, open a link, queue) are left out; typed, they still say how.
     /// </summary>
     private IEnumerable<SlashCommand> SlashMenuCommands()
     {
         var known = _commands.Select(c => c.Name).ToHashSet(StringComparer.Ordinal);
         return _commands.Concat(TerminalOnlyCommands.All
-            .Where(c => !known.Contains(c.Name) && c.Name is not ("q" or "status" or "rewind" or "providers")) // aliases: one entry each
-            .Select(c => new SlashCommand(c.Name, c.Description, null, c.Hint, [], [])));
+            .Where(c => !known.Contains(c.Name) && c.Gui != GuiEquivalent.Explain
+                        && c.Name is not ("q" or "status" or "rewind" or "providers")) // aliases: one entry each
+            .Select(c => new SlashCommand(c.Name, c.Description, null, c.Gui == GuiEquivalent.Terminal ? TerminalOnlySource : "builtin", [], [])));
     }
 }

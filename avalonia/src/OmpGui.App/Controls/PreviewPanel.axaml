@@ -24,13 +24,21 @@
       <Setter Property="CornerRadius" Value="0" />
       <Setter Property="Background" Value="Transparent" />
     </Style>
+    <Style Selector="Border.preview-agent">
+      <Setter Property="Background" Value="{DynamicResource GuiStatusInfoSoft}" />
+      <Setter Property="CornerRadius" Value="11" />
+      <Setter Property="Height" Value="22" />
+      <Setter Property="Padding" Value="8,0,10,0" />
+      <Setter Property="Margin" Value="0,0,4,0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
   </UserControl.Styles>
 
   <DockPanel>
     <!-- ── Toolbar ── -->
     <Panel DockPanel.Dock="Top">
       <Border Classes="preview-toolbar">
-        <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto" VerticalAlignment="Center">
+        <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto" VerticalAlignment="Center">
           <Button x:Name="BackButton" Grid.Column="0" Classes="icon" Command="{Binding BackCommand}"
                   ToolTip.Tip="Back" AutomationProperties.Name="Back">
             <ctl:Icon Data="{StaticResource IconArrowLeft}" Size="18" />
@@ -57,12 +65,20 @@
               </Button>
             </TextBox.InnerRightContent>
           </TextBox>
+          <!-- omp's browser tool is using the page (as Claude in Chrome marks the tab it drives); in the toolbar, so the page keeps its size -->
+          <Border x:Name="AgentBrowsingPill" Grid.Column="4" Classes="preview-agent" IsVisible="{Binding IsAgentBrowsing}"
+                  ToolTip.Tip="omp is using this page" AutomationProperties.Name="omp is using this page">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <Ellipse Classes="state-dot running" />
+              <TextBlock Text="omp" FontSize="{DynamicResource GuiFontS}" VerticalAlignment="Center" />
+            </StackPanel>
+          </Border>
           <!-- Select element (Claude Code's name; Codex's page comments): click an element, write what to change -->
-          <Button x:Name="AnnotateButton" Grid.Column="4" Classes="icon" Classes.on="{Binding IsAnnotating}" Command="{Binding ToggleAnnotateCommand}"
+          <Button x:Name="AnnotateButton" Grid.Column="5" Classes="icon" Classes.on="{Binding IsAnnotating}" Command="{Binding ToggleAnnotateCommand}"
                   ToolTip.Tip="Select an element to comment on (Ctrl/⌘+Shift+S)" AutomationProperties.Name="Select element">
             <ctl:Icon Data="{StaticResource IconSelect}" Size="18" />
           </Button>
-          <Button x:Name="ClosePreviewButton" Grid.Column="5" Classes="icon" Command="{Binding CloseCommand}"
+          <Button x:Name="ClosePreviewButton" Grid.Column="6" Classes="icon" Command="{Binding CloseCommand}"
                   ToolTip.Tip="Close preview" AutomationProperties.Name="Close preview">
             <ctl:Icon Data="{StaticResource IconClose}" Size="18" />
           </Button>

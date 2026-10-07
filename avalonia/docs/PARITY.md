@@ -136,7 +136,7 @@ extension commands that omp lists itself keep going to omp.
 | `/context` | yes | **Done** — the context ring and its popover (the breakdown as bars) |
 | `/stats` | yes | **Done** — context popover › Usage dashboard (link to omp's local dashboard) |
 | `/changelog [full]`, `/tools` | yes | **Done (typed)** |
-| `/hotkeys` | TUI | **Done** — the card lists the GUI's shortcuts; omp's TUI keys: its terminal |
+| `/hotkeys` | TUI | **Done** — opens the keyboard shortcut sheet (also ⌘/ / Ctrl+/); omp's TUI keys: its terminal |
 | `/extensions`, `/status` | TUI | **Done** — card → Settings › Plugins and skills — *Connectors* area; omp's dashboard: terminal |
 | `/agents` | TUI | **Via omp terminal** (per-agent models, prewalk, advisor config) |
 | `/git [revision]` | TUI | **Via omp terminal** (git TUI); branch chip — *Workspace* area |
@@ -166,7 +166,7 @@ extension commands that omp lists itself keep going to omp.
 | `/setup`, `/providers` | TUI | **Done** — opens Settings › Model providers |
 | `/plan`, `/plan-review` | TUI | **Via omp terminal** (plan mode). The Plan pane (*Panes* area) shows omp's todo plan |
 | `/vibe`, `/goal`, `/guided-goal`, `/loop` | TUI | **Via omp terminal** (omp's goal updates still show in the conversation) |
-| `/queue <message>` | TUI | **Done** differently: while omp works, Enter queues (`follow_up`) and Alt+Enter steers (`steer`) |
+| `/queue <message>` | TUI | **Done** differently: while omp works, Enter queues (`follow_up`) and Alt+Enter steers (`steer`); × or ↑ takes a queued message back (`remove_queued_message`) |
 | `/live`, `/pause` | TUI | **Via omp terminal** |
 
 ### Collaboration, export, plugins (`builtin-collaboration.ts`, `builtin-marketplace.ts`)
@@ -208,6 +208,7 @@ extension commands that omp lists itself keep going to omp.
 | `get_state` | **Done** — model, thinking, session name, todos, context ring, model options, queue settle |
 | `set_fast_mode` | **Done** — Model menu › Fast mode |
 | `get_available_commands`, `available_commands_update` | **Done** — slash menu |
+| `remove_queued_message` | **Done** — × on a queued message; ↑ in the empty box puts the last one back to edit (with its images) |
 | `set_todos` | **Missing** (the GUI shows todos; editing them: `/todo` typed) |
 | `set_host_tools`, `host_tool_*`, `set_host_uri_schemes`, `host_uri_*` | **Not applicable** (the GUI offers no tools of its own to the agent) |
 | `set_subagent_subscription`, `get_subagents`, `get_subagent_messages`, `subagent_*` | **Done** — Background tasks pane — *Panes* area |
@@ -220,7 +221,7 @@ extension commands that omp lists itself keep going to omp.
 | `set_auto_retry` | **Done** — Model menu › Auto-retry (state: `omp config get retry.enabled`, get_state has none) |
 | `abort_retry` | **Missing**: the retry notice shows; Stop aborts the run. Plan: "Cancel retry" on the notice |
 | `bash`, `abort_bash` | **Done** — `!command` in the message box runs in the project (the output joins the context, a "shell" row in the conversation, Stop on its card); `!!command` (kept out of the context) exists only in omp's terminal: its card offers a shell in the terminal panel |
-| `get_session_stats` | **Not used**: `/usage` and `/context` give the same numbers as omp prints them |
+| `get_session_stats` | **Done** — the context ring's popover: this session's input/output/cache tokens and cost. Plan limits come from `omp usage --json` (CLI side process; RPC has no usage command and `/usage` over RPC prints either the tallies or the limits as text) |
 | `export_html` | **Not used**: `/export` does the same and reports the path |
 | `get_last_assistant_text` | **Not applicable** (the GUI has the text) |
 | `set_session_name`, `session_info_update` | **Done** — rename |
@@ -248,7 +249,15 @@ omp's own interface for them.
 - **Files pane** — the project tree with git marks and "changed in this session", Go to file, a code viewer, open in an
   editor or the file manager (*Files* area).
 - **Browser preview and page comments** — a local web app beside the conversation; comments pinned to page elements
-  go with the next message.
+  go with the next message. omp's own browser tool drives the preview: the app serves the protocol of omp's cmux
+  backend (`CMUX_SOCKET_PATH`, see `AgentBrowserBridge`), so pages omp opens show there instead of in headless Chromium
+  (one page at a time; screenshots of the visible area through the web view's own snapshot call —
+  `Platform/WebViewSnapshot` — not full-page or element clips, as on a real cmux surface).
 - **Dictation** — speech to text on this computer, into the message box.
 - **Pets** — a pixel companion on the message box that follows what omp does (Settings › Pets).
 - **Plan history** — earlier plans and every change to the todo list, kept for the session (*Panes* area).
+- **Don't ask again / Deny and say why** (Claude Code's approval options) — omp 18.8's approval is a plain
+  Approve/Deny select and its own `tools.approval.<tool>: allow` can only allow a whole tool, so the client keeps the
+  rules (command prefix like `bash(npm test:*)`, exact command, or whole tool; this session / this project / always,
+  Settings › Permissions) and answers covered requests itself, noting *Allowed automatically* in the conversation.
+  A deny cannot carry a reason over RPC: the reason goes as a steering message, read right after the denied tool.

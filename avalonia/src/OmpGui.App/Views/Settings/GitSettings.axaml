@@ -77,7 +77,7 @@
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock x:Name="GitNotRepo" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0"
                            Text="This folder is not a git repository. Worktrees and omp's branch features need one: git init starts one." />
-                <Button Grid.Column="1" Content="Open terminal" Command="{Binding OpenTerminalCommand}" VerticalAlignment="Center" />
+                <Button Grid.Column="1" Classes="accent" Content="Open terminal" Command="{Binding OpenTerminalCommand}" VerticalAlignment="Center" />
               </Grid>
             </Border>
             <Border Classes="ws-note error" IsVisible="{Binding GitMissing}">
@@ -108,10 +108,10 @@
                   <TextBlock Text="Connected" VerticalAlignment="Center" />
                 </StackPanel>
               </Border>
-              <Button x:Name="GitHubSignIn" Content="Sign in…" Command="{Binding SignInToGitHubCommand}" IsVisible="{Binding GhSignedOut}"
+              <Button x:Name="GitHubSignIn" Classes="accent" Content="Sign in…" Command="{Binding SignInToGitHubCommand}" IsVisible="{Binding GhSignedOut}"
                       ToolTip.Tip="Runs gh auth login in a terminal" />
-              <Button Content="Sign in again…" Command="{Binding SignInToGitHubCommand}" IsVisible="{Binding GhProblem}" ToolTip.Tip="Runs gh auth login in a terminal" />
-              <Button x:Name="GitHubInstall" Content="Get GitHub CLI" Command="{Binding InstallGhCommand}" IsVisible="{Binding GhNotInstalled}"
+              <Button Classes="accent" Content="Sign in again…" Command="{Binding SignInToGitHubCommand}" IsVisible="{Binding GhProblem}" ToolTip.Tip="Runs gh auth login in a terminal" />
+              <Button x:Name="GitHubInstall" Classes="accent" Content="Get GitHub CLI" Command="{Binding InstallGhCommand}" IsVisible="{Binding GhNotInstalled}"
                       ToolTip.Tip="cli.github.com" />
               <Button Classes="icon" Command="{Binding CheckGitHubAgainCommand}" IsVisible="{Binding !GhChecking}" ToolTip.Tip="Check again" AutomationProperties.Name="Check GitHub again">
                 <ctl:Icon Data="{StaticResource IconReload}" Size="16" />

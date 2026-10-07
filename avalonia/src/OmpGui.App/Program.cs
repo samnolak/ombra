@@ -80,6 +80,15 @@ internal static class Program
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()
             .UsePlatformDetect()
+            // macOS: Avalonia 12.1's Metal path can present a frame rendered for the old size after a resize, and Core
+            // Animation stretches it (everything squeezed until the next repaint; AvaloniaUI/Avalonia#22215, unmerged).
+            // Native popups resizing (the permission menu's confirmation) hit the same path and can freeze
+            // (AvaloniaUI/Avalonia#22297). OpenGL first, popups drawn inside the window.
+            .With(new AvaloniaNativePlatformOptions
+            {
+                RenderingMode = [AvaloniaNativeRenderingMode.OpenGl, AvaloniaNativeRenderingMode.Software],
+                OverlayPopups = true,
+            })
             .WithInterFont()
             .LogToTrace();
 }

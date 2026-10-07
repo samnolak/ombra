@@ -32,7 +32,7 @@
           <TextBlock Classes="muted" TextWrapping="Wrap"
                      Text="Computers omp can run commands on with its ssh tool. It signs in with SSH keys only, never with a password." />
           <Border Classes="ws-note" IsVisible="{Binding ReadOnly}">
-            <TextBlock x:Name="SshReadOnlyNote" TextWrapping="Wrap" Text="omp isn't running: these are the saved hosts. Start omp to add or remove them." />
+            <TextBlock x:Name="SshReadOnlyNote" TextWrapping="Wrap" Text="{Binding ReadOnlyNote}" />
           </Border>
 
           <!-- Add a host: omp's /ssh add (name, host, user, port, key file, scope user or project) -->

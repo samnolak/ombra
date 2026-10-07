@@ -14,6 +14,10 @@ public sealed record PetOptions
     public string? Size { get; init; }
     /// <summary>Pets the user created, and changes to built-in ones (an entry whose id is a built-in pet's).</summary>
     public List<CustomPetOptions>? Custom { get; init; }
+    /// <summary>Where the user dragged the pet: its top-left corner as fractions (0–1) of the room the window leaves it
+    /// (the window's size less the pet's), so it stays in the same place, in the window, at any size. Both null: on the message box.</summary>
+    public double? X { get; init; }
+    public double? Y { get; init; }
 }
 
 /// <summary>One pet the user made or changed: which body, which coat colour, which accessory, and its name.</summary>

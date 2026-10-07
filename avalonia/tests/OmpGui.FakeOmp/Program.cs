@@ -42,10 +42,56 @@ if (scenario == "cli")
     var table = Environment.GetEnvironmentVariable("FAKE_OMP_CLI") is { Length: > 0 } cliFile && File.Exists(cliFile)
         ? JsonNode.Parse(File.ReadAllText(cliFile)) as JsonObject : null;
     var hit = table?.Where(kv => line == kv.Key || line.StartsWith(kv.Key + " ", StringComparison.Ordinal)).OrderByDescending(kv => kv.Key.Length).FirstOrDefault().Value;
+    // omp usage --json (cli/usage-cli.ts, omp 18.8.0) when the table has no answer for it: two subscriptions with
+    // 5-hour and weekly windows, resets relative to now, like a signed-in Claude Max and ChatGPT Plus account
+    if (hit is null && line == "usage --json") { Console.Out.Write(FakeUsageJson()); return 0; }
     if (hit is null) { Console.Error.WriteLine($"fake omp: no answer for \"{line}\""); return 1; }
     Console.Out.Write(hit["stdout"]?.GetValue<string>() ?? "");
     Console.Error.Write(hit["stderr"]?.GetValue<string>() ?? "");
     return hit["exit"]?.GetValue<int>() ?? 0;
+}
+// The shape of `omp usage --json` (raw provider payloads dropped), with omp's field names and units
+static string FakeUsageJson()
+{
+    var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    const long hour = 3_600_000;
+    object Limit(string provider, string id, string label, string windowId, string windowLabel, long durationMs, long resetsIn, double used, string status = "ok") => new
+    {
+        id = $"{provider}:{id}", label,
+        scope = new { provider, windowId, shared = true },
+        window = new { id = windowId, label = windowLabel, durationMs, resetsAt = now + resetsIn },
+        amount = new { used, limit = 100, remaining = 100 - used, usedFraction = used / 100, remainingFraction = 1 - used / 100, unit = "percent" },
+        status,
+    };
+    return JsonSerializer.Serialize(new
+    {
+        generatedAt = now,
+        reports = new object[]
+        {
+            new
+            {
+                provider = "anthropic", fetchedAt = now - 20_000,
+                limits = new[]
+                {
+                    Limit("anthropic", "5h", "Claude 5 Hour", "5h", "5 Hour", 5 * hour, 2 * hour + 10 * 60_000, 42),
+                    Limit("anthropic", "7d", "Claude 7 Day", "7d", "7 Day", 168 * hour, 76 * hour, 86, "warning"),
+                },
+                metadata = new { email = "dev@example.com", orgName = "Example" },
+            },
+            new
+            {
+                provider = "openai-codex", fetchedAt = now - 20_000,
+                limits = new[]
+                {
+                    Limit("openai-codex", "primary", "5 hours", "5h", "5 hours", 5 * hour, 4 * hour + 5 * 60_000, 9),
+                    Limit("openai-codex", "secondary", "7 days", "7d", "7 days", 168 * hour, 130 * hour, 16),
+                },
+                metadata = new { email = "dev@example.com", planType = "plus" },
+            },
+        },
+        accountsWithoutUsage = Array.Empty<object>(),
+        disabledCredentials = Array.Empty<object>(),
+    });
 }
 // Builtin slash commands answered like omp answers them over RPC: FAKE_OMP_COMMANDS names a JSON file mapping a
 // command prefix ("/mcp list") to the text it prints; each command sent is appended to FAKE_OMP_COMMAND_LOG.
@@ -149,6 +195,31 @@ var commandCatalog = new object[]
 };
 // The side panes' scenarios answer /jobs, and list it as omp lists the builtins it runs over RPC
 if (scenario is "plan" or "subagents") commandCatalog = [.. commandCatalog, new { name = "jobs", description = "Show background jobs", source = "builtin" }];
+// Like omp, which lists every builtin it runs over RPC (and runs them locally, never as a turn): the ones the app's
+// settings pages and panes read, and every command a test cans.
+commandCatalog = [.. commandCatalog,
+    new { name = "tools", description = "Show available tools", source = "builtin" },
+    new { name = "ssh", description = "Manage SSH connections", source = "builtin" },
+    new { name = "computer", description = "Toggle computer use", source = "builtin" },
+    new { name = "advisor", description = "Toggle the advisor", source = "builtin" },
+    new { name = "extended-context", description = "Toggle extended context", source = "builtin" },
+    new { name = "context", description = "Show context usage", source = "builtin" },
+    new { name = "usage", description = "Show provider usage", source = "builtin" }];
+foreach (var key in cannedCommands?.Select(kv => kv.Key) ?? [])
+    if (key.StartsWith('/') && key[1..].Split(' ')[0] is { Length: > 0 } cannedName
+        && !commandCatalog.Any(c => JsonSerializer.SerializeToNode(c)?["name"]?.GetValue<string>() == cannedName))
+        commandCatalog = [.. commandCatalog, new { name = cannedName, description = "Builtin", source = "builtin" }];
+// What omp 18.8 prints for the reads the settings pages make when a test cans nothing (slash-commands/helpers/*.ts)
+string? LocalBuiltinOutput(string text) => text switch
+{
+    "/mcp list" => "No MCP servers configured.",
+    "/tools" => "* read\n* bash\n* edit\n* write\n* grep\n* eval",
+    "/ssh list" => "No SSH hosts configured.",
+    "/computer status" => "Computer use: disabled · prelude: active · configured: display=auto, maxWidth=1280, maxHeight=800",
+    _ when text.StartsWith("/mcp ", StringComparison.Ordinal) || text.StartsWith("/ssh ", StringComparison.Ordinal)
+        || text.StartsWith("/computer", StringComparison.Ordinal) || text is "/context" or "/usage" => "",
+    _ => null,
+};
 string sessionFile = "";
 
 string NewSessionFile()
@@ -443,6 +514,28 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
             Emit(new { type = "tool_execution_end", toolCallId = tid, toolName = "bash", isError = ok != "Approve", result = new { content = new[] { new { type = "text", text = ok == "Approve" ? "done" : "Tool call denied by user: bash" } } } });
         }
     }
+    else if (!aborted && scenario == "approval-rules")
+    {
+        // omp 18.8's approval prompts as they are (tools/approval.ts formatApprovalPrompt with bash's and write's
+        // formatApprovalDetails): one request per line of the prompt — "write <path>" for the write tool, any other line a
+        // bash command — asked one after the other. FAKE_OMP_APPROVAL_LOG receives "<answer> <line>" for each.
+        var requests = message.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (var r = 0; r < requests.Length; r++)
+        {
+            var line = requests[r];
+            var write = line.StartsWith("write ", StringComparison.Ordinal);
+            var tool = write ? "write" : "bash";
+            var tid = $"r{r + 1}";
+            Emit(new { type = "tool_execution_start", toolCallId = tid, toolName = tool, args = write ? (object)new { path = line[6..], content = "hello" } : new { command = line } });
+            var did = $"ap{Interlocked.Increment(ref dialogSeq)}";
+            var title = write ? $"Allow tool: write\nPath: {line[6..]}\nContent:\nhello" : $"Allow tool: bash\nCommand: {line}";
+            var choice = await AskAsync(new { type = "extension_ui_request", id = did, method = "select", title, options = new[] { "Approve", "Deny" } }, did, null);
+            if (Environment.GetEnvironmentVariable("FAKE_OMP_APPROVAL_LOG") is { Length: > 0 } approvalLog)
+                File.AppendAllText(approvalLog, $"{choice ?? "(none)"} {line}\n");
+            var ok = choice == "Approve";
+            Emit(new { type = "tool_execution_end", toolCallId = tid, toolName = tool, isError = !ok, result = new { content = new[] { new { type = "text", text = ok ? "ran: " + line : "Tool call denied by user: " + tool } } } });
+        }
+    }
     else if (!aborted && scenario is "approval" or "approval-timeout")
     {
         Emit(new { type = "tool_execution_start", toolCallId = "t1", toolName = "bash", args = new { command = "echo hi" } });
@@ -579,6 +672,21 @@ while (true)
             Interlocked.Increment(ref queuedCount);
             Respond(id, type);
             break;
+        case "remove_queued_message":
+        {
+            // omp 18.4.4+: withdraws the first pending message with that text (steer and follow-up share one queue here)
+            var withdrawText = cmd?["message"]?.GetValue<string>() ?? "";
+            var stillQueued = new List<string>();
+            var withdrawn = false;
+            while (queue.TryDequeue(out var pending))
+            {
+                if (!withdrawn && pending == withdrawText) withdrawn = true;
+                else stillQueued.Add(pending);
+            }
+            foreach (var pending in stillQueued) queue.Enqueue(pending);
+            Respond(id, type, new { removed = withdrawn });
+            break;
+        }
         case "get_available_commands":
             Respond(id, type, new { commands = commandCatalog });
             break;
@@ -662,6 +770,20 @@ while (true)
             shellAbort?.Cancel();
             Respond(id, type);
             break;
+        case "get_session_stats":
+        {
+            // session-stats.ts: the tallies grow with the conversation (the first prompt carries the system prompt)
+            var turns = history.Count;
+            long input = turns == 0 ? 0 : 12_480 + 3_100L * turns, output = 820L * turns, cacheRead = 9_600L * Math.Max(0, turns - 1);
+            Respond(id, type, new
+            {
+                sessionId = Path.GetFileNameWithoutExtension(sessionFile), userMessages = (turns + 1) / 2, assistantMessages = turns / 2,
+                toolCalls = 0, toolResults = 0, totalMessages = turns,
+                tokens = new { input, output, cacheRead, cacheWrite = 0, total = input + output + cacheRead },
+                premiumRequests = 0, cost = Math.Round(input * 3e-6 + output * 15e-6 + cacheRead * 0.3e-6, 6), sessionFile,
+            });
+            break;
+        }
         case "get_login_providers":
             Respond(id, type, new { providers = new[] { new { id = "fakeauth", name = "Fake Provider", available = true, authenticated = signedIn } } });
             break;
@@ -764,13 +886,19 @@ while (true)
                 Respond(id, type, new { agentInvoked = false });
                 break;
             }
+            if (LocalBuiltinOutput(slash) is { } printed)
+            {
+                if (printed.Length > 0) Emit(new { type = "command_output", text = printed });
+                Respond(id, type, new { agentInvoked = false });
+                break;
+            }
             if (streaming) { Respond(id, type, error: "Agent is busy"); break; }
             // Like omp: the run exists as soon as the prompt is accepted (abort then waits for it).
             streaming = true;
             Respond(id, type);
             run = new CancellationTokenSource();
             var msg = cmd?["message"]?.GetValue<string>() ?? "";
-            var (n, delay) = scenario switch { "slow-stream" or "abort-hangs" => (100000, 20), "queue-stream" or "queue-stream-2" => (60, 20), "markdown" or "session" or "plan" or "subagents" => (0, 0), _ => (50, 0) };
+            var (n, delay) = scenario switch { "slow-stream" or "abort-hangs" => (100000, 20), _ when scenario.StartsWith("queue-stream", StringComparison.Ordinal) => (60, 20), "markdown" or "session" or "plan" or "subagents" => (0, 0), _ => (50, 0) };
             var promptImages = cmd?["images"] as JsonArray;
             _ = Task.Run(async () =>
             {

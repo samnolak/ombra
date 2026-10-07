@@ -289,7 +289,7 @@ public sealed class ConversationStateTests
 
         var notices = s.Snapshot().Items.OfType<NoticeItem>().Select(n => n.Text).ToList();
         Assert.Collection(notices,
-            n => Assert.Equal("Approved by you — Allow tool: bash", n),
+            n => Assert.Equal("Approved by you — bash", n),
             n => Assert.StartsWith("Question timed out without an answer; omp applied its default — Go?", n),
             n => Assert.Equal("Question withdrawn by omp — Name", n),
             n => Assert.Equal("Question closed (omp was stopped) — Other", n));

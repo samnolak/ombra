@@ -76,6 +76,21 @@ public sealed partial class PreviewViewModel : ObservableObject
     /// <summary>More on why the engine is unavailable (the engine's own reason, an install hint).</summary>
     [ObservableProperty] private string _engineDetail = "";
 
+    /// <summary>omp's browser tool is driving the page (AgentBrowserBridge): the panel says so until it has been idle a moment.</summary>
+    [ObservableProperty] private bool _isAgentBrowsing;
+
+    private DispatcherTimer? _agentIdle;
+
+    /// <summary>Runs a script in the page and returns the engine's result; set by the view (it throws while no page is open).</summary>
+    public Func<string, Task<string?>>? RunScript { get; set; }
+
+    /// <summary>Captures the page shown as a PNG (Platform/WebViewSnapshot); set by the view together with <see cref="RunScript"/>.
+    /// Failures are <see cref="OmpGui.ClientCore.AgentBrowserException"/>s with a message for the agent.</summary>
+    public Func<CancellationToken, Task<OmpGui.ClientCore.AgentScreenshot>>? CaptureScreenshot { get; set; }
+
+    /// <summary>The last navigation failed (the server did not answer); reset when the next one starts.</summary>
+    public bool LoadFailed { get; private set; }
+
     public PreviewViewModel()
     {
         Suggestions.CollectionChanged += (_, _) =>
@@ -133,7 +148,28 @@ public sealed partial class PreviewViewModel : ObservableObject
         CurrentUrl = uri;
         Title = "";
         IsLoading = true;
+        LoadFailed = false;
         NavigationRequested?.Invoke(uri);
+    }
+
+    /// <summary>The agent opens a page (omp's browser tool): like the address box; the reason when it is refused.</summary>
+    public string? NavigateForAgent(string address)
+    {
+        Navigate(address);
+        return HasMessage ? Message : null;
+    }
+
+    /// <summary>The agent used the page just now: the panel shows it for a few seconds after the last use.</summary>
+    public void NoteAgentActivity()
+    {
+        IsAgentBrowsing = true;
+        _agentIdle ??= new DispatcherTimer(TimeSpan.FromSeconds(4), DispatcherPriority.Background, (_, _) =>
+        {
+            _agentIdle!.Stop();
+            IsAgentBrowsing = false;
+        });
+        _agentIdle.Stop();
+        _agentIdle.Start();
     }
 
     [RelayCommand(CanExecute = nameof(HasPage))]
@@ -293,6 +329,7 @@ public sealed partial class PreviewViewModel : ObservableObject
     public void OnNavigationStarted(Uri? uri)
     {
         IsLoading = true;
+        LoadFailed = false;
         if (IsAllowed(uri))
         {
             CurrentUrl = uri;
@@ -304,6 +341,7 @@ public sealed partial class PreviewViewModel : ObservableObject
     public void OnNavigationCompleted(Uri? uri, bool success, bool canGoBack, bool canGoForward)
     {
         IsLoading = false;
+        LoadFailed = !success;
         CanGoBack = canGoBack;
         CanGoForward = canGoForward;
         if (IsAllowed(uri))

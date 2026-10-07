@@ -51,19 +51,22 @@ public sealed class App : Application
                 // After an update that brought a new pack, omp runs from the earlier one until the new one is installed.
                 return (installer.FindInstalled() ?? installer.FindPrevious()?.Runtime) is { } rt ? rt.ApplyTo(o) : o;
             }
-            OmpLaunchSpec Launch(LaunchRequest request) => Current().ToLaunchSpec(request);
+            // omp's browser tool drives the preview panel (AgentBrowserBridge: the cmux protocol omp speaks)
+            var agentBrowser = AgentBrowserBridge.TryStart();
+            OmpLaunchSpec WithBrowser(OmpLaunchSpec spec) => agentBrowser?.AddTo(spec) ?? spec;
+            OmpLaunchSpec Launch(LaunchRequest request) => WithBrowser(Current().ToLaunchSpec(request));
             configError ??= options.ApprovalModeWarning;
             var initial = new LaunchRequest(options.WorkingDirectory ?? ExistingDirectory(options.LastWorkingDirectory),
                 ApprovalMode: OmpRuntimeOptions.EffectiveApprovalMode(options.ApprovalMode));
-            // "Never ask" was chosen explicitly before; say so at every start, not only in the header chip.
+            // "Bypass permissions" was chosen explicitly before; say so at every start, not only in the chip.
             if (initial.ApprovalMode == "yolo")
-                configError = (configError is null ? "" : configError + "\n") + "Approvals are off (Never ask): omp runs every tool, including shell commands, without asking. Change it in the header.";
+                configError = (configError is null ? "" : configError + "\n") + "Bypass permissions is on: omp runs every tool, including shell commands, without asking. Change it under the message box.";
             installer.RemovePrevious(); // packs of earlier versions, once this version's is installed (before omp starts)
             var session = new SessionController(Launch, initial);
             var updater = OmpGui.App.Services.UpdateInstaller.ForThisApp(out var noInstall);
             var vm = new MainViewModel(session, args, configError, store)
             {
-                OmpTuiLaunch = dir => Current().ToTuiLaunchSpec(dir),
+                OmpTuiLaunch = dir => WithBrowser(Current().ToTuiLaunchSpec(dir)),
                 OmpCliLaunch = (cliArgs, dir) => Current().ToCliLaunchSpec(cliArgs, dir),
                 RuntimeInstaller = installer,
                 Updates = new OmpGui.App.Services.UpdateChecker(new HttpClient { Timeout = TimeSpan.FromMinutes(30) },
@@ -73,10 +76,16 @@ public sealed class App : Application
                 UpdateInstaller = updater,
                 UpdateInstallUnavailable = noInstall,
             };
+            if (agentBrowser is not null)
+            {
+                agentBrowser.Page = new PreviewAgentPage(vm);
+                desktop.Exit += (_, _) => agentBrowser.Dispose();
+            }
             var window = new MainWindow { DataContext = vm, Notifier = CreateNotifier() };
             desktop.MainWindow = window;
             window.Opened += (_, _) => vm.OnWindowOpened();
             vm.NotificationsEnabled = options.Notifications ?? true;
+            vm.SendKey = options.SendKey == "mod-enter" ? "mod-enter" : "enter";
             SetUpMenus(desktop, window, vm);
         }
         base.OnFrameworkInitializationCompleted();

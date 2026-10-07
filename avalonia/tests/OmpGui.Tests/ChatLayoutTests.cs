@@ -77,6 +77,31 @@ public sealed class ChatLayoutTests
         finally { Environment.SetEnvironmentVariable("FAKE_OMP_PACE_MS", null); }
     }
 
+    /// <summary>A low new-session window drops the logo, then the starters; nothing of the greeting is cut off above.</summary>
+    [AvaloniaFact]
+    public async Task A_low_window_keeps_the_whole_greeting_visible()
+    {
+        var (w, vm) = await Open("normal");
+        var area = w.FindControl<Grid>("ConversationArea")!;
+        var empty = w.FindControl<StackPanel>("EmptyState")!;
+        foreach (var width in new double[] { 480, 800, 1180 })
+            for (double height = 360; height <= 760; height += 40)
+            {
+                w.Width = width;
+                w.Height = height;
+                await Settle(60);
+                var box = new Rect(area.TranslatePoint(default, w)!.Value, area.Bounds.Size);
+                foreach (var c in empty.GetVisualDescendants().OfType<Control>().Where(c => c.IsEffectivelyVisible && c is TextBlock or Button or Image && c.Bounds.Height > 0))
+                {
+                    var r = new Rect(c.TranslatePoint(default, w)!.Value, c.Bounds.Size);
+                    Assert.True(r.Top >= box.Top - 0.5 && r.Bottom <= box.Bottom + 0.5, $"{width}x{height}: {c.GetType().Name} {r} is cut off ({box})");
+                }
+            }
+        Assert.True(w.FindControl<WrapPanel>("Greeting")!.IsEffectivelyVisible);
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
     [AvaloniaFact]
     public async Task Starting_and_ending_a_run_moves_neither_the_composer_nor_the_conversation_bottom()
     {
@@ -124,7 +149,11 @@ public sealed class ChatLayoutTests
             var container = w.FindControl<ListBox>("Transcript")!.ContainerFromItem(empty);
             if (container is not null) Assert.True(container.Bounds.Height < 1, "an empty reply took " + container.Bounds.Height);
         }
-        Assert.Equal([replies.Last(r => r.HasText)], replies.Where(r => r.ShowActions));
+        // The reply that ends the turn has the copy action once: on the "Worked for…" line after it, not a line of its own
+        var last = replies.Last(r => r.HasText);
+        Assert.DoesNotContain(replies, r => r.ShowActions);
+        Assert.Same(last, vm.Rows.OfType<TurnEndRowViewModel>().Last().Reply);
+        Assert.True(last.IsTurnEnd && last.HasTurnEndRow);
         Assert.Contains(vm.Rows.OfType<ToolRowViewModel>(), t => t.Name == "todo" && t.Summary == "init · 3 items");
         await vm.DisposeAsync();
         w.Close();
@@ -166,6 +195,48 @@ public sealed class ChatLayoutTests
         await Settle();
         Assert.False(AtBottom(w), "a resize pulled the reader back down");
         Assert.True(w.FindControl<Button>("JumpToLatest")!.IsVisible || !AtBottom(w));
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Sending_goes_to_the_latest_message_and_the_jump_button_brings_a_reader_back()
+    {
+        var (w, vm) = await Open("session", 1180, 600);
+        await RunSession(vm);
+        Assert.True(AtBottom(w), "the reply was not followed to its end");
+        var list = w.FindControl<ListBox>("Transcript")!;
+        var jump = w.FindControl<Button>("JumpToLatest")!;
+        var p = list.TranslatePoint(new Point(list.Bounds.Width / 2, 100), w)!.Value;
+        async Task ScrollUp()
+        {
+            for (var i = 0; i < 6; i++) w.MouseWheel(p, new Vector(0, 3));
+            await Settle();
+            Assert.False(AtBottom(w), "the wheel did not scroll up");
+            Assert.True(jump.IsVisible, "no way back to the latest message");
+        }
+
+        // Scrolled up: the ↓ button goes back down and follows again
+        await ScrollUp();
+        jump.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        await Settle();
+        Assert.True(AtBottom(w), "the jump button did not reach the end");
+        Assert.False(jump.IsVisible);
+
+        // Scrolled up, then a message sent: the conversation goes to its end, the streamed reply included
+        await ScrollUp();
+        Environment.SetEnvironmentVariable("FAKE_OMP_PACE_MS", "1");
+        try
+        {
+            vm.ComposerText = "and again";
+            vm.SendCommand.Execute(null);
+            await Until(() => vm.Phase == SessionPhase.Running, "running");
+            await Until(() => vm.Phase == SessionPhase.Ready, "run end");
+            await Settle();
+        }
+        finally { Environment.SetEnvironmentVariable("FAKE_OMP_PACE_MS", null); }
+        Assert.True(AtBottom(w), "sending did not go to the latest message");
+        Assert.False(jump.IsVisible);
         await vm.DisposeAsync();
         w.Close();
     }
@@ -217,12 +288,15 @@ public sealed class ChatLayoutTests
         Assert.False(row.ShowTail);
         row.Update(new ToolItem(1, "t", "bash", "{}", ToolStatus.Running, "a\n\nb\nc\nd\ne\n", "$ make"));
         Assert.True(row.ShowTail);
-        Assert.Equal("b\nc\nd\ne", row.Tail);
+        Assert.Equal("c\nd\ne", row.Tail);
+        Assert.Equal(row.Tail, row.Result);
         row.IsExpanded = true;
         Assert.False(row.ShowTail); // the full output is open instead
+        Assert.False(row.ShowResult);
         row.IsExpanded = false;
         row.Update(new ToolItem(1, "t", "bash", "{}", ToolStatus.Succeeded, "a\nb\n", "$ make"));
         Assert.False(row.ShowTail);
+        Assert.Equal("a\nb", row.Result); // done: its first lines
     }
 
     [Fact]

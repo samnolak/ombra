@@ -36,6 +36,9 @@ case "$MODE" in
     FILES=("$TARGET/OmpGui.exe")
     for f in "$TARGET"/OmpGui*.dll; do [ -f "$f" ] && FILES+=("$f"); done
     WIN=(); for f in "${FILES[@]}"; do WIN+=("$(cygpath -w "$f")"); done
+    # Git Bash rewrites arguments that look like POSIX paths ("/fd" → "C:/Program Files/Git/fd"), so signtool lost
+    # its switches; the paths above are already converted with cygpath.
+    export MSYS2_ARG_CONV_EXCL='*'
     "$SIGNTOOL" sign /fd sha256 /td sha256 /tr "${WINDOWS_TIMESTAMP_URL:-http://timestamp.digicert.com}" \
       /f "$(cygpath -w "$TMP/cert.pfx")" /p "$WINDOWS_CERT_PASSWORD" "${WIN[@]}" > "$TMP/sign.log" 2>&1 || { cat "$TMP/sign.log"; exit 1; }
     "$SIGNTOOL" verify /pa "${WIN[@]}" > "$TMP/verify.log" 2>&1 || { cat "$TMP/verify.log"; exit 1; }

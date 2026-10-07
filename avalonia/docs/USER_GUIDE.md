@@ -59,29 +59,72 @@ project yet), so the OS warns on first start:
 
 ## Daily use
 
-- **Sessions** — the sidebar lists omp's sessions of all your projects, grouped by project folder (the open
-  project first, pinned sessions first in each group); **Search** filters them by title or folder. Click one to
-  continue it; **New session** (Ctrl/⌘+N) starts a fresh one, and a project group's **+** starts one in that
-  project. The title opens the session menu (below).
-- **Models and thinking** — in the message box: the *Thinking effort* chip sets omp's reasoning level (off,
-  minimal, low, medium, high, xhigh; hidden for models that don't reason) and the model chip lists the models omp
-  can use (type to search) with the model options below the list.
-- **Permissions** — the mode chip under the message box says when omp asks before running tools: *Accept edits*
-  (edits run, commands ask; the default), *Ask permissions* (edits ask too), or *Bypass permissions* (nothing asks;
-  asks for a second confirmation, and the chip turns red). Changing the mode restarts omp on the same session, so
-  it is refused while a run is going. When omp asks, a card shows what it wants to run with **Allow** / **Deny**
-  (keys 1 / 2 or Alt/⌥+A / Alt/⌥+D; 1–9 pick an answer to a question); Esc closes the card without answering.
-- **Message box** — Enter sends; Shift+Enter adds a line. While omp is working, **Queue** (or Enter) adds a
-  follow-up — queued messages are listed above the box — and **Steer** (or Alt+Enter) changes the current run.
+- **Sessions** — the sidebar lists omp's sessions of all your projects, grouped by project folder. Sessions are
+  ordered by their last message (yours or the agent's), newest first, and groups by their newest session; opening a
+  session does not reorder the list. Each row shows how long ago its last message was (*now*, *5m*, *3h*, *2d*, then
+  the date), or a dot while omp is busy there: green and pulsing while it works, blue when it waits for your
+  approval or answer, clay for a reply that came while the window was in the background. **Pinned** sessions are listed on their
+  own at the top (pins are omp's own, so `/pin` and omp's session picker agree). **Search** filters by title or
+  folder. Click a session to continue it; **New session** (Ctrl/⌘+N) starts a fresh one, and a project's **+** starts
+  one in that project. Ctrl+Tab and Ctrl+Shift+Tab go to the next and previous session. Hover a session for **Pin**
+  and **⋯** (or right-click it): **Rename** (opens it and edits its name in the header), **Pin / Unpin**, **Copy path**
+  (the session file) and **Delete…**, after a confirmation; deleting the open session works like the session menu's
+  Delete (a new session starts). The folder button at the top of the sidebar **adds a project folder** to the list;
+  hover a project's header (or right-click it) to **remove it from the sidebar** (⊖) — only the list changes, the
+  folder and its sessions stay on disk, **Undo** brings it back, and so does adding the folder again. Drag the
+  sidebar's right edge to make it wider or narrower (220–480 px; double-click the edge for the default); Ctrl/⌘+B
+  hides and shows it. Added and removed projects and the width are remembered in the client's settings file. The
+  title opens the session menu (below).
+- **Models and thinking** — in the message box: the *Thinking effort* chip sets omp's reasoning level (*Off*,
+  *Minimal*, *Low*, *Medium*, *High*, *Extra high*, *Max* — each with a line on what it does; only the levels the
+  model accepts; hidden for models that don't reason) and the model chip lists the models omp can use (type to
+  search) with the model options below the list. The model menu opens above the message box, so what you are writing
+  stays in view.
+- **Permissions** — the mode chip under the message box says when omp asks before running tools: *Ask permissions*
+  (edits and commands ask), *Accept edits* (edits run, commands ask; the default) or *Bypass permissions* (nothing
+  asks). The mode colours the chip, the box's border while you type and the Send button: grey, violet, red. Shift+Tab
+  in the message box steps through the modes; Bypass always asks for a second confirmation first. Changing the mode
+  restarts omp on the same session: once you stop pressing Shift+Tab, and never in the middle of a run (it waits for
+  the run to end). When omp asks, a card in the conversation says what it wants (*omp wants to run a command*) and
+  shows the command or file, with **Allow** / **Deny** (keys 1 / 2 or Alt/⌥+A / Alt/⌥+D; 1–9 pick an answer to a
+  question, omp's suggestion carries a *Recommended* badge); Esc closes the card without answering.
+  *Don't ask again for …* allows the request and keeps a rule for **This session** (until the app quits), **This
+  project** (the project folder) or **Always** (every project): for a command it covers commands starting with the
+  same words (`npm test` covers `npm test --watch`, not `npm testing`; `git status`, `npm run build` keep their
+  subcommand); for a command chained with `;` `&&` `|`, redirected or substituted, run through a wrapper (`sudo`,
+  `env`, `bash -c`) or destructive (`rm`, `mv`, `chmod`, `kill`…) only that exact command; for other tools every
+  request of that tool. A prefix rule never covers a chained, redirected or multi-line command, whatever it starts
+  with, and no rule covers a command omp shortened in its request. When a rule answers, the conversation says
+  *Allowed automatically — …*. **Deny and say why…** (key 3) opens a box: what you type (Enter sends, Esc closes the
+  box) denies the request and reaches omp as a steering message, read right after the denied tool. Rules are the
+  app's own (omp 18.8 can only allow a whole tool), listed with **Remove** in *Settings → Permissions*.
+- **Message box** — Enter sends; Shift+Enter adds a line (*Settings → General → Send messages with* switches to
+  Ctrl/⌘+Enter to send, Enter then adds a line). While omp is working, **Queue** (or Enter) adds a
+  follow-up and **Steer** (or Alt/⌥+Enter) hands a message to the current run at its next step. Queued messages are
+  listed in grey above the box until omp takes them: **×** takes one back, and ↑ in the empty box brings the last
+  one back to edit (with its images). A long paste (over 800 characters or 3 lines) becomes a *Pasted text +N lines*
+  chip instead of filling the box (hover it to see the start, × removes it); it is sent in full after what you typed.
   **+** opens *Attach images* (up to 3 per message; paste or drag & drop works too, other files are inserted as
-  paths), *Commands and skills*, *Connectors*, *Plugins* and *Comment on the page*. Type `/` for omp's commands.
-  Before the first message the chips under the box also pick the project (a new session in another project, or
-  **Open folder…**).
+  paths), *Commands and skills*, *Connectors*, *Plugins* and *Comment on the page*. Type `/` for commands: ↑/↓ or
+  Tab/Shift+Tab choose, Tab or Enter completes, Esc closes; what only omp's terminal runs is listed last, under
+  *Terminal only*. Before the first message the chips under the box also pick the project (a new session in another
+  project, or **Open folder…**).
+- **New session** — the page asks *What should we work on in ‹project›?*; the project opens the same project menu,
+  and the starter prompts under it (*Explain how this project is organized*, *Find a bug and fix it*, *Add tests for
+  the code I changed last*) fill the message box to edit and send. Notices from omp's start do not hide it.
+- **Tool calls** — each is one line, as in Claude Code: a dot (grey and blinking while it runs, green when done, red
+  when it failed), the tool's name and what it works on, and how long it took (from a tenth of a second). Under it,
+  what it gave: *Read 120 lines*, *Found 12 files*, *Added 2 lines, removed 1 line*, or the first three lines of its
+  output with **… +N lines** to see all of it; a running command shows its newest lines. Click the line to open the
+  whole output; a file change shows as it happens. *Thinking…* counts the seconds while the model thinks, then
+  reads *Thought for 4s*; click it for the thoughts.
+- **Keyboard shortcuts** — Ctrl/⌘+/ (or `/hotkeys`) shows them all; Esc closes the sheet.
 - **Stop** — the Stop button or Esc stops the current run; if omp does not stop, the button offers Force stop.
-- **Terminal** — Ctrl+` (Ctrl on macOS too), the terminal button in the header or **⋮ → Terminal** opens a
+- **Terminal** — Ctrl+` (Ctrl on macOS too), the terminal button in the header (or **⋮ → Terminal**) opens a
   terminal beside the conversation (drag its edge to resize it; in a narrow window it covers the conversation until
-  it is hidden), in the project folder, with the keyboard in it: **+ Shell** for a shell, **+ omp TUI** for omp's own terminal UI, for features
-  omp offers only there (plan, goal, vibe…).
+  it is hidden), in the project folder, with the keyboard in it: **+ Shell** for a shell, **+ omp TUI** for omp's own
+  terminal UI, for features omp offers only there (plan, goal, vibe…). With no terminal open the panel offers
+  **New shell** and **omp TUI**.
 - **Project menu** — click the project's name next to the session title: **Browse files** (the Files pane),
   **Show in Finder** / **Show in Explorer** / **Open in file manager**, **Open in VS Code** (or Cursor, Windsurf,
   Zed, Sublime Text — only the editors whose command is on your PATH), **Open terminal here**, **Copy path**, a new
@@ -106,6 +149,15 @@ project yet), so the OS warns on first start:
   local addresses that appear in omp's tool output (dev servers it starts) are offered as chips. It uses the system's
   web engine: WebView2 on Windows, WebKit on macOS, WebKitGTK (`libwebkit2gtk-4.1`) on Linux; when the engine is
   missing the panel says what to install and offers **Open in browser**.
+- **omp browses in the preview** — when omp opens a web page with its browser tool, the page opens here rather
+  than in a hidden browser: the preview opens by itself and you watch each step; a pulsing **omp** pill in its
+  toolbar shows while omp reads, clicks or types on the page. The preview shows one page: a second tab omp opens
+  takes it over. omp reads pages as text (their elements and content) and can take screenshots of what the preview
+  shows: the visible part of the page (not the whole page, not one element), taken by the web view itself, so no
+  Screen Recording permission is needed; keep the preview open while omp works. Only http and https pages open
+  (for a local file, ask omp to serve it, e.g. `python3 -m http.server`).
+  The terminal's omp uses the same preview. To give omp its own hidden browser back, run
+  `omp config set browser.cmux false` (omp's setting for this kind of embedded browser) and restart omp.
 - **Comments on the page** — **Select element** in the preview's toolbar (or **+ → Comment on the page**, or
   Ctrl/⌘+Shift+S) turns on the mode: point at an element (it is outlined), click it, write what to change and press
   **Comment** (or Enter). A numbered pin marks the element on the page and the comment becomes a chip in the message
@@ -114,11 +166,13 @@ project yet), so the OS warns on first start:
   each with what finds the element in the code: its selector, opening tag, text, position and size and — for
   React ≤ 18, Vue and Svelte dev builds — the source file. Comments on several pages can go together, up to 20 at a
   time.
-- **Views (⋮)** — the ⋮ button at the right of the header opens the Views menu: **Files**, **Background tasks**
-  (with how many run now), **Plan** (with how many steps are done), then **Browser** and **Terminal**; a tick marks
-  what is shown. Files, Background tasks and Plan open in a pane right of the conversation (drag its edge to resize;
-  in a narrow window it covers the conversation until you close it with ×). A small blue dot on ⋮ means background
-  tasks are running.
+- **Panes** — the buttons at the right of the header open **Files** (Ctrl/⌘+Shift+F), **Plan** (Ctrl/⌘+Shift+P),
+  **Background tasks** (Ctrl/⌘+Shift+T), the **Terminal** (Ctrl+`) and the **Browser** preview (Ctrl/⌘+Shift+B); a
+  lit button means its pane is open, and its tooltip names its shortcut. When the header has too little room for
+  them beside the title, project and branch, they fold into **⋮**, a menu that lists them by name with their shortcuts (with how many background tasks
+  run now, and how many plan steps are done); a tick marks what is shown. Files, Background tasks and Plan open in a
+  pane right of the conversation (drag its edge to resize; in a narrow window it covers the conversation until you
+  close it with ×). A small blue dot on the Background tasks button (or on ⋮) means background tasks are running.
   - *Plan* — the agent's steps (omp's todo list) by phase, each with a checkbox: checked when done, a blue box with a
     dot for the step in progress (with what the run does now under it), an orange bar and what it waits on when
     blocked, a cross when dropped. Finished steps stay; a plan the agent replaces or clears stays under *Earlier
@@ -137,16 +191,24 @@ project yet), so the OS warns on first start:
 - **Menus and tray** — on macOS the app menu has **Settings…** (⌘,) and the menu bar *File* (New Session, Open
   Folder…) and *View* (Sessions, Terminal, Events). Where the desktop has a tray or menu-bar area, an OMP GUI icon
   there offers **Show OMP GUI**, **New Session** and **Quit**.
-- **In the conversation** — **Retry** on a failed reply, **Copy the message as Markdown**, and **Jump to latest**
-  when you have scrolled up.
+- **In the conversation** — **Retry** on a failed reply. Point at a reply's end (*Worked for 12s · 3 tools*) for
+  **Copy** (as Markdown); point at one of your messages for **Copy** and **Rewind to here** (a new session from
+  before it, the message back in the box, like *Rewind…* in the session menu). The conversation
+  follows a streaming reply while you are at (or near) its end; scroll up to read and it stays put, with a round
+  **↓** button at the bottom right to jump back to the latest message. Sending a message, or opening another
+  session, always goes to the end.
 
 | Shortcut | Action |
 |---|---|
-| Enter / Shift+Enter | send / new line |
-| Alt+Enter | steer the running turn |
+| Enter / Shift+Enter | send / new line (Ctrl/⌘+Enter sends instead when chosen in Settings → General) |
+| Alt+Enter (⌥Enter) | steer the running turn |
+| Shift+Tab | next permission mode (Ask → Accept edits → Bypass, which asks to confirm) |
+| ↑ (in the empty message box) | edit the last queued message |
+| Ctrl+/ (⌘/) | keyboard shortcuts |
 | Ctrl+Enter (⌘+Enter) | send |
 | Ctrl+N (⌘+N) | new session |
-| Ctrl+B (⌘+B) | show / hide sessions |
+| Ctrl+B (⌘+B) | show / hide the sidebar |
+| Ctrl+Tab / Ctrl+Shift+Tab | next / previous session in the sidebar |
 | Ctrl+, (⌘+,) | settings |
 | Ctrl+` (Ctrl on macOS too) | terminal panel |
 | Ctrl+Shift+P (⇧⌘P) | Plan pane |
@@ -155,9 +217,9 @@ project yet), so the OS warns on first start:
 | Ctrl+Shift+B (⇧⌘B) | browser preview |
 | Ctrl+Shift+S (⇧⌘S) | select an element in the preview to comment on |
 | Ctrl+Shift+Space (⇧⌘Space) | dictation (Enter finishes, Esc cancels) |
-| Ctrl+V (⌘V) | paste text, images or files |
-| 1 / 2, Alt+A / Alt+D (⌥A / ⌥D) | allow / deny on an approval card; 1–9 pick an answer |
-| Esc | close a question card (when it has the focus), or stop the run |
+| Ctrl+V (⌘V) | paste text, images or files (a long text becomes a chip) |
+| 1 / 2 / 3, Alt+A / Alt+D (⌥A / ⌥D) | allow / deny / deny and say why on an approval card; 1–9 pick an answer |
+| Esc | leave Settings, close the shortcut sheet, the *say why* box, or a question card (when it has the focus), or stop the run |
 | F12 | event log (also *Settings → Diagnostics → RPC events*) |
 
 ### Session menu
@@ -191,9 +253,14 @@ report on a card above the message box:
 The ring with a percentage at the right end of the row under the message box shows how full the model's context
 is; it turns orange from 70 % and red from 85 % (omp compacts the conversation on its own near the end, when
 Auto-compact is on). Click it for the breakdown as bars (the parts omp's `/context` reports, the auto-compact buffer,
-free room), this session's tokens and cost (or, for a subscription, the provider's limits with when they reset),
-**Compact now**, **Measure again** and a link to omp's **Usage dashboard** across all sessions. While it is open it
-refreshes after each reply.
+free room), this session's tokens (input, output, cache) and cost (when omp prices the model), **Compact now**,
+**Measure again** and a link to omp's **Usage dashboard** across all sessions. When the model's provider reports plan
+limits (for example a Claude or ChatGPT subscription: the 5-hour and weekly windows), *Plan usage* shows each as a
+meter with the share used and when it resets ("resets in 2h 10m"); the bar turns orange from 80 % and red when the
+limit is used up. **All providers** opens Settings → Model providers. Providers that report no usage show nothing.
+While it is open it refreshes after each reply. The limits come from omp's own usage reports (`omp usage`, run in the
+background: nothing is sent to the conversation); omp caches them, and the app asks again at most every 30 seconds,
+after a reply ends, or when you click refresh.
 
 ### Model options
 
@@ -211,23 +278,34 @@ Typed in the message box they are never sent to omp as a message: where the wind
 `/settings` → Settings, `/login` (`/setup`, `/providers`) → Model providers, `/new` → a new session, `/resume` → the
 sessions list (text after it filters the list), `/model` without arguments → the model picker, `/hub` → Background
 tasks, `/branch` or `/rewind` → Rewind, `/drop` → Delete session, `/restart` → restarts omp, `/extensions` and
-`/status` → a card that opens Plugins and skills. `/quit`, `/exit`, `/copy`, `/open`, `/queue` and `/hotkeys` get a
-card that says what to use in the window instead. Otherwise a card offers **Open omp terminal**, omp's own interface
-in the terminal panel (a separate omp with its own session). The `/` menu shows where each goes; a skill, prompt or
+`/status` → a card that opens Plugins and skills, `/hotkeys` → the keyboard shortcuts. `/quit`, `/exit`, `/copy`,
+`/open` and `/queue` get a card that says what to use in the window instead (the `/` menu leaves them out).
+Otherwise a card offers **Open omp terminal**, omp's own interface in the terminal panel (a separate omp with its own
+session); the `/` menu lists these last, under *Terminal only*. A skill, prompt or
 extension omp itself offers under such a name is sent to omp as usual. `!command` runs a shell command in the project
 through omp (the output joins the conversation and the context); `!!command` offers to open a shell instead.
 
 ## Settings
 
 **Settings** at the bottom of the sidebar (in the header while the sidebar is hidden), Ctrl+, (⌘,) or
-`/settings`. Pages: **General**, **Model providers**, **Connectors**, **Plugins and skills**, **Computer use**, **Git and
-worktrees**, **SSH hosts**, **Pets**, **Updates**, **Advanced** and **Diagnostics**. The ones without a section of
+`/settings`. The settings fill the window: their page list takes the sidebar's place, and **Back to app** at its top
+(or Esc) returns to the conversation. Pages: **General**; for omp, **Model providers**, **Connectors**, **Plugins and
+skills**, **Computer use**, **Git and worktrees**, **SSH hosts**; for this app, **Pets** and **Updates**; for
+troubleshooting, **Advanced** and **Diagnostics**. In a narrow window the pages are a strip across the top that
+scrolls sideways (its faded edge shows there are more). The ones without a section of
 their own below:
 
-- **General** — *Appearance* (System, Light or Dark) and *Notifications* (see Daily use).
+- **General** — *Appearance* (System, Light or Dark), *Notifications* (see Daily use) and *Send messages with*
+  (Enter, or Ctrl/⌘+Enter).
+- **Permissions** — the *Don't ask again* rules given on approval cards: what each covers, as the rule
+  (`bash(npm test:*)`), and where (*This session*, *This project* with its folder, *All projects*), each with
+  **Remove** — omp asks again from the next request. Project and always rules are kept in the GUI's settings file
+  (`approvalRules`), session rules only until the app quits.
 - **Model providers** — the providers omp can use, each with **Sign in** or *Signed in*; the browser link and any
   code appear above the message box. The list appears while omp is running. API keys stay in omp's configuration.
-- **Advanced** — *Advanced: omp runtime*: which omp the app starts. **Command** empty means the omp the app
+  Below it, *Plan usage* shows every signed-in account whose provider reports limits (subscription windows, spend),
+  as meters with the share used and the time to reset, with a refresh button. Hidden when no provider reports usage.
+- **Advanced** — *omp runtime*: which omp the app starts. **Command** empty means the omp the app
   installed, otherwise omp from PATH; *Arguments before omp's own* (one per line; for your own Bun setup the command
   is `bun` with `--no-install` and the path to omp's `cli.ts`); *Profile* (`OMP_PROFILE`); **Save and restart omp**,
   and **Install omp 18.8.0** or **Reinstall**.
@@ -315,11 +393,21 @@ looks up at a thought cloud with dots while the model thinks or writes, bounces 
 tool runs, pops up a **!** and looks at you when omp asks you something, hops for joy among sparkles when a run
 finishes, wobbles with a sweat drop when a tool fails or omp stops, and falls asleep with drifting Zzz after three
 quiet minutes (typing or clicking it wakes it up). It looks at the pointer when you hover it, glances at the message
-box while you type, and hops happily when clicked; a click also shows what omp is doing, or a word from the pet, and
-the keyboard stays in the message box. It has its own strip above the message box, so it never covers the
-conversation; in a window less than 520 px tall it steps aside and gives that strip back. It moves only while the
-window is active and redraws only when something changes: minimised, in the background, or asleep for a while, it
-does not redraw at all.
+box while you type, and hops happily when clicked. On the message box it has its own strip above the box, so it never
+covers the conversation; in a window less than 520 px tall it steps aside and gives that strip back. It moves only
+while the window is active and redraws only when something changes: minimised, in the background, or asleep for a
+while, it does not redraw at all.
+
+**Click the pet** to message omp from it: a small message box opens above it with the keyboard in it, and the pet
+says what omp is doing (or a word of its own). **Enter** sends the text to the conversation just as the message box's
+Send does (a new prompt, or queued for after the run while one goes on), without touching what is in the message box;
+**Esc**, a click on the pet or a click elsewhere closes it (the text stays for next time) and the keyboard goes back
+where it was.
+
+**Drag the pet** (press and move it a few pixels; a press that barely moves is a click) to put it anywhere in the
+window; its speech bubble and message box go with it. It stays where you drop it, inside the window when the window
+is resized, and after a restart; while it is off the message box, the box gives its strip back. Drop it close to its
+place on the message box and it sits there again, or use **Reset position** in Settings → Pets.
 
 **Settings → Pets** turns the pet on or off (on by default), sets its size (small 32 px or medium 48 px, the default)
 and picks one of nine: Pi (omp's own), a cat, an owl, a robot, a slime, a cactus, a ghost, a fox and a turtle.
@@ -378,7 +466,8 @@ another settings file; `OMPGUI_RUNTIME_DIR` and `OMPGUI_STT_DIR` move the runtim
 
 The GUI writes its own settings file (atomically, keeping a `.bak` of a version you edited by hand), the folders
 above, and what you save (update packages, diagnostics). It reads omp's session folder to list sessions. Of omp's
-own files it changes only the MCP config (editing a connector, or the variables and headers of a new one);
+own files it changes only the MCP config (editing a connector, or the variables and headers of a new one) and its
+list of pinned sessions (`session-pins.json`, when you pin or unpin from the sidebar, the way omp's `/pin` does);
 everything else goes through omp.
 
 ## Uninstall

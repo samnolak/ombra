@@ -15,7 +15,7 @@
           <StackPanel Spacing="6">
             <TextBlock Classes="section" Text="Pets" />
             <TextBlock Classes="muted" TextWrapping="Wrap"
-                       Text="A little pixel companion on the message box. It thinks and works along with omp, waits with you when omp asks something, cheers when a run is done and winces when something fails. Click it to see what omp is doing." />
+                       Text="A little pixel companion on the message box. It thinks and works along with omp, waits with you when omp asks something, cheers when a run is done and winces when something fails. Click it to send omp a message; drag it anywhere in the window." />
           </StackPanel>
           <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
           <Grid ColumnDefinitions="*,Auto">
@@ -40,6 +40,15 @@
                         Command="{Binding SetSizeCommand}" CommandParameter="medium" AutomationProperties.Name="Pet size: medium" />
               </StackPanel>
             </Border>
+          </Grid>
+          <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
+              <TextBlock Text="Place" FontWeight="Medium" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding PlaceText}" />
+            </StackPanel>
+            <Button x:Name="PetReturnToPerch" Grid.Column="1" Content="Reset position" VerticalAlignment="Center"
+                    Command="{Binding ReturnToPerchCommand}" AutomationProperties.Name="Put the pet back on the message box" />
           </Grid>
         </StackPanel>
       </Border>

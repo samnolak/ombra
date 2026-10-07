@@ -26,7 +26,7 @@ public partial class MainViewModel
     public Task<OmpCliResult> RunOmpCliAsync(IReadOnlyList<string> args, TimeSpan? timeout = null, CancellationToken ct = default) =>
         OmpCliLaunch is { } launch
             ? OmpCli.RunAsync(launch(args, ProjectFolder), timeout, ct)
-            : Task.FromResult(new OmpCliResult(-1, "", "omp's command line is not available here"));
+            : Task.FromResult(new OmpCliResult(-1, "", "The app couldn't start omp's command-line tool."));
 
     /// <summary>
     /// Starts omp again on the open session so it reads changed settings files (omp reads config.yml, mcp.json and

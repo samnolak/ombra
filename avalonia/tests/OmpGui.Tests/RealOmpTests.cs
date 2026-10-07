@@ -104,7 +104,7 @@ public sealed class RealOmpTests
         var tool = snap.Items.OfType<ToolItem>().Single(t => t.Name == "bash");
         Assert.Equal(ToolStatus.Succeeded, tool.Status);
         Assert.Contains("hi", tool.Output);
-        Assert.Contains(snap.Items, i => i is NoticeItem { Text: "Approved by you — Allow tool: bash" });
+        Assert.Contains(snap.Items, i => i is NoticeItem { Text: "Approved by you — bash" });
     }
 
     [Fact]

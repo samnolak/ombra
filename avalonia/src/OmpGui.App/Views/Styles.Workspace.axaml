@@ -1,7 +1,213 @@
-<!-- Styles for the Computer use, Git and worktrees and SSH settings, on the design system's tokens (Tokens.axaml), as in Styles.axaml. -->
+<!-- Styles for the app shell (sidebar, header pane toggles, the settings page's navigation) and the Computer use, Git
+     and worktrees and SSH settings, on the design system's tokens (Tokens.axaml), as in Styles.axaml. -->
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:ctl="using:OmpGui.App.Controls">
+        xmlns:ctl="using:OmpGui.App.Controls"
+        xmlns:panes="using:OmpGui.App.Views.Panes">
+
+  <!-- ─────────────── Sidebar ─────────────── -->
+  <Style Selector="TextBlock.sidebar-brand">
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="FontSize" Value="15" />
+  </Style>
+  <Style Selector="Button.sidebar-action">
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="Padding" Value="10,0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusControl}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontWeight" Value="Normal" />
+  </Style>
+  <Style Selector="Button.sidebar-action.current">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+  </Style>
+  <Style Selector="Button.sidebar-action.current /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+  </Style>
+  <!-- The shortcut beside "New session" / "Settings": only while the row is hovered or focused, so the list stays calm -->
+  <Style Selector="TextBlock.sidebar-shortcut">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="Opacity" Value="0" />
+  </Style>
+  <Style Selector="Button.sidebar-action:pointerover TextBlock.sidebar-shortcut, Button.sidebar-action:focus-visible TextBlock.sidebar-shortcut">
+    <Setter Property="Opacity" Value="1" />
+  </Style>
+  <!-- An update to install, or how the last one went: the sidebar's one tinted row -->
+  <Style Selector="Button.sidebar-action.update">
+    <Setter Property="Background" Value="{DynamicResource GuiStatusInfoSoft}" />
+  </Style>
+  <Style Selector="Button.sidebar-action.update ctl|Icon">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiStatusInfo}" />
+  </Style>
+  <Style Selector="ListBox.sessions">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="ListBox.sessions ListBoxItem">
+    <Setter Property="Padding" Value="8,1" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Focusable" Value="False" />
+  </Style>
+  <Style Selector="ListBox.sessions ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter, ListBox.sessions ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="TextBlock.sidebar-empty">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <!-- Group headings: a project (its "remove from sidebar" and "new session here" show on hover or focus), Pinned -->
+  <Style Selector="Grid.group-header">
+    <Setter Property="Height" Value="30" />
+  </Style>
+  <Style Selector="TextBlock.group-label">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="ctl|Icon.group-icon">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="Grid.group-header Button.group-action">
+    <Setter Property="Opacity" Value="0" />
+  </Style>
+  <Style Selector="Grid.group-header:pointerover Button.group-action, Grid.group-header:focus-within Button.group-action">
+    <Setter Property="Opacity" Value="1" />
+  </Style>
+  <!-- A session: the title takes the row; its age (or status dot) at the right gives way to pin and ⋯ on hover / focus -->
+  <Style Selector="Button.session">
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Padding" Value="10,0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusControl}" />
+    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="FontSize" Value="14" />
+  </Style>
+  <!-- The open session: the neutral fill -->
+  <Style Selector="Button.session.current">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
+  <Style Selector="Button.session.current /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+  </Style>
+  <Style Selector="TextBlock.session-age">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="Panel.session-row StackPanel.session-actions">
+    <Setter Property="Opacity" Value="0" />
+    <Setter Property="IsHitTestVisible" Value="False" />
+  </Style>
+  <Style Selector="Panel.session-row:pointerover StackPanel.session-actions, Panel.session-row:focus-within StackPanel.session-actions">
+    <Setter Property="Opacity" Value="1" />
+    <Setter Property="IsHitTestVisible" Value="True" />
+  </Style>
+  <Style Selector="Panel.session-meta">
+    <Setter Property="MinWidth" Value="20" />
+  </Style>
+  <!-- The meta keeps the actions' width while they show, so the title trims before them instead of running under -->
+  <Style Selector="Panel.session-row:pointerover Panel.session-meta, Panel.session-row:focus-within Panel.session-meta">
+    <Setter Property="Opacity" Value="0" />
+    <Setter Property="MinWidth" Value="48" />
+  </Style>
+  <Style Selector="Button.session-action ctl|Icon">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="Button.session-action:pointerover ctl|Icon, Button.session-action.on ctl|Icon">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="Button.session-action.on">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <!-- What omp is doing in a session: working (pulsing), needs your input, a reply you have not seen -->
+  <Style Selector="Ellipse.session-dot">
+    <Setter Property="Width" Value="8" />
+    <Setter Property="Height" Value="8" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusRunning}" />
+  </Style>
+  <Style Selector="Ellipse.session-dot.running">
+    <Style.Animations>
+      <Animation Duration="0:0:1.1" IterationCount="INFINITE" PlaybackDirection="Alternate" Easing="SineEaseInOut">
+        <KeyFrame Cue="0%"><Setter Property="Opacity" Value="1" /></KeyFrame>
+        <KeyFrame Cue="100%"><Setter Property="Opacity" Value="0.3" /></KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+  <Style Selector="Ellipse.session-dot.waiting">
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusWaiting}" />
+  </Style>
+  <Style Selector="Ellipse.session-dot.unread">
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusUnread}" />
+  </Style>
+  <!-- The sidebar's right edge: drag to resize (a hairline in the focus colour while hovered or dragged) -->
+  <Style Selector="Border.sidebar-grip:pointerover, Border.sidebar-grip.dragging">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiFocus}" />
+    <Setter Property="BorderThickness" Value="0,0,2,0" />
+    <Setter Property="Margin" Value="0,0,-1,0" />
+  </Style>
+  <Style Selector="Border.sidebar.drawer Border.sidebar-grip">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+
+  <!-- ─────────────── Header: the pane toggles, folded into ⋮ when the column is narrow ─────────────── -->
+  <Style Selector="Border.header-divider">
+    <Setter Property="Width" Value="1" />
+    <Setter Property="Height" Value="18" />
+    <Setter Property="Margin" Value="4,0" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Background" Value="{DynamicResource GuiBorder}" />
+  </Style>
+  <Style Selector="Border.header.fold-panes StackPanel.header-panes">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <Style Selector="Border.header:not(.fold-panes) panes|ViewsMenu.header-views">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+
+  <!-- ─────────────── Settings page: its navigation in the sidebar's place ─────────────── -->
+  <Style Selector="Border.settings-sidebar">
+    <Setter Property="Width" Value="240" />
+    <Setter Property="Background" Value="{DynamicResource GuiSidebar}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="0,0,1,0" />
+  </Style>
+  <Style Selector="TextBlock.settings-title">
+    <Setter Property="FontSize" Value="18" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="TextBlock.settings-group">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="Margin" Value="10,16,0,4" />
+  </Style>
+  <Style Selector="Button.settings-nav">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Left" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="Padding" Value="10,0" />
+    <Setter Property="Margin" Value="0,1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusControl}" />
+    <Setter Property="FontSize" Value="14" />
+  </Style>
+  <Style Selector="Button.settings-nav:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="Button.settings-nav.current /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="Button.settings-nav.current">
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
+  <!-- In the narrow strip: tabs as wide as their names -->
+  <Style Selector="Button.settings-nav.tab">
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="Margin" Value="0" />
+  </Style>
 
   <!-- A 1 px separator between rows of a settings card -->
   <Style Selector="Border.ws-sep">

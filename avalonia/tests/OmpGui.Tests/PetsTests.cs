@@ -612,15 +612,18 @@ public sealed class PetsTests
     }
 
     [AvaloniaFact]
-    public async Task Clicking_the_pet_opens_its_bubble_and_the_keyboard_stays_in_the_message_box()
+    public async Task Clicking_the_pet_opens_its_message_box_and_Enter_sends_to_the_conversation()
     {
         var (w, vm) = await Open("normal");
         var composer = w.FindControl<TextBox>("Composer")!;
         composer.Focus();
         await Settle(100);
         Assert.True(composer.IsFocused);
-        var pet = w.FindControl<PetPerch>("PetPerch")!.FindControl<PetView>("Pet")!;
+        var perch = w.FindControl<PetPerch>("PetPerch")!;
+        var pet = perch.FindControl<PetView>("Pet")!;
+        var chat = perch.FindControl<TextBox>("PetChatBox")!;
         Assert.True(pet.IsEffectivelyVisible);
+        Assert.False(chat.IsEffectivelyVisible);
         // The pet sits on the message box's top edge, at its right end
         var petBox = Box(pet, w);
         var boxBox = Box(w.FindControl<Border>("ComposerBox")!, w);
@@ -630,18 +633,145 @@ public sealed class PetsTests
         w.MouseDown(center, MouseButton.Left);
         w.MouseUp(center, MouseButton.Left);
         await Settle(100);
+        // A click: the message box opens beside the pet with the keyboard in it, and the pet says something
+        Assert.True(vm.Pets.IsChatOpen);
+        Assert.True(chat.IsEffectivelyVisible);
+        Assert.True(chat.IsFocused, "the pet's message box did not take the keyboard");
         Assert.True(vm.Pets.IsBubbleOpen);
         Assert.False(string.IsNullOrWhiteSpace(vm.Pets.BubbleText));
-        Assert.True(composer.IsFocused, "the click took the keyboard from the message box");
-        var bubble = w.FindControl<PetPerch>("PetPerch")!.FindControl<StackPanel>("PetBubble")!;
+        var bubble = perch.FindControl<StackPanel>("PetBubble")!;
         Assert.True(bubble.IsEffectivelyVisible);
         Assert.True(Box(bubble, w).Right <= petBox.Left + 1, "the bubble covers the pet");
+        var chatBox = Box(perch.FindControl<Border>("PetChat")!, w);
+        Assert.True(chatBox.Bottom <= petBox.Top, "the message box covers the pet");
+        Assert.False(chatBox.Intersects(Box(bubble, w)), "the message box covers the bubble");
         Assert.Empty(PetCovers(w));
+        // Esc closes it and gives the keyboard back; what was typed stays for the next time
+        w.KeyTextInput("draft");
+        w.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
+        await Settle(100);
+        Assert.False(vm.Pets.IsChatOpen);
+        Assert.True(composer.IsFocused);
+        Assert.Equal("draft", vm.Pets.ChatText);
+        // A click again opens it; a click on the pet while it is open closes it
         w.MouseDown(center, MouseButton.Left);
         w.MouseUp(center, MouseButton.Left);
         await Settle(100);
+        Assert.True(chat.IsFocused);
+        w.MouseDown(center, MouseButton.Left);
+        w.MouseUp(center, MouseButton.Left);
+        await Settle(100);
+        Assert.False(vm.Pets.IsChatOpen);
         Assert.False(vm.Pets.IsBubbleOpen);
         Assert.True(composer.IsFocused);
+        // Enter sends it as the message box would, and leaves the message box's own draft alone
+        vm.ComposerText = "not this";
+        w.MouseDown(center, MouseButton.Left);
+        w.MouseUp(center, MouseButton.Left);
+        await Settle(100);
+        chat.SelectAll();
+        w.KeyTextInput("hello from the pet");
+        w.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
+        await Until(() => vm.Rows.OfType<UserRowViewModel>().Any(u => u.Text == "hello from the pet"), "sent from the pet");
+        Assert.False(vm.Pets.IsChatOpen);
+        Assert.Equal("", vm.Pets.ChatText);
+        Assert.Equal("not this", vm.ComposerText);
+        Assert.True(composer.IsFocused);
+        await Close(w, vm);
+    }
+
+    [AvaloniaFact]
+    public async Task The_pet_can_be_dragged_anywhere_in_the_window_and_stays_inside_it()
+    {
+        var path = Path.Combine(TestProcesses.TempDir("pets-place"), "omp-gui.local.json");
+        var (w, vm) = await Open("normal", store: new ClientSettingsStore(path));
+        var perch = w.FindControl<PetPerch>("PetPerch")!;
+        var pet = perch.FindControl<PetView>("Pet")!;
+        var composer = w.FindControl<Border>("ComposerBox")!;
+        var from = Box(pet, w).Center;
+        // A press that moves a little is still a click
+        w.MouseDown(from, MouseButton.Left);
+        w.MouseMove(from + new Vector(2, 1));
+        w.MouseUp(from + new Vector(2, 1), MouseButton.Left);
+        await Settle(100);
+        Assert.True(vm.Pets.IsChatOpen);
+        Assert.False(vm.Pets.IsRoaming);
+        vm.Pets.CloseChat();
+        // Dragged to the window's top left: it goes there, the message box gives the pet's band back
+        var to = new Point(200, 150);
+        w.MouseDown(from, MouseButton.Left);
+        w.MouseMove(from + new Vector(-10, -10));
+        w.MouseMove(to);
+        w.MouseUp(to, MouseButton.Left);
+        await Settle(100);
+        Assert.False(vm.Pets.IsChatOpen);
+        Assert.True(vm.Pets.IsRoaming);
+        Assert.Equal(to.X, Box(pet, w).Center.X, 1);
+        Assert.Equal(to.Y, Box(pet, w).Center.Y, 1);
+        Assert.Equal(6, composer.Margin.Top);
+        // Past the window's edge: it stops at the edge
+        from = Box(pet, w).Center;
+        w.MouseDown(from, MouseButton.Left);
+        w.MouseMove(from + new Vector(5000, 5000));
+        w.MouseUp(from + new Vector(5000, 5000), MouseButton.Left);
+        await Settle(100);
+        Assert.Equal(w.Bounds.Width, Box(pet, w).Right, 1);
+        Assert.Equal(w.Bounds.Height, Box(pet, w).Bottom, 1);
+        // A smaller window keeps it inside, in the same corner
+        w.Width = 800;
+        w.Height = 600;
+        await Settle(150);
+        Assert.Equal(w.Bounds.Width, Box(pet, w).Right, 1);
+        Assert.Equal(w.Bounds.Height, Box(pet, w).Bottom, 1);
+        // The bubble follows it (on its left, room permitting)
+        vm.Pets.TalkCommand.Execute(null);
+        await Settle(100);
+        var bubble = Box(perch.FindControl<StackPanel>("PetBubble")!, w);
+        Assert.True(bubble.Right <= Box(pet, w).Left + 1 && bubble.Right >= Box(pet, w).Left - 4, "the bubble is not beside the pet");
+        await Close(w, vm);
+
+        // The place survives a restart
+        (w, vm) = await Open("normal", width: 800, height: 600, store: new ClientSettingsStore(path));
+        pet = w.FindControl<PetPerch>("PetPerch")!.FindControl<PetView>("Pet")!;
+        Assert.True(vm.Pets.IsRoaming);
+        Assert.Equal(w.Bounds.Width, Box(pet, w).Right, 1);
+        Assert.Equal(w.Bounds.Height, Box(pet, w).Bottom, 1);
+        // Reset position puts it back on the message box
+        vm.Pets.ReturnToPerchCommand.Execute(null);
+        await Settle(150);
+        Assert.False(vm.Pets.IsRoaming);
+        Assert.False(vm.Pets.ReturnToPerchCommand.CanExecute(null));
+        var boxBox = Box(w.FindControl<Border>("ComposerBox")!, w);
+        Assert.Equal(boxBox.Top + 1, Box(pet, w).Bottom, 0.5);
+        await Close(w, vm);
+
+        (w, vm) = await Open("normal", store: new ClientSettingsStore(path));
+        Assert.False(vm.Pets.IsRoaming);
+        await Close(w, vm);
+    }
+
+    [AvaloniaFact]
+    public async Task A_pet_dropped_close_to_its_perch_sits_on_it_again()
+    {
+        var (w, vm) = await Open("normal");
+        var pet = w.FindControl<PetPerch>("PetPerch")!.FindControl<PetView>("Pet")!;
+        vm.Pets.MoveTo(new Point(0.5, 0.5));
+        await Settle(150);
+        Assert.True(vm.Pets.IsRoaming);
+        // Where the perch is now (the band is gone while the pet is elsewhere): its feet on the message box
+        var box = Box(w.FindControl<Border>("ComposerBox")!, w);
+        var size = Box(pet, w).Size;
+        var perchCenter = new Point(box.Right - PetsViewModel.PetInset - size.Width / 2, box.Top + 1 - size.Height / 2);
+        var from = Box(pet, w).Center;
+        w.MouseDown(from, MouseButton.Left);
+        w.MouseMove(from + new Vector(20, 20));
+        w.MouseMove(perchCenter + new Vector(6, -5));
+        w.MouseUp(perchCenter + new Vector(6, -5), MouseButton.Left);
+        await Settle(150);
+        Assert.False(vm.Pets.IsRoaming);
+        box = Box(w.FindControl<Border>("ComposerBox")!, w);
+        Assert.Equal(box.Top + 1, Box(pet, w).Bottom, 0.5);
+        Assert.Equal(vm.Pets.PerchHeight - 1, w.FindControl<Border>("ComposerBox")!.Margin.Top);
         await Close(w, vm);
     }
 

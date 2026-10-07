@@ -1,0 +1,38 @@
+<!-- Settings → Model providers, "Plan usage": each signed-in provider's limits as omp's usage endpoints report them
+     (ProviderUsageViewModel, from "omp usage" in JSON). Hidden when no provider reports usage. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             xmlns:session="using:OmpGui.App.Views.Session"
+             x:Class="OmpGui.App.Views.Settings.ProviderUsageSettings"
+             x:DataType="vm:MainViewModel">
+  <Border x:Name="ProviderUsageCard" Classes="section-card" DataContext="{Binding ProviderUsage}" x:DataType="vm:ProviderUsageViewModel"
+          IsVisible="{Binding HasGroups}">
+    <StackPanel Spacing="12">
+      <Grid ColumnDefinitions="*,Auto,Auto">
+        <TextBlock Classes="section" Text="Plan usage" VerticalAlignment="Center" />
+        <TextBlock Grid.Column="1" Classes="tertiary" Text="Updating…" IsVisible="{Binding IsLoading}" VerticalAlignment="Center" Margin="0,0,6,0" />
+        <Button Grid.Column="2" Classes="icon" Width="26" Height="26" Command="{Binding RefreshCommand}" ToolTip.Tip="Check again"
+                AutomationProperties.Name="Refresh plan usage">
+          <ctl:Icon Data="{StaticResource IconReload}" Size="14" />
+        </Button>
+      </Grid>
+      <TextBlock Classes="muted" TextWrapping="Wrap"
+                 Text="How much of each subscription's limits is used, as the provider reports it to omp. Providers that report no usage are not listed." />
+      <ItemsControl x:Name="ProviderUsageGroups" ItemsSource="{Binding Groups}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Spacing="14" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:ProviderUsageGroupViewModel">
+            <session:ProviderUsageGroupView />
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+      <TextBlock Classes="tertiary" Text="{Binding Note}" IsVisible="{Binding Note, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+    </StackPanel>
+  </Border>
+</UserControl>

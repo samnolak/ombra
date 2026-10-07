@@ -37,12 +37,22 @@ public sealed record OmpRuntimeOptions
     public string? Theme { get; init; }
     /// <summary>OS notification when a run ends or omp asks while the window is in the background (default on).</summary>
     public bool? Notifications { get; init; }
+    /// <summary>How the message box sends: <c>enter</c> (default; Shift+Enter adds a line) or <c>mod-enter</c> (⌘/Ctrl+Enter sends, Enter adds a line).</summary>
+    public string? SendKey { get; init; }
     /// <summary>Update manifest address (https, signed with the release key); unset = this client's release feed.</summary>
     public string? UpdateFeed { get; init; }
     /// <summary>Check the feed shortly after start and once a day (default on). Installing always waits for the user.</summary>
     public bool? CheckForUpdates { get; init; }
     /// <summary>The pixel pet above the message box (<see cref="PetOptions"/>); null means the defaults.</summary>
     public PetOptions? Pet { get; init; }
+    /// <summary>Project folders added from the sidebar: listed even before they have a session.</summary>
+    public string[]? SidebarProjects { get; init; }
+    /// <summary>Project folders removed from the sidebar: their sessions are not listed (nothing is deleted on disk).</summary>
+    public string[]? HiddenProjects { get; init; }
+    /// <summary>The sidebar's width as last dragged (220–480 px); null means the default.</summary>
+    public double? SidebarWidth { get; init; }
+    /// <summary>"Don't ask again" rules for omp's approval requests (<see cref="ApprovalRuleSet"/>); session rules are never saved.</summary>
+    public SavedApprovalRule[]? ApprovalRules { get; init; }
 
     public const string ConfigEnvVar = "OMPGUI_CONFIG";
 

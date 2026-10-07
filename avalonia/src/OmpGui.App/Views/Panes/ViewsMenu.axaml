@@ -7,7 +7,7 @@
              xmlns:ctl="using:OmpGui.App.Controls"
              x:Class="OmpGui.App.Views.Panes.ViewsMenu"
              x:DataType="vm:MainViewModel">
-  <Button x:Name="ViewsButton" Classes="icon" ToolTip.Tip="Views: plan, background tasks, files" AutomationProperties.Name="Views">
+  <Button x:Name="ViewsButton" Classes="icon" ToolTip.Tip="Panes: files, plan, background tasks, terminal, browser" AutomationProperties.Name="Views">
     <Panel>
       <ctl:Icon Data="{StaticResource IconMoreVertical}" Size="20" Filled="True" />
       <Border x:Name="ViewsDot" Classes="views-dot" IsHitTestVisible="False">
@@ -21,7 +21,7 @@
     </Panel>
     <Button.Flyout>
       <Flyout Placement="BottomEdgeAlignedRight">
-        <StackPanel x:Name="ViewsList" Width="300" Spacing="2">
+        <StackPanel x:Name="ViewsList" MinWidth="280" Spacing="2">
           <Button x:Name="ViewFilesItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                   Command="{Binding TogglePaneCommand}" CommandParameter="{x:Static vm:SidePane.Files}" AutomationProperties.Name="Files">
             <Grid ColumnDefinitions="Auto,*,Auto,Auto">

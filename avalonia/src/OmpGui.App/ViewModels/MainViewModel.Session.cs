@@ -80,6 +80,7 @@ public sealed partial class MainViewModel
                      ExportHtmlCommand, ShareSessionCommand, WorkspaceFoldersCommand, MoveSessionCommand, TogglePinCommand,
                      OpenUsageDashboardCommand, ShowMemoryCommand, CopySessionIdCommand, CopySessionFileCommand, DeleteSessionCommand })
             c.NotifyCanExecuteChanged();
+        RewindToCommand.NotifyCanExecuteChanged();
         _usage?.CompactNowCommand.NotifyCanExecuteChanged();
         _usage?.OpenDashboardCommand.NotifyCanExecuteChanged();
     }
@@ -515,7 +516,7 @@ public sealed partial class MainViewModel
         if (r.Ok && r.Output.StartsWith("Session pinned", StringComparison.Ordinal))
         {
             IsSessionPinned = true;
-            ShowBrief("IconPin", "Session pinned", "It stays at the top of its project in the sessions list, and of omp's own session list.");
+            ShowBrief("IconPin", "Session pinned", "It is listed under Pinned at the top of the sidebar, and first in omp's own session list.");
         }
         else if (r.Ok && r.Output.StartsWith("Session unpinned", StringComparison.Ordinal))
         {
@@ -543,20 +544,7 @@ public sealed partial class MainViewModel
     }
 
     /// <summary>omp's pins (<c>session-pins.json</c> next to its sessions folder): ids of pinned sessions.</summary>
-    internal static HashSet<string> ReadPinnedSessionIds(string? sessionFile)
-    {
-        if (SessionCatalog.SessionsRootOf(sessionFile) is not { } root || Path.GetDirectoryName(root) is not { } agentDir) return [];
-        try
-        {
-            var path = Path.Combine(agentDir, "session-pins.json");
-            if (!File.Exists(path)) return [];
-            using var doc = JsonDocument.Parse(File.ReadAllText(path));
-            return doc.RootElement.ValueKind == JsonValueKind.Array
-                ? [.. doc.RootElement.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!)]
-                : [];
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { return []; }
-    }
+    internal static HashSet<string> ReadPinnedSessionIds(string? sessionFile) => SessionPins.Read(SessionPins.PathFor(sessionFile));
 
     // ───────────── Delete (omp's /session delete, then a new session: the TUI's /drop) ─────────────
 

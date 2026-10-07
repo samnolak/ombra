@@ -18,7 +18,7 @@ public sealed class WorkspaceConfig
     public static async Task<(WorkspaceConfig? Config, string? Error)> LoadAsync(MainViewModel main, CancellationToken ct)
     {
         var r = await main.RunOmpCliAsync(["config", "list", "--json"], TimeSpan.FromSeconds(45), ct);
-        if (!r.Ok) return (null, "omp's settings could not be read: " + CliError(r));
+        if (!r.Ok) return (null, "Couldn't read omp's settings: " + CliError(r));
         try
         {
             using var doc = JsonDocument.Parse(r.Stdout);
@@ -29,7 +29,7 @@ public sealed class WorkspaceConfig
         }
         catch (JsonException e)
         {
-            return (null, "omp's settings could not be read: " + e.Message);
+            return (null, "Couldn't read omp's settings: " + e.Message);
         }
     }
 

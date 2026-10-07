@@ -71,4 +71,17 @@ public static class GitProbe
             ? "~" + path[home.Length..]
             : path;
     }
+
+    /// <summary>
+    /// A folder as the user knows it: macOS's /private/var, /private/tmp, /private/etc as /var, /tmp, /etc (the same
+    /// folder reached through a link, so one project never reads two ways), then the home folder as ~.
+    /// </summary>
+    public static string ShownPath(string path)
+    {
+        if (OperatingSystem.IsMacOS() && path.StartsWith("/private/", StringComparison.Ordinal) && path[8..] is var rest
+            && (rest.StartsWith("/var", StringComparison.Ordinal) || rest.StartsWith("/tmp", StringComparison.Ordinal) || rest.StartsWith("/etc", StringComparison.Ordinal))
+            && (rest.Length == 4 || rest[4] == '/'))
+            path = rest;
+        return Tilde(path);
+    }
 }

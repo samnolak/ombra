@@ -15,24 +15,15 @@ public sealed record ContextRowViewModel(string Label, double Fraction, string T
     public bool IsUsed => !IsFree && !IsReserve;
 }
 
-/// <summary>A total from <c>/usage</c> ("Input tokens", "Cost") as a label and value.</summary>
+/// <summary>One of this session's tallies (<c>get_session_stats</c>): "Input", "Cost".</summary>
 public sealed record UsageTotalViewModel(string Label, string Value);
-
-/// <summary>A provider limit from <c>/usage</c> with its bar.</summary>
-public sealed record UsageLimitViewModel(string Title, string Account, double Fraction, string Used, string Resets, bool InUse, bool HasAmount)
-{
-    public double Value => Math.Clamp(Fraction * 100, 0, 100);
-    public bool HasAccount => Account.Length > 0;
-    public bool HasResets => Resets.Length > 0;
-    /// <summary>Near the limit: the bar in the warning colour (with the percentage beside it).</summary>
-    public bool IsHigh => Fraction >= 0.8;
-}
 
 /// <summary>
 /// Claude Code's context ring next to the model: how full the model's context is (get_state's contextUsage, after
 /// every turn), in the warning colour from 70 % and the negative one from 85 % (omp compacts near the end). Its
-/// popover draws omp's <c>/context</c> breakdown as bars, adds <c>/usage</c> (tokens and cost, or the providers'
-/// limits) and offers "Compact now"; it refreshes after each turn while it is open.
+/// popover draws omp's <c>/context</c> breakdown as bars, this session's tokens and cost (<c>get_session_stats</c>)
+/// and the plan limits of the model's provider (<see cref="ProviderUsageViewModel"/>), and offers "Compact now"; it
+/// refreshes after each turn while it is open.
 /// </summary>
 public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObject
 {
@@ -62,6 +53,9 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
 
     public string AccessibleName => Percent is { } p ? string.Create(CultureInfo.InvariantCulture, $"Context usage, {p:0} percent") : "Context usage";
 
+    /// <summary>The popover's headline when omp gave no breakdown: the ring's own number, not a bare "Context".</summary>
+    private string PercentHeadline => PercentText.Length > 0 ? $"{PercentText} of the context used" : "Context";
+
     [ObservableProperty] private bool _isOpen;
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string _contextHeadline = "";
@@ -71,12 +65,11 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
     [ObservableProperty] private bool _hasContext;
     [ObservableProperty] private bool _hasTotals;
     [ObservableProperty] private bool _hasLimits;
-    /// <summary>omp printed something the popover does not know how to draw: shown as it is.</summary>
-    [ObservableProperty] private string _rawUsage = "";
 
     public ObservableCollection<ContextRowViewModel> ContextRows { get; } = [];
     public ObservableCollection<UsageTotalViewModel> Totals { get; } = [];
-    public ObservableCollection<UsageLimitViewModel> Limits { get; } = [];
+    /// <summary>The plan limits of the session model's provider (every account omp has for it).</summary>
+    public ObservableCollection<ProviderUsageGroupViewModel> Limits { get; } = [];
 
     /// <summary>From each applied snapshot: the ring, and a refresh of the open popover once a turn ended.</summary>
     internal void Apply(SessionSnapshot s)
@@ -86,13 +79,17 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
         {
             var first = _runsEnded < 0;
             _runsEnded = s.RunsEnded;
-            if (!first && IsOpen) _ = LoadAsync();
+            if (first) return;
+            owner.ProviderUsage.MarkStale(); // a turn spends plan allowance
+            if (IsOpen) _ = LoadAsync();
         }
     }
 
     partial void OnIsOpenChanged(bool value)
     {
-        if (value) _ = LoadAsync();
+        if (!value) return;
+        CompactNowCommand.NotifyCanExecuteChanged(); // the conversation may have begun since
+        _ = LoadAsync();
     }
 
     [RelayCommand]
@@ -106,7 +103,8 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
         if (IsOpen) _ = LoadAsync();
     }
 
-    private bool CanCompactNow() => owner.CompactConversationCommand.CanExecute(null);
+    /// <summary>Only with something to compact: an empty new session has no conversation yet.</summary>
+    private bool CanCompactNow() => owner.Rows.Count > 0 && owner.CompactConversationCommand.CanExecute(null);
 
     [RelayCommand(CanExecute = nameof(CanCompactNow))]
     private Task CompactNowAsync()
@@ -125,7 +123,15 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
         return owner.OpenUsageDashboardCommand.ExecuteAsync(null);
     }
 
-    /// <summary>Runs <c>/context</c> and <c>/usage</c> and draws what they print.</summary>
+    /// <summary>All providers' limits: Settings → Model providers.</summary>
+    [RelayCommand]
+    private Task ShowAllProvidersAsync()
+    {
+        IsOpen = false;
+        return owner.OpenSettingsAtAsync("providers");
+    }
+
+    /// <summary>Runs <c>/context</c>, reads <c>get_session_stats</c> and the provider's limits, and draws them.</summary>
     internal async Task LoadAsync()
     {
         var load = ++_loads;
@@ -133,6 +139,7 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
         Error = "";
         try
         {
+            var limits = owner.ProviderUsage.LoadAsync(); // a side process: runs while omp answers the rest
             if (!owner.CanRunOmpCommands)
             {
                 Error = "omp is not running.";
@@ -140,11 +147,14 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
             }
             owner.Session.RefreshState(); // the ring from get_state, measured now
             var context = await owner.RunOmpCommandAsync("/context");
-            var usage = await owner.RunOmpCommandAsync("/usage", TimeSpan.FromMinutes(1));
+            var stats = await owner.Session.GetSessionStatsAsync(owner.Closing);
+            await limits;
             if (load != _loads) return; // a newer refresh is on its way
             ApplyContext(context);
-            ApplyUsage(usage);
+            ApplyTotals(stats);
+            ApplyLimits();
         }
+        catch (OperationCanceledException) { }
         finally
         {
             if (load == _loads) IsLoading = false;
@@ -159,14 +169,14 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
         if (report is null)
         {
             HasContext = false;
-            ContextHeadline = "Context";
+            ContextHeadline = PercentHeadline;
             ContextNote = r.Ok ? r.Output.Trim() : r.Error ?? "omp did not answer.";
             return;
         }
         if (report.Unavailable is { } why)
         {
             HasContext = false;
-            ContextHeadline = "Context";
+            ContextHeadline = PercentHeadline;
             ContextNote = why;
             return;
         }
@@ -180,39 +190,33 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
             ContextNote = "The auto-compact buffer is kept free: omp compacts the conversation when the rest is full.";
     }
 
-    private void ApplyUsage(SlashCommandResult r)
+    private void ApplyTotals(SessionTokenStats? s)
     {
         Totals.Clear();
-        Limits.Clear();
-        RawUsage = "";
-        UsageNote = "";
-        var report = r.Ok ? SessionOutputs.ParseUsage(r.Output) : null;
-        if (report is null)
+        if (s is not null)
         {
-            HasTotals = HasLimits = false;
-            if (r.Ok) RawUsage = r.Output.Trim();
-            else UsageNote = r.Error ?? "omp did not answer.";
-            return;
-        }
-        foreach (var (label, value) in report.Totals)
-            Totals.Add(new UsageTotalViewModel(label.Replace(" tokens", "", StringComparison.Ordinal), Friendly(label, value)));
-        foreach (var l in report.Limits)
-        {
-            var title = l.Provider.Length > 0 && !l.Label.StartsWith(l.Provider, StringComparison.OrdinalIgnoreCase) ? $"{l.Provider} · {l.Label}" : l.Label;
-            Limits.Add(new UsageLimitViewModel(title, l.Account ?? "", (l.UsedPercent ?? 0) / 100.0,
-                l.UsedPercent is { } u ? string.Create(CultureInfo.InvariantCulture, $"{u:0.#}% used") : l.Detail ?? "",
-                l.Resets ?? "", l.InUse, l.UsedPercent is not null));
+            Totals.Add(new UsageTotalViewModel("Input", SessionOutputs.Tokens(s.Input)));
+            Totals.Add(new UsageTotalViewModel("Output", SessionOutputs.Tokens(s.Output)));
+            if (s.CacheRead > 0) Totals.Add(new UsageTotalViewModel("Cache read", SessionOutputs.Tokens(s.CacheRead)));
+            if (s.CacheWrite > 0) Totals.Add(new UsageTotalViewModel("Cache write", SessionOutputs.Tokens(s.CacheWrite)));
+            if (s.PremiumRequests > 0) Totals.Add(new UsageTotalViewModel("Premium requests", SessionOutputs.Tokens(s.PremiumRequests)));
+            // omp prices a turn from the model's catalog rates; nothing to show when it has none (0)
+            if (s.Cost > 0) Totals.Add(new UsageTotalViewModel("Cost", Money(s.Cost)));
         }
         HasTotals = Totals.Count > 0;
-        HasLimits = Limits.Count > 0;
-        UsageNote = string.Join(" ", report.Notes.Concat(report.Age is { } age ? [$"Reported {age} ago."] : []));
     }
 
-    /// <summary>"1234567" → "1,234,567"; the cost as omp prints it but with two decimals when it is round.</summary>
-    private static string Friendly(string label, string value)
+    private void ApplyLimits()
     {
-        if (label == "Cost" && value.StartsWith('$') && decimal.TryParse(value[1..], NumberStyles.Number, CultureInfo.InvariantCulture, out var cost))
-            return "$" + cost.ToString(cost >= 0.01m || cost == 0 ? "0.00" : "0.0000", CultureInfo.InvariantCulture);
-        return long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? SessionOutputs.Tokens(n) : value;
+        Limits.Clear();
+        var provider = owner.Session.Snapshot().Model is { } m && m.IndexOf('/') is var slash and > 0 ? m[..slash] : null;
+        if (provider is not null)
+            foreach (var g in owner.ProviderUsage.For(provider)) Limits.Add(g);
+        HasLimits = Limits.Count > 0;
+        UsageNote = HasLimits ? owner.ProviderUsage.Note : "";
     }
+
+    /// <summary>"$0.42", and four decimals under a cent so a cheap session does not read as free.</summary>
+    private static string Money(double cost) =>
+        "$" + cost.ToString(cost >= 0.01 ? "#,0.00" : "0.0000", CultureInfo.InvariantCulture);
 }

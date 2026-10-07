@@ -119,6 +119,9 @@ public sealed partial class ConversationState
     /// <summary>Dialogs with a deadline added since the controller last looked (it schedules their expiry).</summary>
     public List<PendingDialog> NewDeadlines { get; } = [];
 
+    /// <summary>Approval requests added since the controller last looked (it answers those a "don't ask again" rule covers).</summary>
+    public List<PendingDialog> NewApprovals { get; } = [];
+
     public IReadOnlyList<PendingDialog> Dialogs => _dialogs;
 
     private sealed class Row(long key, TranscriptItem item)
@@ -162,6 +165,7 @@ public sealed partial class ConversationState
         {
             _dialogs.Clear();
             NewDeadlines.Clear();
+            NewApprovals.Clear();
             DialogsToCancel.Clear();
             _extensionStatus.Clear();
             _widgets.Clear();
@@ -415,7 +419,7 @@ public sealed partial class ConversationState
                 AddNotice(NoticeLevel.Error, $"RPC framing error: {Str(j, "message")}");
                 break;
             case RpcFrame.UnmatchedResponse:
-                if (!(j.TryGetProperty("success", out var ok) && ok.ValueKind == JsonValueKind.True) && !OnSubagentCommandFailed(j))
+                if (!(j.TryGetProperty("success", out var ok) && ok.ValueKind == JsonValueKind.True) && !OnSubagentCommandFailed(j) && !IsOptionalUnknown(j))
                 {
                     var cmd = Str(j, "command") ?? "?";
                     AddNotice(NoticeLevel.Error, $"{cmd} failed: {Str(j, "error") ?? "unknown error"}");
@@ -425,6 +429,19 @@ public sealed partial class ConversationState
         }
         Log(now, frame.Type, Summarize(frame));
     }
+
+    /// <summary>
+    /// Queries the app makes only to show more when omp offers it; an omp without one answers "Unknown command" and the
+    /// app falls back quietly (the default thinking levels, no subagents…). Never an error for the user.
+    /// </summary>
+    private static readonly HashSet<string> OptionalCommands = new(StringComparer.Ordinal)
+    {
+        "get_available_thinking_levels", "get_subagents", "get_subagent_messages", "get_session_stats", "get_login_providers",
+    };
+
+    private static bool IsOptionalUnknown(JsonElement j) =>
+        Str(j, "command") is { } cmd && OptionalCommands.Contains(cmd)
+        && Str(j, "error") is { } error && error.StartsWith("Unknown command", StringComparison.Ordinal);
 
     /// <summary>Rebuilds the transcript from <c>get_messages</c> (AgentMessage[]).</summary>
     public void Hydrate(JsonElement messages)
@@ -463,7 +480,8 @@ public sealed partial class ConversationState
                     if (Str(m, "toolCallId") is { } callId && _toolsByCallId.TryGetValue(callId, out var tr) && tr.Item is ToolItem ti)
                     {
                         var err = m.TryGetProperty("isError", out var ie) && ie.ValueKind == JsonValueKind.True;
-                        Set(tr, ti with { Status = err ? ToolStatus.Failed : ToolStatus.Succeeded, Output = HeadTail(ContentText(m, "text"), MaxToolOutputChars), Diff = DiffOf(m) ?? ti.Diff });
+                        Set(tr, ti with { Status = err ? ToolStatus.Failed : ToolStatus.Succeeded, Output = HeadTail(ContentText(m, "text"), MaxToolOutputChars), Diff = DiffOf(m) ?? ti.Diff,
+                            ResultNote = err ? null : ResultNote(ti.Name, m) });
                     }
                     break;
             }
@@ -660,6 +678,30 @@ public sealed partial class ConversationState
             ? HeadTail(diff, MaxDiffChars)
             : null;
 
+    /// <summary>
+    /// What a search found, from the counts omp's grep and glob put in the result's details ("Found 12 files", "Found 3
+    /// matches in 2 files"); null for other tools and when the details say nothing.
+    /// </summary>
+    internal static string? ResultNote(string tool, JsonElement result)
+    {
+        if (result.ValueKind != JsonValueKind.Object || !result.TryGetProperty("details", out var d) || d.ValueKind != JsonValueKind.Object) return null;
+        var more = d.TryGetProperty("truncated", out var tr) && tr.ValueKind == JsonValueKind.True ? "+" : "";
+        switch (tool)
+        {
+            case "glob" when Int(d, "fileCount") is { } files:
+                return files == 0 ? "No files found" : $"Found {files}{more} {(files == 1 && more.Length == 0 ? "file" : "files")}";
+            case "grep" when Int(d, "matchCount") is { } matches:
+                if (matches == 0) return "No matches";
+                var what = $"Found {matches}{more} {(matches == 1 && more.Length == 0 ? "match" : "matches")}";
+                return Int(d, "fileCount") is { } inFiles and > 1 ? $"{what} in {inFiles} files" : what;
+            default:
+                return null;
+        }
+
+        static int? Int(JsonElement o, string key) =>
+            o.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n) ? n : null;
+    }
+
     private void OnToolUpdate(JsonElement j)
     {
         if (Str(j, "toolCallId") is not { } id || !_toolsByCallId.TryGetValue(id, out var row) || row.Item is not ToolItem t) return;
@@ -680,7 +722,7 @@ public sealed partial class ConversationState
         if (t.Name == "todo" && hasResult && !err) RecordPlan(r, LastFrameAt); // ConversationState.Plan.cs
         var output = hasResult ? HeadTail(ResultText(r), MaxToolOutputChars) : t.Output;
         Set(row, t with { Status = err ? ToolStatus.Failed : ToolStatus.Succeeded, Output = output, Diff = hasResult ? DiffOf(r) ?? t.Diff : t.Diff,
-            Took = t.StartedAt is { } s ? DateTimeOffset.UtcNow - s : null });
+            Took = t.StartedAt is { } s ? DateTimeOffset.UtcNow - s : null, ResultNote = hasResult && !err ? ResultNote(t.Name, r) : null });
     }
 
     private void OnExtensionUi(JsonElement j, DateTimeOffset now)
@@ -719,6 +761,7 @@ public sealed partial class ConversationState
                     Str(j, "placeholder"), Str(j, "prefill"), now, deadline);
                 _dialogs.Add(dialog);
                 if (deadline is not null) NewDeadlines.Add(dialog);
+                if (kind == DialogKind.Approval) NewApprovals.Add(dialog);
                 Touch();
                 break;
             case "cancel":
@@ -794,12 +837,12 @@ public sealed partial class ConversationState
         var (level, text) = answer switch
         {
             DialogAnswer.Value v when d.Kind == DialogKind.Approval =>
-                v.Text == "Approve" ? (NoticeLevel.Info, $"Approved {by} — {d.Headline}") : (NoticeLevel.Warning, $"Denied {by} — {d.Headline}"),
+                v.Text == "Approve" ? (NoticeLevel.Info, $"Approved {by} — {Subject(d)}") : (NoticeLevel.Warning, $"Denied {by} — {Subject(d)}"),
             DialogAnswer.Value v when d.Kind is DialogKind.Input or DialogKind.Editor => (NoticeLevel.Info, $"Answered {by} — {d.Headline}"),
             // The choice as the user read it: omp's "(Recommended)" mark is a hint on the option, not part of the answer
             DialogAnswer.Value v => (NoticeLevel.Info, $"Answered {by}: “{WithoutRecommended(v.Text)}” — {d.Headline}"),
             DialogAnswer.Confirmed c => (NoticeLevel.Info, $"{(c.Yes ? "Confirmed" : "Declined")} {by} — {d.Headline}"),
-            _ => (NoticeLevel.Warning, $"{Describe(d)} dismissed {by} — {d.Headline}"),
+            _ => (NoticeLevel.Warning, $"{Describe(d)} dismissed {by} — {Subject(d)}"),
         };
         AddNotice(level, text);
     }
@@ -810,7 +853,7 @@ public sealed partial class ConversationState
         foreach (var d in _dialogs.Where(d => d.Deadline <= now).ToList())
         {
             TakeDialog(d.Id);
-            AddNotice(NoticeLevel.Warning, $"{Describe(d)} timed out without an answer; omp applied its default — {d.Headline}");
+            AddNotice(NoticeLevel.Warning, $"{Describe(d)} timed out without an answer; omp applied its default — {Subject(d)}");
         }
     }
 
@@ -821,12 +864,16 @@ public sealed partial class ConversationState
         foreach (var d in all)
         {
             TakeDialog(d.Id);
-            AddNotice(NoticeLevel.Warning, $"{Describe(d)} closed ({reason}) — {d.Headline}");
+            AddNotice(NoticeLevel.Warning, $"{Describe(d)} closed ({reason}) — {Subject(d)}");
         }
         return all;
     }
 
     private static string Describe(PendingDialog d) => d.Kind == DialogKind.Approval ? "Approval request" : "Question";
+
+    /// <summary>What the notice is about: an approval's tool ("bash", not omp's "Allow tool: bash"), a question's words.</summary>
+    private static string Subject(PendingDialog d) =>
+        d.Kind == DialogKind.Approval && d.Headline.StartsWith("Allow tool: ", StringComparison.Ordinal) && d.Headline.Length > 12 ? d.Headline[12..] : d.Headline;
 
     private void FinalizeStreamingAssistant()
     {

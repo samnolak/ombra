@@ -3,9 +3,42 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ctl="using:OmpGui.App.Controls">
 
-  <!-- The pet on the message box: a hand cursor says it can be clicked -->
+  <!-- The pet: a hand cursor says it can be clicked (and dragged) -->
   <Style Selector="ctl|PetView.perched">
     <Setter Property="Cursor" Value="Hand" />
+  </Style>
+  <Style Selector="ctl|PetView.perched.dragging">
+    <Setter Property="Cursor" Value="SizeAll" />
+  </Style>
+  <!-- While the model menu is open over the message box the pet steps out of its way -->
+  <Style Selector="ctl|PetPerch">
+    <Setter Property="Transitions">
+      <Transitions><DoubleTransition Property="Opacity" Duration="0:0:0.12" /></Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="ctl|PetPerch.under-menu">
+    <Setter Property="Opacity" Value="0" />
+    <Setter Property="IsHitTestVisible" Value="False" />
+  </Style>
+
+  <!-- Its message box: a small popup surface beside the pet; the card is the field, the text box stays bare -->
+  <Style Selector="Border.pet-chat">
+    <Setter Property="Width" Value="300" />
+    <Setter Property="Background" Value="{DynamicResource GuiSurface2}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+    <Setter Property="BoxShadow" Value="{DynamicResource GuiShadowPopup}" />
+    <Setter Property="Padding" Value="2" />
+  </Style>
+  <Style Selector="TextBox.pet-chat">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+  </Style>
+  <Style Selector="TextBox.pet-chat:not(:disabled) /template/ TextBlock#PART_Placeholder">
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
 
   <!-- Its speech bubble: a small menu surface with a tail pointing at the pet -->

@@ -24,8 +24,9 @@ public sealed record AssistantItem(long Key, string Text, string Thinking, bool 
 /// <param name="Summary">What the call does in a few words (the command, the path, the query), from its arguments.</param>
 /// <param name="Diff">Unified diff of a file edit (omp's edit tool puts it in the result details).</param>
 /// <param name="Took">How long it ran (start to end event), once it ended; null for history loaded from a file.</param>
+/// <param name="ResultNote">What a search found, from the result's details ("Found 12 files"); null when it says nothing.</param>
 public sealed record ToolItem(long Key, string ToolCallId, string Name, string Args, ToolStatus Status, string? Output,
-    string Summary = "", string? Diff = null, DateTimeOffset? StartedAt = null, TimeSpan? Took = null) : TranscriptItem(Key);
+    string Summary = "", string? Diff = null, DateTimeOffset? StartedAt = null, TimeSpan? Took = null, string? ResultNote = null) : TranscriptItem(Key);
 
 /// <summary>The end of a run, kept in the conversation (Claude Code's "Worked for 4m 46s"): how long, what it did.</summary>
 public sealed record TurnEndItem(long Key, TimeSpan Took, bool Interrupted, int Tools, int FilesChanged) : TranscriptItem(Key);

@@ -41,6 +41,8 @@ public partial class PreviewPanel : UserControl
             old.OpenExternallyRequested -= OnOpenExternallyRequested;
             old.PropertyChanged -= OnVmPropertyChanged;
             old.Annotations.CollectionChanged -= OnAnnotationsChanged;
+            old.RunScript = null;
+            old.CaptureScreenshot = null;
         }
         _vm = DataContext as PreviewViewModel;
         if (_vm is { } vm)
@@ -54,6 +56,11 @@ public partial class PreviewPanel : UserControl
             vm.Annotations.CollectionChanged += OnAnnotationsChanged;
             // A page chosen while the panel was not in a window yet (or by an earlier panel).
             if (vm.CurrentUrl is { } current && _web is null) OnNavigationRequested(current);
+            if (_web is not null)
+            {
+                vm.RunScript = RunScriptAsync;
+                vm.CaptureScreenshot = CaptureScreenshotAsync;
+            }
         }
     }
 
@@ -133,6 +140,8 @@ public partial class PreviewPanel : UserControl
             web.Navigate(uri); // remembered until the native adapter exists, then loaded
             _web = web;
             this.FindControl<Border>("WebHost")!.Child = web;
+            _vm.RunScript = RunScriptAsync; // the agent's browser (AgentBrowserBridge) runs its scripts here
+            _vm.CaptureScreenshot = CaptureScreenshotAsync; // and takes its screenshots
         }
         catch (Exception e)
         {
@@ -158,8 +167,26 @@ public partial class PreviewPanel : UserControl
             web.NewWindowRequested -= OnWebNewWindowRequested;
             web.WebMessageReceived -= OnWebMessageReceived;
         }
+        if (_vm is { } vm)
+        {
+            vm.RunScript = null;
+            vm.CaptureScreenshot = null;
+        }
         _vm?.ReportEngineUnavailable(engine, detail);
     }
+
+    /// <summary>A script in the page (the agent's browser): the engine's result as it came back (JSON text or a bare string).</summary>
+    private async Task<string?> RunScriptAsync(string script)
+    {
+        if (_web is not { } web) throw new InvalidOperationException("No page is open in the preview.");
+        return await web.InvokeScript(script);
+    }
+
+    /// <summary>A screenshot of the page (the agent's browser): the web view's own snapshot, no screen capture.</summary>
+    private Task<OmpGui.ClientCore.AgentScreenshot> CaptureScreenshotAsync(CancellationToken ct) =>
+        _web is { } web
+            ? Platform.WebViewSnapshot.CaptureAsync(web.TryGetPlatformHandle(), ct)
+            : throw new OmpGui.ClientCore.AgentBrowserException("no_page", "No page is open in the preview.");
 
     private void OnWebNavigationStarted(object? sender, WebViewNavigationStartingEventArgs e)
     {

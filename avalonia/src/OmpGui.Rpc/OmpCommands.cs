@@ -86,6 +86,35 @@ public static class OmpCommands
     public static async Task FollowUpAsync(this RpcConnection c, string message, IReadOnlyList<(string MimeType, byte[] Data)> images, CancellationToken ct = default) =>
         Ok(await c.RequestAsync("follow_up", w => { w.WriteString("message", message); WriteImages(w, images); }, ct: ct).ConfigureAwait(false));
 
+    /// <summary>
+    /// Withdraws one pending steer (<paramref name="steering"/>) or follow-up by the text it was queued with (omp
+    /// 18.4.4+). <c>Removed</c> is false when omp had already delivered it; its images come back (omp 18.6.3+) so the
+    /// message can return to the editor whole.
+    /// </summary>
+    public static async Task<(bool Removed, IReadOnlyList<(string MimeType, byte[] Data)> Images)> RemoveQueuedMessageAsync(
+        this RpcConnection c, string message, bool steering, CancellationToken ct = default)
+    {
+        var r = Ok(await c.RequestAsync("remove_queued_message", w =>
+        {
+            w.WriteString("message", message);
+            w.WriteString("queue", steering ? "steering" : "followUp");
+        }, ct: ct).ConfigureAwait(false));
+        if (r.Data is not { ValueKind: JsonValueKind.Object } d) return (false, []);
+        var removed = d.TryGetProperty("removed", out var rm) && rm.ValueKind == JsonValueKind.True;
+        var images = new List<(string, byte[])>();
+        if (d.TryGetProperty("images", out var imgs) && imgs.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var i in imgs.EnumerateArray())
+            {
+                if (i.ValueKind != JsonValueKind.Object || !i.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.String) continue;
+                var mime = i.TryGetProperty("mimeType", out var m) && m.ValueKind == JsonValueKind.String ? m.GetString() ?? "image/png" : "image/png";
+                try { images.Add((mime, data.GetBytesFromBase64())); }
+                catch (FormatException) { }
+            }
+        }
+        return (removed, images);
+    }
+
     private static void WriteImages(System.Text.Json.Utf8JsonWriter w, IReadOnlyList<(string MimeType, byte[] Data)> images)
     {
         if (images.Count == 0) return;

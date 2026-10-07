@@ -53,10 +53,10 @@ case "$RID" in
     chmod +x "$APP/Contents/MacOS/OmpGui"
     sed "s/VERSION/${VERSION%%-*}/g" "$PKG/Info.plist" > "$APP/Contents/Info.plist"
     ICONSET="$STAGE/omp-gui.iconset"; mkdir -p "$ICONSET"
-    SRC="$HERE/src/OmpGui.App/Assets/icon-512.png"
+    SRC="$HERE/src/OmpGui.App/Assets/icon-1024.png"
     for s in 16 32 128 256 512; do
       sips -z $s $s "$SRC" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-      d=$((s * 2)); [ $d -le 512 ] && sips -z $d $d "$SRC" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+      d=$((s * 2)); sips -z $d $d "$SRC" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
     done
     iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/omp-gui.icns"
     docs "$STAGE/$NAME"

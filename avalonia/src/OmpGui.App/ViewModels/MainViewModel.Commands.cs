@@ -6,7 +6,7 @@ using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
 
-public sealed partial class CommandSuggestionViewModel(string insert, string label, string? description, string? hint, string source) : ObservableObject
+public sealed partial class CommandSuggestionViewModel(string insert, string label, string? description, string? hint, string source, bool terminalOnly = false) : ObservableObject
 {
     /// <summary>Composer text after choosing it (ends with a space so arguments can follow).</summary>
     public string Insert { get; } = insert;
@@ -14,7 +14,25 @@ public sealed partial class CommandSuggestionViewModel(string insert, string lab
     public string Description { get; } = description ?? "";
     public string Hint { get; } = hint ?? "";
     public bool HasHint => Hint.Length > 0;
-    public string Source { get; } = source;
+
+    /// <summary>Where a command comes from, when that tells the user something (a skill, an MCP prompt…); omp's own
+    /// commands and the window's have none.</summary>
+    public string Tag { get; } = source switch
+    {
+        "skill" => "Skill",
+        "extension" => "Extension",
+        "custom" => "Custom",
+        "mcp_prompt" => "MCP",
+        "file" => "Prompt file",
+        _ => "",
+    };
+    public bool HasTag => Tag.Length > 0;
+
+    /// <summary>Runs only in omp's terminal UI: listed last, under a "Terminal only" heading.</summary>
+    public bool IsTerminalOnly { get; } = terminalOnly;
+
+    /// <summary>The first terminal-only entry carries the heading.</summary>
+    public bool StartsTerminalGroup { get; init; }
     [ObservableProperty] private bool _isSelected;
 }
 
@@ -40,7 +58,6 @@ public sealed record TodoPhaseViewModel(string Name, IReadOnlyList<TodoTaskViewM
 /// <summary>Slash-command autocomplete (omp's own catalog), todo progress, context usage.</summary>
 public sealed partial class MainViewModel
 {
-    private const int MaxSuggestions = 12;
     private IReadOnlyList<SlashCommand> _commands = [];
 
     public ObservableCollection<CommandSuggestionViewModel> CommandSuggestions { get; } = [];
@@ -57,7 +74,13 @@ public sealed partial class MainViewModel
     [ObservableProperty] private bool _isTodoAllDone;
     private int _selectedSuggestion;
 
-    /// <summary>Updates suggestions while the first word of the message is a slash command.</summary>
+    /// <summary>The selected entry of the slash menu (the view keeps it scrolled into view).</summary>
+    public int SelectedSuggestionIndex => _selectedSuggestion;
+
+    /// <summary>
+    /// Updates suggestions while the first word of the message is a slash command. What runs in this window comes
+    /// first; what runs only in omp's terminal UI follows under its own heading. The menu scrolls: every match is listed.
+    /// </summary>
     private void UpdateCommandSuggestions()
     {
         var text = ComposerText;
@@ -68,12 +91,20 @@ public sealed partial class MainViewModel
             if (space < 0)
             {
                 var typed = text[1..];
-                list.AddRange(SlashMenuCommands() // omp's catalog + its terminal-only commands, marked (MainViewModel.TerminalOnly.cs)
-                    .Select(c => (c, rank: Rank(c, typed)))
+                var first = true;
+                list.AddRange(SlashMenuCommands() // omp's catalog + its terminal-only commands (MainViewModel.TerminalOnly.cs)
+                    .Select(c => (c, rank: Rank(c, typed), tui: c.Source == TerminalOnlySource))
                     .Where(x => x.rank >= 0)
-                    .OrderBy(x => x.rank).ThenBy(x => x.c.Name, StringComparer.Ordinal)
-                    .Take(MaxSuggestions)
-                    .Select(x => new CommandSuggestionViewModel("/" + x.c.Name + " ", "/" + x.c.Name, x.c.Description, x.c.Hint, x.c.Source)));
+                    .OrderBy(x => x.tui).ThenBy(x => x.rank).ThenBy(x => x.c.Name, StringComparer.Ordinal)
+                    .Select(x =>
+                    {
+                        var s = new CommandSuggestionViewModel("/" + x.c.Name + " ", "/" + x.c.Name, x.c.Description, x.c.Hint, x.c.Source, x.tui)
+                        {
+                            StartsTerminalGroup = x.tui && first,
+                        };
+                        if (x.tui) first = false;
+                        return s;
+                    }));
             }
             else if (_commands.FirstOrDefault(c => string.Equals(c.Name, text[1..space], StringComparison.OrdinalIgnoreCase)) is { Subcommands.Count: > 0 } cmd
                      && !text[(space + 1)..].Contains(' '))
@@ -81,18 +112,23 @@ public sealed partial class MainViewModel
                 var typed = text[(space + 1)..];
                 list.AddRange(cmd.Subcommands
                     .Where(sc => sc.Name.StartsWith(typed, StringComparison.OrdinalIgnoreCase))
-                    .Take(MaxSuggestions)
                     .Select(sc => new CommandSuggestionViewModel($"/{cmd.Name} {sc.Name} ", $"/{cmd.Name} {sc.Name}", sc.Description, sc.Hint, cmd.Source)));
             }
         }
+        // A slash word that matches nothing: the menu stays, saying so (closing it read as the menu having broken)
+        var noMatch = list.Count == 0 && text.Length > 1 && text.StartsWith('/') && !text.Contains(' ') && !text.Contains('\n');
         // An exact, complete command with nothing more to offer: no menu (Enter sends it).
         if (list.Count == 1 && list[0].Insert.TrimEnd() == text.TrimEnd()) list.Clear();
         CommandSuggestions.Clear();
         foreach (var s in list) CommandSuggestions.Add(s);
         _selectedSuggestion = 0;
         if (list.Count > 0) list[0].IsSelected = true;
-        IsCommandMenuOpen = list.Count > 0;
+        ShowNoCommandMatch = noMatch;
+        IsCommandMenuOpen = list.Count > 0 || noMatch;
     }
+
+    /// <summary>The slash menu's "No matching commands" row.</summary>
+    [ObservableProperty] private bool _showNoCommandMatch;
 
     /// <summary>0: name starts with the text; 1: an alias does; 2: the name contains it; -1: no match.</summary>
     private static int Rank(SlashCommand c, string typed)

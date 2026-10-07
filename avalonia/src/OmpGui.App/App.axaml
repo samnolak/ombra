@@ -1,6 +1,7 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="OmpGui.App.App"
+             Name="OMP GUI"
              RequestedThemeVariant="Default">
   <Application.Resources>
     <ResourceDictionary>
@@ -29,5 +30,6 @@
     <StyleInclude Source="avares://OmpGui/Views/Styles.Connectors.axaml" />
     <StyleInclude Source="avares://OmpGui/Views/Styles.Workspace.axaml" />
     <StyleInclude Source="avares://OmpGui/Views/Styles.Session.axaml" />
+    <StyleInclude Source="avares://OmpGui/Views/Styles.Composer.axaml" />
   </Application.Styles>
 </Application>

@@ -49,6 +49,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _args = args;
         _settings = settings;
         if (configError is not null) Rows.Add(RowViewModel.Create(new NoticeItem(0, NoticeLevel.Warning, configError)));
+        ApprovalRules = _session.ApprovalRules ??= new ApprovalRuleSet(settings); // MainViewModel.Approvals.cs
+        _approvalActions = new ApprovalActions(AllowWithRuleAsync, DenyWithFeedbackAsync);
         Rows.CollectionChanged += (_, _) => NotifyRecoverLayout();
     }
 
@@ -128,16 +130,21 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsIdle => !IsRunning;
     public string ComposerHint => Phase switch
     {
-        SessionPhase.Running when HasDialog => "Answer above — or Esc to stop the run",
-        SessionPhase.Running => "Queue a message — Alt+Enter to steer",
+        SessionPhase.Running when HasDialog => "Answer the request above, or press Esc to stop",
+        SessionPhase.Running => $"Queue a message — {SendKeyHint} to queue, {KeyboardShortcuts.Steer} to steer",
         SessionPhase.Aborting => "Stopping…",
-        SessionPhase.Ready => "Ask omp anything — Shift+Enter for a new line",
+        SessionPhase.Ready => SendWithModifier ? $"Ask omp anything — {SendKeyHint} to send" : "Ask omp anything — Shift+Enter for a new line",
         SessionPhase.Faulted => "omp is not running.",
         _ => "Waiting for omp…",
     };
 
-    /// <summary>Raised on the UI thread after rows were added or the last row changed (for auto-scroll).</summary>
+    /// <summary>Raised on the UI thread after rows were added or the last row changed (for auto-scroll: followed only
+    /// while the reader is at the latest message).</summary>
     public event Action? TranscriptChanged;
+
+    /// <summary>Raised on the UI thread when the conversation must show its latest message whatever the reader was
+    /// looking at: the user sent a message (prompt, follow-up, steer), or another conversation came in.</summary>
+    public event Action? ScrollToLatestRequested;
 
     /// <summary>Raised on the UI thread after an apply added event-log lines.</summary>
     public event Action? DebugLogAppended;
@@ -216,18 +223,25 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand(CanExecute = nameof(CanSend), AllowConcurrentExecutions = true)]
     private async Task SendAsync()
     {
+        // Terminal-only commands (/settings, /plan…) never reach omp: they would go to the model as a message
+        if (HandleTerminalOnlyCommand(ComposerText)) return;
+        await SubmitAsync(TakeComposer);
+    }
+
+    /// <summary>Ready: a new prompt. Running: queued as a follow-up. <paramref name="take"/> takes the content (the
+    /// message box's, or the pet's message box's).</summary>
+    private async Task SubmitAsync(Func<(string Text, ImageAttachment[] Images)> take)
+    {
         try
         {
-            // Terminal-only commands (/settings, /plan…) never reach omp: they would go to the model as a message
-            if (HandleTerminalOnlyCommand(ComposerText)) return;
             if (Phase == SessionPhase.Running)
             {
-                var (queued, queuedImages) = TakeComposer();
+                var (queued, queuedImages) = take();
                 await _session.QueueAsync(QueueKind.FollowUp, queued, queuedImages, _cts.Token);
                 Apply(_session.Snapshot());
                 return;
             }
-            var (text, images) = TakeComposer();
+            var (text, images) = take();
             // Reflect Running at once instead of waiting for the next pump tick.
             _optimisticAfterVersion = _session.Snapshot().Version;
             Phase = SessionPhase.Running;
@@ -402,7 +416,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         if (_last is not null && s.Version < _last.Version) return;
         Interlocked.Increment(ref _uiApplies);
         var changed = false;
-        if (s.TranscriptEpoch != _transcriptEpoch)
+        var newConversation = s.TranscriptEpoch != _transcriptEpoch;
+        if (newConversation)
         {
             // Another session (or a restarted omp): the old rows belong to a different conversation.
             Rows.Clear();
@@ -456,12 +471,14 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         ApplySessionArea(s); // MainViewModel.Session.cs: context ring, pin, session menu
         CheckAttention(s);
         if (s.Phase == SessionPhase.Ready) RememberProject(s.Cwd);
-        // A finished run or another session changes the list (new file, newer time, first-message title).
-        if (fileChanged || (wasRunning && !IsRunning)) RequestCatalogRefresh();
+        // Another session, a sent message (the run starts) or a finished run changes the list (new file, the time of the
+        // last message that orders it, first-message title).
+        if (fileChanged || wasRunning != IsRunning) RequestCatalogRefresh();
         UpdateStatus();
         ApplyPet(s); // MainViewModel.Pets.cs
         UpdateElapsedTimer();
         if (changed || wasRunning != IsRunning) MarkTurnEnds();
+        if (newConversation) ScrollToLatestRequested?.Invoke(); // a chat opens on its latest message
         if (changed) TranscriptChanged?.Invoke();
         if (debugAdded) DebugLogAppended?.Invoke();
     }
@@ -486,25 +503,44 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             retryable = false;
         }
         var turnOver = !IsRunning;
+        // The "Worked for…" line after the reply that ends a turn carries that reply's copy action
+        TurnEndRowViewModel? endLine = null;
         for (var i = Rows.Count - 1; i >= 0; i--)
         {
             switch (Rows[i])
             {
-                case UserRowViewModel: turnOver = true; break;
-                case ToolRowViewModel: turnOver = false; break; // the turn ends in tool calls: no actions mid-turn
+                case UserRowViewModel: turnOver = true; Release(); break;
+                case ToolRowViewModel: turnOver = false; Release(); break; // the turn ends in tool calls: no actions mid-turn
+                case TurnEndRowViewModel te:
+                    Release();
+                    endLine = te;
+                    break;
                 case AssistantRowViewModel a:
                     var end = turnOver && a.HasText;
                     if (a.IsTurnEnd != end) a.IsTurnEnd = end;
+                    var carried = end && endLine is not null;
+                    if (carried && endLine!.Reply != a) endLine.Reply = a;
+                    if (a.HasTurnEndRow != carried) a.HasTurnEndRow = carried;
                     if (end) turnOver = false;
+                    if (!carried) Release();
+                    endLine = null;
                     break;
             }
+        }
+        Release();
+
+        // A "Worked for…" line with no reply of its own (the turn ended in tool calls) has nothing to copy
+        void Release()
+        {
+            if (endLine?.Reply is not null) endLine.Reply = null;
+            endLine = null;
         }
     }
 
     private void ApplyExtensionUi(SessionSnapshot s)
     {
         var first = s.Dialogs.Count > 0 ? s.Dialogs[0] : null;
-        if (first?.Id != CurrentDialog?.Id) CurrentDialog = first is null ? null : new DialogViewModel(first, AnswerDialogAsync);
+        if (first?.Id != CurrentDialog?.Id) CurrentDialog = first is null ? null : new DialogViewModel(first, AnswerDialogAsync, _approvalActions);
         if (CurrentDialog is { } d) d.QueueText = s.Dialogs.Count > 1 ? $"1 of {s.Dialogs.Count}" : "";
         UpdateDialogTimer();
 
@@ -551,7 +587,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         {
             SessionPhase.Starting => "Starting omp…",
             SessionPhase.Ready => "Ready",
-            SessionPhase.Running => $"{Activity(s)} {Elapsed(s)}",
+            SessionPhase.Running => $"{Activity(s)} · {Elapsed(s)}",
             SessionPhase.Aborting => "Stopping…",
             SessionPhase.Stopping => "Shutting down…",
             SessionPhase.Stopped => "Stopped",
@@ -586,8 +622,15 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         return "Working";
     }
 
-    private static string Elapsed(SessionSnapshot s) =>
-        s.RunStartedAt is { } started ? (DateTimeOffset.UtcNow - started).ToString(@"mm\:ss", CultureInfo.InvariantCulture) : "00:00";
+    /// <summary>How long the run has gone, as Claude Code writes it: "4s", "1m 05s", "1h 02m".</summary>
+    private static string Elapsed(SessionSnapshot s)
+    {
+        var t = s.RunStartedAt is { } started ? DateTimeOffset.UtcNow - started : TimeSpan.Zero;
+        if (t < TimeSpan.Zero) t = TimeSpan.Zero;
+        return t.TotalHours >= 1 ? string.Create(CultureInfo.InvariantCulture, $"{(int)t.TotalHours}h {t.Minutes:00}m")
+            : t.TotalMinutes >= 1 ? string.Create(CultureInfo.InvariantCulture, $"{(int)t.TotalMinutes}m {t.Seconds:00}s")
+            : string.Create(CultureInfo.InvariantCulture, $"{t.Seconds}s");
+    }
 
     partial void OnPhaseChanged(SessionPhase value)
     {
@@ -600,7 +643,13 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (IsRunning && _elapsedTimer is null)
         {
-            _elapsedTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => UpdateStatus());
+            _elapsedTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) =>
+            {
+                UpdateStatus();
+                // The live "Thinking… 4s" label of the reply being written
+                for (var i = Rows.Count - 1; i >= 0 && i >= Rows.Count - 8; i--)
+                    if (Rows[i] is AssistantRowViewModel { IsThinkingLive: true } live) live.Tick();
+            });
             _elapsedTimer.Start();
         }
         else if (!IsRunning && _elapsedTimer is not null)

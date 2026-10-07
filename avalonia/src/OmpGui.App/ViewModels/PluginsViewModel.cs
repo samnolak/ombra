@@ -344,7 +344,14 @@ public sealed partial class PluginsViewModel : ObservableObject
     public bool HasPlugins => Plugins.Count > 0;
     public bool HasPluginsError => PluginsError.Length > 0;
     public bool HasMarketplaces => Marketplaces.Count > 0;
-    public bool ShowMarketplacesEmpty => HasLoaded && MarketplacesError.Length == 0 && Marketplaces.Count == 0;
+    public bool ShowMarketplacesEmpty => HasLoaded && !PageFailed && MarketplacesError.Length == 0 && Marketplaces.Count == 0;
+
+    /// <summary>None of omp's lists could be read (its command line failed): one message for the whole page.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PluginsErrorTitle), nameof(ShowMarketplacesEmpty))]
+    private bool _pageFailed;
+
+    public string PluginsErrorTitle => PageFailed ? "Couldn't load plugins and skills from omp" : "omp couldn't list the plugins";
     public bool HasMarketplacesError => MarketplacesError.Length > 0;
     public bool HasMarketplaceFormError => MarketplaceFormError.Length > 0;
     public bool HasSettingsError => SettingsError.Length > 0;
@@ -379,6 +386,13 @@ public sealed partial class PluginsViewModel : ObservableObject
             ApplyConfig(config.Result);
             ApplyMarketplaces(markets.Result);
             ApplyPlugins(list.Result);
+            // omp's command line failed altogether (the same reason three times): say it once, at the top.
+            PageFailed = !list.Result.Ok && !markets.Result.Ok && !config.Result.Ok;
+            if (PageFailed)
+            {
+                MarketplacesError = "";
+                SettingsError = "";
+            }
             RefreshSkills();
             await LoadCatalogsAsync(version);
         }
@@ -452,7 +466,7 @@ public sealed partial class PluginsViewModel : ObservableObject
         var config = r.Ok ? OmpPlugins.ParseConfigList(r.Stdout) : null;
         if (config is null)
         {
-            SettingsError = "omp's settings could not be read: " + (r.Ok ? "unexpected output" : Why(r));
+            SettingsError = "Couldn't read omp's settings: " + (r.Ok ? "unexpected output" : Why(r));
             HasSettings = false;
             return;
         }
@@ -860,7 +874,7 @@ public sealed partial class PluginsViewModel : ObservableObject
             if (!current.Ok || !ok)
             {
                 skill.SetEnabledQuietly(!enabled);
-                SkillsFeedback.Error = "omp's settings could not be read: " + Why(current);
+                SkillsFeedback.Error = "Couldn't read omp's settings: " + Why(current);
                 return;
             }
             var id = "skill:" + skill.Name;

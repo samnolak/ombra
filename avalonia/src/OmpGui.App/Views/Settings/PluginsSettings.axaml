@@ -53,7 +53,7 @@
             <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
               <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
               <StackPanel Grid.Column="1" Spacing="4">
-                <TextBlock Classes="error" Text="omp couldn't list the plugins" FontWeight="Medium" FontSize="13" />
+                <TextBlock Classes="error" Text="{Binding PluginsErrorTitle}" FontWeight="Medium" FontSize="13" TextWrapping="Wrap" />
                 <SelectableTextBlock Text="{Binding PluginsError}" TextWrapping="Wrap" FontSize="13" />
               </StackPanel>
               <Button Grid.Row="1" Grid.Column="1" Content="Try again" Command="{Binding RefreshCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" />

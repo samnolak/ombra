@@ -37,9 +37,9 @@ public sealed partial class MainViewModel
     [
         // omp 18.2.0 tiers (tools/approval.ts): each mode auto-approves up to a tier and asks above it.
         // Named as Claude Code names its permission modes (Ask permissions, Accept edits, Bypass permissions)
-        new("always-ask", "Ask permissions", "Reading runs; file edits, shell commands and other risky tools ask first."),
-        new("write", "Accept edits", "Reading and editing files runs; shell commands and other exec-tier tools ask first. Recommended."),
-        new("yolo", "Bypass permissions", "omp runs every tool without asking, including shell commands. Only for trusted, sandboxed work."),
+        new("always-ask", "Ask permissions", "omp reads on its own and asks before it edits a file or runs a command."),
+        new("write", "Accept edits", "omp reads and edits files on its own and asks before it runs a command. Recommended."),
+        new("yolo", "Bypass permissions", "omp runs every tool without asking, shell commands included. Only for trusted, sandboxed work."),
     ];
 
     /// <summary>All of omp's thinking levels: the menu when omp cannot say which the model accepts (omp before 18.8.0).</summary>
@@ -95,13 +95,22 @@ public sealed partial class MainViewModel
     [ObservableProperty] private bool _showThinking = true;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ApprovalLabel), nameof(IsYolo))]
+    [NotifyPropertyChangedFor(nameof(ApprovalLabel), nameof(IsYolo), nameof(IsAcceptEdits), nameof(ShownApprovalMode))]
     private string? _approvalMode;
 
-    public string ApprovalLabel => ApprovalModes.FirstOrDefault(m => m.Mode == ApprovalMode)?.Label ?? "Default permissions";
-    public bool IsYolo => ApprovalMode == "yolo";
+    /// <summary>A mode chosen while omp runs: it takes effect (omp restarts) once the run ends.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ApprovalLabel), nameof(IsYolo), nameof(IsAcceptEdits), nameof(ApprovalPendingNote), nameof(ShownApprovalMode))]
+    private string? _pendingApprovalMode;
 
-    /// <summary>"Never ask" waits for an explicit second confirmation.</summary>
+    /// <summary>The mode the menu ticks: the one waiting for the run to end, else the current one.</summary>
+    public string? ShownApprovalMode => PendingApprovalMode ?? ApprovalMode;
+    public string ApprovalLabel => ApprovalModes.FirstOrDefault(m => m.Mode == ShownApprovalMode)?.Label ?? "Default permissions";
+    public bool IsYolo => ShownApprovalMode == "yolo";
+    public bool IsAcceptEdits => ShownApprovalMode == "write";
+    public string? ApprovalPendingNote => PendingApprovalMode is null || !IsRunning ? null : "Takes effect when the current run ends (omp restarts).";
+
+    /// <summary>"Bypass permissions" waits for an explicit second confirmation.</summary>
     [ObservableProperty] private bool _confirmYolo;
 
     [ObservableProperty] private bool _isSettingsOpen;
@@ -139,12 +148,15 @@ public sealed partial class MainViewModel
     };
 
     /// <summary>A new session that cannot start: the setup screen takes the page (no greeting, no message box).</summary>
-    public bool ShowSetupScreen => CanRecover && Rows.Count == 0;
+    public bool ShowSetupScreen => CanRecover && IsConversationEmpty;
 
     /// <summary>Mid-conversation, the same content is a card above the (disabled) message box.</summary>
-    public bool ShowRecoverCard => CanRecover && Rows.Count > 0;
+    public bool ShowRecoverCard => CanRecover && !IsConversationEmpty;
 
-    public bool ShowGreeting => !CanRecover && Rows.Count == 0;
+    public bool ShowGreeting => !CanRecover && IsConversationEmpty;
+
+    /// <summary>Nothing said yet: no rows, or only notices (a warning from omp's start does not end the new-session page).</summary>
+    public bool IsConversationEmpty => Rows.All(r => r is NoticeRowViewModel);
 
     /// <summary>What omp or the system said, for the curious and for bug reports (under "Show details").</summary>
     public string ErrorDetail => CanRecover ? _last?.LastError?.Trim() ?? "" : "";
@@ -200,6 +212,30 @@ public sealed partial class MainViewModel
         if (IsSettingsOpen) Persist(o => o with { Notifications = value });
     }
 
+    /// <summary>
+    /// The message box sends with <c>enter</c> (Shift+Enter adds a line) or <c>mod-enter</c> (⌘/Ctrl+Enter sends,
+    /// Enter adds a line). Saved when chosen.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SendWithModifier), nameof(SendKeyHint), nameof(ComposerHint))]
+    private string _sendKey = "enter";
+
+    public bool SendWithModifier => SendKey == "mod-enter";
+
+    /// <summary>The key that sends, as the platform writes it.</summary>
+    public string SendKeyHint => !SendWithModifier ? "Enter" : OperatingSystem.IsMacOS() ? "⌘Enter" : "Ctrl+Enter";
+
+    /// <summary>The ⌘/Ctrl modifier's label for the send-key choice.</summary>
+    public static string ModEnterLabel => OperatingSystem.IsMacOS() ? "⌘ Enter" : "Ctrl+Enter";
+
+    [RelayCommand]
+    private void SetSendKey(string? key)
+    {
+        if (key is not ("enter" or "mod-enter") || key == SendKey) return;
+        SendKey = key;
+        Persist(o => o with { SendKey = key == "enter" ? null : key });
+    }
+
     private static void PostToUi(Action a) => Avalonia.Threading.Dispatcher.UIThread.Post(a);
 
     [RelayCommand]
@@ -244,24 +280,32 @@ public sealed partial class MainViewModel
             Models.Add(new ModelItemViewModel(m) { IsCurrent = m.Key == _last?.Model });
     }
 
-    [RelayCommand]
+    // Concurrent: a choice made while an earlier one waits (for the run to end, or for Shift+Tab to pause) replaces it
+    [RelayCommand(AllowConcurrentExecutions = true)]
     private async Task SetApprovalModeAsync(string mode)
     {
         try
         {
-            if (mode == ApprovalMode) return;
+            if (mode == ShownApprovalMode) return;
             if (mode == "yolo" && !ConfirmYolo)
             {
                 ConfirmYolo = true; // the card asks once more; nothing changes until the user confirms
                 return;
             }
             ConfirmYolo = false;
-            if (Phase is SessionPhase.Running or SessionPhase.Aborting)
-            {
-                SettingsMessage = "Stop the current run first: changing approvals restarts omp.";
-                return;
-            }
             Persist(o => o with { ApprovalMode = mode });
+            // Changing approvals restarts omp: never mid-run (it switches once omp is idle), and not on every step of a
+            // Shift+Tab through the modes: the newest choice applies once the keys pause.
+            _approvalChosenAt = DateTime.UtcNow;
+            var waiting = PendingApprovalMode is not null;
+            PendingApprovalMode = mode;
+            if (waiting) return; // the loop already waiting picks up the newest choice
+            while (Phase is SessionPhase.Running or SessionPhase.Aborting or SessionPhase.Stopping or SessionPhase.Starting
+                   || DateTime.UtcNow - _approvalChosenAt < ApprovalSettle)
+                await Task.Delay(100, _cts.Token);
+            mode = PendingApprovalMode ?? mode;
+            PendingApprovalMode = null;
+            if (mode == ApprovalMode) return;
             await _session.SetApprovalModeAsync(mode, _cts.Token);
             Apply(_session.Snapshot());
         }
@@ -273,6 +317,10 @@ public sealed partial class MainViewModel
 
     [RelayCommand]
     private void CancelYolo() => ConfirmYolo = false;
+
+    /// <summary>How long the permission mode waits for another Shift+Tab before omp restarts with it.</summary>
+    private static readonly TimeSpan ApprovalSettle = TimeSpan.FromMilliseconds(600);
+    private DateTime _approvalChosenAt;
 
     [RelayCommand]
     private async Task OpenSettingsAsync()

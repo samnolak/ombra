@@ -30,7 +30,7 @@ public sealed class ApprovalTests
         var done = await TestProcesses.Eventually(s.Snapshot, x => x.Phase == SessionPhase.Ready, Wait, "run end");
         var tool = done.Items.OfType<ToolItem>().Single();
         Assert.Equal((ToolStatus.Succeeded, "hi"), (tool.Status, tool.Output));
-        Assert.Contains(done.Items, i => i is NoticeItem { Text: "Approved by you — Allow tool: bash" });
+        Assert.Contains(done.Items, i => i is NoticeItem { Text: "Approved by you — bash" });
         Assert.Empty(done.Dialogs);
         Assert.False(await s.AnswerDialogAsync(d.Id, new DialogAnswer.Value("Deny")), "a second answer is not sent");
     }
@@ -43,7 +43,7 @@ public sealed class ApprovalTests
         Assert.True(await s.AnswerDialogAsync(d.Id, new DialogAnswer.Value("Deny")));
         var done = await TestProcesses.Eventually(s.Snapshot, x => x.Phase == SessionPhase.Ready, Wait, "run end");
         Assert.Equal(ToolStatus.Failed, done.Items.OfType<ToolItem>().Single().Status);
-        Assert.Contains(done.Items, i => i is NoticeItem { Level: NoticeLevel.Warning, Text: "Denied by you — Allow tool: bash" });
+        Assert.Contains(done.Items, i => i is NoticeItem { Level: NoticeLevel.Warning, Text: "Denied by you — bash" });
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public sealed class ApprovalTests
         var snap = s.Snapshot();
         Assert.Equal(SessionPhase.Ready, snap.Phase);
         Assert.Empty(snap.Dialogs);
-        Assert.Contains(snap.Items, i => i is NoticeItem { Text: "Approval request closed (the run was stopped) — Allow tool: bash" });
+        Assert.Contains(snap.Items, i => i is NoticeItem { Text: "Approval request closed (the run was stopped) — bash" });
         Assert.NotEqual(ToolStatus.Running, snap.Items.OfType<ToolItem>().Single().Status);
     }
 
@@ -109,7 +109,7 @@ public sealed class ApprovalTests
         System.Diagnostics.Process.GetProcessById(s.ProcessId!.Value).Kill();
         var snap = await TestProcesses.Eventually(s.Snapshot, x => x.Phase == SessionPhase.Faulted, Wait, "fault");
         Assert.Empty(snap.Dialogs);
-        Assert.Contains(snap.Items, i => i is NoticeItem { Text: "Approval request closed (omp is no longer running) — Allow tool: bash" });
+        Assert.Contains(snap.Items, i => i is NoticeItem { Text: "Approval request closed (omp is no longer running) — bash" });
         Assert.False(await s.AnswerDialogAsync(d.Id, new DialogAnswer.Value("Approve")));
     }
 

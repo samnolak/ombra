@@ -31,12 +31,16 @@ public sealed partial class SshSettingsViewModel : WorkspacePageViewModel
 
     [ObservableProperty] private bool _isEmpty;
 
-    /// <summary>omp isn't running: the list comes from the files and cannot be changed here.</summary>
+    /// <summary>omp isn't running (or can't list hosts): the list comes from the files and cannot be changed here.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(EmptyText))]
+    [NotifyPropertyChangedFor(nameof(EmptyText), nameof(ReadOnlyNote))]
     private bool _readOnly;
 
     public string EmptyText => ReadOnly ? "No SSH hosts saved yet." : "No SSH hosts yet. Add one, and omp can run commands on it.";
+
+    public string ReadOnlyNote => Main.CanRunOmpCommands
+        ? "These are the saved hosts. This version of omp can't change them from the app; update omp to add or remove hosts here."
+        : "omp isn't running: these are the saved hosts. Start omp to add or remove them.";
 
     [ObservableProperty] private string _userFile = "";
     [ObservableProperty] private string _projectFile = "";
@@ -91,28 +95,33 @@ public sealed partial class SshSettingsViewModel : WorkspacePageViewModel
             ProjectFile = projectPath is null ? "" : GitProbe.Tilde(projectPath);
             var files = await Task.Run(() => (User: ReadFile(userPath, "user"), Project: ReadFile(projectPath, "project")), ct);
 
-            IReadOnlyList<SshHostEntry>? hosts;
+            // What /ssh list would print: project entries first, a user entry of the same name is shadowed.
+            List<SshHostEntry> FromFiles() => files.Project.Select(h => h.Entry)
+                .Concat(files.User.Select(h => h.Entry).Where(u => files.Project.All(p => p.Entry.Name != u.Name))).ToList();
+            IReadOnlyList<SshHostEntry> hosts;
             if (Main.CanRunOmpCommands)
             {
-                ReadOnly = false;
                 var r = await Main.RunOmpCommandAsync("/ssh list", TimeSpan.FromSeconds(20), ct);
-                hosts = r.Ok ? WorkspaceParsers.ParseSshList(r.Output) : null;
-                if (hosts is null) LoadError = r.Ok ? "omp said: " + r.Output : "omp did not list the hosts: " + r.Error;
+                // An omp without /ssh: the files still show what it would use, read-only.
+                ReadOnly = r.Unsupported;
+                var listed = r.Ok ? WorkspaceParsers.ParseSshList(r.Output) : null;
+                if (listed is null && !r.Unsupported)
+                    LoadError = r.Ok && r.Output.Length > 0 ? r.Output : "Couldn't read the SSH hosts from omp" + (r.Error is { Length: > 0 } why ? ": " + why + "." : ". Try again.");
+                hosts = listed ?? (r.Unsupported ? FromFiles() : []);
+                IsEmpty = listed is { Count: 0 } || r.Unsupported && hosts.Count == 0;
             }
             else
             {
                 ReadOnly = true;
-                // What /ssh list would print: project entries first, a user entry of the same name is shadowed.
-                hosts = files.Project.Select(h => h.Entry)
-                    .Concat(files.User.Select(h => h.Entry).Where(u => files.Project.All(p => p.Entry.Name != u.Name))).ToList();
+                hosts = FromFiles();
+                IsEmpty = hosts.Count == 0;
             }
             Hosts.Clear();
-            foreach (var h in hosts ?? [])
+            foreach (var h in hosts)
             {
                 var key = (h.IsProject ? files.Project : files.User).FirstOrDefault(x => x.Entry.Name == h.Name).KeyPath;
                 Hosts.Add(new SshHostRowViewModel(this, h, key));
             }
-            IsEmpty = hosts is { Count: 0 };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         finally { IsLoading = false; }

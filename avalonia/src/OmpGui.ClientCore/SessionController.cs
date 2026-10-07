@@ -483,6 +483,9 @@ public sealed partial class SessionController : IAsyncDisposable
     {
         if (!OmpBuiltins.RunsOverRpc(command))
             return new(false, "", Error: $"/{OmpBuiltins.NameOf(command)} is not available over omp's RPC");
+        // This omp lacks the builtin (an older version): sent anyway it would become a message to the model.
+        if (!OmpBuiltins.RunsOverRpc(command, Snapshot().Commands))
+            return new(false, "", Error: $"This version of omp has no /{OmpBuiltins.NameOf(command)} command", Unsupported: true);
         if (_omp?.Connection is not { } conn) return new(false, "", Error: "omp is not running");
         if (Snapshot().SigningIn is { } provider) return new(false, "", Error: $"omp is busy with the sign-in to {provider}");
         await _commands.WaitAsync(ct).ConfigureAwait(false);
@@ -544,6 +547,27 @@ public sealed partial class SessionController : IAsyncDisposable
                 s.RemoveQueued(queued!.Seq);
                 s.AddNotice(NoticeLevel.Error, $"Could not queue the message ({e.Message}): {text}");
             });
+        }
+    }
+
+    /// <summary>
+    /// Takes a queued message back before omp delivers it (omp's <c>remove_queued_message</c>). Returns its images
+    /// when omp withdrew it; null when omp had already delivered it or did not answer. An omp without the command
+    /// (before 18.4.4) throws <see cref="RpcCommandException"/>.
+    /// </summary>
+    public async Task<IReadOnlyList<ImageAttachment>?> RemoveQueuedAsync(QueuedMessage message, CancellationToken ct = default)
+    {
+        var conn = RequireConnection();
+        try
+        {
+            var (removed, images) = await conn.RemoveQueuedMessageAsync(message.Text, message.Kind == QueueKind.Steer, ct).ConfigureAwait(false);
+            if (!removed) return null;
+            Mutate(s => s.RemoveQueued(message.Seq));
+            return [.. images.Select((i, n) => new ImageAttachment($"image {n + 1}", i.MimeType, i.Data))];
+        }
+        catch (Exception e) when (e is TimeoutException or RpcConnectionClosedException)
+        {
+            return null;
         }
     }
 
@@ -727,6 +751,7 @@ public sealed partial class SessionController : IAsyncDisposable
         {
             PendingDialog[] deadlines = [];
             string[] toCancel = [];
+            List<(PendingDialog Dialog, ApprovalGrant Grant)>? autoAllowed = null;
             var reconcile = false;
             // When the line was read, not when the pump got to it: frames can wait in the queue (e.g. while history
             // loads at start), and dialog deadlines count from omp's send time.
@@ -756,6 +781,11 @@ public sealed partial class SessionController : IAsyncDisposable
                     toCancel = [.. _state.DialogsToCancel];
                     _state.DialogsToCancel.Clear();
                 }
+                if (_state.NewApprovals.Count > 0)
+                {
+                    autoAllowed = TakeCoveredApprovals(_state.NewApprovals);
+                    _state.NewApprovals.Clear();
+                }
             }
             if (reconcile) _ = ReconcileQueueAsync(conn);
             foreach (var id in toCancel)
@@ -763,6 +793,7 @@ public sealed partial class SessionController : IAsyncDisposable
                 try { await conn.CancelExtensionUiAsync(id).ConfigureAwait(false); }
                 catch (RpcConnectionClosedException) { }
             }
+            if (autoAllowed is not null) await AutoAllowAsync(conn, autoAllowed).ConfigureAwait(false);
             _changes.Writer.TryWrite(true);
             if (NeedsSettleProbe(conn)) EnsureSettleProbe(conn);
             foreach (var d in deadlines) _ = ExpireAtDeadlineAsync(d);
@@ -789,7 +820,9 @@ public sealed partial class SessionController : IAsyncDisposable
                 var tail = LastLines(omp.StderrTail, 12);
                 var what = protocolError
                     ? $"omp RPC stream broke ({conn.CloseReason!.InnerException!.Message}); omp was stopped"
-                    : $"omp exited unexpectedly (code {code?.ToString() ?? "unknown"}): {conn.CloseReason?.Message}";
+                    // The process is gone: the end of its output says nothing the exit code does not (a read error does)
+                    : (code is { } c ? $"omp exited unexpectedly (exit code {c})" : "omp exited unexpectedly")
+                      + (conn.CloseReason is { InnerException: not null } r ? ": " + r.Message : "");
                 s.Fail(what + (tail.Length > 0 ? "\n" + tail : ""), Now);
             }
         });

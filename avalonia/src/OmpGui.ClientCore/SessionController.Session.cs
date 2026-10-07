@@ -37,6 +37,22 @@ public sealed partial class SessionController
         catch (Exception e) when (e is TimeoutException or RpcConnectionClosedException or InvalidOperationException) { return null; }
     }
 
+    /// <summary><c>get_session_stats</c>: this session's tokens and cost; null when omp is not running or does not answer.</summary>
+    public async Task<SessionTokenStats?> GetSessionStatsAsync(CancellationToken ct = default)
+    {
+        if (_omp?.Connection is not { } conn) return null;
+        try
+        {
+            var r = await conn.RequestAsync("get_session_stats", ct: ct).ConfigureAwait(false);
+            if (!r.Success || r.Data is not { ValueKind: JsonValueKind.Object } d) return null;
+            static double N(JsonElement e, string n) => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(n, out var p) && p.ValueKind == JsonValueKind.Number ? p.GetDouble() : 0;
+            var t = d.TryGetProperty("tokens", out var tokens) ? tokens : default;
+            return new SessionTokenStats((long)N(t, "input"), (long)N(t, "output"), (long)N(t, "cacheRead"), (long)N(t, "cacheWrite"),
+                (long)N(t, "total"), N(d, "cost"), (long)N(d, "premiumRequests"));
+        }
+        catch (Exception e) when (e is TimeoutException or RpcConnectionClosedException or InvalidOperationException) { return null; }
+    }
+
     /// <summary>
     /// <c>set_fast_mode</c>: the priority service tier for the current model's family, recorded in the session. omp
     /// refuses to turn it on for a model without a tier (its error is returned).
