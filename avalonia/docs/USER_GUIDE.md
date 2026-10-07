@@ -43,11 +43,11 @@ project yet), so the OS warns on first start:
 ## First start
 
 1. **omp not found.** If omp is not on your PATH and you have not set one, the window says *Install omp to get
-   started* and offers **Install omp 18.2.0**. The client downloads Bun 1.4.2 and omp 18.2.0 from the npm registry,
+   started* and offers **Install omp 18.8.0**. The client downloads Bun 1.4.2 and omp 18.8.0 from the npm registry,
    checks them against the versions and hashes pinned in the app, and keeps them in the app's own folder (about
    1.3 GB on disk). Nothing global is changed. If you already have omp, choose **Use my own omp…** and set its
    command in **Settings → Advanced** instead; a command you set always wins over the installed one. Newer omp
-   releases than 18.2.0 exist on npm, but this client is verified only with 18.2.0 — another version may work or
+   releases than 18.8.0 may exist on npm, but this client is verified only with 18.8.0 — another version may work or
    may miss features.
 2. **No model provider.** omp needs a model. If it has none, the window says *Connect a model provider*.
    **Open omp setup** opens omp's own setup in the terminal beside the conversation, with the keyboard already in
@@ -230,7 +230,7 @@ their own below:
 - **Advanced** — *Advanced: omp runtime*: which omp the app starts. **Command** empty means the omp the app
   installed, otherwise omp from PATH; *Arguments before omp's own* (one per line; for your own Bun setup the command
   is `bun` with `--no-install` and the path to omp's `cli.ts`); *Profile* (`OMP_PROFILE`); **Save and restart omp**,
-  and **Install omp 18.2.0** or **Reinstall**.
+  and **Install omp 18.8.0** or **Reinstall**.
 
 ## Connectors (MCP servers)
 

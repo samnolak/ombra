@@ -31,9 +31,9 @@
   <ItemGroup>
     <!-- The pinned runtime pack the client installs (RuntimePack): the same files in runtime/packs that CI installs. -->
     <EmbeddedResource Include="Controls\Preview\annotate.js" LogicalName="preview/annotate.js" />
-    <EmbeddedResource Include="..\..\..\runtime\packs\omp-18.2.0-bun-1.4.2\package.json" LogicalName="runtime-pack/package.json" />
-    <EmbeddedResource Include="..\..\..\runtime\packs\omp-18.2.0-bun-1.4.2\bun.lock" LogicalName="runtime-pack/bun.lock" />
-    <EmbeddedResource Include="..\..\..\runtime\packs\omp-18.2.0-bun-1.4.2\bunfig.toml" LogicalName="runtime-pack/bunfig.toml" />
+    <EmbeddedResource Include="..\..\..\runtime\packs\omp-18.8.0-bun-1.4.2\package.json" LogicalName="runtime-pack/package.json" />
+    <EmbeddedResource Include="..\..\..\runtime\packs\omp-18.8.0-bun-1.4.2\bun.lock" LogicalName="runtime-pack/bun.lock" />
+    <EmbeddedResource Include="..\..\..\runtime\packs\omp-18.8.0-bun-1.4.2\bunfig.toml" LogicalName="runtime-pack/bunfig.toml" />
     <EmbeddedResource Include="..\..\packaging\update-signing.pub" LogicalName="update-signing.pub" />
   </ItemGroup>
 </Project>

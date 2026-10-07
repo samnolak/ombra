@@ -587,7 +587,7 @@ while (true)
             {
                 models = new object[]
                 {
-                    new { provider = "fake", id = "model", name = "Fake Model", reasoning = true, input = new[] { "text" }, contextWindow = 128000 },
+                    new { provider = "fake", id = "model", name = "Fake Model", reasoning = scenario != "thinking-levels", input = new[] { "text" }, contextWindow = 128000 },
                     new { provider = "fake", id = "vision", name = "Fake Vision", reasoning = false, input = new[] { "text", "image" }, contextWindow = 32000 },
                 },
             });
@@ -596,6 +596,11 @@ while (true)
             var mid = cmd?["modelId"]?.GetValue<string>() ?? "";
             if (mid is "model" or "vision") { model = ("fake", mid); if (mid == "vision") thinking = null; Respond(id, type, new { provider = "fake", id = mid }); }
             else Respond(id, type, error: $"Model not found: {mid}");
+            break;
+        case "get_available_thinking_levels" when scenario == "thinking-levels":
+            // omp 18.8.0: the levels of the live model, whatever its catalog row says (the model list below marks
+            // fake/model as not reasoning in this scenario, like a model newer than omp's catalog)
+            Respond(id, type, new { levels = model.id == "vision" ? new[] { "off" } : new[] { "off", "low", "medium", "high", "xhigh", "max" } });
             break;
         case "set_thinking_level":
             thinking = cmd?["level"]?.GetValue<string>();

@@ -8,7 +8,7 @@ namespace OmpGui.App.ViewModels;
 
 /// <summary>
 /// First run: install the pinned Original OMP Core runtime when omp is not found, and send the user to omp's own
-/// provider setup (<c>/login</c> in omp's terminal UI) when omp has no model — omp 18.2.0 exits before its RPC is
+/// provider setup (<c>/login</c> in omp's terminal UI) when omp has no model — omp (18.2.0, 18.8.0) exits before its RPC is
 /// ready in that case, so the RPC sign-in cannot be used yet.
 /// </summary>
 public sealed partial class MainViewModel

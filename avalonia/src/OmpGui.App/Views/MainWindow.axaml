@@ -816,7 +816,7 @@
                 <Flyout Placement="TopEdgeAlignedRight">
                   <StackPanel Width="200" Spacing="2">
                     <TextBlock Classes="group-label" Text="Thinking effort" Margin="10,4,0,4" />
-                    <ItemsControl ItemsSource="{x:Static vm:MainViewModel.ThinkingLevels}">
+                    <ItemsControl ItemsSource="{Binding ThinkingOptions}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="x:String">
                           <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"

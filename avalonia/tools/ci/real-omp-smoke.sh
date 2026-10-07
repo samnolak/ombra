@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Real Original OMP Core smoke for CI (Linux, macOS, Windows via Git Bash).
-# Installs the pinned runtime pack (omp 18.2.0 from npm on Bun 1.4.2) with the client's own installer, builds a
+# Installs the pinned runtime pack (omp 18.8.0 from npm on Bun 1.4.2) with the client's own installer, builds a
 # throwaway harness profile, starts the stand-in model server and runs the gated RealOmp tests against it.
 # Model: STAND-IN (tools/mock-model), not a real model. Everything else (omp, RPC, provider path, tools) is real.
 #
@@ -21,7 +21,7 @@ esac
 echo "::group::Pinned runtime via the client's installer"
 (cd "$HERE" && OMPGUI_RUNTIME_INSTALL_DIR="$WORK/runtimes" dotnet test tests/OmpGui.Tests -c Release --no-build \
   --filter "FullyQualifiedName~RealRuntimeInstallTests" --logger "console;verbosity=detailed")
-RT="$WORK/runtimes/omp-18.2.0-bun-1.4.2"
+RT="$WORK/runtimes/omp-18.8.0-bun-1.4.2"
 BUN="$RT/bun/bun$EXE"
 CLI="$RT/omp/node_modules/@oh-my-pi/pi-coding-agent/src/cli.ts"
 cat "$RT/installed.json"

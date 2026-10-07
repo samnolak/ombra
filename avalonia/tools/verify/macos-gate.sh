@@ -43,7 +43,7 @@ check "package-smoke-$RID (self-test, runtime install, omp over RPC, window star
 # ── RUNTIME: the real omp suite on this Mac (installs the pinned runtime with the client's own installer) ─────
 tools/ci/real-omp-smoke.sh "$WORK/omp" > "$WORK/real-omp.log" 2>&1
 check "real-omp (startup, stdin/stdout RPC, protocol v2, prompt, stream, abort, shutdown, paths)" $? "$(grep -E '^\s*(Passed|Failed|Skipped):' "$WORK/real-omp.log" | tr -s ' ' | tr '\n' ' ')"
-RT=$WORK/omp/runtimes/omp-18.2.0-bun-1.4.2
+RT=$WORK/omp/runtimes/omp-18.8.0-bun-1.4.2
 
 # $SHELL: zsh (macOS default) and a non-macOS path; the packaged app's self-test must still start a shell.
 APP_DIR="$WORK/smoke/unpacked/omp-gui-$V-$RID/OMP GUI.app"; APP="$APP_DIR/Contents/MacOS/OmpGui"

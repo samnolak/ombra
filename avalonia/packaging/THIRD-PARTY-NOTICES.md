@@ -32,7 +32,7 @@ OMP GUI is distributed under the MIT License (`LICENSE`). It is an independent c
 
 | Component | Version | License | Where from |
 |---|---|---|---|
-| omp (`@oh-my-pi/pi-coding-agent`) and its dependencies | 18.2.0 (pinned lockfile) | MIT (omp); dependencies: their own licenses, installed with their license files | npm registry |
+| omp (`@oh-my-pi/pi-coding-agent`) and its dependencies | 18.8.0 (pinned lockfile) | MIT (omp); dependencies: their own licenses, installed with their license files | npm registry |
 | Bun (`@oven/bun-<platform>`) | 1.4.2 (pinned sha512) | MIT (Bun; JavaScriptCore / WebKit parts: LGPL-2.0) | npm registry |
 | Dictation model: NeMo Parakeet TDT 0.6B v3 (int8, sherpa-onnx export) | pinned revision | CC-BY-4.0 (NVIDIA) | huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8 |
 

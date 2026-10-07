@@ -16,15 +16,15 @@ public sealed record BunBuild(string Key, string Integrity, string Exe)
 }
 
 /// <summary>
-/// The pinned runtime pack (<c>runtime/packs/omp-18.2.0-bun-1.4.2</c>): Original OMP Core 18.2.0 from its published npm
+/// The pinned runtime pack (<c>runtime/packs/omp-18.8.0-bun-1.4.2</c>): Original OMP Core 18.8.0 from its published npm
 /// package, run by Bun 1.4.2. Nothing floats: Bun is checked against the npm registry integrity recorded here, and omp
 /// with every dependency comes from the pack's lockfile (<c>bun install --frozen-lockfile</c>, which checks each
 /// package's integrity). No lifecycle scripts run; omp is not patched.
 /// </summary>
 public static class RuntimePack
 {
-    public const string Name = "omp-18.2.0-bun-1.4.2";
-    public const string OmpVersion = "18.2.0";
+    public const string Name = "omp-18.8.0-bun-1.4.2";
+    public const string OmpVersion = "18.8.0";
     public const string BunVersion = "1.4.2";
     public const string CliEntry = "node_modules/@oh-my-pi/pi-coding-agent/src/cli.ts";
     public const string DefaultRegistry = "https://registry.npmjs.org";

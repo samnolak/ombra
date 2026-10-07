@@ -9,7 +9,7 @@ The template is in this repository under [`harness/profile`](../harness/profile)
 client's CI builds a throwaway copy of the template for its real-omp tests
 ([`avalonia/tools/stand-in-env/setup.sh`](../avalonia/tools/stand-in-env/setup.sh)).
 
-Template 1.2.0 (rules, agents, skills and settings), verified with omp 18.2.0, the version the desktop client pins.
+Template 1.2.0 (rules, agents, skills and settings), verified with omp 18.8.0, the version the desktop client pins.
 
 ## What it contains
 

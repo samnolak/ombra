@@ -42,7 +42,28 @@ public sealed partial class MainViewModel
         new("yolo", "Bypass permissions", "omp runs every tool without asking, including shell commands. Only for trusted, sandboxed work."),
     ];
 
-    public static readonly IReadOnlyList<string> ThinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"];
+    /// <summary>All of omp's thinking levels: the menu when omp cannot say which the model accepts (omp before 18.8.0).</summary>
+    public static readonly IReadOnlyList<string> ThinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+    /// <summary>The thinking menu: the levels the current model accepts (omp's <c>get_available_thinking_levels</c>).</summary>
+    [ObservableProperty] private IReadOnlyList<string> _thinkingOptions = ThinkingLevels;
+
+    /// <summary>The model the thinking menu was fetched for.</summary>
+    private string? _thinkingFetchedFor;
+
+    private async Task FetchThinkingLevelsAsync(string model)
+    {
+        IReadOnlyList<string>? levels;
+        try { levels = await _session.GetThinkingLevelsAsync(_cts.Token); }
+        catch (OperationCanceledException) { return; }
+        if (_last?.Model != model) return; // the model changed again meanwhile: that fetch decides
+        _thinkingLevelsKnown = levels is not null;
+        ThinkingOptions = levels ?? ThinkingLevels;
+        if (_last is { } last) ApplyModelInfo(last);
+    }
+
+    /// <summary>omp named the levels of the current model (else the menu is the full list and the catalog decides).</summary>
+    private bool _thinkingLevelsKnown;
 
     private readonly ClientSettingsStore? _settings;
     private IReadOnlyList<OmpModel> _allModels = [];
@@ -409,10 +430,17 @@ public sealed partial class MainViewModel
         CurrentModel = s.Model ?? "no model";
         ApprovalMode = s.ApprovalMode;
         _applyingThinking = true;
-        SelectedThinking = s.ThinkingLevel is { } t && ThinkingLevels.Contains(t) ? t : null;
+        SelectedThinking = s.ThinkingLevel is { } t && ThinkingOptions.Contains(t) ? t : null;
         _applyingThinking = false;
         var current = _allModels.FirstOrDefault(m => m.Key == s.Model);
-        ShowThinking = current?.Reasoning ?? true;
+        // omp's own answer wins: a model it knows to reason has more than "off" (omp 18.8.0 knows newer models than
+        // its catalog flag says, e.g. claude-opus-5-5); without it, the model list's reasoning flag decides.
+        ShowThinking = _thinkingLevelsKnown ? ThinkingOptions.Count > 1 : current?.Reasoning ?? true;
+        if (s.Phase == SessionPhase.Ready && s.Model is { } m && m != _thinkingFetchedFor)
+        {
+            _thinkingFetchedFor = m;
+            _ = FetchThinkingLevelsAsync(m);
+        }
         // Whether the model reasons is in omp's model list: fetched once omp is ready on a model not in it yet (the
         // picker fetches it too), so the thinking selector is right without opening the picker.
         if (current is null && s.Phase == SessionPhase.Ready && s.Model is { } model && model != _modelsFetchedFor)

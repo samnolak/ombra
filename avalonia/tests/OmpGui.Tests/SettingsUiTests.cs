@@ -137,6 +137,34 @@ public sealed class SettingsUiTests
     }
 
     /// <summary>
+    /// omp 18.8.0 names the thinking levels of the live model (get_available_thinking_levels). Its model list called
+    /// claude-opus-5-5 not reasoning, so the selector was hidden; the levels omp names now decide, "max" included, and
+    /// a model with only "off" has no selector.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task The_thinking_menu_lists_the_levels_omp_names_for_the_model()
+    {
+        var s = new SessionController(TestProcesses.Fake("thinking-levels"));
+        var vm = new MainViewModel(s, new AppArgs());
+        var w = new MainWindow { DataContext = vm, Width = 1000, Height = 700 };
+        w.Show();
+        vm.OnWindowOpened();
+        await Until(() => vm.Phase == SessionPhase.Ready && vm.ThinkingOptions.Contains("max"), "levels fetched");
+        Assert.Equal(["off", "low", "medium", "high", "xhigh", "max"], vm.ThinkingOptions);
+        Assert.True(vm.ShowThinking); // although the model list says the model does not reason
+        vm.SetThinkingCommand.Execute("max");
+        await Until(() => s.Snapshot().ThinkingLevel == "max", "max reached omp");
+
+        vm.OpenModelMenuCommand.Execute(null);
+        await Until(() => vm.Models.Any(m => m.Key == "fake/vision"), "models listed");
+        vm.ChooseModelCommand.Execute(vm.Models.First(m => m.Key == "fake/vision"));
+        await Until(() => vm.CurrentModel == "fake/vision" && !vm.ShowThinking, "no selector for a model with only off");
+        Assert.Equal(["off"], vm.ThinkingOptions);
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    /// <summary>
     /// Regression (package E2E, real 1100 px window): a long session title was drawn over the model chip; it trims now.
     /// </summary>
     [AvaloniaTheory]
