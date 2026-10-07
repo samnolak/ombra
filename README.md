@@ -28,7 +28,7 @@ not an official product of the omp, Bun, Anthropic or OpenAI projects.
 - **Settings** — General (appearance, notifications), Model providers, Connectors (MCP servers, Smithery search),
   Plugins and skills, Computer use, Git and worktrees, SSH hosts, Pets, Updates, Advanced (which omp to run) and
   Diagnostics. What belongs to omp is changed through omp's own commands and settings.
-- **First start without omp** — the client installs the pinned omp 18.2.0 on Bun 1.4.2 into its own folder, checked
+- **First start without omp** — the client installs the pinned omp 18.8.0 on Bun 1.4.2 into its own folder, checked
   against the hashes built into it. Model providers and keys stay in omp's configuration. Newer omp releases (18.3
   and later) are not verified with this client yet; your own omp can be set in Settings → Advanced.
 
@@ -51,7 +51,7 @@ is, the app finds newer releases by itself and installs one when you choose to, 
 releases are signed with the project's release key.
 
 What is verified, on Linux x64 only (details: [PROJECT_STATE.md](avalonia/docs/PROJECT_STATE.md)):
-the test suite with the real omp 18.2.0, and the packaged app in a real window with a real (small, generic) model —
+the test suite with the real omp 18.8.0, and the packaged app in a real window with a real (small, generic) model —
 install, reply and streaming, stop, approvals, terminal, restart. Not verified yet: Windows and macOS at run time
 (no runners), arm64 at run time, the real speech model, larger models and hosted providers, code signing.
 
@@ -93,7 +93,7 @@ UI changes the layout audit screenshots (`OMPGUI_REVIEW_DIR`) and `tools/verify/
 | Path | What it is |
 |---|---|
 | [`avalonia/`](avalonia) | The client: `src/OmpGui.Rpc` (process, stdio, framing), `src/OmpGui.ClientCore` (state, session control), `src/OmpGui.App` (view models, UI, platform adapters), `tests/`, `tools/` (packaging, verification, stand-in model), `packaging/`, `docs/` |
-| [`runtime/packs/`](runtime/packs) | The pinned omp runtime pack (omp 18.2.0 on Bun 1.4.2) that the client builds in and installs |
+| [`runtime/packs/`](runtime/packs) | The pinned omp runtime pack (omp 18.8.0 on Bun 1.4.2) that the client builds in and installs |
 | [`harness/`](harness) | The `harness` omp profile template, used by the client's real-omp tests ([docs/harness.md](docs/harness.md)) |
 
 Documentation for contributors: [PROJECT_STATE.md](avalonia/docs/PROJECT_STATE.md) (state, architecture, decisions,

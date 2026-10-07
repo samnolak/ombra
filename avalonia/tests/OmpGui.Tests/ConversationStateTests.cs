@@ -384,6 +384,33 @@ public sealed class ConversationStateTests
         Assert.Equal(SessionPhase.Ready, s.Phase);
     }
 
+    /// <summary>
+    /// omp 18.8.0 ends a run with agent_end, prompt_result and session_settled together. A prompt sent while the last
+    /// two were still on their way (real-omp test, and a user who types fast) was shown as idle while omp worked.
+    /// </summary>
+    [Fact]
+    public void The_previous_runs_end_does_not_end_the_next_prompt()
+    {
+        var s = new ConversationState();
+        s.Apply(F("""{"type":"agent_start"}"""), T);
+        s.Apply(F("""{"type":"agent_end","messages":[]}"""), T);
+        Assert.Equal(SessionPhase.Ready, s.Phase);
+        s.AddUserPrompt("next");
+        s.BeginRun(T);
+        s.Apply(F("""{"type":"prompt_result","id":"p1","agentInvoked":true,"status":"completed","sessionSettled":true}"""), T);
+        s.Apply(F("""{"type":"session_settled"}"""), T);
+        Assert.Equal(SessionPhase.Running, s.Phase);
+        s.Apply(F("""{"type":"agent_start"}"""), T);
+        s.Apply(F("""{"type":"agent_end","messages":[]}"""), T);
+        s.Apply(F("""{"type":"session_settled"}"""), T);
+        Assert.Equal(SessionPhase.Ready, s.Phase);
+
+        // A prompt omp handles without a run (a slash command) still ends at once.
+        s.BeginRun(T);
+        s.Apply(F("""{"type":"prompt_result","id":"p3","agentInvoked":false,"status":"completed"}"""), T);
+        Assert.Equal(SessionPhase.Ready, s.Phase);
+    }
+
     [Fact]
     public void Late_run_events_do_not_leave_the_stopping_phase()
     {

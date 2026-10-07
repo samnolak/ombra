@@ -18,13 +18,13 @@
 #            TARGET_OMP_ARGS      extra omp flags, space-separated (default none; for a small context e.g.
 #                                 "--tools=bash,read --no-skills --no-rules --no-lsp")
 #            OMP_RUNTIME          installed pinned runtime (default: the client's own install,
-#                                 ~/.local/share/OmpGui/runtimes/omp-18.2.0-bun-1.4.2)
+#                                 ~/.local/share/OmpGui/runtimes/omp-18.8.0-bun-1.4.2)
 # Result: <work-dir>/target-report.txt (every step) and <work-dir>/result.txt (PASS / FAIL per check).
 set -uo pipefail
 WORK=${1:?work dir}; mkdir -p "$WORK"; WORK=$(cd "$WORK" && pwd)
 : "${TARGET_BASE_URL:?TARGET_BASE_URL (e.g. http://127.0.0.1:8000/v1)}" "${TARGET_MODEL_ID:?TARGET_MODEL_ID}"
 PROVIDER=${TARGET_PROVIDER:-target-local}; ROUTE="$PROVIDER/$TARGET_MODEL_ID"
-RT=${OMP_RUNTIME:-$HOME/.local/share/OmpGui/runtimes/omp-18.2.0-bun-1.4.2}
+RT=${OMP_RUNTIME:-$HOME/.local/share/OmpGui/runtimes/omp-18.8.0-bun-1.4.2}
 HERE=$(cd "$(dirname "$0")/../.." && pwd)
 [ -x "$RT/bun/bun" ] || [ -f "$RT/bun/bun.exe" ] || { echo "no pinned runtime at $RT (install it from the app, or set OMP_RUNTIME)"; exit 2; }
 KEYVAR=${TARGET_API_KEY_VAR:-TARGET_NO_KEY}

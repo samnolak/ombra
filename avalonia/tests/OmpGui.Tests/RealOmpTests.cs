@@ -31,6 +31,10 @@ public sealed class RealOmpTests
         Assert.Equal(2, snap.ProtocolVersion);
         Assert.Equal(SessionPhase.Ready, snap.Phase);
         Assert.Equal("qwen-local/flash-next-w4a16", snap.Model);
+        // omp 18.8.0 names the thinking levels of the live model ("off" first); the thinking menu shows them
+        var levels = await s.GetThinkingLevelsAsync();
+        Assert.NotNull(levels);
+        Assert.Equal("off", levels![0]);
     }
 
     [Fact]

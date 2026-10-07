@@ -1,0 +1,8 @@
+{
+  "name": "omp-gui-runtime-18-8-0",
+  "private": true,
+  "description": "Isolated omp 18.8.0 runtime for OMP GUI (source mode, pinned Bun 1.4.2). Not a global install.",
+  "dependencies": {
+    "@oh-my-pi/pi-coding-agent": "18.8.0"
+  }
+}

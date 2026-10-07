@@ -61,7 +61,7 @@ and the harness profile template (`harness/profile`, used by the stand-in test e
 ## Architecture
 
 ```
-Original OMP Core (omp 18.2.0, Bun 1.4.2)  --mode rpc-ui --approval-mode write, OMP_PROFILE=harness
+Original OMP Core (omp 18.8.0, Bun 1.4.2)  --mode rpc-ui --approval-mode write, OMP_PROFILE=harness
         ⇅ stdin/stdout (JSONL, protocol v2 rpc_chunk), stderr drained separately
 Client Integration Layer   OmpProcess → RpcConnection (bounded event channel, deadlines) → OmpCommands
         ↓ ChannelReader<RpcFrame> (4096, backpressure, never drops)
@@ -88,16 +88,16 @@ Nothing critical depends on UI timers, focus or rendering. No OS checks outside 
 | Settle probe after non-terminal `agent_end` | `UPSTREAM OMP ISSUE`: 18.2.0 can go idle without a terminal `agent_end`; `session_settled` honoured for newer omp |
 | UI delivery paused while minimized + young-gen GC bound | Avalonia queues dirty visuals until the next frame (none while minimized); the workstation GC's gen0 budget is large |
 | Caret blinks only in the active window and stops after 10 s without input | a blinking caret repaints: 2–5% CPU idle under software rendering; some window systems do not report deactivation |
-| The client installs the pinned runtime itself (Bun 1.4.2 + omp 18.2.0) | a first run needs no global tools; sha512-pinned Bun, frozen lockfile, no lifecycle scripts, staged swap |
+| The client installs the pinned runtime itself (Bun 1.4.2 + omp 18.8.0) | a first run needs no global tools; sha512-pinned Bun, frozen lockfile, no lifecycle scripts, staged swap |
 | Own updater, not Velopack or Sparkle / Squirrel | the client ships as a plain folder / `.app` in an archive; an in-place swap of that folder keeps its path and needs no installer format per OS. The manifest is signed with ECDSA P-256, because .NET verifies it without extra libraries and Ed25519 is not built into .NET 10. Installing waits for the user |
 | omp updates only with the client | each client version pins one runtime pack (tested together); a new pack installs after the client update while the old omp keeps working |
-| First-run provider setup through omp's own TUI | omp 18.2.0 exits "No models available" before its RPC is ready, so RPC login cannot be used then |
+| First-run provider setup through omp's own TUI | omp exits before its RPC is ready when no provider is set up (18.2.0: "No models available", 18.8.0: "No default model selected"), so RPC login cannot be used then |
 | Local settings in the OS config folder (`omp-gui.local.json`, or `--config`, `OMPGUI_CONFIG`) | no machine paths or secrets in source; atomic writes, `.bak` of hand edits |
 | Mock model only for deterministic tests | Original OMP Core, RPC, provider path, tools stay real; reports separate mock-model results |
 
 ## Baseline facts
 
-omp 18.2.0 npm sources (RPC byte-identical to tag v18.2.0 `6f2c14b3`), Bun `1.4.2+744846f84`; harness template
+omp 18.8.0 npm sources (pinned since 2026-10-07; 18.2.0 before it, RPC byte-identical to tag v18.2.0 `6f2c14b3`), Bun `1.4.2+744846f84`; harness template
 1.2.0; the tests' model route is the stand-in model.
 
 ## How to run

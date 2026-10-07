@@ -12,7 +12,7 @@
 # SmolLM2 has an 8k context: omp's full tool set is ~20k tokens, so the profile starts omp with its own options
 # --tools=bash,read --no-skills --no-rules --no-lsp, and the server caps a reply at 384 tokens (-n 384).
 #
-#   tools/real-model/setup.sh <work-dir> <omp-runtime-dir> [port]     # omp-runtime-dir: …/omp-18.2.0-bun-1.4.2
+#   tools/real-model/setup.sh <work-dir> <omp-runtime-dir> [port]     # omp-runtime-dir: …/omp-18.8.0-bun-1.4.2
 # Then:
 #   OMPGUI_REAL_MODEL_CONFIG=<work-dir>/realmodel.json OMPGUI_REAL_MODEL_ROUTE=local-llamacpp/smollm2-135m-instruct-q4_1 \
 #     dotnet test tests/OmpGui.Tests --filter FullyQualifiedName~RealModelTests

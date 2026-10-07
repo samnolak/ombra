@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "name": "omp-18.8.0-bun-1.4.2",
+  "revision": 1,
+  "omp": {
+    "package": "@oh-my-pi/pi-coding-agent",
+    "version": "18.8.0",
+    "integrity": "sha512-i0m5z+sljos+Fb7GwKhtXimAbvZ3EOiulyN9RiDeVy0yl1UtNlErgp2O376EurT263rD7C/CAbVOp9EyK7saOQ==",
+    "entry": "node_modules/@oh-my-pi/pi-coding-agent/src/cli.ts"
+  },
+  "bun": {
+    "version": "1.4.2",
+    "revision": "744846f84",
+    "platforms": {
+      "win32-x64": {
+        "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-windows-x64.zip",
+        "sha256": "ce4c17497b2f29712a99d3d53f028de28cd42e3bacb8589599e7f000e49b6405",
+        "exe": "bun-windows-x64/bun.exe"
+      }
+    }
+  },
+  "natives": {
+    "win32-x64": "@oh-my-pi/pi-natives-win32-x64"
+  },
+  "capabilities": [
+    "vibe",
+    "collab",
+    "live"
+  ],
+  "patchSet": [],
+  "minGui": "0.6.0-0",
+  "notes": "omp 18.8.0 from its published npm package sources, run by the pinned Bun 1.4.2 (omp 18.8.0 needs Bun >= 1.3.14), so GUI extensions can import vibe/*, collab/* and live/* (a compiled omp binary bundles only package export subpaths). 18.8.0's model catalog knows newer models (e.g. claude-opus-5-5, with its thinking levels). Dependency lifecycle scripts are not run; no source patches."
+}

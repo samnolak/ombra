@@ -110,7 +110,7 @@ public sealed class RuntimeInstallerTests
         var install = bun.Calls[0];
         Assert.Equal(["install", "--frozen-lockfile", "--ignore-scripts", "--no-progress"], install.ArgumentList.ToArray());
         Assert.StartsWith(root, install.Environment["BUN_INSTALL_CACHE_DIR"]);
-        Assert.Equal(File.ReadAllText(RepoFile("runtime/packs/omp-18.2.0-bun-1.4.2/bun.lock")), File.ReadAllText(Path.Combine(rt.Directory, "omp", "bun.lock")));
+        Assert.Equal(File.ReadAllText(RepoFile("runtime/packs/omp-18.8.0-bun-1.4.2/bun.lock")), File.ReadAllText(Path.Combine(rt.Directory, "omp", "bun.lock")));
         // omp is checked in the staging folder, before it replaces anything.
         var check = bun.Calls[1].ArgumentList.ToArray();
         Assert.Equal("--no-install", check[0]);
@@ -259,9 +259,9 @@ public sealed class RuntimeInstallerTests
         foreach (var name in RuntimePack.PackFiles)
         {
             using var reader = new StreamReader(RuntimePack.OpenPackFile(name));
-            Assert.Equal(File.ReadAllText(RepoFile("runtime/packs/omp-18.2.0-bun-1.4.2/" + name)), reader.ReadToEnd());
+            Assert.Equal(File.ReadAllText(RepoFile("runtime/packs/omp-18.8.0-bun-1.4.2/" + name)), reader.ReadToEnd());
         }
-        Assert.Contains("\"@oh-my-pi/pi-coding-agent\": \"18.2.0\"", File.ReadAllText(RepoFile("runtime/packs/omp-18.2.0-bun-1.4.2/package.json")));
+        Assert.Contains("\"@oh-my-pi/pi-coding-agent\": \"18.8.0\"", File.ReadAllText(RepoFile("runtime/packs/omp-18.8.0-bun-1.4.2/package.json")));
     }
 
     [Fact]
@@ -277,6 +277,9 @@ public sealed class RuntimeInstallerTests
     {
         Assert.Equal(StartProblem.NotFound, SessionController.ClassifyStartFailure(new OmpStartException("could not start omp", null, "", launchFailed: true)));
         Assert.Equal(StartProblem.NoModel, SessionController.ClassifyStartFailure(new OmpStartException("exited 1", 1, "No models available. Use /login or set an API key environment variable.")));
+        // omp 18.8.0's wording (seen with an empty HOME and no API key in the environment)
+        Assert.Equal(StartProblem.NoModel, SessionController.ClassifyStartFailure(new OmpStartException("exited 1", 1,
+            "No default model selected. Use /login, set an API key environment variable, or select a local model with /model or --model.")));
         Assert.Equal(StartProblem.Other, SessionController.ClassifyStartFailure(new OmpStartException("exited 3", 3, "fatal: something else")));
     }
 

@@ -200,6 +200,7 @@ public sealed partial class ConversationState
     public void EndRun(bool interrupted, DateTimeOffset now)
     {
         AwaitingSettle = false;
+        _runStartPending = false;
         if (Phase is not (SessionPhase.Running or SessionPhase.Aborting or SessionPhase.Stopping)) return;
         ConfirmPendingPrompts();
         FinalizeOpenRows(interrupted || Phase is SessionPhase.Aborting or SessionPhase.Stopping);
@@ -217,6 +218,20 @@ public sealed partial class ConversationState
     public void AddUserPrompt(string text, int imageCount = 0)
     {
         Add(new UserItem(0, text, Confirmed: false, imageCount));
+    }
+
+    /// <summary>
+    /// A prompt was sent and its run has not started yet: the end of the previous run (prompt_result,
+    /// session_settled, agent_end) can still be on its way and must not end this one. omp 18.8.0 writes those three
+    /// right after agent_end, and a prompt sent in that moment was shown as idle while omp worked on it.
+    /// </summary>
+    private bool _runStartPending;
+
+    /// <summary>The client started a run (a prompt, or a command omp hands to the agent): Running until it ends.</summary>
+    public void BeginRun(DateTimeOffset now)
+    {
+        _runStartPending = true;
+        SetPhase(SessionPhase.Running, now);
     }
 
     private readonly List<QueuedMessage> _queued = [];
@@ -266,9 +281,11 @@ public sealed partial class ConversationState
         {
             case "agent_start":
                 AwaitingSettle = false;
+                _runStartPending = false;
                 SetPhase(Phase == SessionPhase.Aborting ? SessionPhase.Aborting : SessionPhase.Running, now);
                 break;
             case "agent_end":
+                if (_runStartPending) break; // the previous run's end; the new run has not started yet
                 if (j.TryGetProperty("isTerminal", out var term) && term.ValueKind == JsonValueKind.False)
                 {
                     AwaitingSettle = Phase is SessionPhase.Running or SessionPhase.Aborting;
@@ -280,11 +297,14 @@ public sealed partial class ConversationState
                 StateRefreshWanted = true; // context usage and todos after the run
                 break;
             case "session_settled":
-                // Upstream after 18.2.0: the session is done, whatever agent_end said.
+                // Upstream after 18.2.0: the session is done, whatever agent_end said (unless it is the previous
+                // run's, read after the next prompt was sent).
+                if (_runStartPending) break;
                 AwaitingSettle = false;
                 EndRun(interrupted: false, now);
                 break;
             case "prompt_result":
+                // agentInvoked:false is this prompt handled without a run (a slash command): no agent_start follows
                 if (j.TryGetProperty("agentInvoked", out var inv) && inv.ValueKind == JsonValueKind.False)
                     EndRun(interrupted: false, now);
                 break;

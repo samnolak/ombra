@@ -287,6 +287,21 @@ public sealed partial class SessionController : IAsyncDisposable
         }
     }
 
+    /// <summary>The thinking levels the current model accepts; null when omp cannot say (older omp, not running).</summary>
+    public async Task<IReadOnlyList<string>?> GetThinkingLevelsAsync(CancellationToken ct = default)
+    {
+        if (_omp?.Connection is not { } conn) return null;
+        try
+        {
+            var levels = await conn.GetAvailableThinkingLevelsAsync(ct).ConfigureAwait(false);
+            return levels.Count > 0 ? levels : null;
+        }
+        catch (Exception e) when (e is RpcCommandException or TimeoutException or RpcConnectionClosedException)
+        {
+            return null;
+        }
+    }
+
     public async Task SetThinkingLevelAsync(string level, CancellationToken ct = default)
     {
         var conn = RequireConnection();
@@ -436,7 +451,7 @@ public sealed partial class SessionController : IAsyncDisposable
         Mutate(s =>
         {
             s.AddUserPrompt(text, images.Count);
-            s.SetPhase(SessionPhase.Running, Now);
+            s.BeginRun(Now);
         });
         try
         {
@@ -492,7 +507,7 @@ public sealed partial class SessionController : IAsyncDisposable
             if (!ack.Success) return new(false, printed, Error: ack.Error ?? "unknown error");
             var invoked = !(ack.Data is { } d && d.ValueKind == System.Text.Json.JsonValueKind.Object
                             && d.TryGetProperty("agentInvoked", out var inv) && inv.ValueKind == System.Text.Json.JsonValueKind.False);
-            if (invoked) Mutate(s => s.SetPhase(SessionPhase.Running, Now));
+            if (invoked) Mutate(s => s.BeginRun(Now));
             return new(true, printed, invoked);
         }
         catch (Exception e) when (e is TimeoutException or RpcConnectionClosedException or ArgumentException)
@@ -877,13 +892,16 @@ public sealed partial class SessionController : IAsyncDisposable
     private DateTimeOffset Now => _clock.GetUtcNow();
 
     /// <summary>
-    /// omp 18.2.0 prints "No models available. Use /login or set an API key…" and exits when no provider is set up
+    /// omp exits when no provider is set up: 18.2.0 printed "No models available. Use /login or set an API key…",
+    /// 18.8.0 prints "No default model selected. Use /login, set an API key environment variable…"
     /// (UNDOCUMENTED / VERSION-PINNED text; an unrecognized message still shows as a plain start failure).
     /// </summary>
     internal static StartProblem ClassifyStartFailure(OmpStartException e) =>
         e.LaunchFailed ? StartProblem.NotFound
-        : e.StderrTail.Contains("No models available", StringComparison.OrdinalIgnoreCase) ? StartProblem.NoModel
+        : NoModelMessages.Any(m => e.StderrTail.Contains(m, StringComparison.OrdinalIgnoreCase)) ? StartProblem.NoModel
         : StartProblem.Other;
+
+    private static readonly string[] NoModelMessages = ["No models available", "No default model selected"];
 
     private static string LastLines(string text, int n)
     {

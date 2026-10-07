@@ -159,6 +159,17 @@ public static class OmpCommands
             w.WriteString("modelId", modelId);
         }, ct: ct).ConfigureAwait(false));
 
+    /// <summary>
+    /// The levels the live model accepts, <c>off</c> first (omp 18.8.0 <c>get_available_thinking_levels</c>; older omp
+    /// has no such command and answers with an error).
+    /// </summary>
+    public static async Task<IReadOnlyList<string>> GetAvailableThinkingLevelsAsync(this RpcConnection c, CancellationToken ct = default)
+    {
+        var r = Ok(await c.RequestAsync("get_available_thinking_levels", ct: ct).ConfigureAwait(false));
+        if (r.Data is not { ValueKind: JsonValueKind.Object } d || !d.TryGetProperty("levels", out var ls) || ls.ValueKind != JsonValueKind.Array) return [];
+        return [.. ls.EnumerateArray().Where(l => l.ValueKind == JsonValueKind.String).Select(l => l.GetString()!)];
+    }
+
     /// <summary>off | minimal | low | medium | high | xhigh | max (omp validates).</summary>
     public static async Task SetThinkingLevelAsync(this RpcConnection c, string level, CancellationToken ct = default) =>
         Ok(await c.RequestAsync("set_thinking_level", w => w.WriteString("level", level), ct: ct).ConfigureAwait(false));
