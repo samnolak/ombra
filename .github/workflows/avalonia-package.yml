@@ -27,23 +27,49 @@ on:
         description: 'Release notes (shown in the app before updating)'
         type: string
         default: ''
+      platforms:
+        description: 'Platforms to build, comma-separated (linux-x64, linux-arm64, win-x64, win-arm64, osx-arm64, osx-x64), or all'
+        type: string
+        default: all
 
 permissions:
   contents: read
 
 jobs:
+  plan:
+    # The platforms this run builds (input "platforms"); a release then offers updates only to those
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          all_ = [
+              {"rid": "linux-x64", "os": "ubuntu-24.04", "smoke": "native"},
+              {"rid": "linux-arm64", "os": "ubuntu-24.04", "smoke": "none"},
+              {"rid": "win-x64", "os": "windows-2025", "smoke": "native"},
+              {"rid": "win-arm64", "os": "windows-2025", "smoke": "none"},
+              {"rid": "osx-arm64", "os": "macos-15", "smoke": "native"},
+              {"rid": "osx-x64", "os": "macos-15", "smoke": "rosetta"},
+          ]
+          want = (os.environ.get("PLATFORMS") or "all").replace(" ", "")
+          rids = [p["rid"] for p in all_] if want in ("", "all") else want.split(",")
+          unknown = set(rids) - {p["rid"] for p in all_}
+          if unknown:
+              raise SystemExit(f"unknown platforms: {sorted(unknown)}")
+          print("matrix=" + json.dumps({"include": [p for p in all_ if p["rid"] in rids]}))
+          PY
+
   package:
     name: ${{ matrix.rid }}
+    needs: plan
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { rid: linux-x64, os: ubuntu-24.04, smoke: native }
-          - { rid: linux-arm64, os: ubuntu-24.04, smoke: none }
-          - { rid: win-x64, os: windows-2025, smoke: native }
-          - { rid: win-arm64, os: windows-2025, smoke: none }
-          - { rid: osx-arm64, os: macos-15, smoke: native }
-          - { rid: osx-x64, os: macos-15, smoke: rosetta }
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     defaults:
