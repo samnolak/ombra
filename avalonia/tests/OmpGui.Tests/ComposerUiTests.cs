@@ -253,6 +253,16 @@ public sealed class ComposerUiTests
         Assert.Equal("write", vm.ShownApprovalMode);
         Assert.True(w.FindControl<Button>("ApprovalButton")!.Flyout!.IsOpen);
         Shot(w, "ui-composer-bypass-confirm");
+        // Another Shift+Tab while the confirmation waits moves on past Bypass (to Ask): a key is never the confirmation
+        vm.CycleApprovalMode();
+        Assert.False(vm.ConfirmYolo);
+        Assert.Equal("always-ask", vm.ShownApprovalMode);
+        await Until(() => s.Snapshot().ApprovalMode == "always-ask" && vm.Phase == SessionPhase.Ready && vm.PendingApprovalMode is null, "omp restarted in Ask");
+        vm.CycleApprovalMode();
+        await Until(() => s.Snapshot().ApprovalMode == "write" && vm.Phase == SessionPhase.Ready && vm.PendingApprovalMode is null, "Accept edits again");
+        vm.CycleApprovalMode();
+        Assert.True(vm.ConfirmYolo);
+        Assert.Equal("write", vm.ShownApprovalMode);
         await vm.SetApprovalModeCommand.ExecuteAsync("yolo");
         Assert.Contains("mode-yolo", box.Classes);
         await Until(() => s.Snapshot().ApprovalMode == "yolo" && vm.Phase == SessionPhase.Ready, "bypass");

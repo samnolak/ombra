@@ -86,11 +86,12 @@ public static class KeyboardShortcuts
             ]),
             new("Panels",
             [
+                // In the Views menu's order
+                S("Files", Mod.Command | Mod.Shift, "F"),
+                S("Background tasks", Mod.Command | Mod.Shift, "T"),
+                S("Plan", Mod.Command | Mod.Shift, "P"),
                 S("Browser preview", Mod.Command | Mod.Shift, "B"),
                 S("Comment on the page", Mod.Command | Mod.Shift, "S"),
-                S("Files", Mod.Command | Mod.Shift, "F"),
-                S("Plan", Mod.Command | Mod.Shift, "P"),
-                S("Background tasks", Mod.Command | Mod.Shift, "T"),
             ]),
         ];
     }

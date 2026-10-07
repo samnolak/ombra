@@ -125,7 +125,8 @@
   </Style>
   <!-- Primary (Fluent's "accent" class): clay fill, white text (AccentButton* keys in Tokens). Danger: the error colour
        filled, for the one destructive action of a confirmation. Disabled primary, danger and inverse buttons keep their
-       colour at 40 % (Claude Code's disabled opacity) instead of turning into a grey secondary button. -->
+       colour at 50 % (Claude's disabled opacity; at 40 % the white label all but vanished on clay) instead of turning
+       into a grey secondary button. -->
   <Style Selector="Button.danger:not(.chip):not(.menu-item):not(.flat)">
     <Setter Property="Background" Value="{DynamicResource GuiStatusError}" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextOnAccent}" />
@@ -136,7 +137,7 @@
     <Setter Property="Opacity" Value="0.9" />
   </Style>
   <Style Selector="Button.accent:disabled, Button.danger:not(.chip):not(.menu-item):not(.flat):disabled, Button.inverse:disabled">
-    <Setter Property="Opacity" Value="0.4" />
+    <Setter Property="Opacity" Value="0.5" />
   </Style>
   <Style Selector="Button.danger:not(.chip):not(.menu-item):not(.flat):disabled /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource GuiStatusError}" />
@@ -665,7 +666,8 @@
     <Setter Property="Fill" Value="{DynamicResource GuiStatusSuccess}" />
   </Style>
   <Style Selector="Ellipse.state-dot.running">
-    <Setter Property="Fill" Value="{DynamicResource GuiStatusInfo}" />
+    <!-- Claude Code's spinner colour: the brand clay (blue is for links and focus only) -->
+    <Setter Property="Fill" Value="{DynamicResource GuiBrandMark}" />
     <Style.Animations>
       <Animation Duration="0:0:1.1" IterationCount="INFINITE" PlaybackDirection="Alternate" Easing="SineEaseInOut">
         <KeyFrame Cue="0%"><Setter Property="Opacity" Value="1" /></KeyFrame>

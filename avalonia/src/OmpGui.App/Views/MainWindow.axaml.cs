@@ -138,6 +138,7 @@ public sealed partial class MainWindow : Window
         };
         // Below this width the conversation needs all the room; the sidebar opens on demand (Ctrl/⌘+B).
         SizeChanged += (_, _) => FitPanels();
+        ConversationArea.SizeChanged += (_, _) => FitEmptyState();
         ComposerToolbar.SizeChanged += (_, _) => QueueComposerFit();
         ComposerFooter.SizeChanged += (_, _) => QueueComposerFit();
         ComposerBox.PropertyChanged += (_, e) => { if (e.Property == BoundsProperty && e.OldValue is Rect o && e.NewValue is Rect n && o.Height != n.Height || e.Property == MarginProperty) FitPanels(); };
@@ -255,6 +256,28 @@ public sealed partial class MainWindow : Window
         CardsScroll.MaxHeight = Math.Max(96, Bounds.Height - 48 - Math.Max(ComposerBox.Bounds.Height, 96) - 34 - ComposerBox.Margin.Top
             - (ComposerFooter.IsVisible ? Math.Max(0, ComposerFooter.Bounds.Height + ComposerFooter.Margin.Top) : 0));
         UpdateHeaderDensity();
+        FitEmptyState();
+    }
+
+    /// <summary>
+    /// A low window has no room for the whole greeting above the centred composer: the logo goes first, then the
+    /// starter prompts; the question itself always stays (nothing is cut off at the top).
+    /// </summary>
+    private void FitEmptyState()
+    {
+        if (!EmptyState.IsVisible) return;
+        var room = ConversationArea.Bounds.Height - EmptyState.Margin.Top - EmptyState.Margin.Bottom;
+        if (room <= 0) return;
+        var width = Math.Max(0, Math.Min(EmptyState.MaxWidth, ConversationArea.Bounds.Width - EmptyState.Margin.Left - EmptyState.Margin.Right));
+        double Need(Control c) { c.Measure(new Size(width, double.PositiveInfinity)); return c.DesiredSize.Height; }
+        // A hidden control measures as 0: show both before measuring, then decide (layout runs once, afterwards)
+        StarterPrompts.IsVisible = true;
+        GreetingLogo.IsVisible = true;
+        var greeting = Need(Greeting);
+        var starters = StarterPrompts.ItemCount > 0 ? Need(StarterPrompts) + EmptyState.Spacing : 0;
+        var logo = GreetingLogo.Height + EmptyState.Spacing;
+        StarterPrompts.IsVisible = greeting + starters <= room;
+        GreetingLogo.IsVisible = greeting + (StarterPrompts.IsVisible ? starters : 0) + logo <= room;
     }
 
     /// <summary>

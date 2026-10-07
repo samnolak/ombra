@@ -24,7 +24,7 @@
         <ScrollViewer x:Name="UsageScroll" HorizontalScrollBarVisibility="Disabled">
         <StackPanel Spacing="10" Margin="10,8,10,10">
           <Grid ColumnDefinitions="*,Auto,Auto">
-            <TextBlock Classes="caps" Text="CONTEXT WINDOW" VerticalAlignment="Center" />
+            <TextBlock Classes="caps" Text="Context window" VerticalAlignment="Center" />
             <TextBlock Grid.Column="1" Classes="tertiary" Text="Updating…" IsVisible="{Binding Usage.IsLoading}" VerticalAlignment="Center" Margin="0,0,6,0" />
             <Button Grid.Column="2" Classes="icon" Width="26" Height="26" Command="{Binding Usage.RefreshCommand}" ToolTip.Tip="Measure again"
                     AutomationProperties.Name="Refresh usage">
@@ -47,7 +47,7 @@
           <TextBlock Classes="tertiary" Text="{Binding Usage.ContextNote}" TextWrapping="Wrap"
                      IsVisible="{Binding Usage.ContextNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
-          <TextBlock Classes="caps" Text="THIS SESSION" IsVisible="{Binding Usage.HasTotals}" />
+          <TextBlock Classes="caps" Text="This session" IsVisible="{Binding Usage.HasTotals}" />
           <ItemsControl x:Name="UsageTotals" ItemsSource="{Binding Usage.Totals}" IsVisible="{Binding Usage.HasTotals}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:UsageTotalViewModel">
@@ -59,7 +59,7 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
           <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding Usage.HasLimits}">
-            <TextBlock Classes="caps" Text="PLAN USAGE" VerticalAlignment="Center" />
+            <TextBlock Classes="caps" Text="Plan usage" VerticalAlignment="Center" />
             <Button x:Name="AllProvidersButton" Grid.Column="1" Classes="link action" Content="All providers" Command="{Binding Usage.ShowAllProvidersCommand}"
                     VerticalAlignment="Center" ToolTip.Tip="Every signed-in provider's limits (Settings → Model providers)" />
           </Grid>

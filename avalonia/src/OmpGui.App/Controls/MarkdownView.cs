@@ -254,8 +254,9 @@ public sealed class MarkdownView : ContentControl
                 return span;
             }
             case CodeInline code:
-                // Inline code: mono at 0.875 of the text around it; MdText draws its chip
-                return new Run(code.Content) { FontFamily = Mono, FontSize = codeSize };
+                // Inline code: mono at 0.875 of the text around it; MdText draws its chip. A narrow no-break space on
+                // each side keeps the chip's padding clear of the words around it (a plain space alone is eaten by it).
+                return new Span { Inlines = { new Run("\u202F"), new Run(code.Content) { FontFamily = Mono, FontSize = codeSize }, new Run("\u202F") } };
             case LineBreakInline br:
                 return br.IsHard ? new LineBreak() : new Run(" ");
             case LinkInline link when !link.IsImage:

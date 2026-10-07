@@ -183,12 +183,15 @@ public sealed partial class MainViewModel
 
     /// <summary>
     /// Shift+Tab in the message box (Claude Code): Ask → Accept edits → Bypass → Ask. Bypass still asks first: the
-    /// view opens the permission menu on its confirmation, and nothing changes until the user confirms there.
+    /// view opens the permission menu on its confirmation, and nothing changes until the user confirms there. Another
+    /// Shift+Tab while that confirmation waits moves on past Bypass: a key press is never taken as the confirmation.
     /// </summary>
     public void CycleApprovalMode()
     {
         var modes = ApprovalModes.Select(m => m.Mode).ToList();
-        var next = modes[(modes.IndexOf(ShownApprovalMode ?? "") + 1) % modes.Count];
+        var from = ConfirmYolo ? "yolo" : ShownApprovalMode ?? "";
+        ConfirmYolo = false;
+        var next = modes[(modes.IndexOf(from) + 1) % modes.Count];
         _ = SetApprovalModeCommand.ExecuteAsync(next);
     }
 

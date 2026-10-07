@@ -82,12 +82,12 @@ Values are light / dark; contrast is against the window. Only the keys the style
 | `GuiFocus` / `GuiFocusRing` | #2A78D6 / #4C8FE0 | focused text box border; keyboard-focus ring (2 px, inset) |
 | `GuiInverse` (+`Hover`, `Pressed`) | #141413 / #FAF9F5 | `inverse` buttons (Stop), tooltips (`GuiTooltip`) |
 | `GuiModeManual` / `AcceptEdits` / `Plan` / `Bypass` | #6B6A64 · #8700FF · #006666 · #AB2B3F / #9C9A92 · #AF87FF · #48968C · #FF6B80 | permission-mode pill, composer focus border and Send in that mode |
-| `GuiStatusRunning` / `Waiting` / `Unread` | #2C7A39 · #2C84DB · #D97757 / #89D185 · #4C8FE0 · #D97757 | session status dots |
+| `GuiStatusRunning` / `Waiting` / `Unread` | #2C7A39 · #B77700 · #D97757 / #89D185 · #DA9E25 · #D97757 | session status dots: working (pulsing), needs your input, unseen reply |
 | `GuiDiffAddedBg` / `Text`, `GuiDiffRemovedBg` / `Text` | green / red at 16–18 % (dark 14–15 %) with AA text | diff rows, calm in dark |
 | `GuiBorderSoft` / `GuiBorder` / `GuiBorderStrong` | ink or ivory at 10 / 20 / 40 % | dividers, menus, tool rows / text boxes, composer / composer while focused, switch track off |
 | `GuiBorderDarkOnly` | transparent / ivory 10 % | card hairline (dark only) |
 | `GuiStatus*Soft` | pale status fills / deep muted fills | badges, `notice`, `banner error`, `chip danger` |
-| `GuiStatusInfo` / `Success` / `Error` / `Warning` | | status dots and marks (3:1 is enough for graphics) |
+| `GuiStatusInfo` / `Success` / `Error` / `Warning` | info = clay #C6613F / #D97757 (never blue) | status dots and marks (3:1 is enough for graphics); info marks what is in progress: the current todo, a running pill, counts |
 | `GuiShadow` | `0 1 2 #000 4%, 0 4 14 #000 6%` / none | cards, composer, raised segment |
 | `GuiShadowPopup` | `0 2 6 #000 6%, 0 10 32 #000 12%` / `0 10 32 #000 40%` | menus, drawer sidebar |
 | `GuiBackdrop` | ink 20 % / black 35 % | `Border.scrim` behind a drawer or a sheet |
@@ -140,10 +140,10 @@ context without its percentage, the project as its icon. Voice and send always s
 | Classes | Looks like |
 |---|---|
 | *(none)* | secondary: fill 1, primary text, 32 high, radius 8, 13 px medium; hover / pressed step the fill |
-| `accent` | primary: clay (`GuiAccent`) fill, white text, hover `GuiAccentHover`; disabled = the same at 40 % |
+| `accent` | primary: clay (`GuiAccent`) fill, white text, hover `GuiAccentHover`; disabled = the same at 50 % |
 | `danger` | the one destructive action of a confirmation: error fill, white text (not on `chip`, `menu-item`, `flat`) |
 | `md` | 44 high, radius 12, 15 px (combine: `accent md`) |
-| `inverse` | ink in light, ivory in dark (Stop); disabled = the same at 40 % |
+| `inverse` | ink in light, ivory in dark (Stop); disabled = the same at 50 % |
 | `flat` | no fill until hovered (fill 1), pressed fill 1 pressed |
 | `icon` | 32 × 32, no fill, secondary foreground → primary on hover; `icon wide` for icon + text |
 | `link` | no chrome, 12 px secondary text → primary on hover |

@@ -8,7 +8,7 @@
              xmlns:svc="using:OmpGui.App.Services"
              x:Class="OmpGui.App.Views.Panes.ProjectMenuButton"
              x:DataType="vm:MainViewModel">
-  <Button x:Name="MenuButton" Classes="header-project" ToolTip.Tip="{Binding ProjectPath}"
+  <Button x:Name="MenuButton" Classes="header-project" ToolTip.Tip="{Binding ShownProjectPath}"
           AutomationProperties.Name="{Binding ProjectName, StringFormat='Project {0}'}">
     <Grid ColumnDefinitions="Auto,*,Auto">
       <ctl:Icon Data="{StaticResource IconFolder}" Size="15" VerticalAlignment="Center" />
@@ -20,7 +20,7 @@
         <StackPanel x:Name="MenuPanel" Width="300" Spacing="2">
           <StackPanel Margin="10,4,10,6" Spacing="2">
             <TextBlock Classes="project-menu-name" Text="{Binding ProjectName}" TextTrimming="CharacterEllipsis" />
-            <TextBlock Classes="tertiary" Text="{Binding ProjectPath}" TextTrimming="PrefixCharacterEllipsis" />
+            <TextBlock Classes="tertiary" Text="{Binding ShownProjectPath}" TextTrimming="PrefixCharacterEllipsis" />
           </StackPanel>
           <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="6,2,6,4" />
           <Button x:Name="BrowseFilesItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
@@ -68,7 +68,7 @@
             </Grid>
           </Button>
           <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="6,4" />
-          <TextBlock Classes="caps" Text="NEW SESSION IN" Margin="10,4,0,4" IsVisible="{Binding Files.HasRecentProjects}" />
+          <TextBlock Classes="caps" Text="New session in" Margin="10,4,0,4" IsVisible="{Binding Files.HasRecentProjects}" />
           <ItemsControl x:Name="RecentProjectItems" ItemsSource="{Binding Files.RecentProjects}" IsVisible="{Binding Files.HasRecentProjects}">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate><StackPanel Spacing="2" /></ItemsPanelTemplate>
@@ -77,12 +77,12 @@
               <DataTemplate x:DataType="vm:SessionGroupViewModel">
                 <Button Classes="menu-item" Classes.current="{Binding IsCurrentProject}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                         Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).NewSessionInProjectCommand}" CommandParameter="{Binding}"
-                        AutomationProperties.Name="{Binding Name, StringFormat='New session in {0}'}" ToolTip.Tip="{Binding Cwd}">
+                        AutomationProperties.Name="{Binding Name, StringFormat='New session in {0}'}" ToolTip.Tip="{Binding ShownCwd}">
                   <Grid ColumnDefinitions="Auto,*">
                     <ctl:Icon Data="{StaticResource IconFolder}" Size="16" Margin="0,0,10,0" VerticalAlignment="Top" />
                     <StackPanel Grid.Column="1" Spacing="1">
                       <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                      <TextBlock Classes="tertiary" Text="{Binding Cwd}" TextTrimming="PrefixCharacterEllipsis" />
+                      <TextBlock Classes="tertiary" Text="{Binding ShownCwd}" TextTrimming="PrefixCharacterEllipsis" />
                     </StackPanel>
                   </Grid>
                 </Button>

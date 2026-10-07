@@ -53,6 +53,9 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
 
     public string AccessibleName => Percent is { } p ? string.Create(CultureInfo.InvariantCulture, $"Context usage, {p:0} percent") : "Context usage";
 
+    /// <summary>The popover's headline when omp gave no breakdown: the ring's own number, not a bare "Context".</summary>
+    private string PercentHeadline => PercentText.Length > 0 ? $"{PercentText} of the context used" : "Context";
+
     [ObservableProperty] private bool _isOpen;
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string _contextHeadline = "";
@@ -84,7 +87,9 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
 
     partial void OnIsOpenChanged(bool value)
     {
-        if (value) _ = LoadAsync();
+        if (!value) return;
+        CompactNowCommand.NotifyCanExecuteChanged(); // the conversation may have begun since
+        _ = LoadAsync();
     }
 
     [RelayCommand]
@@ -98,7 +103,8 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
         if (IsOpen) _ = LoadAsync();
     }
 
-    private bool CanCompactNow() => owner.CompactConversationCommand.CanExecute(null);
+    /// <summary>Only with something to compact: an empty new session has no conversation yet.</summary>
+    private bool CanCompactNow() => owner.Rows.Count > 0 && owner.CompactConversationCommand.CanExecute(null);
 
     [RelayCommand(CanExecute = nameof(CanCompactNow))]
     private Task CompactNowAsync()
@@ -163,14 +169,14 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
         if (report is null)
         {
             HasContext = false;
-            ContextHeadline = "Context";
+            ContextHeadline = PercentHeadline;
             ContextNote = r.Ok ? r.Output.Trim() : r.Error ?? "omp did not answer.";
             return;
         }
         if (report.Unavailable is { } why)
         {
             HasContext = false;
-            ContextHeadline = "Context";
+            ContextHeadline = PercentHeadline;
             ContextNote = why;
             return;
         }

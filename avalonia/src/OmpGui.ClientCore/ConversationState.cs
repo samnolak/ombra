@@ -832,12 +832,12 @@ public sealed partial class ConversationState
         var (level, text) = answer switch
         {
             DialogAnswer.Value v when d.Kind == DialogKind.Approval =>
-                v.Text == "Approve" ? (NoticeLevel.Info, $"Approved {by} — {d.Headline}") : (NoticeLevel.Warning, $"Denied {by} — {d.Headline}"),
+                v.Text == "Approve" ? (NoticeLevel.Info, $"Approved {by} — {Subject(d)}") : (NoticeLevel.Warning, $"Denied {by} — {Subject(d)}"),
             DialogAnswer.Value v when d.Kind is DialogKind.Input or DialogKind.Editor => (NoticeLevel.Info, $"Answered {by} — {d.Headline}"),
             // The choice as the user read it: omp's "(Recommended)" mark is a hint on the option, not part of the answer
             DialogAnswer.Value v => (NoticeLevel.Info, $"Answered {by}: “{WithoutRecommended(v.Text)}” — {d.Headline}"),
             DialogAnswer.Confirmed c => (NoticeLevel.Info, $"{(c.Yes ? "Confirmed" : "Declined")} {by} — {d.Headline}"),
-            _ => (NoticeLevel.Warning, $"{Describe(d)} dismissed {by} — {d.Headline}"),
+            _ => (NoticeLevel.Warning, $"{Describe(d)} dismissed {by} — {Subject(d)}"),
         };
         AddNotice(level, text);
     }
@@ -848,7 +848,7 @@ public sealed partial class ConversationState
         foreach (var d in _dialogs.Where(d => d.Deadline <= now).ToList())
         {
             TakeDialog(d.Id);
-            AddNotice(NoticeLevel.Warning, $"{Describe(d)} timed out without an answer; omp applied its default — {d.Headline}");
+            AddNotice(NoticeLevel.Warning, $"{Describe(d)} timed out without an answer; omp applied its default — {Subject(d)}");
         }
     }
 
@@ -859,12 +859,16 @@ public sealed partial class ConversationState
         foreach (var d in all)
         {
             TakeDialog(d.Id);
-            AddNotice(NoticeLevel.Warning, $"{Describe(d)} closed ({reason}) — {d.Headline}");
+            AddNotice(NoticeLevel.Warning, $"{Describe(d)} closed ({reason}) — {Subject(d)}");
         }
         return all;
     }
 
     private static string Describe(PendingDialog d) => d.Kind == DialogKind.Approval ? "Approval request" : "Question";
+
+    /// <summary>What the notice is about: an approval's tool ("bash", not omp's "Allow tool: bash"), a question's words.</summary>
+    private static string Subject(PendingDialog d) =>
+        d.Kind == DialogKind.Approval && d.Headline.StartsWith("Allow tool: ", StringComparison.Ordinal) && d.Headline.Length > 12 ? d.Headline[12..] : d.Headline;
 
     private void FinalizeStreamingAssistant()
     {

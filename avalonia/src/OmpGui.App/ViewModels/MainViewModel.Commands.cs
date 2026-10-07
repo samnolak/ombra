@@ -115,14 +115,20 @@ public sealed partial class MainViewModel
                     .Select(sc => new CommandSuggestionViewModel($"/{cmd.Name} {sc.Name} ", $"/{cmd.Name} {sc.Name}", sc.Description, sc.Hint, cmd.Source)));
             }
         }
+        // A slash word that matches nothing: the menu stays, saying so (closing it read as the menu having broken)
+        var noMatch = list.Count == 0 && text.Length > 1 && text.StartsWith('/') && !text.Contains(' ') && !text.Contains('\n');
         // An exact, complete command with nothing more to offer: no menu (Enter sends it).
         if (list.Count == 1 && list[0].Insert.TrimEnd() == text.TrimEnd()) list.Clear();
         CommandSuggestions.Clear();
         foreach (var s in list) CommandSuggestions.Add(s);
         _selectedSuggestion = 0;
         if (list.Count > 0) list[0].IsSelected = true;
-        IsCommandMenuOpen = list.Count > 0;
+        ShowNoCommandMatch = noMatch;
+        IsCommandMenuOpen = list.Count > 0 || noMatch;
     }
+
+    /// <summary>The slash menu's "No matching commands" row.</summary>
+    [ObservableProperty] private bool _showNoCommandMatch;
 
     /// <summary>0: name starts with the text; 1: an alias does; 2: the name contains it; -1: no match.</summary>
     private static int Rank(SlashCommand c, string typed)

@@ -88,7 +88,9 @@ public sealed partial class MainViewModel
     [ObservableProperty] private string _sessionFilter = "";
     [ObservableProperty] private string _sessionTitle = "New session";
     [ObservableProperty] private string _projectName = "";
-    [ObservableProperty] private string _projectPath = "";
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ShownProjectPath))] private string _projectPath = "";
+    /// <summary>The project folder as the user reads it (~/…, /var not /private/var), for tooltips and menus.</summary>
+    public string ShownProjectPath => GitProbe.ShownPath(ProjectPath);
     [ObservableProperty] private bool _isRenaming;
     [ObservableProperty] private string _renameText = "";
 

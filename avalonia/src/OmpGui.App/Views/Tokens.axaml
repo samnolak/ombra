@@ -13,7 +13,7 @@
           <SolidColorBrush x:Key="GuiTextLinkHover" Color="#FF15528E" />
           <SolidColorBrush x:Key="GuiTextError" Color="#FFB53333" />
           <SolidColorBrush x:Key="GuiTextSuccess" Color="#FF2F7613" />
-          <SolidColorBrush x:Key="GuiTextWarning" Color="#FF875A08" />
+          <SolidColorBrush x:Key="GuiTextWarning" Color="#FF8F4F12" />
           <SolidColorBrush x:Key="GuiTextOnAccent" Color="#FFFFFFFF" />
           <SolidColorBrush x:Key="GuiTextOnInverse" Color="#FFFAF9F5" />
           <SolidColorBrush x:Key="GuiWindow" Color="#FFFAF9F5" />
@@ -42,14 +42,15 @@
           <SolidColorBrush x:Key="GuiBorderHover" Color="#4D141413" />
           <SolidColorBrush x:Key="GuiBorderFocus" Color="#8C141413" />
           <SolidColorBrush x:Key="GuiBorderDarkOnly" Color="#00FFFFFF" />
-          <SolidColorBrush x:Key="GuiStatusInfo" Color="#FF2C84DB" />
-          <SolidColorBrush x:Key="GuiStatusInfoSoft" Color="#FFDDEBF9" />
+          <!-- "In progress" marks (current todo, running pill, counts, the update row): the clay family, not blue -->
+          <SolidColorBrush x:Key="GuiStatusInfo" Color="#FFC6613F" />
+          <SolidColorBrush x:Key="GuiStatusInfoSoft" Color="#FFF6E6DF" />
           <SolidColorBrush x:Key="GuiStatusSuccess" Color="#FF3F8A1F" />
           <SolidColorBrush x:Key="GuiStatusSuccessSoft" Color="#FFE7F1DA" />
           <SolidColorBrush x:Key="GuiStatusError" Color="#FFC0392F" />
           <SolidColorBrush x:Key="GuiStatusErrorSoft" Color="#FFF9ECEC" />
-          <SolidColorBrush x:Key="GuiStatusWarning" Color="#FFB77700" />
-          <SolidColorBrush x:Key="GuiStatusWarningSoft" Color="#FFF8EEDD" />
+          <SolidColorBrush x:Key="GuiStatusWarning" Color="#FFB5661B" />
+          <SolidColorBrush x:Key="GuiStatusWarningSoft" Color="#FFF9ECE0" />
           <SolidColorBrush x:Key="GuiStatusNeutral" Color="#FF6B6A64" />
           <SolidColorBrush x:Key="GuiStatusNeutralSoft" Color="#1A141413" />
           <SolidColorBrush x:Key="GuiSelection" Color="#FFC9DEF7" />
@@ -69,7 +70,7 @@
           <SolidColorBrush x:Key="GuiDiffRemovedBg" Color="#29CD2054" />
           <SolidColorBrush x:Key="GuiDiffRemovedText" Color="#FFB42346" />
           <SolidColorBrush x:Key="GuiStatusRunning" Color="#FF2C7A39" />
-          <SolidColorBrush x:Key="GuiStatusWaiting" Color="#FF2C84DB" />
+          <SolidColorBrush x:Key="GuiStatusWaiting" Color="#FFB5661B" />
           <SolidColorBrush x:Key="GuiStatusUnread" Color="#FFD97757" />
           <SolidColorBrush x:Key="GuiInlineCodeBg" Color="#14141413" />
           <SolidColorBrush x:Key="GuiCodeBlockBg" Color="#FFF0EEE6" />
@@ -246,7 +247,7 @@
           <SolidColorBrush x:Key="GuiTextLinkHover" Color="#FF98C1EA" />
           <SolidColorBrush x:Key="GuiTextError" Color="#FFFE8181" />
           <SolidColorBrush x:Key="GuiTextSuccess" Color="#FF7CC24F" />
-          <SolidColorBrush x:Key="GuiTextWarning" Color="#FFDA9E25" />
+          <SolidColorBrush x:Key="GuiTextWarning" Color="#FFE09A4F" />
           <SolidColorBrush x:Key="GuiTextOnAccent" Color="#FFFFFFFF" />
           <SolidColorBrush x:Key="GuiTextOnInverse" Color="#FF141413" />
           <SolidColorBrush x:Key="GuiWindow" Color="#FF262624" />
@@ -275,14 +276,14 @@
           <SolidColorBrush x:Key="GuiBorderHover" Color="#47FAF9F5" />
           <SolidColorBrush x:Key="GuiBorderFocus" Color="#A6FAF9F5" />
           <SolidColorBrush x:Key="GuiBorderDarkOnly" Color="#1AFAF9F5" />
-          <SolidColorBrush x:Key="GuiStatusInfo" Color="#FF74ABE2" />
-          <SolidColorBrush x:Key="GuiStatusInfoSoft" Color="#FF1F3550" />
+          <SolidColorBrush x:Key="GuiStatusInfo" Color="#FFD97757" />
+          <SolidColorBrush x:Key="GuiStatusInfoSoft" Color="#FF3D2B24" />
           <SolidColorBrush x:Key="GuiStatusSuccess" Color="#FF65BB30" />
           <SolidColorBrush x:Key="GuiStatusSuccessSoft" Color="#FF263620" />
           <SolidColorBrush x:Key="GuiStatusError" Color="#FFC24543" />
           <SolidColorBrush x:Key="GuiStatusErrorSoft" Color="#FF472625" />
-          <SolidColorBrush x:Key="GuiStatusWarning" Color="#FFDA9E25" />
-          <SolidColorBrush x:Key="GuiStatusWarningSoft" Color="#FF40341C" />
+          <SolidColorBrush x:Key="GuiStatusWarning" Color="#FFE09A4F" />
+          <SolidColorBrush x:Key="GuiStatusWarningSoft" Color="#FF42301F" />
           <SolidColorBrush x:Key="GuiStatusNeutral" Color="#FF9C9A92" />
           <SolidColorBrush x:Key="GuiStatusNeutralSoft" Color="#1FFAF9F5" />
           <SolidColorBrush x:Key="GuiSelection" Color="#FF2A4A6E" />
@@ -302,7 +303,7 @@
           <SolidColorBrush x:Key="GuiDiffRemovedBg" Color="#26E0505F" />
           <SolidColorBrush x:Key="GuiDiffRemovedText" Color="#FFF0909B" />
           <SolidColorBrush x:Key="GuiStatusRunning" Color="#FF89D185" />
-          <SolidColorBrush x:Key="GuiStatusWaiting" Color="#FF4C8FE0" />
+          <SolidColorBrush x:Key="GuiStatusWaiting" Color="#FFE09A4F" />
           <SolidColorBrush x:Key="GuiStatusUnread" Color="#FFD97757" />
           <SolidColorBrush x:Key="GuiInlineCodeBg" Color="#1AFAF9F5" />
           <SolidColorBrush x:Key="GuiCodeBlockBg" Color="#FF1F1E1D" />

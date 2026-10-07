@@ -94,7 +94,7 @@ public sealed class DialogUiTests
         Click(allow);
         await Until(() => vm.Phase == SessionPhase.Ready && !vm.HasDialog, "run end");
         Assert.Equal("done", vm.Rows.OfType<ToolRowViewModel>().Single().StatusText);
-        Assert.Contains(vm.Rows.OfType<NoticeRowViewModel>(), n => n.Text == "Approved by you — Allow tool: bash");
+        Assert.Contains(vm.Rows.OfType<NoticeRowViewModel>(), n => n.Text == "Approved by you — bash");
         Shot(w, "ui-approval-allowed");
         await vm.DisposeAsync();
         w.Close();

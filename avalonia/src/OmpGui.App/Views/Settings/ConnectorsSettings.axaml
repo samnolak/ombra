@@ -271,7 +271,7 @@
           <TextBlock Classes="muted" Text="Asking the servers…" IsVisible="{Binding IsLoadingItems}" />
           <TextBlock x:Name="McpItemsMessage" Classes="muted" Text="{Binding ItemsMessage}" TextWrapping="Wrap" IsVisible="{Binding HasItemsMessage}" />
           <StackPanel Spacing="8" IsVisible="{Binding HasPrompts}">
-            <TextBlock Classes="caps" Text="PROMPTS" />
+            <TextBlock Classes="caps" Text="Prompts" />
             <ItemsControl ItemsSource="{Binding Prompts}">
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="vm:McpItemViewModel">
@@ -288,7 +288,7 @@
             </ItemsControl>
           </StackPanel>
           <StackPanel Spacing="8" IsVisible="{Binding HasResources}">
-            <TextBlock Classes="caps" Text="RESOURCES" />
+            <TextBlock Classes="caps" Text="Resources" />
             <ItemsControl ItemsSource="{Binding Resources}">
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="vm:McpItemViewModel">

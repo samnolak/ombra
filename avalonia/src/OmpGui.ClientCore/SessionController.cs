@@ -813,7 +813,9 @@ public sealed partial class SessionController : IAsyncDisposable
                 var tail = LastLines(omp.StderrTail, 12);
                 var what = protocolError
                     ? $"omp RPC stream broke ({conn.CloseReason!.InnerException!.Message}); omp was stopped"
-                    : $"omp exited unexpectedly (code {code?.ToString() ?? "unknown"}): {conn.CloseReason?.Message}";
+                    // The process is gone: the end of its output says nothing the exit code does not (a read error does)
+                    : (code is { } c ? $"omp exited unexpectedly (exit code {c})" : "omp exited unexpectedly")
+                      + (conn.CloseReason is { InnerException: not null } r ? ": " + r.Message : "");
                 s.Fail(what + (tail.Length > 0 ? "\n" + tail : ""), Now);
             }
         });

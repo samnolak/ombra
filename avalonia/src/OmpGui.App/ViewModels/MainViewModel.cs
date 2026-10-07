@@ -585,7 +585,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         {
             SessionPhase.Starting => "Starting omp…",
             SessionPhase.Ready => "Ready",
-            SessionPhase.Running => $"{Activity(s)} {Elapsed(s)}",
+            SessionPhase.Running => $"{Activity(s)} · {Elapsed(s)}",
             SessionPhase.Aborting => "Stopping…",
             SessionPhase.Stopping => "Shutting down…",
             SessionPhase.Stopped => "Stopped",
@@ -620,8 +620,15 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         return "Working";
     }
 
-    private static string Elapsed(SessionSnapshot s) =>
-        s.RunStartedAt is { } started ? (DateTimeOffset.UtcNow - started).ToString(@"mm\:ss", CultureInfo.InvariantCulture) : "00:00";
+    /// <summary>How long the run has gone, as Claude Code writes it: "4s", "1m 05s", "1h 02m".</summary>
+    private static string Elapsed(SessionSnapshot s)
+    {
+        var t = s.RunStartedAt is { } started ? DateTimeOffset.UtcNow - started : TimeSpan.Zero;
+        if (t < TimeSpan.Zero) t = TimeSpan.Zero;
+        return t.TotalHours >= 1 ? string.Create(CultureInfo.InvariantCulture, $"{(int)t.TotalHours}h {t.Minutes:00}m")
+            : t.TotalMinutes >= 1 ? string.Create(CultureInfo.InvariantCulture, $"{(int)t.TotalMinutes}m {t.Seconds:00}s")
+            : string.Create(CultureInfo.InvariantCulture, $"{t.Seconds}s");
+    }
 
     partial void OnPhaseChanged(SessionPhase value)
     {

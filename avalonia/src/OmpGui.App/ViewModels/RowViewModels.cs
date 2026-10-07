@@ -324,7 +324,8 @@ public sealed partial class ToolRowViewModel : RowViewModel
         {
             result = string.Join('\n', lines.Take(PreviewLines));
             more = Math.Max(0, lines.Length - PreviewLines);
-            isOutput = true;
+            // A command's output is mono; what a subagent, the todo list or a question answered is words
+            isOutput = Name is not ("task" or "todo" or "ask");
         }
         else result = Model is ToolItem { Status: ToolStatus.Interrupted, StartedAt: not null } ? "Interrupted"
             : IsDone && Name is "bash" or "shell" ? "(No output)"

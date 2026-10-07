@@ -13,8 +13,9 @@ public sealed class SessionGroupViewModel(string cwd, bool isCurrentProject, boo
         : SessionItemViewModel.ProjectName(cwd) is { Length: > 0 } n ? n : "(no folder)";
     public bool IsCurrentProject { get; } = isCurrentProject;
     public ObservableCollection<SessionItemViewModel> Items { get; } = [];
-    /// <summary>The project's folder (the pinned group has none).</summary>
-    public string? Tooltip => IsPinnedGroup ? null : Cwd;
+    /// <summary>The project's folder as the user reads it (~/…, /var not /private/var); the pinned group has none.</summary>
+    public string? Tooltip => IsPinnedGroup ? null : ShownCwd;
+    public string ShownCwd => GitProbe.ShownPath(Cwd);
     public string NewSessionTooltip => $"New session in {Name}";
     /// <summary>The header menu's commands (MainViewModel's, set when the group is made): the menu's popup cannot reach
     /// the window's DataContext.</summary>

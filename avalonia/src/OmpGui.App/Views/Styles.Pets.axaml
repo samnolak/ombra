@@ -10,6 +10,16 @@
   <Style Selector="ctl|PetView.perched.dragging">
     <Setter Property="Cursor" Value="SizeAll" />
   </Style>
+  <!-- While the model menu is open over the message box the pet steps out of its way -->
+  <Style Selector="ctl|PetPerch">
+    <Setter Property="Transitions">
+      <Transitions><DoubleTransition Property="Opacity" Duration="0:0:0.12" /></Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="ctl|PetPerch.under-menu">
+    <Setter Property="Opacity" Value="0" />
+    <Setter Property="IsHitTestVisible" Value="False" />
+  </Style>
 
   <!-- Its message box: a small popup surface beside the pet; the card is the field, the text box stays bare -->
   <Style Selector="Border.pet-chat">

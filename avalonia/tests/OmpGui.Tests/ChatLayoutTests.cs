@@ -77,6 +77,31 @@ public sealed class ChatLayoutTests
         finally { Environment.SetEnvironmentVariable("FAKE_OMP_PACE_MS", null); }
     }
 
+    /// <summary>A low new-session window drops the logo, then the starters; nothing of the greeting is cut off above.</summary>
+    [AvaloniaFact]
+    public async Task A_low_window_keeps_the_whole_greeting_visible()
+    {
+        var (w, vm) = await Open("normal");
+        var area = w.FindControl<Grid>("ConversationArea")!;
+        var empty = w.FindControl<StackPanel>("EmptyState")!;
+        foreach (var width in new double[] { 480, 800, 1180 })
+            for (double height = 360; height <= 760; height += 40)
+            {
+                w.Width = width;
+                w.Height = height;
+                await Settle(60);
+                var box = new Rect(area.TranslatePoint(default, w)!.Value, area.Bounds.Size);
+                foreach (var c in empty.GetVisualDescendants().OfType<Control>().Where(c => c.IsEffectivelyVisible && c is TextBlock or Button or Image && c.Bounds.Height > 0))
+                {
+                    var r = new Rect(c.TranslatePoint(default, w)!.Value, c.Bounds.Size);
+                    Assert.True(r.Top >= box.Top - 0.5 && r.Bottom <= box.Bottom + 0.5, $"{width}x{height}: {c.GetType().Name} {r} is cut off ({box})");
+                }
+            }
+        Assert.True(w.FindControl<WrapPanel>("Greeting")!.IsEffectivelyVisible);
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
     [AvaloniaFact]
     public async Task Starting_and_ending_a_run_moves_neither_the_composer_nor_the_conversation_bottom()
     {
