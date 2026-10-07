@@ -110,6 +110,7 @@ public sealed partial class PetsViewModel : ObservableObject
         _loading = true;
         ShowPet = saved?.Show ?? true;
         Size = saved?.Size is "small" ? "small" : "medium";
+        if (saved is { X: { } px, Y: { } py } && double.IsFinite(px) && double.IsFinite(py)) Position = new Point(Math.Clamp(px, 0, 1), Math.Clamp(py, 0, 1));
         foreach (var c in saved?.Custom ?? []) if (c.Id.Length > 0 && !_custom.Any(x => x.Id == c.Id)) _custom.Add(c);
         RebuildGallery(saved?.Chosen);
         _loading = false;
@@ -129,19 +130,14 @@ public sealed partial class PetsViewModel : ObservableObject
 
     /// <summary>small | medium.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(PixelScale), nameof(PerchHeight), nameof(ComposerMargin), nameof(IsSmall), nameof(IsMedium), nameof(BubbleMargin))]
+    [NotifyPropertyChangedFor(nameof(PixelScale), nameof(PerchHeight), nameof(ComposerMargin), nameof(IsSmall), nameof(IsMedium))]
     private string _size = "medium";
 
     public bool IsSmall => Size == "small";
     public bool IsMedium => !IsSmall;
 
-    /// <summary>The pet's distance from the message box's right end: clear of its rounded corner.</summary>
+    /// <summary>On its perch, the pet's distance from the message box's right end: clear of its rounded corner.</summary>
     public const double PetInset = 20;
-
-    public static Thickness PetMargin => new(0, 0, PetInset, 0);
-
-    /// <summary>The speech bubble: left of the pet (and of its effects), at the height of its head.</summary>
-    public Thickness BubbleMargin => new(0, IsSmall ? 2 : 8, PetInset + PetFrames.Width * PixelScale + 2, 0);
 
     /// <summary>Screen pixels per pet pixel: 4/3 (32 px tall) or 2 (48 px tall).</summary>
     public double PixelScale => IsSmall ? 4 / 3.0 : 2;
@@ -160,20 +156,61 @@ public sealed partial class PetsViewModel : ObservableObject
     /// <summary>The window is tall enough for the pet's band.</summary>
     public bool HasRoom => WindowHeight >= MinWindowHeight;
 
-    partial void OnWindowHeightChanged(double value)
-    {
-        if (!HasRoom) IsBubbleOpen = false;
-    }
-
-    /// <summary>The pet is drawn: switched on, the window tall enough, and neither the setup screen nor the settings page covers the conversation.</summary>
-    public bool IsOnScreen => ShowPet && HasRoom && !_host.ShowSetupScreen && !_host.IsSettingsOpen;
+    partial void OnWindowHeightChanged(double value) => CloseIfHidden();
 
     /// <summary>
-    /// The message box's margin: with the pet, a band as tall as the pet above the box (its feet on the box's top edge),
-    /// so it never covers the conversation, a card or a question. Kept while the settings page is open (no layout churn);
-    /// given back in a short window (<see cref="MinWindowHeight"/>).
+    /// Where the user dragged the pet: its top-left corner as fractions (0–1) of the room the window leaves it (the
+    /// window's size less the pet's), so a resize keeps it in the same place and inside the window. Null: on its perch,
+    /// the message box's top edge.
     /// </summary>
-    public Thickness ComposerMargin => ShowPet && HasRoom && !_host.ShowSetupScreen ? new Thickness(24, PerchHeight - 1, 24, 16) : new Thickness(24, 6, 24, 16);
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsRoaming), nameof(IsOnScreen), nameof(ComposerMargin), nameof(PlaceText))]
+    [NotifyCanExecuteChangedFor(nameof(ReturnToPerchCommand))]
+    private Point? _position;
+
+    /// <summary>The user put the pet somewhere else than on the message box.</summary>
+    public bool IsRoaming => Position is not null;
+
+    public string PlaceText => IsRoaming
+        ? "Where you dropped it. Drag it anywhere in the window."
+        : "On the top edge of the message box. Drag it anywhere in the window.";
+
+    /// <summary>The pet was dropped: <paramref name="fraction"/> as in <see cref="Position"/>.</summary>
+    internal void MoveTo(Point fraction)
+    {
+        Position = new Point(Math.Clamp(fraction.X, 0, 1), Math.Clamp(fraction.Y, 0, 1));
+        Save();
+    }
+
+    /// <summary>Back on the message box (Settings → Pets, or dropped close to its perch).</summary>
+    [RelayCommand(CanExecute = nameof(IsRoaming))]
+    private void ReturnToPerch()
+    {
+        if (Position is null) return;
+        Position = null;
+        Save();
+    }
+
+    partial void OnPositionChanged(Point? value) => CloseIfHidden();
+
+    /// <summary>The pet is drawn: switched on, on its perch only in a window tall enough for its band (dragged
+    /// elsewhere it needs no band), and neither the setup screen nor the settings page covers the conversation.</summary>
+    public bool IsOnScreen => ShowPet && (HasRoom || IsRoaming) && !_host.ShowSetupScreen && !_host.IsSettingsOpen;
+
+    /// <summary>
+    /// The message box's margin: with the pet on its perch, a band as tall as the pet above the box (its feet on the
+    /// box's top edge), so it never covers the conversation, a card or a question. Kept while the settings page is open
+    /// (no layout churn); given back in a short window (<see cref="MinWindowHeight"/>) and when the pet is elsewhere.
+    /// </summary>
+    public Thickness ComposerMargin => ShowPet && HasRoom && !IsRoaming && !_host.ShowSetupScreen ? new Thickness(24, PerchHeight - 1, 24, 16) : new Thickness(24, 6, 24, 16);
+
+    /// <summary>Off screen, the pet says nothing and its message box closes (what was typed in it is kept).</summary>
+    private void CloseIfHidden()
+    {
+        if (IsOnScreen) return;
+        IsBubbleOpen = false;
+        IsChatOpen = false;
+    }
 
     partial void OnShowPetChanged(bool value)
     {
@@ -182,7 +219,7 @@ public sealed partial class PetsViewModel : ObservableObject
             _machine.Poke(Clock.GetUtcNow());
             SyncMood();
         }
-        else IsBubbleOpen = false;
+        else CloseIfHidden();
         Save();
     }
 
@@ -201,7 +238,7 @@ public sealed partial class PetsViewModel : ObservableObject
 
     /// <summary>The mood on screen.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(AccessibleName))]
+    [NotifyPropertyChangedFor(nameof(AccessibleName), nameof(PetTip))]
     private PetMood _mood = PetMood.Idle;
 
     public string AccessibleName => $"{ChosenName}, your pet: " + Mood switch
@@ -214,6 +251,9 @@ public sealed partial class PetsViewModel : ObservableObject
         PetMood.Error => "something went wrong",
         _ => "idle",
     };
+
+    /// <summary>The pet's tooltip: how it is, and what it does.</summary>
+    public string PetTip => AccessibleName + "\nClick to message omp · drag to move";
 
     /// <summary>From each snapshot the window applies: the agent's state, a finished run, a failed tool.</summary>
     internal void OnSnapshot(SessionSnapshot s)
@@ -292,7 +332,8 @@ public sealed partial class PetsViewModel : ObservableObject
     [ObservableProperty] private bool _isBubbleOpen;
     [ObservableProperty] private string _bubbleText = "";
 
-    /// <summary>A click on the pet: a bubble with what the agent is doing, or a word from the pet; a click again closes it.</summary>
+    /// <summary>A bubble with what the agent is doing, or a word from the pet (a click on the pet opens it with the pet's
+    /// message box); again closes it.</summary>
     [RelayCommand]
     private void Talk()
     {
@@ -328,6 +369,66 @@ public sealed partial class PetsViewModel : ObservableObject
         return _host.StatusText;
     }
 
+    /// <summary>A short line from the pet (a message sent, or not), closed after a while.</summary>
+    private void ShowBubble(string text)
+    {
+        _bubbleTimer.Stop();
+        _bubbleIsActivity = false;
+        BubbleText = text;
+        IsBubbleOpen = true;
+        if (!_shutDown) _bubbleTimer.Start();
+    }
+
+    // ───────────────────────── The pet's message box ─────────────────────────
+
+    /// <summary>The small message box beside the pet (a click on the pet opens it): Enter sends to the conversation.</summary>
+    [ObservableProperty] private bool _isChatOpen;
+
+    /// <summary>What is typed in it; kept when it closes without sending.</summary>
+    [ObservableProperty] private string _chatText = "";
+
+    public string ChatPlaceholder => _host.IsRunning ? "Queue a message — Enter to send" : "Message omp — Enter to send";
+
+    partial void OnChatTextChanged(string value) => Poke();
+
+    /// <summary>A click on the pet: its message box opens, and the pet says what omp is doing (or a word of its own).</summary>
+    internal void OpenChat()
+    {
+        if (!IsOnScreen) return;
+        IsChatOpen = true;
+        if (!IsBubbleOpen) Talk();
+    }
+
+    /// <summary>Closes the message box (and the pet's bubble with it).</summary>
+    internal void CloseChat()
+    {
+        if (!IsChatOpen) return;
+        IsChatOpen = false;
+        _bubbleTimer.Stop();
+        IsBubbleOpen = false;
+    }
+
+    /// <summary>
+    /// Enter in the pet's message box: the text goes to the conversation as from the message box (a prompt, or queued
+    /// while a run goes on; terminal-only commands handled in the window), and the box closes. When omp cannot take a
+    /// message (starting, signing in, stopping) the pet says so and keeps the text.
+    /// </summary>
+    [RelayCommand]
+    private void SendChat()
+    {
+        var text = ChatText.Trim();
+        if (text.Length == 0) return;
+        var queued = _host.IsRunning;
+        if (!_host.SendFromPet(text))
+        {
+            ShowBubble("omp can't take a message right now.");
+            return;
+        }
+        ChatText = "";
+        IsChatOpen = false;
+        ShowBubble(queued ? "Queued for after this run." : "Sent!");
+    }
+
     private void OnHostChanged(object? sender, PropertyChangedEventArgs e)
     {
         switch (e.PropertyName)
@@ -342,10 +443,14 @@ public sealed partial class PetsViewModel : ObservableObject
             case nameof(MainViewModel.ShowSetupScreen):
                 OnPropertyChanged(nameof(IsOnScreen));
                 OnPropertyChanged(nameof(ComposerMargin));
+                CloseIfHidden();
+                break;
+            case nameof(MainViewModel.IsRunning):
+                OnPropertyChanged(nameof(ChatPlaceholder));
                 break;
             case nameof(MainViewModel.IsSettingsOpen):
                 OnPropertyChanged(nameof(IsOnScreen));
-                if (_host.IsSettingsOpen) IsBubbleOpen = false;
+                if (_host.IsSettingsOpen) CloseIfHidden();
                 else CancelEditor();
                 break;
         }
@@ -356,7 +461,7 @@ public sealed partial class PetsViewModel : ObservableObject
     public ObservableCollection<PetCardViewModel> Gallery { get; } = [];
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ChosenLook), nameof(ChosenName), nameof(AccessibleName), nameof(CustomizeTitle), nameof(EditorTitle))]
+    [NotifyPropertyChangedFor(nameof(ChosenLook), nameof(ChosenName), nameof(AccessibleName), nameof(PetTip), nameof(CustomizeTitle), nameof(EditorTitle))]
     [NotifyPropertyChangedFor(nameof(CanChangeBody), nameof(CanDelete), nameof(CanReset))]
     private PetCardViewModel? _chosen;
 
@@ -406,6 +511,8 @@ public sealed partial class PetsViewModel : ObservableObject
             Chosen = Chosen?.Id ?? DefaultPet,
             Size = Size,
             Custom = _custom.Count > 0 ? [.. _custom] : null,
+            X = Position?.X,
+            Y = Position?.Y,
         };
         _host.PersistPet(options);
     }

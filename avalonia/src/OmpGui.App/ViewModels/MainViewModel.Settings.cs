@@ -95,13 +95,21 @@ public sealed partial class MainViewModel
     [ObservableProperty] private bool _showThinking = true;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ApprovalLabel), nameof(IsYolo))]
+    [NotifyPropertyChangedFor(nameof(ApprovalLabel), nameof(IsYolo), nameof(ShownApprovalMode))]
     private string? _approvalMode;
 
-    public string ApprovalLabel => ApprovalModes.FirstOrDefault(m => m.Mode == ApprovalMode)?.Label ?? "Default permissions";
-    public bool IsYolo => ApprovalMode == "yolo";
+    /// <summary>A mode chosen while omp runs: it takes effect (omp restarts) once the run ends.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ApprovalLabel), nameof(IsYolo), nameof(ApprovalPendingNote), nameof(ShownApprovalMode))]
+    private string? _pendingApprovalMode;
 
-    /// <summary>"Never ask" waits for an explicit second confirmation.</summary>
+    /// <summary>The mode the menu ticks: the one waiting for the run to end, else the current one.</summary>
+    public string? ShownApprovalMode => PendingApprovalMode ?? ApprovalMode;
+    public string ApprovalLabel => ApprovalModes.FirstOrDefault(m => m.Mode == ShownApprovalMode)?.Label ?? "Default permissions";
+    public bool IsYolo => ShownApprovalMode == "yolo";
+    public string? ApprovalPendingNote => PendingApprovalMode is null ? null : "Takes effect when the current run ends (omp restarts).";
+
+    /// <summary>"Bypass permissions" waits for an explicit second confirmation.</summary>
     [ObservableProperty] private bool _confirmYolo;
 
     [ObservableProperty] private bool _isSettingsOpen;
@@ -249,19 +257,25 @@ public sealed partial class MainViewModel
     {
         try
         {
-            if (mode == ApprovalMode) return;
+            if (mode == ShownApprovalMode) return;
             if (mode == "yolo" && !ConfirmYolo)
             {
                 ConfirmYolo = true; // the card asks once more; nothing changes until the user confirms
                 return;
             }
             ConfirmYolo = false;
+            Persist(o => o with { ApprovalMode = mode });
             if (Phase is SessionPhase.Running or SessionPhase.Aborting)
             {
-                SettingsMessage = "Stop the current run first: changing approvals restarts omp.";
-                return;
+                // Never cut a run short: changing approvals restarts omp, so it switches once omp is idle.
+                var waiting = PendingApprovalMode is not null;
+                PendingApprovalMode = mode;
+                if (waiting) return; // the loop already waiting picks up the newest choice
+                while (Phase is SessionPhase.Running or SessionPhase.Aborting) await Task.Delay(300, _cts.Token);
+                mode = PendingApprovalMode ?? mode;
             }
-            Persist(o => o with { ApprovalMode = mode });
+            PendingApprovalMode = null;
+            if (mode == ApprovalMode) return;
             await _session.SetApprovalModeAsync(mode, _cts.Token);
             Apply(_session.Snapshot());
         }

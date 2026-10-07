@@ -59,10 +59,15 @@ project yet), so the OS warns on first start:
 
 ## Daily use
 
-- **Sessions** — the sidebar lists omp's sessions of all your projects, grouped by project folder (the open
-  project first, pinned sessions first in each group); **Search** filters them by title or folder. Click one to
-  continue it; **New session** (Ctrl/⌘+N) starts a fresh one, and a project group's **+** starts one in that
-  project. The title opens the session menu (below).
+- **Sessions** — the sidebar lists omp's sessions of all your projects, grouped by project folder. Sessions are
+  ordered by their last message (yours or the agent's), newest first, and groups by their newest session; opening a
+  session does not reorder the list. Pinned sessions come first in their group. **Search** filters them by title or
+  folder. Click one to continue it; **New session** (Ctrl/⌘+N) starts a fresh one, and a project group's **+** starts
+  one in that project. Hover a session (or right-click it) to **delete** it, after a confirmation; deleting the open
+  session works like the session menu's Delete (a new session starts). The folder button at the top of the sidebar
+  **adds a project folder** to the list; hover a group's header (or right-click it) to **remove the project from the
+  sidebar** — only the list changes, the folder and its sessions stay on disk, and adding the folder again brings them
+  back. Both are remembered in the client's settings file. The title opens the session menu (below).
 - **Models and thinking** — in the message box: the *Thinking effort* chip sets omp's reasoning level (off,
   minimal, low, medium, high, xhigh; hidden for models that don't reason) and the model chip lists the models omp
   can use (type to search) with the model options below the list.
@@ -106,6 +111,13 @@ project yet), so the OS warns on first start:
   local addresses that appear in omp's tool output (dev servers it starts) are offered as chips. It uses the system's
   web engine: WebView2 on Windows, WebKit on macOS, WebKitGTK (`libwebkit2gtk-4.1`) on Linux; when the engine is
   missing the panel says what to install and offers **Open in browser**.
+- **omp browses in the preview** — when omp opens a web page with its browser tool, the page opens here rather
+  than in a hidden browser: the preview opens by itself and you watch each step; a pulsing **omp** pill in its
+  toolbar shows while omp reads, clicks or types on the page. The preview shows one page: a second tab omp opens
+  takes it over. omp reads pages as text (their elements and content); screenshots are not available in the
+  preview, and only http and https pages open (for a local file, ask omp to serve it, e.g. `python3 -m http.server`).
+  The terminal's omp uses the same preview. To give omp its own hidden browser back, run
+  `omp config set browser.cmux false` (omp's setting for this kind of embedded browser) and restart omp.
 - **Comments on the page** — **Select element** in the preview's toolbar (or **+ → Comment on the page**, or
   Ctrl/⌘+Shift+S) turns on the mode: point at an element (it is outlined), click it, write what to change and press
   **Comment** (or Enter). A numbered pin marks the element on the page and the comment becomes a chip in the message
@@ -137,8 +149,10 @@ project yet), so the OS warns on first start:
 - **Menus and tray** — on macOS the app menu has **Settings…** (⌘,) and the menu bar *File* (New Session, Open
   Folder…) and *View* (Sessions, Terminal, Events). Where the desktop has a tray or menu-bar area, an OMP GUI icon
   there offers **Show OMP GUI**, **New Session** and **Quit**.
-- **In the conversation** — **Retry** on a failed reply, **Copy the message as Markdown**, and **Jump to latest**
-  when you have scrolled up.
+- **In the conversation** — **Retry** on a failed reply and **Copy the message as Markdown**. The conversation
+  follows a streaming reply while you are at (or near) its end; scroll up to read and it stays put, with a round
+  **↓** button at the bottom right to jump back to the latest message. Sending a message, or opening another
+  session, always goes to the end.
 
 | Shortcut | Action |
 |---|---|
@@ -315,11 +329,21 @@ looks up at a thought cloud with dots while the model thinks or writes, bounces 
 tool runs, pops up a **!** and looks at you when omp asks you something, hops for joy among sparkles when a run
 finishes, wobbles with a sweat drop when a tool fails or omp stops, and falls asleep with drifting Zzz after three
 quiet minutes (typing or clicking it wakes it up). It looks at the pointer when you hover it, glances at the message
-box while you type, and hops happily when clicked; a click also shows what omp is doing, or a word from the pet, and
-the keyboard stays in the message box. It has its own strip above the message box, so it never covers the
-conversation; in a window less than 520 px tall it steps aside and gives that strip back. It moves only while the
-window is active and redraws only when something changes: minimised, in the background, or asleep for a while, it
-does not redraw at all.
+box while you type, and hops happily when clicked. On the message box it has its own strip above the box, so it never
+covers the conversation; in a window less than 520 px tall it steps aside and gives that strip back. It moves only
+while the window is active and redraws only when something changes: minimised, in the background, or asleep for a
+while, it does not redraw at all.
+
+**Click the pet** to message omp from it: a small message box opens above it with the keyboard in it, and the pet
+says what omp is doing (or a word of its own). **Enter** sends the text to the conversation just as the message box's
+Send does (a new prompt, or queued for after the run while one goes on), without touching what is in the message box;
+**Esc**, a click on the pet or a click elsewhere closes it (the text stays for next time) and the keyboard goes back
+where it was.
+
+**Drag the pet** (press and move it a few pixels; a press that barely moves is a click) to put it anywhere in the
+window; its speech bubble and message box go with it. It stays where you drop it, inside the window when the window
+is resized, and after a restart; while it is off the message box, the box gives its strip back. Drop it close to its
+place on the message box and it sits there again, or use **Reset position** in Settings → Pets.
 
 **Settings → Pets** turns the pet on or off (on by default), sets its size (small 32 px or medium 48 px, the default)
 and picks one of nine: Pi (omp's own), a cat, an owl, a robot, a slime, a cactus, a ghost, a fox and a turtle.

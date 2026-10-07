@@ -178,4 +178,23 @@ public sealed class SessionTests
         // A head cut in the middle of a line: the partial line is ignored, the rest still parses.
         Assert.Equal("New session", SessionCatalog.Parse("""{"type":"session","id":"e","cwd":"/w"}""" + "\n{\"type\":\"mess", "/s/d.jsonl", DateTime.UtcNow)!.Title);
     }
+
+    [Fact]
+    public void Catalog_sort_key_is_the_last_user_or_assistant_message()
+    {
+        const string text = """
+            {"type":"session","version":3,"id":"abc","cwd":"/work/p"}
+            {"type":"message","message":{"role":"user","content":[],"timestamp":1790000000000}}
+            {"type":"message","message":{"role":"assistant","content":[],"timestamp":1790000005000}}
+            {"type":"message","message":{"role":"toolResult","content":[],"timestamp":1790000009000}}
+            {"type":"model_change","id":"x","timestamp":"2026-10-07T10:00:00Z"}
+
+            """;
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1790000005000), SessionCatalog.LastMessageTime(text, headIsWhole: true));
+        // No message timestamp: the entry's ISO time.
+        Assert.Equal(new DateTimeOffset(2026, 10, 7, 9, 0, 0, TimeSpan.Zero),
+            SessionCatalog.LastMessageTime("""{"type":"message","timestamp":"2026-10-07T09:00:00Z","message":{"role":"user"}}""" + "\n", headIsWhole: true));
+        // A tail's first line may be cut: it is not used.
+        Assert.Null(SessionCatalog.LastMessageTime("""{"type":"message","message":{"role":"user","timestamp":1790000000000}}""" + "\n", headIsWhole: false));
+    }
 }

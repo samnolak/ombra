@@ -13,8 +13,12 @@ public sealed partial class SessionItemViewModel(SessionSummary model) : Observa
     public string Title => LiveTitle ?? Model.Title;
     public string Project => ProjectName(Model.Cwd);
     public string Cwd => Model.Cwd;
-    public string When => Relative(Model.LastModified, DateTimeOffset.Now);
-    public string Tooltip => $"{Title}\n{Model.Cwd}\n{Model.LastModified.ToLocalTime():g}";
+    public string When => Relative(Model.LastMessageAt, DateTimeOffset.Now);
+    public string Tooltip => $"{Title}\n{Model.Cwd}\n{Model.LastMessageAt.ToLocalTime():g}";
+    /// <summary>The row menu's commands (MainViewModel's, set when the row is made): a menu opens in a popup, outside
+    /// the window's visual tree, so it cannot reach the window's DataContext.</summary>
+    public System.Windows.Input.ICommand? OpenCommand { get; init; }
+    public System.Windows.Input.ICommand? DeleteCommand { get; init; }
 
     [ObservableProperty] private bool _isCurrent;
     /// <summary>omp is working in this session right now (the open session during a run).</summary>

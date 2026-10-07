@@ -73,7 +73,7 @@ Values are light / dark. Only keys referenced from `Styles.axaml` or `MainWindow
 | `GuiFill1` | navy 6% / #FFF 10% | flat-button hover, user bubble, tool name, attachment, details, model list selection |
 | `GuiFill1OnWindow` | #F6F7F8 / #2C2C2E | code blocks, command output |
 | `GuiFill2` | navy 8% / #FFF 15% | tags, selected terminal tab, current menu item |
-| `GuiInverse` (+`Hover`, `Pressed`) | #000 / #FFF | `inverse` buttons (Stop, Never ask) |
+| `GuiInverse` (+`Hover`, `Pressed`) | #000 / #FFF | `inverse` buttons (Stop, Bypass permissions) |
 | `GuiBlue` | #428BF9 | composer drag-over border |
 | `GuiBorderSoft` | hairline | header / sidebar dividers, menus, tool rows, separators, splitters (a 1 px line centred in a wider transparent strip to grab) |
 | `GuiBorder` / `GuiBorderStrong` | | composer border / composer border while focused |
@@ -220,10 +220,10 @@ The style does not uppercase; write the label text in capitals.
   `flat` (Dismiss, Not now, Show in folder) or `link`.
 - **Use `md` for the buttons of a card's main decision** (approval, confirm, recovery banner, settings Save / Done);
   small (default) elsewhere.
-- **`inverse` stops or overrides**: Stop in the composer, "Never ask" in the approval-mode confirmation. It is not a
+- **`inverse` stops or overrides**: Stop in the composer, "Bypass permissions" in the permission-mode confirmation. It is not a
   second primary.
 - **Destructive or risky state uses the error colours**: `chip danger` while approvals are off, `notice error`
-  around the "never ask" confirmation, `status failed`, `banner error`. There is no red button class.
+  around the bypass confirmation, `status failed`, `banner error`. There is no red button class.
 - **Status is shown with soft fills plus a mark in the status colour, never by coloured small text**: badge text is
   primary with a coloured dot (`Border.status` > `Ellipse`); error and warning lines are primary text with an
   `IconAlert` in `GuiStatusError` / `GuiStatusWarning` (`Icon.error-mark` / `Icon.warning-mark`). Text in a status

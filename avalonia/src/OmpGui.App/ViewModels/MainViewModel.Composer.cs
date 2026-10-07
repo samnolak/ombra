@@ -139,7 +139,8 @@ public sealed partial class MainViewModel
         await AddFilesAsync(await pick());
     }
 
-    /// <summary>Takes the composer content (text + images) and clears it.</summary>
+    /// <summary>Takes the composer content (text + images) and clears it: the message is being sent, so the
+    /// conversation goes to its latest message (chat apps do, even when the reader had scrolled up).</summary>
     private (string Text, ImageAttachment[] Images) TakeComposer()
     {
         var text = ComposerText.Trim();
@@ -152,6 +153,7 @@ public sealed partial class MainViewModel
         Attachments.Clear();
         ComposerMessage = "";
         AttachmentsChanged();
+        ScrollToLatestRequested?.Invoke();
         return (text, images);
     }
 

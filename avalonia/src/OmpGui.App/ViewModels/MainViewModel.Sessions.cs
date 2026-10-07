@@ -236,7 +236,11 @@ public sealed partial class MainViewModel
         Sessions.Clear();
         foreach (var c in visible)
         {
-            var item = new SessionItemViewModel(c) { IsCurrent = c.Path == current, IsPinned = _pinnedIds.Contains(c.Id) };
+            var item = new SessionItemViewModel(c)
+            {
+                IsCurrent = c.Path == current, IsPinned = _pinnedIds.Contains(c.Id),
+                OpenCommand = OpenSessionCommand, DeleteCommand = DeleteSessionItemCommand,
+            };
             item.LiveTitle = LiveTitleFor(item);
             Sessions.Add(item);
         }
@@ -250,15 +254,135 @@ public sealed partial class MainViewModel
     private void RebuildSessionGroups()
     {
         var project = _last?.Cwd ?? ProjectPath;
+        var (added, hidden) = ProjectPrefs();
         SessionGroups.Clear();
-        // Sessions is newest first, so the first appearance of a folder orders the groups by recency.
         var groups = new List<SessionGroupViewModel>();
         foreach (var item in Sessions)
         {
+            // A removed project stays out of the list, except while omp works in it.
+            if (hidden.Contains(item.Cwd) && !string.Equals(item.Cwd, project, StringComparison.Ordinal)) continue;
             var g = groups.FirstOrDefault(x => string.Equals(x.Cwd, item.Cwd, StringComparison.Ordinal));
-            if (g is null) groups.Add(g = new SessionGroupViewModel(item.Cwd, string.Equals(item.Cwd, project, StringComparison.Ordinal)));
+            if (g is null) groups.Add(g = NewGroup(item.Cwd, project));
             g.Items.Add(item);
         }
-        foreach (var g in groups.OrderByDescending(x => x.IsCurrentProject)) SessionGroups.Add(g);
+        // By the newest message in each (pinned sessions lead their group, not the list of groups); folders added
+        // from the sidebar that have no session yet go first, as just added.
+        var ordered = groups.OrderByDescending(g => g.Items.Max(i => i.Model.LastMessageAt)).ToList();
+        if (SessionFilter.Trim().Length == 0)
+            foreach (var p in added)
+                if (!hidden.Contains(p) && !groups.Any(g => string.Equals(g.Cwd, p, StringComparison.Ordinal))) ordered.Insert(0, NewGroup(p, project));
+        foreach (var g in ordered) SessionGroups.Add(g);
+    }
+
+    private SessionGroupViewModel NewGroup(string cwd, string? project) =>
+        new(cwd, string.Equals(cwd, project, StringComparison.Ordinal))
+        {
+            NewSessionCommand = NewSessionInProjectCommand,
+            RemoveCommand = RemoveProjectCommand,
+        };
+
+    // ───────────── Projects added to / removed from the sidebar (the client's settings file) ─────────────
+
+    private List<string>? _addedProjects;
+    private HashSet<string>? _hiddenProjects;
+
+    private (List<string> Added, HashSet<string> Hidden) ProjectPrefs()
+    {
+        if (_addedProjects is null || _hiddenProjects is null)
+        {
+            OmpRuntimeOptions? o = null;
+            try { o = _settings?.Load(); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                // Listed as if nothing was added or removed; the settings page reports the file's problem when it opens.
+            }
+            _addedProjects = [.. o?.SidebarProjects ?? []];
+            _hiddenProjects = new HashSet<string>(o?.HiddenProjects ?? [], StringComparer.Ordinal);
+        }
+        return (_addedProjects, _hiddenProjects);
+    }
+
+    private void SaveProjectPrefs()
+    {
+        var (added, hidden) = ProjectPrefs();
+        string[]? addedOut = added.Count > 0 ? [.. added] : null;
+        string[]? hiddenOut = hidden.Count > 0 ? [.. hidden.Order(StringComparer.Ordinal)] : null;
+        Persist(o => o with { SidebarProjects = addedOut, HiddenProjects = hiddenOut });
+        RebuildSessionGroups();
+    }
+
+    /// <summary>Sidebar header: pick a folder and list it as a project (its sessions, or an empty group with its
+    /// "new session" button). Removing it earlier is undone.</summary>
+    [RelayCommand]
+    private async Task AddProjectAsync()
+    {
+        if (PickFolderRequested is not { } pick || await pick() is not { } picked) return;
+        var folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(picked));
+        var (added, hidden) = ProjectPrefs();
+        hidden.Remove(folder);
+        added.RemoveAll(p => string.Equals(p, folder, StringComparison.Ordinal));
+        added.Add(folder); // the newest last: it is inserted first
+        SaveProjectPrefs();
+    }
+
+    /// <summary>Group header: take a project off the sidebar after asking. Only the client's list changes.</summary>
+    [RelayCommand]
+    private void RemoveProject(SessionGroupViewModel? group)
+    {
+        if (group is null) return;
+        var card = new SessionCardViewModel("remove-project", "IconFolder", $"Remove “{group.Name}” from the sidebar?",
+            "Its sessions are no longer listed here. Nothing is deleted: the folder and its sessions stay on disk, and adding the folder again lists them again.")
+        {
+            Detail = group.Cwd,
+            State = SessionCardState.Ask,
+        };
+        card.Primary = new SessionCardAction("Remove", new RelayCommand(() =>
+        {
+            var (added, hidden) = ProjectPrefs();
+            added.RemoveAll(p => string.Equals(p, group.Cwd, StringComparison.Ordinal));
+            hidden.Add(group.Cwd);
+            SaveProjectPrefs();
+            ShowBrief("IconFolder", "Project removed from the sidebar", group.IsCurrentProject
+                ? "It stays listed while omp works in it. Nothing was deleted." : "Nothing was deleted.");
+        }));
+        card.Secondary = new SessionCardAction("Cancel", new RelayCommand(CloseSessionCard));
+        ShowCard(card);
+    }
+
+    /// <summary>Sidebar row: delete a saved session after asking. The open one goes through omp (the session menu's
+    /// Delete, which then starts a new session); another one is deleted as omp's own session picker does.</summary>
+    [RelayCommand]
+    private void DeleteSessionItem(SessionItemViewModel? item)
+    {
+        if (item is null) return;
+        if (item.Model.Path == _last?.SessionFile)
+        {
+            if (DeleteSessionCommand.CanExecute(null)) DeleteSessionCommand.Execute(null);
+            else ShowBrief("IconTrash", "Not now", "Stop the current run first; then the open session can be deleted.");
+            return;
+        }
+        var card = new SessionCardViewModel("delete", "IconTrash", $"Delete “{item.Title}”?",
+            "The conversation's file and its artifacts are deleted. This cannot be undone.")
+        {
+            Detail = item.Model.Path,
+            State = SessionCardState.Ask,
+        };
+        card.Primary = new SessionCardAction("Delete session", new AsyncRelayCommand(async () =>
+        {
+            card.State = SessionCardState.Running;
+            card.Message = "Deleting…";
+            card.Primary = null;
+            card.Secondary = null;
+            try { await Task.Run(() => SessionCatalog.DeleteSession(item.Model.Path)); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                card.Finish(false, "Not deleted", e.Message, secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
+                return;
+            }
+            RequestCatalogRefresh();
+            ShowBrief("IconTrash", "Session deleted", item.Title);
+        }));
+        card.Secondary = new SessionCardAction("Cancel", new RelayCommand(CloseSessionCard));
+        ShowCard(card);
     }
 }

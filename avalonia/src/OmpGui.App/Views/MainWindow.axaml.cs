@@ -57,7 +57,7 @@ public sealed partial class MainWindow : Window
         AddHandler(DragDrop.DropEvent, OnDrop);
         DragDrop.SetAllowDrop(this, true);
         RenameBox.LostFocus += (_, _) => { if (Vm is { IsRenaming: true } vm) vm.CommitRenameCommand.Execute(null); };
-        JumpToLatest.Click += (_, _) => ScrollToEnd();
+        JumpToLatest.Click += (_, _) => FollowLatest();
         // The model picker works from the keyboard: it opens with the filter focused, Enter takes the first match
         // (or the entry chosen with the arrows), Esc closes it.
         ModelPopup.Opened += (_, _) => Dispatcher.UIThread.Post(() => ModelFilterBox.Focus(), DispatcherPriority.Background);
@@ -240,13 +240,16 @@ public sealed partial class MainWindow : Window
         ComposerFooter.IsVisible = !vm.ShowSetupScreen;
     }
 
-    /// <summary>The composer's pill menus close once a choice is made (the "never ask" confirmation keeps it open).</summary>
+    /// <summary>
+    /// The composer's pill menus close once a choice is made: a menu item, or the bypass confirmation's button (the
+    /// bypass item itself keeps the menu open for that confirmation).
+    /// </summary>
     private static void CloseOnChoice(Button owner, Func<bool>? keepOpen = null)
     {
         if (owner.Flyout is not Flyout { Content: Control content } flyout) return;
         content.AddHandler(Button.ClickEvent, (_, e) =>
         {
-            if (e.Source is not Button { Classes: var c } || !c.Contains("menu-item")) return;
+            if (e.Source is not Button { Classes: var c } b || !(c.Contains("menu-item") || b.Name == "ConfirmYoloButton")) return;
             Dispatcher.UIThread.Post(() => { if (keepOpen?.Invoke() != true) flyout.Hide(); }, DispatcherPriority.Background);
         });
     }
@@ -357,6 +360,7 @@ public sealed partial class MainWindow : Window
         if (Vm is { } vm)
         {
             vm.TranscriptChanged += OnTranscriptChanged;
+            vm.ScrollToLatestRequested += FollowLatest;
             vm.FocusComposerRequested += () => Dispatcher.UIThread.Post(() =>
             {
                 if (!Composer.IsEffectivelyVisible) return;
@@ -484,8 +488,10 @@ public sealed partial class MainWindow : Window
             {
                 var atBottom = _scroll.Offset.Y >= _scroll.Extent.Height - _scroll.Viewport.Height - BottomSlack;
                 if (atBottom) { _stickToBottom = true; JumpToLatest.IsVisible = false; return; }
-                if (DateTime.UtcNow - _readerScrolledAt < TimeSpan.FromMilliseconds(600)) { _stickToBottom = false; return; }
+                // Away from the latest message: the way back is the ↓ button (and the next message sent)
+                if (DateTime.UtcNow - _readerScrolledAt < TimeSpan.FromMilliseconds(600)) _stickToBottom = false;
                 if (_stickToBottom) PinToBottom();
+                else JumpToLatest.IsVisible = true;
             };
             // ScrollChanged comes a frame late: re-anchor when the extent or the viewport changes, inside the layout
             // pass, so no frame is drawn at the old offset (a resize or a panel opening flickered).
@@ -810,10 +816,23 @@ public sealed partial class MainWindow : Window
         base.OnKeyDown(e);
     }
 
+    /// <summary>Streaming and new rows: followed while the reader is at (or within <see cref="BottomSlack"/> of) the
+    /// latest message; a reader who scrolled up stays where they are and gets "Jump to latest".</summary>
     private void OnTranscriptChanged()
     {
-        if (_stickToBottom) Dispatcher.UIThread.Post(ScrollToEnd, DispatcherPriority.Background);
+        // Checked again when the job runs: a wheel turn up in between means the reader left, and stays left
+        if (_stickToBottom) Dispatcher.UIThread.Post(() => { if (_stickToBottom) ScrollToEnd(); }, DispatcherPriority.Background);
         else JumpToLatest.IsVisible = true;
+    }
+
+    /// <summary>The user sent a message or opened another conversation: to the latest message, whatever the reader was
+    /// looking at, and following it again.</summary>
+    private void FollowLatest()
+    {
+        _stickToBottom = true;
+        _readerScrolledAt = default; // the reader's last scroll must not hold the anchor off while the new rows come in
+        JumpToLatest.IsVisible = false;
+        Dispatcher.UIThread.Post(ScrollToEnd, DispatcherPriority.Background);
     }
 
     private void PinToBottom()
@@ -823,12 +842,24 @@ public sealed partial class MainWindow : Window
         if (Math.Abs(_scroll.Offset.Y - bottom) > 0.5) _scroll.Offset = new Vector(_scroll.Offset.X, bottom);
     }
 
+    /// <summary>
+    /// To the very end (posted at Background priority: after the layout of the new rows). The virtualised list only
+    /// estimates the height of rows it has not measured, so the end moves once they are realised: pinned again after the
+    /// next layout pass, and after that by the extent watch in <see cref="OnLoaded"/> while the conversation follows.
+    /// </summary>
     private void ScrollToEnd()
     {
-        if (Vm is { Rows.Count: > 0 } vm) Transcript.ScrollIntoView(vm.Rows.Count - 1);
-        _scroll?.ScrollToEnd();
         _stickToBottom = true;
         JumpToLatest.IsVisible = false;
+        if (Vm is { Rows.Count: > 0 } vm) Transcript.ScrollIntoView(vm.Rows.Count - 1);
+        if (_scroll is not { } scroll) return;
+        scroll.ScrollToEnd();
+        void Settled(object? sender, EventArgs e)
+        {
+            scroll.LayoutUpdated -= Settled;
+            if (_stickToBottom) PinToBottom();
+        }
+        scroll.LayoutUpdated += Settled;
     }
 
     /// <summary>Closing stops omp gracefully first (stdin EOF, then tree kill after a grace period).</summary>

@@ -26,6 +26,25 @@ public partial class MainViewModel
     /// <summary>Saves the pet settings (the rest of the client's settings file is kept as it is).</summary>
     internal void PersistPet(PetOptions options) => Persist(o => o with { Pet = options });
 
+    /// <summary>
+    /// The pet's message box: <paramref name="text"/> goes the way of the message box's Send (terminal-only commands
+    /// handled here, a prompt when ready, a follow-up while a run goes on) without touching the message box's draft
+    /// or its attachments. False when omp cannot take a message now.
+    /// </summary>
+    internal bool SendFromPet(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || Phase is not (SessionPhase.Ready or SessionPhase.Running) || IsSigningIn) return false;
+        var draft = ComposerText;
+        if (HandleTerminalOnlyCommand(text))
+        {
+            // Handling a command empties the message box, which held a draft, not the command: the draft comes back
+            if (ComposerText.Length == 0 && draft.Length > 0) ComposerText = draft;
+            return true;
+        }
+        _ = SubmitAsync(() => (text.Trim(), Array.Empty<ImageAttachment>()));
+        return true;
+    }
+
     /// <summary>Called from <see cref="Apply"/>: the pet's mood follows the agent.</summary>
     private void ApplyPet(SessionSnapshot s) => _pets?.OnSnapshot(s);
 }

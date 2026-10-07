@@ -248,7 +248,9 @@ omp's own interface for them.
 - **Files pane** — the project tree with git marks and "changed in this session", Go to file, a code viewer, open in an
   editor or the file manager (*Files* area).
 - **Browser preview and page comments** — a local web app beside the conversation; comments pinned to page elements
-  go with the next message.
+  go with the next message. omp's own browser tool drives the preview: the app serves the protocol of omp's cmux
+  backend (`CMUX_SOCKET_PATH`, see `AgentBrowserBridge`), so pages omp opens show there instead of in headless Chromium
+  (no screenshots; one page at a time).
 - **Dictation** — speech to text on this computer, into the message box.
 - **Pets** — a pixel companion on the message box that follows what omp does (Settings › Pets).
 - **Plan history** — earlier plans and every change to the todo list, kept for the session (*Panes* area).

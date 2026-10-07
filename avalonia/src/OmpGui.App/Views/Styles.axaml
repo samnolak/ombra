@@ -501,7 +501,7 @@
   <Style Selector="Button.sidebar-action.update ctl|Icon">
     <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiStatusInfo}" />
   </Style>
-  <!-- Project group: a header row with the folder name; its "new session here" button shows on hover / focus -->
+  <!-- Project group: a header row with the folder name; its "remove" and "new session here" buttons show on hover / focus -->
   <Style Selector="Grid.group-header">
     <Setter Property="Height" Value="30" />
   </Style>
@@ -514,6 +514,16 @@
   <Style Selector="TextBlock.session-age">
     <Setter Property="FontSize" Value="12" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <!-- Session row: the delete button takes the age's place on hover / focus -->
+  <Style Selector="Panel.session-row Button.session-delete">
+    <Setter Property="Opacity" Value="0" />
+  </Style>
+  <Style Selector="Panel.session-row:pointerover Button.session-delete, Panel.session-row Button.session-delete:focus">
+    <Setter Property="Opacity" Value="1" />
+  </Style>
+  <Style Selector="Panel.session-row:pointerover TextBlock.session-age">
+    <Setter Property="Opacity" Value="0" />
   </Style>
   <Style Selector="Ellipse.session-dot">
     <Setter Property="Width" Value="6" />
@@ -915,11 +925,18 @@
     <Setter Property="Background" Value="{DynamicResource GuiStatusWarningSoft}" />
     <Setter Property="Padding" Value="12,8" />
   </Style>
+  <!-- "Jump to latest": a small round ↓ over the conversation's bottom-right corner -->
   <Style Selector="Button#JumpToLatest">
+    <Setter Property="Width" Value="32" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="Background" Value="{DynamicResource GuiSurface2}" />
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
     <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
     <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Cursor" Value="Hand" />
   </Style>
 
   <!-- Markdown -->

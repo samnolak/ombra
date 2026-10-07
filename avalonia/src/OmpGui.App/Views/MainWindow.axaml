@@ -26,6 +26,11 @@
             <ctl:Icon Data="{StaticResource IconPanelLeft}" Size="20" />
           </Button>
           <TextBlock Grid.Column="1" Text="OMP" FontWeight="SemiBold" FontSize="{DynamicResource GuiFontM}" VerticalAlignment="Center" Margin="6,0,0,0" />
+          <!-- Add a project folder to the list (the folder picker); nothing starts until a session is made there -->
+          <Button x:Name="AddProjectButton" Grid.Column="2" Classes="icon" Command="{Binding AddProjectCommand}"
+                  ToolTip.Tip="Add project folder" AutomationProperties.Name="Add project folder">
+            <ctl:Icon Data="{StaticResource IconFolders}" Size="20" />
+          </Button>
         </Grid>
         <StackPanel DockPanel.Dock="Top" Margin="8,0,8,4" Spacing="2">
           <Button AutomationProperties.Name="New session" x:Name="NewSessionButton" Classes="sidebar-action" Command="{Binding NewSessionCommand}"
@@ -84,11 +89,38 @@
           <ListBox.ItemTemplate>
             <DataTemplate x:DataType="vm:SessionGroupViewModel">
               <StackPanel Spacing="1" Margin="0,0,0,10">
-                <Grid Classes="group-header" ColumnDefinitions="Auto,*,Auto" ToolTip.Tip="{Binding Cwd}">
+                <Grid Classes="group-header" ColumnDefinitions="Auto,*,Auto,Auto" ToolTip.Tip="{Binding Cwd}">
+                  <!-- Right-click: new session here, remove from the sidebar (as the hover buttons) -->
+                  <Grid.ContextFlyout>
+                    <Flyout Placement="Pointer" ctl:ChoiceMenu.CloseOnChoice="True">
+                      <StackPanel Width="230" Spacing="2">
+                        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                Command="{Binding NewSessionCommand}" CommandParameter="{Binding}" AutomationProperties.Name="New session here">
+                          <Grid ColumnDefinitions="Auto,*">
+                            <ctl:Icon Data="{StaticResource IconPlus}" Size="16" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="1" Text="New session here" VerticalAlignment="Center" />
+                          </Grid>
+                        </Button>
+                        <Border Classes="menu-separator" />
+                        <Button Classes="menu-item danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                Command="{Binding RemoveCommand}" CommandParameter="{Binding}" AutomationProperties.Name="Remove from sidebar">
+                          <Grid ColumnDefinitions="Auto,*">
+                            <ctl:Icon Data="{StaticResource IconClose}" Size="16" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="1" Text="Remove from sidebar…" VerticalAlignment="Center" />
+                          </Grid>
+                        </Button>
+                      </StackPanel>
+                    </Flyout>
+                  </Grid.ContextFlyout>
                   <ctl:Icon Data="{StaticResource IconFolder}" Size="14" Margin="10,0,6,0" VerticalAlignment="Center" TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
                   <TextBlock Grid.Column="1" Classes="group-label" Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                   <Button Grid.Column="2" Classes="icon group-action" Width="28" Height="28"
-                          Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).NewSessionInProjectCommand}" CommandParameter="{Binding}"
+                          Command="{Binding RemoveCommand}" CommandParameter="{Binding}"
+                          ToolTip.Tip="Remove from sidebar (files stay on disk)" AutomationProperties.Name="{Binding Name, StringFormat='Remove {0} from sidebar'}">
+                    <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+                  </Button>
+                  <Button Grid.Column="3" Classes="icon group-action" Width="28" Height="28"
+                          Command="{Binding NewSessionCommand}" CommandParameter="{Binding}"
                           ToolTip.Tip="New session in this project" AutomationProperties.Name="{Binding Name, StringFormat='New session in {0}'}">
                     <ctl:Icon Data="{StaticResource IconPlus}" Size="16" />
                   </Button>
@@ -96,17 +128,46 @@
                 <ItemsControl ItemsSource="{Binding Items}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:SessionItemViewModel">
-                      <Button AutomationProperties.Name="{Binding Title}" Classes="session" Classes.current="{Binding IsCurrent}"
-                              Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenSessionCommand}"
-                              CommandParameter="{Binding}" ToolTip.Tip="{Binding Tooltip}"
-                              HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                        <Grid ColumnDefinitions="Auto,*,Auto">
-                          <Ellipse Classes="session-dot" IsVisible="{Binding IsActive}" Margin="0,0,8,0" />
-                          <ctl:Icon Classes="session-pin" Data="{StaticResource IconPin}" Size="14" Margin="0,0,6,0" IsVisible="{Binding ShowPin}" ToolTip.Tip="Pinned" />
-                          <TextBlock Grid.Column="1" Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                          <TextBlock Grid.Column="2" Classes="session-age" Text="{Binding When}" Margin="8,0,0,0" VerticalAlignment="Center" />
-                        </Grid>
-                      </Button>
+                      <Panel Classes="session-row">
+                        <Button AutomationProperties.Name="{Binding Title}" Classes="session" Classes.current="{Binding IsCurrent}"
+                                Command="{Binding OpenCommand}"
+                                CommandParameter="{Binding}" ToolTip.Tip="{Binding Tooltip}"
+                                HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                          <Button.ContextFlyout>
+                            <Flyout Placement="Pointer" ctl:ChoiceMenu.CloseOnChoice="True">
+                              <StackPanel Width="200" Spacing="2">
+                                <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                        Command="{Binding OpenCommand}" CommandParameter="{Binding}" AutomationProperties.Name="Open">
+                                  <Grid ColumnDefinitions="Auto,*">
+                                    <ctl:Icon Data="{StaticResource IconChevronRight}" Size="16" Margin="0,0,10,0" />
+                                    <TextBlock Grid.Column="1" Text="Open" VerticalAlignment="Center" />
+                                  </Grid>
+                                </Button>
+                                <Border Classes="menu-separator" />
+                                <Button Classes="menu-item danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                        Command="{Binding DeleteCommand}" CommandParameter="{Binding}" AutomationProperties.Name="Delete session">
+                                  <Grid ColumnDefinitions="Auto,*">
+                                    <ctl:Icon Data="{StaticResource IconTrash}" Size="16" Margin="0,0,10,0" />
+                                    <TextBlock Grid.Column="1" Text="Delete session…" VerticalAlignment="Center" />
+                                  </Grid>
+                                </Button>
+                              </StackPanel>
+                            </Flyout>
+                          </Button.ContextFlyout>
+                          <Grid ColumnDefinitions="Auto,*,Auto">
+                            <Ellipse Classes="session-dot" IsVisible="{Binding IsActive}" Margin="0,0,8,0" />
+                            <ctl:Icon Classes="session-pin" Data="{StaticResource IconPin}" Size="14" Margin="0,0,6,0" IsVisible="{Binding ShowPin}" ToolTip.Tip="Pinned" />
+                            <TextBlock Grid.Column="1" Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="2" Classes="session-age" Text="{Binding When}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                          </Grid>
+                        </Button>
+                        <!-- On hover, in place of the age: delete (asks first) -->
+                        <Button Classes="icon session-delete" Width="24" Height="24" Margin="0,0,4,0" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                Command="{Binding DeleteCommand}" CommandParameter="{Binding}"
+                                ToolTip.Tip="Delete session" AutomationProperties.Name="{Binding Title, StringFormat='Delete {0}'}">
+                          <ctl:Icon Data="{StaticResource IconTrash}" Size="14" />
+                        </Button>
+                      </Panel>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -309,12 +370,10 @@
         <Image Source="/Assets/icon-256.png" Width="40" Height="40" HorizontalAlignment="Center" RenderOptions.BitmapInterpolationMode="HighQuality" />
         <TextBlock Classes="greeting" Text="What should we work on?" HorizontalAlignment="Center" />
       </StackPanel>
-      <Button x:Name="JumpToLatest" IsVisible="False" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,12"
-              AutomationProperties.Name="Jump to latest">
-        <StackPanel Orientation="Horizontal" Spacing="6">
-          <TextBlock Text="Jump to latest" VerticalAlignment="Center" />
-          <ctl:Icon Data="{StaticResource IconChevronDown}" Size="16" />
-        </StackPanel>
+      <!-- Shown when the reader scrolled up while new rows came in (MainWindow.OnTranscriptChanged): back to the latest -->
+      <Button x:Name="JumpToLatest" IsVisible="False" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,24,12"
+              ToolTip.Tip="Jump to latest" AutomationProperties.Name="Jump to latest">
+        <ctl:Icon Data="{StaticResource IconArrowDown}" Size="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
       </Button>
     </Panel>
     </Grid>
@@ -973,7 +1032,7 @@
                             <ctl:Icon.IsVisible>
                               <MultiBinding Converter="{x:Static vm:Converters.AreEqual}">
                                 <Binding Path="Mode" />
-                                <Binding Path="$parent[Window].((vm:MainViewModel)DataContext).ApprovalMode" />
+                                <Binding Path="$parent[Window].((vm:MainViewModel)DataContext).ShownApprovalMode" />
                               </MultiBinding>
                             </ctl:Icon.IsVisible>
                           </ctl:Icon>
@@ -982,12 +1041,14 @@
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
+                <TextBlock Classes="muted" Text="{Binding ApprovalPendingNote}" TextWrapping="Wrap" Margin="10,0,10,4"
+                           IsVisible="{Binding ApprovalPendingNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                 <Border Classes="notice error" IsVisible="{Binding ConfirmYolo}">
                   <StackPanel Spacing="8">
-                    <TextBlock Text="Run every tool without asking?" FontWeight="SemiBold" />
+                    <TextBlock Text="Bypass all permission checks?" FontWeight="SemiBold" TextWrapping="Wrap" />
                     <TextBlock Text="omp will run shell commands and edits with no confirmation. omp restarts on this session." TextWrapping="Wrap" FontSize="13" />
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                      <Button x:Name="ConfirmYoloButton" Classes="inverse" Content="Never ask" Command="{Binding SetApprovalModeCommand}" CommandParameter="yolo" />
+                      <Button x:Name="ConfirmYoloButton" Classes="inverse" Content="Bypass permissions" Command="{Binding SetApprovalModeCommand}" CommandParameter="yolo" />
                       <Button Content="Cancel" Command="{Binding CancelYoloCommand}" />
                     </StackPanel>
                   </StackPanel>
@@ -1000,9 +1061,6 @@
       <!-- How full the context is (Views/Session/UsageIndicator) -->
       <session:UsageIndicator x:Name="UsageIndicator" Grid.Column="2" VerticalAlignment="Center" />
     </Grid>
-    <!-- The pet, sitting on the message box's top edge (Controls/PetPerch; the box's top margin is its band) -->
-    <ctl:PetPerch x:Name="PetPerch" Grid.Row="3" Grid.Column="0" />
-
     <!-- ── Settings page (covers the conversation area) ── -->
     <Border x:Name="SettingsPage" Grid.Row="0" Grid.RowSpan="5" Grid.Column="0" Grid.ColumnSpan="9" Classes="page"
             IsVisible="{Binding IsSettingsOpen}">
@@ -1219,5 +1277,8 @@
       </DockPanel>
     </Border>
   </Grid>
+  <!-- The pet, over the whole window (Controls/PetPerch): on the message box's top edge (the box's top margin is its
+       band) until dragged elsewhere; only the pet, its bubble and its message box take the pointer -->
+  <ctl:PetPerch x:Name="PetPerch" Grid.Column="0" Grid.ColumnSpan="2" Anchor="{Binding #ComposerBox}" />
   </Grid>
 </Window>

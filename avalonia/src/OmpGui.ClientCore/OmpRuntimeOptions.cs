@@ -43,6 +43,10 @@ public sealed record OmpRuntimeOptions
     public bool? CheckForUpdates { get; init; }
     /// <summary>The pixel pet above the message box (<see cref="PetOptions"/>); null means the defaults.</summary>
     public PetOptions? Pet { get; init; }
+    /// <summary>Project folders added from the sidebar: listed even before they have a session.</summary>
+    public string[]? SidebarProjects { get; init; }
+    /// <summary>Project folders removed from the sidebar: their sessions are not listed (nothing is deleted on disk).</summary>
+    public string[]? HiddenProjects { get; init; }
 
     public const string ConfigEnvVar = "OMPGUI_CONFIG";
 

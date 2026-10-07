@@ -136,8 +136,13 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _ => "Waiting for omp…",
     };
 
-    /// <summary>Raised on the UI thread after rows were added or the last row changed (for auto-scroll).</summary>
+    /// <summary>Raised on the UI thread after rows were added or the last row changed (for auto-scroll: followed only
+    /// while the reader is at the latest message).</summary>
     public event Action? TranscriptChanged;
+
+    /// <summary>Raised on the UI thread when the conversation must show its latest message whatever the reader was
+    /// looking at: the user sent a message (prompt, follow-up, steer), or another conversation came in.</summary>
+    public event Action? ScrollToLatestRequested;
 
     /// <summary>Raised on the UI thread after an apply added event-log lines.</summary>
     public event Action? DebugLogAppended;
@@ -216,18 +221,25 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand(CanExecute = nameof(CanSend), AllowConcurrentExecutions = true)]
     private async Task SendAsync()
     {
+        // Terminal-only commands (/settings, /plan…) never reach omp: they would go to the model as a message
+        if (HandleTerminalOnlyCommand(ComposerText)) return;
+        await SubmitAsync(TakeComposer);
+    }
+
+    /// <summary>Ready: a new prompt. Running: queued as a follow-up. <paramref name="take"/> takes the content (the
+    /// message box's, or the pet's message box's).</summary>
+    private async Task SubmitAsync(Func<(string Text, ImageAttachment[] Images)> take)
+    {
         try
         {
-            // Terminal-only commands (/settings, /plan…) never reach omp: they would go to the model as a message
-            if (HandleTerminalOnlyCommand(ComposerText)) return;
             if (Phase == SessionPhase.Running)
             {
-                var (queued, queuedImages) = TakeComposer();
+                var (queued, queuedImages) = take();
                 await _session.QueueAsync(QueueKind.FollowUp, queued, queuedImages, _cts.Token);
                 Apply(_session.Snapshot());
                 return;
             }
-            var (text, images) = TakeComposer();
+            var (text, images) = take();
             // Reflect Running at once instead of waiting for the next pump tick.
             _optimisticAfterVersion = _session.Snapshot().Version;
             Phase = SessionPhase.Running;
@@ -402,7 +414,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         if (_last is not null && s.Version < _last.Version) return;
         Interlocked.Increment(ref _uiApplies);
         var changed = false;
-        if (s.TranscriptEpoch != _transcriptEpoch)
+        var newConversation = s.TranscriptEpoch != _transcriptEpoch;
+        if (newConversation)
         {
             // Another session (or a restarted omp): the old rows belong to a different conversation.
             Rows.Clear();
@@ -456,12 +469,14 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         ApplySessionArea(s); // MainViewModel.Session.cs: context ring, pin, session menu
         CheckAttention(s);
         if (s.Phase == SessionPhase.Ready) RememberProject(s.Cwd);
-        // A finished run or another session changes the list (new file, newer time, first-message title).
-        if (fileChanged || (wasRunning && !IsRunning)) RequestCatalogRefresh();
+        // Another session, a sent message (the run starts) or a finished run changes the list (new file, the time of the
+        // last message that orders it, first-message title).
+        if (fileChanged || wasRunning != IsRunning) RequestCatalogRefresh();
         UpdateStatus();
         ApplyPet(s); // MainViewModel.Pets.cs
         UpdateElapsedTimer();
         if (changed || wasRunning != IsRunning) MarkTurnEnds();
+        if (newConversation) ScrollToLatestRequested?.Invoke(); // a chat opens on its latest message
         if (changed) TranscriptChanged?.Invoke();
         if (debugAdded) DebugLogAppended?.Invoke();
     }
