@@ -117,7 +117,7 @@
       </DockPanel>
     </Border>
 
-  <Grid x:Name="MainColumn" Grid.Column="1" RowDefinitions="Auto,*,Auto,Auto,Auto" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">
+  <Grid x:Name="MainColumn" Grid.Column="1" RowDefinitions="Auto,*,Auto,Auto,Auto" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
     <!-- ── Header: sessions toggle, title (rename) and project; terminal and settings. Model, thinking and approvals
          live in the composer, next to the message they apply to (as in Claude Code). ── -->
@@ -168,10 +168,8 @@
       </Grid>
     </Border>
 
-    <!-- ── Transcript, and the terminal panel below it ── -->
-    <!-- Clipped, and the terminal capped to what the row has (MainWindow.axaml.cs): in a short window its 280 px had
-         drawn under the cards and the plan strip below -->
-    <Grid x:Name="ConversationArea" Grid.Row="1" Grid.Column="0" RowDefinitions="*,Auto,Auto" ClipToBounds="True">
+    <!-- ── Transcript ── -->
+    <Grid x:Name="ConversationArea" Grid.Row="1" Grid.Column="0" ClipToBounds="True">
     <Panel Grid.Row="0">
       <ListBox x:Name="Transcript" Classes="transcript" ItemsSource="{Binding Rows}"
                ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -319,10 +317,27 @@
         </StackPanel>
       </Button>
     </Panel>
-    <GridSplitter Grid.Row="1" Height="1" ResizeDirection="Rows" IsVisible="{Binding IsTerminalOpen}" />
-    <Border x:Name="TerminalPanel" Grid.Row="2" Height="280" MinHeight="120" IsVisible="{Binding IsTerminalOpen}" Classes="terminal-panel">
+    </Grid>
+
+    <!-- ── Side pane (Views menu ⋮: Plan, Background tasks, Files): right of the conversation, full height, resizable.
+         Docked beside the conversation when both fit, else over it until closed (MainWindow.FitPanels). ── -->
+    <GridSplitter x:Name="SidePaneSplitter" Grid.Row="0" Grid.RowSpan="5" Grid.Column="1" Width="1" ResizeDirection="Columns" IsVisible="False" />
+    <panes:SidePaneHost x:Name="SidePanePanel" Grid.Row="0" Grid.RowSpan="5" Grid.Column="2" IsVisible="{Binding IsSidePaneOpen}" />
+
+    <!-- ── Event / debug panel ── -->
+    <!-- ── Browser preview (Claude Code's Preview): right of the conversation, full height, resizable ── -->
+    <!-- Its width is the column's (MainWindow.FitPanels): never less than the conversation needs; too narrow for both, it
+         covers the conversation until closed. -->
+    <GridSplitter x:Name="PreviewSplitter" Grid.Row="0" Grid.RowSpan="5" Grid.Column="1" Width="1" ResizeDirection="Columns" IsVisible="False" />
+    <ctl:PreviewPanel x:Name="PreviewPanel" Grid.Row="0" Grid.RowSpan="5" Grid.Column="2"
+                      DataContext="{Binding Preview}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).IsPreviewOpen}" />
+
+    <!-- ── Terminal: a column beside the conversation, like the side pane (MainWindow.FitPanels sizes it) ── -->
+    <GridSplitter x:Name="TerminalSplitter" Grid.Row="0" Grid.RowSpan="5" Grid.Column="5" Width="1" ResizeDirection="Columns" IsVisible="False" />
+    <Border x:Name="TerminalPanel" Grid.Row="0" Grid.RowSpan="5" Grid.Column="6" IsVisible="{Binding IsTerminalOpen}" Classes="terminal-panel">
       <DockPanel>
-        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="10,6">
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="10,6" MinHeight="36">
+          <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="0,0,8,0">
           <ItemsControl ItemsSource="{Binding Terminals}">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate>
@@ -346,35 +361,21 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
+          </ScrollViewer>
           <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
             <Button x:Name="NewShellButton" Classes="link action" Content="+ Shell" Command="{Binding NewShellCommand}" ToolTip.Tip="A shell in the project folder" />
             <Button x:Name="OmpTuiButton" Classes="link action" Content="+ omp TUI" Command="{Binding OpenOmpTuiCommand}"
                     ToolTip.Tip="omp's own terminal UI (plan, goal, vibe…): a separate omp with its own session" />
             <Button AutomationProperties.Name="Hide terminal panel" Classes="icon" Width="28" Height="28" Command="{Binding ToggleTerminalCommand}" ToolTip.Tip="Hide the terminal panel (Ctrl+`)">
-              <ctl:Icon Data="{StaticResource IconChevronDown}" Size="16" />
+              <ctl:Icon Data="{StaticResource IconChevronRight}" Size="16" />
             </Button>
           </StackPanel>
         </Grid>
         <Panel x:Name="TerminalHost" />
       </DockPanel>
     </Border>
-    </Grid>
-
-    <!-- ── Side pane (Views menu ⋮: Plan, Background tasks, Files): right of the conversation, full height, resizable.
-         Docked beside the conversation when both fit, else over it until closed (MainWindow.FitPanels). ── -->
-    <GridSplitter x:Name="SidePaneSplitter" Grid.Row="0" Grid.RowSpan="5" Grid.Column="1" Width="1" ResizeDirection="Columns" IsVisible="False" />
-    <panes:SidePaneHost x:Name="SidePanePanel" Grid.Row="0" Grid.RowSpan="5" Grid.Column="2" IsVisible="{Binding IsSidePaneOpen}" />
-
-    <!-- ── Event / debug panel ── -->
-    <!-- ── Browser preview (Claude Code's Preview): right of the conversation, full height, resizable ── -->
-    <!-- Its width is the column's (MainWindow.FitPanels): never less than the conversation needs; too narrow for both, it
-         covers the conversation until closed. -->
-    <GridSplitter x:Name="PreviewSplitter" Grid.Row="0" Grid.RowSpan="5" Grid.Column="1" Width="1" ResizeDirection="Columns" IsVisible="False" />
-    <ctl:PreviewPanel x:Name="PreviewPanel" Grid.Row="0" Grid.RowSpan="5" Grid.Column="2"
-                      DataContext="{Binding Preview}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).IsPreviewOpen}" />
-
-    <GridSplitter Grid.Row="0" Grid.RowSpan="5" Grid.Column="5" Width="1" ResizeDirection="Columns" IsVisible="{Binding IsDebugVisible}" />
-    <Border Grid.Row="0" Grid.RowSpan="5" Grid.Column="6" Width="420" IsVisible="{Binding IsDebugVisible}" Classes="events">
+    <GridSplitter Grid.Row="0" Grid.RowSpan="5" Grid.Column="7" Width="1" ResizeDirection="Columns" IsVisible="{Binding IsDebugVisible}" />
+    <Border Grid.Row="0" Grid.RowSpan="5" Grid.Column="8" Width="420" IsVisible="{Binding IsDebugVisible}" Classes="events">
       <DockPanel>
         <TextBlock DockPanel.Dock="Top" Classes="caps" Text="RPC EVENTS" Margin="14,14,0,8" />
         <ListBox x:Name="DebugList" Classes="events" ItemsSource="{Binding DebugLog}" Background="Transparent"
@@ -1003,7 +1004,7 @@
     <ctl:PetPerch x:Name="PetPerch" Grid.Row="3" Grid.Column="0" />
 
     <!-- ── Settings page (covers the conversation area) ── -->
-    <Border x:Name="SettingsPage" Grid.Row="0" Grid.RowSpan="5" Grid.Column="0" Grid.ColumnSpan="7" Classes="page"
+    <Border x:Name="SettingsPage" Grid.Row="0" Grid.RowSpan="5" Grid.Column="0" Grid.ColumnSpan="9" Classes="page"
             IsVisible="{Binding IsSettingsOpen}">
       <DockPanel>
         <Border DockPanel.Dock="Top" Classes="header" Padding="24,0">

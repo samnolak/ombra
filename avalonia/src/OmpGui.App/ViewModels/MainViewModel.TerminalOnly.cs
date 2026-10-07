@@ -88,7 +88,7 @@ public sealed partial class MainViewModel
                 return true;
             default:
                 ShowCard(TerminalCard(cmd, $"{cmd.Description}. It has no place in this window yet: omp runs it in its own terminal UI, " +
-                    "which opens below as a separate omp with its own session."));
+                    "which opens beside the conversation as a separate omp with its own session."));
                 return true;
         }
     }
