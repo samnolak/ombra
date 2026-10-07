@@ -105,9 +105,9 @@
     <Setter Property="TextAlignment" Value="Center" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
   </Style>
-  <!-- Changed by omp in this session: its sparkle, in the info colour -->
+  <!-- Changed by omp in this session: its sparkle, in the brand clay -->
   <Style Selector="ctl|Icon.session-mark">
-    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiStatusInfo}" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiBrandMark}" />
   </Style>
   <Style Selector="TextBlock.files-message">
     <Setter Property="Margin" Value="20,12" />

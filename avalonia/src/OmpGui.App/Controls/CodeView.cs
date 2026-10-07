@@ -88,7 +88,8 @@ internal sealed class CodeSurface : Control, ILogicalScrollable
     private const double FontSize = 12.5;
     private const double GutterPadLeft = 12, GutterPadRight = 12, CodePadRight = 24;
 
-    private static readonly Typeface Mono = new(new FontFamily("Cascadia Mono, Consolas, DejaVu Sans Mono, monospace"));
+    private static readonly Typeface Mono = new(Application.Current?.TryFindResource("GuiFontMono", out var f) == true && f is FontFamily mono
+        ? mono : new FontFamily("SF Mono, Menlo, Cascadia Mono, Consolas, DejaVu Sans Mono, monospace"));
     private static readonly Typeface MonoItalic = new(Mono.FontFamily, FontStyle.Italic);
 
     private string[] _lines = [""];
@@ -225,7 +226,7 @@ internal sealed class CodeSurface : Control, ILogicalScrollable
         var codeX = _gutterWidth - _offset.X;
         var (s, e) = Ordered();
         var selection = Brush("GuiSelection", Brushes.LightBlue);
-        var mark = Brush("GuiStatusWarningSoft", Brushes.LightYellow);
+        var mark = Brush("GuiFill2", Brushes.LightGray);
         for (var i = first; i <= last; i++)
         {
             var y = PadTop + i * LineHeight - _offset.Y;

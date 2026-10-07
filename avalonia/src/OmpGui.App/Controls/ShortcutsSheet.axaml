@@ -1,0 +1,61 @@
+<!-- Keyboard shortcuts (⌘/ or Ctrl+/, /hotkeys): a card over the dimmed window, its groups in columns as wide as the
+     window allows. Esc, ×, or a click on the dimmed window closes it (MainViewModel.IsShortcutsOpen). Styles: Border.keycap
+     in Styles.Composer.axaml. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Controls.ShortcutsSheet"
+             x:DataType="vm:MainViewModel">
+  <Panel>
+    <Border x:Name="Scrim" Classes="scrim" />
+    <Border x:Name="Card" Classes="menu" MaxWidth="660" Margin="24,40" Padding="0" HorizontalAlignment="Center" VerticalAlignment="Center"
+            AutomationProperties.Name="Keyboard shortcuts">
+      <DockPanel>
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="20,14,12,6">
+          <TextBlock Text="Keyboard shortcuts" FontSize="{DynamicResource GuiFontM}" FontWeight="SemiBold" VerticalAlignment="Center" />
+          <Button x:Name="CloseButton" Grid.Column="1" Classes="icon" Width="28" Height="28" Command="{Binding CloseShortcutsCommand}"
+                  ToolTip.Tip="Close (Esc)" AutomationProperties.Name="Close keyboard shortcuts">
+            <ctl:Icon Data="{StaticResource IconClose}" Size="16" />
+          </Button>
+        </Grid>
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+          <ItemsControl ItemsSource="{Binding Shortcuts}" Margin="12,0,12,14">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:KeyboardShortcutGroup">
+                <StackPanel Width="300" Margin="8,6" Spacing="2">
+                  <TextBlock Classes="group-label" Text="{Binding Title}" Margin="0,4,0,4" />
+                  <ItemsControl ItemsSource="{Binding Items}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:KeyboardShortcut">
+                        <Grid ColumnDefinitions="*,Auto" MinHeight="30">
+                          <StackPanel VerticalAlignment="Center" Margin="0,3,12,3">
+                            <TextBlock Text="{Binding Action}" FontSize="13" TextWrapping="Wrap" />
+                            <TextBlock Classes="tertiary" Text="{Binding Note}" IsVisible="{Binding HasNote}" FontSize="12" TextWrapping="Wrap" />
+                          </StackPanel>
+                          <ItemsControl Grid.Column="1" ItemsSource="{Binding Keys}" VerticalAlignment="Center">
+                            <ItemsControl.ItemsPanel>
+                              <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="x:String">
+                                <Border Classes="keycap"><TextBlock Text="{Binding}" /></Border>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+  </Panel>
+</UserControl>

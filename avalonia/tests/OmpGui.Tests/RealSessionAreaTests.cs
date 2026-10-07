@@ -35,7 +35,10 @@ public sealed class RealSessionAreaTests(ITestOutputHelper log)
         var context = SessionOutputs.ParseContext(await Run("/context"));
         Assert.NotNull(context);
         Assert.True(context.Unavailable is not null || context is { Window: > 0, Categories.Count: > 0 });
-        Assert.NotNull(SessionOutputs.ParseUsage(await Run("/usage")));
+        Assert.NotNull(await s.GetSessionStatsAsync());
+        var usage = await OmpCli.RunAsync(options.ToCliLaunchSpec(ProviderUsage.CliArgs, options.WorkingDirectory), TimeSpan.FromSeconds(60));
+        log.WriteLine($"=== omp usage --json exit={usage.ExitCode}\n{usage.Stdout}\n{usage.Stderr}");
+        if (usage.Ok) Assert.NotNull(ProviderUsage.Parse(usage.Stdout));
         Assert.NotNull(SessionOutputs.ParseOnOff(await Run("/fast status"), "Fast mode"));
         Assert.NotNull(SessionOutputs.ParseOnOff(await Run("/extended-context status"), "Extended context"));
         Assert.NotEqual(AdvisorState.Unknown, SessionOutputs.ParseAdvisor(await Run("/advisor status")));

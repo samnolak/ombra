@@ -1,9 +1,11 @@
 <!-- The context ring next to the model (Claude Code's context indicator) and its popover: omp's /context breakdown as
-     bars, /usage (this session's tokens and cost, or the provider's plan limits) and "Compact now" (UsageViewModel). -->
+     bars, this session's tokens and cost (get_session_stats), the model provider's plan limits (omp's usage JSON) and
+     "Compact now" (UsageViewModel, ProviderUsageViewModel). -->
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
+             xmlns:session="using:OmpGui.App.Views.Session"
              x:Class="OmpGui.App.Views.Session.UsageIndicator"
              x:DataType="vm:MainViewModel">
   <Panel>
@@ -56,24 +58,18 @@
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
-          <TextBlock Classes="caps" Text="PLAN LIMITS" IsVisible="{Binding Usage.HasLimits}" />
+          <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding Usage.HasLimits}">
+            <TextBlock Classes="caps" Text="PLAN USAGE" VerticalAlignment="Center" />
+            <Button x:Name="AllProvidersButton" Grid.Column="1" Classes="link action" Content="All providers" Command="{Binding Usage.ShowAllProvidersCommand}"
+                    VerticalAlignment="Center" ToolTip.Tip="Every signed-in provider's limits (Settings → Model providers)" />
+          </Grid>
           <ItemsControl x:Name="UsageLimits" ItemsSource="{Binding Usage.Limits}" IsVisible="{Binding Usage.HasLimits}">
             <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="vm:UsageLimitViewModel">
-                <StackPanel Spacing="4" Margin="0,0,0,8">
-                  <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Classes="usage-label" Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="1" Classes="usage-value" Text="{Binding Used}" VerticalAlignment="Center" Margin="8,0,0,0" />
-                  </Grid>
-                  <ProgressBar Classes="usage-bar" Classes.high="{Binding IsHigh}" Value="{Binding Value}" Maximum="100" IsVisible="{Binding HasAmount}" />
-                  <TextBlock Classes="tertiary" Text="{Binding Resets}" IsVisible="{Binding HasResets}" />
-                  <TextBlock Classes="tertiary" Text="{Binding Account}" IsVisible="{Binding HasAccount}" TextTrimming="CharacterEllipsis" />
-                </StackPanel>
+              <DataTemplate x:DataType="vm:ProviderUsageGroupViewModel">
+                <session:ProviderUsageGroupView />
               </DataTemplate>
             </ItemsControl.ItemTemplate>
           </ItemsControl>
-          <SelectableTextBlock Classes="mono details" Text="{Binding Usage.RawUsage}" TextWrapping="Wrap"
-                               IsVisible="{Binding Usage.RawUsage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           <TextBlock Classes="tertiary" Text="{Binding Usage.UsageNote}" TextWrapping="Wrap"
                      IsVisible="{Binding Usage.UsageNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           <TextBlock Classes="warning" Text="{Binding Usage.Error}" TextWrapping="Wrap"

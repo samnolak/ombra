@@ -10,12 +10,6 @@ public sealed record ContextCategory(string Label, long Tokens, double Fraction)
 /// <param name="Unavailable">omp's own sentence when it cannot tell (no model selected); the rest is empty then.</param>
 public sealed record ContextReport(long Window, double UsedPercent, long UsedTokens, IReadOnlyList<ContextCategory> Categories, string? Unavailable = null);
 
-/// <summary>One provider limit from <c>/usage</c> (a subscription quota window).</summary>
-public sealed record UsageLimit(string Provider, string Label, string? Account, double? UsedPercent, string? Detail, string? Resets, bool InUse);
-
-/// <summary>omp's <c>/usage</c>: the session's own token and cost tallies, or the providers' reported limits.</summary>
-public sealed record UsageReport(IReadOnlyList<(string Label, string Value)> Totals, IReadOnlyList<UsageLimit> Limits, IReadOnlyList<string> Notes, string? Age);
-
 /// <summary>What <c>/compact</c> or <c>/handoff</c> reported when it ended (they run in the background over RPC).</summary>
 public sealed record MaintenanceResult(bool Ok, string Message, long? TokensBefore = null, long? TokensAfter = null);
 
@@ -62,91 +56,6 @@ public static partial class SessionOutputs
         }
         var usedTokens = cats.Where(c => c.Label is not ("Free" or "Auto-compact buffer")).Sum(c => c.Tokens);
         return new ContextReport(total, double.Parse(header.Groups["pct"].Value, CultureInfo.InvariantCulture), usedTokens, cats);
-    }
-
-    [GeneratedRegex(@"(?<used>\d+(?:\.\d+)?)%? ?\S* used(?: \((?<left>\d+(?:\.\d+)?)% left\))?", RegexOptions.CultureInvariant)]
-    private static partial Regex LimitAmount();
-
-    [GeneratedRegex(@"\]\s+(?<pct>\d+)%\s*$", RegexOptions.CultureInvariant)]
-    private static partial Regex BarPercent();
-
-    /// <summary>
-    /// <c>/usage</c>: either the session's tallies ("Input tokens: 0" … "Cost: $0.000000") or, when a provider reports
-    /// quota windows, a fenced block per provider with "- Label — window", the account's use, a bar and the reset.
-    /// </summary>
-    public static UsageReport? ParseUsage(string text)
-    {
-        var lines = Lines(text).Where(l => !l.StartsWith("```", StringComparison.Ordinal)).ToList();
-        if (lines.Count == 0 || !lines[0].StartsWith("Usage", StringComparison.Ordinal)) return null;
-        var age = lines[0] is var h && h.IndexOf('(') is var p and > 0 && h.EndsWith(" ago)", StringComparison.Ordinal) ? h[(p + 1)..^5] : null;
-        var totals = new List<(string, string)>();
-        var limits = new List<UsageLimit>();
-        var notes = new List<string>();
-        string provider = "";
-        UsageLimit? current = null;
-        void Flush()
-        {
-            if (current is not null) limits.Add(current);
-            current = null;
-        }
-        foreach (var raw in lines.Skip(1))
-        {
-            if (raw.Trim().Length == 0) continue;
-            var indented = raw.StartsWith(' ');
-            var line = raw.Trim();
-            if (!indented && !line.StartsWith("- ", StringComparison.Ordinal) && line.IndexOf(": ", StringComparison.Ordinal) is var colon and > 0 && limits.Count == 0 && current is null && provider.Length == 0)
-            {
-                totals.Add((line[..colon], line[(colon + 2)..]));
-                continue;
-            }
-            if (!indented && !line.StartsWith("- ", StringComparison.Ordinal))
-            {
-                Flush();
-                provider = line;
-                continue;
-            }
-            if (line.StartsWith("- ", StringComparison.Ordinal))
-            {
-                Flush();
-                var title = line[2..];
-                if (title.Contains("saved rate-limit reset", StringComparison.Ordinal) || title.EndsWith(": no limits reported", StringComparison.Ordinal))
-                {
-                    notes.Add(title);
-                    continue;
-                }
-                current = new UsageLimit(provider, title, null, null, null, null, false);
-                continue;
-            }
-            if (current is null)
-            {
-                if (line != "Models with usage data") notes.Add(line);
-                continue;
-            }
-            if (BarPercent().Match(line) is { Success: true } bar && line.StartsWith('['))
-            {
-                current = current with { UsedPercent = current.UsedPercent ?? double.Parse(bar.Groups["pct"].Value, CultureInfo.InvariantCulture) };
-                continue;
-            }
-            if (line.StartsWith('[')) continue; // a bar with no known amount
-            if (line.StartsWith("resets in ", StringComparison.Ordinal) || line.Contains(" in ", StringComparison.Ordinal) && current.Resets is null && current.Account is not null && !line.Contains(" used", StringComparison.Ordinal))
-            {
-                current = current with { Resets = line };
-                continue;
-            }
-            if (current.Account is null && line.IndexOf(": ", StringComparison.Ordinal) is var ac and > 0 && line.Contains(" used", StringComparison.Ordinal))
-            {
-                var inUse = line.Contains("← in use by this session", StringComparison.Ordinal);
-                var amount = line[(ac + 2)..].Replace("← in use by this session", "", StringComparison.Ordinal).Trim();
-                var m = LimitAmount().Match(amount);
-                double? used = m.Success && amount.Contains('%') && !amount.StartsWith("unknown", StringComparison.Ordinal)
-                    ? double.Parse(m.Groups["used"].Value, CultureInfo.InvariantCulture) : null;
-                current = current with { Account = line[..ac], Detail = amount, UsedPercent = used, InUse = inUse };
-                continue;
-            }
-            current = current with { Detail = current.Detail is null ? line : current.Detail + " · " + line };
-        }
-        Flush();
-        return new UsageReport(totals, limits, notes, age);
     }
 
     [GeneratedRegex(@"Tokens: (?<before>-?\d+) -> (?<after>-?\d+)", RegexOptions.CultureInvariant)]

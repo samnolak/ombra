@@ -1,0 +1,41 @@
+<!-- One account's plan limits at a provider as compact meters (name, share used, bar, reset countdown); in the
+     context popover (UsageIndicator) and in Settings → Model providers (ProviderUsageViewModel). -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             x:Class="OmpGui.App.Views.Session.ProviderUsageGroupView"
+             x:DataType="vm:ProviderUsageGroupViewModel">
+  <UserControl.Styles>
+    <Style Selector="ProgressBar.usage-bar.full">
+      <Setter Property="Foreground" Value="{DynamicResource GuiStatusError}" />
+    </Style>
+    <Style Selector="TextBlock.usage-amount.high">
+      <Setter Property="Foreground" Value="{DynamicResource GuiStatusWarning}" />
+    </Style>
+    <Style Selector="TextBlock.usage-amount.full">
+      <Setter Property="Foreground" Value="{DynamicResource GuiStatusError}" />
+    </Style>
+  </UserControl.Styles>
+  <StackPanel Spacing="6">
+    <StackPanel Orientation="Horizontal" Spacing="8">
+      <TextBlock Classes="usage-label" Text="{Binding Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
+      <TextBlock Classes="tertiary" Text="{Binding Account}" IsVisible="{Binding HasAccount}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+    </StackPanel>
+    <ItemsControl ItemsSource="{Binding Meters}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:UsageMeterViewModel">
+          <StackPanel Classes="usage-meter" Spacing="4" Margin="0,0,0,8" AutomationProperties.Name="{Binding AccessibleName}">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Classes="usage-label" Text="{Binding Label}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="1" Classes="usage-value usage-amount" Classes.high="{Binding IsHigh}" Classes.full="{Binding IsFull}"
+                         Text="{Binding Amount}" TextAlignment="Right" VerticalAlignment="Center" Margin="8,0,0,0" />
+            </Grid>
+            <ProgressBar Classes="usage-bar" Classes.high="{Binding IsHigh}" Classes.full="{Binding IsFull}"
+                         Value="{Binding Value}" Maximum="100" IsVisible="{Binding HasBar}" />
+            <TextBlock Classes="tertiary" Text="{Binding Resets}" IsVisible="{Binding HasResets}" />
+          </StackPanel>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </StackPanel>
+</UserControl>

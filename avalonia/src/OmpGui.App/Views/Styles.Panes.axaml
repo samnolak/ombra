@@ -36,7 +36,7 @@
     <Setter Property="Margin" Value="6,4" />
   </Style>
   <Style Selector="ctl|Icon.views-check">
-    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextLink}" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiAccent}" />
   </Style>
 
   <!-- ─────────────── Side pane host ─────────────── -->

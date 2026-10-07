@@ -85,6 +85,7 @@ public sealed class App : Application
             desktop.MainWindow = window;
             window.Opened += (_, _) => vm.OnWindowOpened();
             vm.NotificationsEnabled = options.Notifications ?? true;
+            vm.SendKey = options.SendKey == "mod-enter" ? "mod-enter" : "enter";
             SetUpMenus(desktop, window, vm);
         }
         base.OnFrameworkInitializationCompleted();

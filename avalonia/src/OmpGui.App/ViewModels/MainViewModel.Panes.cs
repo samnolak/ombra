@@ -72,12 +72,19 @@ public partial class MainViewModel
     [RelayCommand]
     private void ViewsMenuOpened() => Tasks.OnMenuOpened();
 
-    // Shortcut hints in the Views menu, as the platform writes them (⌘ on macOS, Ctrl elsewhere).
+    // Shortcut hints in the Views menu and the header's tooltips, as the platform writes them (⌘ on macOS, Ctrl
+    // elsewhere). The terminal's is Control on every platform: spelled out (the ⌃ glyph read as a caret).
     public static string FilesShortcut { get; } = CommandShortcut("F");
     public static string PlanShortcut { get; } = CommandShortcut("P");
     public static string TasksShortcut { get; } = CommandShortcut("T");
     public static string BrowserShortcut { get; } = CommandShortcut("B");
-    public static string TerminalShortcut { get; } = OperatingSystem.IsMacOS() ? "⌃`" : "Ctrl+`";
+    public static string TerminalShortcut { get; } = "Ctrl+`";
+
+    public static string FilesTip { get; } = $"Files ({FilesShortcut})";
+    public static string PlanTip { get; } = $"Plan ({PlanShortcut})";
+    public static string TasksTip { get; } = $"Background tasks ({TasksShortcut})";
+    public static string TerminalTip { get; } = $"Terminal ({TerminalShortcut})";
+    public static string BrowserTip { get; } = $"Browser preview ({BrowserShortcut})";
 
     private static string CommandShortcut(string key) => OperatingSystem.IsMacOS() ? "⇧⌘" + key : "Ctrl+Shift+" + key;
 

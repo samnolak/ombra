@@ -136,7 +136,7 @@ extension commands that omp lists itself keep going to omp.
 | `/context` | yes | **Done** — the context ring and its popover (the breakdown as bars) |
 | `/stats` | yes | **Done** — context popover › Usage dashboard (link to omp's local dashboard) |
 | `/changelog [full]`, `/tools` | yes | **Done (typed)** |
-| `/hotkeys` | TUI | **Done** — the card lists the GUI's shortcuts; omp's TUI keys: its terminal |
+| `/hotkeys` | TUI | **Done** — opens the keyboard shortcut sheet (also ⌘/ / Ctrl+/); omp's TUI keys: its terminal |
 | `/extensions`, `/status` | TUI | **Done** — card → Settings › Plugins and skills — *Connectors* area; omp's dashboard: terminal |
 | `/agents` | TUI | **Via omp terminal** (per-agent models, prewalk, advisor config) |
 | `/git [revision]` | TUI | **Via omp terminal** (git TUI); branch chip — *Workspace* area |
@@ -166,7 +166,7 @@ extension commands that omp lists itself keep going to omp.
 | `/setup`, `/providers` | TUI | **Done** — opens Settings › Model providers |
 | `/plan`, `/plan-review` | TUI | **Via omp terminal** (plan mode). The Plan pane (*Panes* area) shows omp's todo plan |
 | `/vibe`, `/goal`, `/guided-goal`, `/loop` | TUI | **Via omp terminal** (omp's goal updates still show in the conversation) |
-| `/queue <message>` | TUI | **Done** differently: while omp works, Enter queues (`follow_up`) and Alt+Enter steers (`steer`) |
+| `/queue <message>` | TUI | **Done** differently: while omp works, Enter queues (`follow_up`) and Alt+Enter steers (`steer`); × or ↑ takes a queued message back (`remove_queued_message`) |
 | `/live`, `/pause` | TUI | **Via omp terminal** |
 
 ### Collaboration, export, plugins (`builtin-collaboration.ts`, `builtin-marketplace.ts`)
@@ -208,6 +208,7 @@ extension commands that omp lists itself keep going to omp.
 | `get_state` | **Done** — model, thinking, session name, todos, context ring, model options, queue settle |
 | `set_fast_mode` | **Done** — Model menu › Fast mode |
 | `get_available_commands`, `available_commands_update` | **Done** — slash menu |
+| `remove_queued_message` | **Done** — × on a queued message; ↑ in the empty box puts the last one back to edit (with its images) |
 | `set_todos` | **Missing** (the GUI shows todos; editing them: `/todo` typed) |
 | `set_host_tools`, `host_tool_*`, `set_host_uri_schemes`, `host_uri_*` | **Not applicable** (the GUI offers no tools of its own to the agent) |
 | `set_subagent_subscription`, `get_subagents`, `get_subagent_messages`, `subagent_*` | **Done** — Background tasks pane — *Panes* area |
@@ -220,7 +221,7 @@ extension commands that omp lists itself keep going to omp.
 | `set_auto_retry` | **Done** — Model menu › Auto-retry (state: `omp config get retry.enabled`, get_state has none) |
 | `abort_retry` | **Missing**: the retry notice shows; Stop aborts the run. Plan: "Cancel retry" on the notice |
 | `bash`, `abort_bash` | **Done** — `!command` in the message box runs in the project (the output joins the context, a "shell" row in the conversation, Stop on its card); `!!command` (kept out of the context) exists only in omp's terminal: its card offers a shell in the terminal panel |
-| `get_session_stats` | **Not used**: `/usage` and `/context` give the same numbers as omp prints them |
+| `get_session_stats` | **Done** — the context ring's popover: this session's input/output/cache tokens and cost. Plan limits come from `omp usage --json` (CLI side process; RPC has no usage command and `/usage` over RPC prints either the tallies or the limits as text) |
 | `export_html` | **Not used**: `/export` does the same and reports the path |
 | `get_last_assistant_text` | **Not applicable** (the GUI has the text) |
 | `set_session_name`, `session_info_update` | **Done** — rename |

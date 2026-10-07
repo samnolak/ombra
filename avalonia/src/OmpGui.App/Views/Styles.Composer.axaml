@@ -1,0 +1,183 @@
+<!-- The composer (MainWindow's ComposerBox, the row under it, their menus) and the shortcut sheet, on the design
+     system's tokens (Tokens.axaml), as in Styles.axaml. The permission mode colours the box: its focus border, the Send
+     button and the mode pill (Ask: neutral; Accept edits: violet; Bypass: red). -->
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctl="using:OmpGui.App.Controls">
+  <Styles.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <!-- Text and icons on a mode colour: white on light's deep violet and red; near black on dark's light ones
+             (white on #AF87FF is under 3:1) -->
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="GuiTextOnMode" Color="#FFFFFFFF" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="GuiTextOnMode" Color="#FF1F1E1D" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Styles.Resources>
+
+  <!-- ─────────────── The box ─────────────── -->
+  <Style Selector="Border#ComposerBox">
+    <Setter Property="Background" Value="{DynamicResource GuiSurface1}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusComposer}" />
+    <Setter Property="BoxShadow" Value="{DynamicResource GuiShadow}" />
+  </Style>
+  <Style Selector="Border#ComposerBox:focus-within">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderStrong}" />
+  </Style>
+  <Style Selector="Border#ComposerBox.mode-write:focus-within">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiModeAcceptEdits}" />
+  </Style>
+  <Style Selector="Border#ComposerBox.mode-yolo:focus-within">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiModeBypass}" />
+  </Style>
+  <Style Selector="Border#ComposerBox.dragover">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiFocus}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+
+  <!-- Density. The composer's toolbar and the row under it each step down only as far as their content needs to fit
+       (MainWindow.FitComposer), so voice and send always stay on screen.
+       In the box: 1 a shorter model; 2 the thinking pill as its icon (the level in its tooltip); 3 a still shorter
+       model; 4 the model as its icon (its tooltip names it); 5 no thinking pill (the narrowest box).
+       Under it: 1 a shorter project; 2 the permission pill as its icon (tooltip and accessible name keep the meaning);
+       3 the context without its percentage; 4 the project as its icon. -->
+  <Style Selector="Border#ComposerBox.density1 TextBlock.model-label">
+    <Setter Property="MaxWidth" Value="130" />
+  </Style>
+  <Style Selector="Border#ComposerBox.density2 TextBlock.thinking-label">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <Style Selector="Border#ComposerBox.density3 TextBlock.model-label">
+    <Setter Property="MaxWidth" Value="90" />
+  </Style>
+  <Style Selector="Border#ComposerBox.density4 TextBlock.model-label">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <Style Selector="Border#ComposerBox.density5 Panel#ThinkingSlot">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <Style Selector="Grid#ComposerFooter.density1 TextBlock.project-label">
+    <Setter Property="MaxWidth" Value="100" />
+  </Style>
+  <Style Selector="Grid#ComposerFooter.density2 TextBlock.approval-label">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <Style Selector="Grid#ComposerFooter.density3 TextBlock.usage-percent">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <Style Selector="Grid#ComposerFooter.density4 TextBlock.project-label">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+
+  <!-- "+" mirrors Send: a 32 px circle the same distance from the box's edge, outlined as it is not the main action -->
+  <Style Selector="Button.attach">
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
+  </Style>
+  <!-- The row under the box: quieter than the box's own controls -->
+  <Style Selector="Grid#ComposerFooter Button.chip.ghost">
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="Height" Value="28" />
+    <Setter Property="FontSize" Value="12.5" />
+  </Style>
+
+  <!-- ─────────────── Send / Stop ─────────────── -->
+  <!-- A 32 px circle: the accent for Send (the mode's colour in Accept edits and Bypass), inverse for Stop -->
+  <Style Selector="Button.send">
+    <Setter Property="Width" Value="32" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="4,0,0,0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+  </Style>
+  <!-- Nothing to send: a quiet grey circle rather than a faded accent (Claude Code) -->
+  <Style Selector="Button.send.accent:disabled">
+    <Setter Property="Opacity" Value="1" />
+  </Style>
+  <Style Selector="Button.send.accent:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+  <Style Selector="Border#ComposerBox.mode-write Button.send.accent:not(:disabled) /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiModeAcceptEdits}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnMode}" />
+  </Style>
+  <Style Selector="Border#ComposerBox.mode-yolo Button.send.accent:not(:disabled) /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiModeBypass}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnMode}" />
+  </Style>
+  <Style Selector="Border#ComposerBox.mode-write Button.send.accent:pointerover, Border#ComposerBox.mode-yolo Button.send.accent:pointerover">
+    <Setter Property="Opacity" Value="0.88" />
+  </Style>
+
+  <!-- ─────────────── Permission mode ─────────────── -->
+  <!-- The pill says the mode in its colour; Ask stays neutral -->
+  <Style Selector="Button#ApprovalButton.mode-write">
+    <Setter Property="Foreground" Value="{DynamicResource GuiModeAcceptEdits}" />
+  </Style>
+  <Style Selector="Button#ApprovalButton.mode-yolo">
+    <Setter Property="Foreground" Value="{DynamicResource GuiModeBypass}" />
+  </Style>
+  <Style Selector="Button#ApprovalButton.mode-write:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Foreground" Value="{DynamicResource GuiModeAcceptEdits}" />
+  </Style>
+  <Style Selector="Button#ApprovalButton.mode-yolo:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Foreground" Value="{DynamicResource GuiModeBypass}" />
+  </Style>
+  <!-- The mode's mark in the menu, in the mode's colour -->
+  <Style Selector="ctl|Icon.mode-mark">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiModeManual}" />
+  </Style>
+  <Style Selector="ctl|Icon.mode-mark.mode-write">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiModeAcceptEdits}" />
+  </Style>
+  <Style Selector="ctl|Icon.mode-mark.mode-yolo">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiModeBypass}" />
+  </Style>
+
+  <!-- ─────────────── Slash menu, queued messages, long pastes ─────────────── -->
+  <Style Selector="TextBlock.menu-group">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
+    <Setter Property="Margin" Value="10,8,10,4" />
+  </Style>
+  <!-- What omp runs only in its terminal reads a step quieter than what this window runs -->
+  <Style Selector="Button.menu-item.tui TextBlock.command-name">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <!-- Queued messages: grey, one line each, until omp takes them -->
+  <Style Selector="TextBlock.queued-text">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+  <Style Selector="Border.paste-chip">
+    <Setter Property="Padding" Value="10,4,4,4" />
+  </Style>
+
+  <!-- ─────────────── Shortcut sheet (Controls/ShortcutsSheet) ─────────────── -->
+  <Style Selector="Border.keycap">
+    <Setter Property="MinWidth" Value="22" />
+    <Setter Property="Height" Value="22" />
+    <Setter Property="Padding" Value="6,0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius4}" />
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="Border.keycap > TextBlock">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+</Styles>

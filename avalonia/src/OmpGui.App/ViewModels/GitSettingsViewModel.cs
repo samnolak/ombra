@@ -336,7 +336,7 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
         DefaultBase = DefaultWorktreeBase(_agentDir);
         if (config is null)
         {
-            SettingsError = error ?? "omp's settings could not be read.";
+            SettingsError = error ?? "Couldn't read omp's settings.";
             SettingsLoaded = false;
             return;
         }

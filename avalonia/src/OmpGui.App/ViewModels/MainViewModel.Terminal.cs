@@ -13,6 +13,9 @@ public sealed partial class MainViewModel
     [ObservableProperty] private bool _isTerminalOpen;
     [ObservableProperty] private TerminalViewModel? _selectedTerminal;
 
+    /// <summary>The panel has no tab: it shows how to start one.</summary>
+    public bool HasNoTerminals => Terminals.Count == 0;
+
     /// <summary>How to start omp's own UI in a terminal (from the client settings); null when unknown (tests).</summary>
     public Func<string?, OmpGui.Rpc.OmpLaunchSpec>? OmpTuiLaunch { get; init; }
 
@@ -53,6 +56,7 @@ public sealed partial class MainViewModel
         if (t is null) return;
         var i = Terminals.IndexOf(t);
         Terminals.Remove(t); // the view kills its process
+        OnPropertyChanged(nameof(HasNoTerminals));
         if (SelectedTerminal == t) SelectedTerminal = Terminals.Count == 0 ? null : Terminals[Math.Min(i, Terminals.Count - 1)];
         if (Terminals.Count == 0) IsTerminalOpen = false;
     }
@@ -66,6 +70,7 @@ public sealed partial class MainViewModel
     private void Add(TerminalViewModel t)
     {
         Terminals.Add(t);
+        OnPropertyChanged(nameof(HasNoTerminals));
         SelectedTerminal = t;
         IsTerminalOpen = true;
     }

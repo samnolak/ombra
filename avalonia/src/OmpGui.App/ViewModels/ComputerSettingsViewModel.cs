@@ -135,7 +135,7 @@ public sealed partial class ComputerSettingsViewModel : WorkspacePageViewModel
         {
             var checks = CheckRequirementsAsync();
             var (config, error) = await WorkspaceConfig.LoadAsync(Main, ct);
-            if (config is null) LoadError = error ?? "omp's settings could not be read.";
+            if (config is null) LoadError = error ?? "Couldn't read omp's settings.";
             else ApplyConfig(config);
             await ReadSessionAsync();
             await checks;
@@ -328,7 +328,7 @@ public sealed partial class ComputerSettingsViewModel : WorkspacePageViewModel
         var ct = Main.Lifetime;
         // tools.approval is one record for every tool: keep the other tools' entries.
         var (config, error) = await WorkspaceConfig.LoadAsync(Main, ct);
-        if (config is null) { Say(error ?? "omp's settings could not be read.", error: true); return; }
+        if (config is null) { Say(error ?? "Couldn't read omp's settings.", error: true); return; }
         var record = config.Record("tools.approval") ?? [];
         if (key == "default") record.Remove("computer");
         else record["computer"] = key;

@@ -43,9 +43,59 @@ public sealed partial class DialogViewModel : ObservableObject
     public string Headline => Model.Headline;
     /// <summary>For approvals: the tool's details (command, paths). Otherwise the rest of the title.</summary>
     public string Details => Model.Details;
-    public bool HasDetails => Details.Length > 0;
+    public bool HasDetails => Preview.Length > 0;
     public string? Message => Model.Message;
     public bool HasMessage => !string.IsNullOrEmpty(Model.Message);
+
+    private const string ApprovalPrefix = "Allow tool: ";
+
+    /// <summary>The tool an approval is for ("bash" from omp's "Allow tool: bash"); empty for other dialogs.</summary>
+    public string ToolName => IsApproval && Headline.StartsWith(ApprovalPrefix, StringComparison.Ordinal) ? Headline[ApprovalPrefix.Length..].Trim() : "";
+
+    /// <summary>The card's title: what omp wants, in words ("omp wants to run a command"); a question's own words otherwise.</summary>
+    public string Title => IsApproval && ToolName.Length > 0 ? ApprovalTitle(ToolName) : Headline;
+
+    /// <summary>
+    /// What the card shows in its code box: for an approval the tool's details without omp's labels where the title
+    /// says it (a command, not "Command: …"), and without the reason and origin lines (<see cref="Note"/>).
+    /// </summary>
+    public string Preview => IsApproval ? ApprovalParts().Preview : Details;
+
+    /// <summary>Why omp asks, as omp put it ("Reason: …", "Origin: MCP server tool"), under the preview.</summary>
+    public string Note => IsApproval ? ApprovalParts().Note : "";
+    public bool HasNote => Note.Length > 0;
+
+    private (string Preview, string Note) ApprovalParts()
+    {
+        var notes = new List<string>();
+        var rest = new List<string>();
+        foreach (var line in Details.Split('\n'))
+        {
+            if (rest.Count == 0 && (line.StartsWith("Reason: ", StringComparison.Ordinal) || line.StartsWith("Origin: ", StringComparison.Ordinal)))
+                notes.Add(line[(line.IndexOf(": ", StringComparison.Ordinal) + 2)..].Trim());
+            else rest.Add(line);
+        }
+        var preview = string.Join('\n', rest).Trim();
+        // One labelled value the title already names: the value alone (bash's "Command: …", edit's "File: …")
+        foreach (var label in (string[])["Command: ", "File: ", "Path: "])
+            if (preview.StartsWith(label, StringComparison.Ordinal) && !preview.Contains('\n'))
+                preview = preview[label.Length..];
+        return (preview, string.Join(" · ", notes.Where(n => n.Length > 0)));
+    }
+
+    /// <summary>Claude Code's wording with omp as the subject: "omp wants to run a command".</summary>
+    public static string ApprovalTitle(string tool) => tool switch
+    {
+        "bash" => "omp wants to run a command",
+        "edit" or "ast_edit" => "omp wants to make changes",
+        "write" => "omp wants to write a file",
+        "read" => "omp wants to read a file",
+        "eval" => "omp wants to run code",
+        "fetch" or "browser" => "omp wants to open a web page",
+        "task" => "omp wants to start a subagent",
+        _ => $"omp wants to use {ToolRowViewModel.DisplayNameOf(tool)}",
+    };
+
     public string Placeholder => Model.Placeholder ?? "";
     public IReadOnlyList<DialogOptionViewModel> Options { get; }
 
@@ -104,6 +154,10 @@ public sealed partial class DialogOptionViewModel(DialogOption option, DialogVie
     public string? Description => option.Description;
     public bool HasDescription => option.Description is not null;
     public bool Recommended => option.Recommended;
+    /// <summary>The label as shown: omp's "(Recommended)" suffix becomes a badge beside it (the answer keeps omp's label).</summary>
+    public string DisplayLabel => Recommended && Label.TrimEnd() is var t && t.Length > "(Recommended)".Length
+        ? t[..^"(Recommended)".Length].TrimEnd()
+        : Label;
 
     [RelayCommand] private Task Choose() => owner.Choose(option.Label);
 }

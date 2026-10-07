@@ -1,4 +1,5 @@
 using Avalonia.Interactivity;
+using Avalonia.Automation;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
@@ -181,7 +182,8 @@ public sealed class SettingsUiTests
         Dispatcher.UIThread.RunJobs();
         var title = w.GetVisualDescendants().OfType<Button>().First(b => b.Classes.Contains("title"));
         // The header keeps the title and its buttons (the model chip moved to the composer): the title never reaches them.
-        var first = w.FindControl<Button>("TerminalButton")!;
+        // Wide, the pane toggles lead them; narrow, the ⋮ that holds them.
+        var first = new Control[] { w.FindControl<Button>("FilesButton")!, w.FindControl<OmpGui.App.Views.Panes.ViewsMenu>("ViewsMenu")! }.First(c => c.IsEffectivelyVisible);
         var titleRight = title.TranslatePoint(new Point(title.Bounds.Width, 0), w)!.Value.X;
         var buttonsLeft = first.TranslatePoint(new Point(0, 0), w)!.Value.X;
         Assert.True(titleRight <= buttonsLeft, $"title ends at {titleRight}, the header buttons start at {buttonsLeft}");
@@ -195,16 +197,16 @@ public sealed class SettingsUiTests
         w.Close();
     }
 
-    /// <summary>Regression (package E2E): after Done on the Settings page the next keystrokes went nowhere.</summary>
+    /// <summary>Regression (package E2E): after leaving the Settings page the next keystrokes went nowhere.</summary>
     [AvaloniaFact]
     public async Task Closing_settings_gives_focus_back_to_the_composer()
     {
         var (w, vm, _, _) = await OpenAsync();
         await vm.OpenSettingsCommand.ExecuteAsync(null);
-        var done = w.GetVisualDescendants().OfType<Button>().First(b => b.Content as string == "Done" && b.IsEffectivelyVisible);
-        done.Focus();
-        done.Command!.Execute(null);
-        await Until(() => !vm.IsSettingsOpen && w.FindControl<TextBox>("Composer")!.IsFocused, "composer focused after Done", 5);
+        var back = w.GetVisualDescendants().OfType<Button>().First(b => AutomationProperties.GetName(b) == "Back to app" && b.IsEffectivelyVisible);
+        back.Focus();
+        back.Command!.Execute(null);
+        await Until(() => !vm.IsSettingsOpen && w.FindControl<TextBox>("Composer")!.IsFocused, "composer focused after Back to app", 5);
         await vm.DisposeAsync();
         w.Close();
     }

@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.TextFormatting;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Markdig;
@@ -101,7 +102,7 @@ public sealed class MarkdownView : ContentControl
         try { doc = Markdig.Markdown.Parse(markdown, Pipeline); }
         catch (ArgumentException) { return Paragraph(markdown); }
         if (Depth(doc) > MaxNesting) return Paragraph(markdown);
-        return Blocks(doc, 8);
+        return Blocks(doc, 12);
     }
 
     /// <summary>A container's blocks one under the other; a heading at the top drops its extra space above.</summary>
@@ -148,12 +149,12 @@ public sealed class MarkdownView : ContentControl
         return max;
     }
 
-    private static StackPanel Stack(ContainerBlock container) => Blocks(container, 6);
+    private static StackPanel Stack(ContainerBlock container) => Blocks(container, 8);
 
-    /// <summary>H1 20, H2 17, H3 and deeper 15 (the body size), all SemiBold, with more space above than below.</summary>
+    /// <summary>H1 22, H2 19, H3 and deeper 16 (the message size), all SemiBold, with more space above than below.</summary>
     private static SelectableTextBlock Heading(HeadingBlock h)
     {
-        var (size, lineHeight, above) = h.Level switch { 1 => (20.0, 28.0, 12.0), 2 => (17.0, 24.0, 10.0), _ => (15.0, 22.0, 6.0) };
+        var (size, lineHeight, above) = h.Level switch { 1 => (22.0, 30.0, 10.0), 2 => (19.0, 26.0, 8.0), _ => (16.0, 24.0, 4.0) };
         var tb = Text(h.Inline, size, FontWeight.SemiBold);
         tb.Classes.Add("md-heading");
         tb.LineHeight = lineHeight;
@@ -165,26 +166,79 @@ public sealed class MarkdownView : ContentControl
 
     private static SelectableTextBlock Paragraph(string text) => new() { Text = text, Classes = { "body" } };
 
+    /// <summary>The message text size (GuiFontMessage; 16 if the theme has none): inline code is 0.875 of the text around it.</summary>
+    private static double BodySize =>
+        Application.Current?.TryFindResource("GuiFontMessage", out var v) == true && v is double d ? d : 16;
+
     private static SelectableTextBlock Text(ContainerInline? inline, double? size = null, FontWeight? weight = null, string textClass = "body")
     {
-        var tb = new SelectableTextBlock { Classes = { textClass } };
+        var codeSize = Math.Round((size ?? (textClass == "body" ? BodySize : 14)) * 0.875 * 4) / 4;
+        var tb = new MdText { CodeSize = codeSize, Classes = { textClass } };
         if (size is { } s) tb.FontSize = s;
         if (weight is { } w) tb.FontWeight = w;
-        if (inline is not null) AddInlines(tb.Inlines!, inline);
+        if (inline is not null) AddInlines(tb.Inlines!, inline, codeSize);
         return tb;
     }
 
-    private static void AddInlines(InlineCollection target, ContainerInline container)
+    /// <summary>
+    /// Text with inline code drawn as chips (Claude Code): a rounded tint behind each code run, painted under the text, so
+    /// the code stays part of the selectable text (copying a sentence keeps its <c>code</c>). The code runs are the ones
+    /// at <see cref="CodeSize"/>, which only inline code has in a block of text.
+    /// </summary>
+    private sealed class MdText : SelectableTextBlock
+    {
+        protected override Type StyleKeyOverride => typeof(SelectableTextBlock);
+
+        public double CodeSize { get; init; }
+
+        protected override void RenderTextLayout(DrawingContext context, Point origin)
+        {
+            if (HasCode && Brush("GuiInlineCodeBg") is { } fill)
+            {
+                var height = Math.Round(CodeSize * 1.5);
+                var y = origin.Y;
+                foreach (var line in TextLayout.TextLines)
+                {
+                    var x = origin.X + line.Start;
+                    foreach (var run in line.TextRuns)
+                    {
+                        if (run is not DrawableTextRun drawable) continue;
+                        var width = drawable.Size.Width;
+                        if (run is ShapedTextRun shaped && Math.Abs(shaped.Properties.FontRenderingEmSize - CodeSize) < 0.01 && width > 0)
+                        {
+                            // Centred on the line's text, a little wider than the code (the spaces around it take the padding)
+                            var top = y + Math.Round((line.Height - height) / 2) + 1;
+                            context.DrawRectangle(fill, null, new RoundedRect(new Rect(x - 3, top, width + 6, height), 4));
+                        }
+                        x += width;
+                    }
+                    y += line.Height;
+                }
+            }
+            base.RenderTextLayout(context, origin);
+        }
+
+        private bool HasCode => Inlines is { Count: > 0 } inlines && inlines.Any(IsCode);
+
+        private bool IsCode(Avalonia.Controls.Documents.Inline inline) => inline switch
+        {
+            Run r => r.FontSize is var s && Math.Abs(s - CodeSize) < 0.01 && r.IsSet(TextElement.FontSizeProperty),
+            Span span => span.Inlines.Any(IsCode),
+            _ => false,
+        };
+    }
+
+    private static void AddInlines(InlineCollection target, ContainerInline container, double codeSize)
     {
         foreach (var inline in container)
         {
             // A task item's text follows its checkbox with a space; the box is the list marker, so the space goes too.
             if (inline is LiteralInline lit && inline.PreviousSibling is TaskList) target.Add(new Run(lit.Content.ToString().TrimStart()));
-            else target.Add(InlineOf(inline));
+            else target.Add(InlineOf(inline, codeSize));
         }
     }
 
-    private static Avalonia.Controls.Documents.Inline InlineOf(MdInline inline)
+    private static Avalonia.Controls.Documents.Inline InlineOf(MdInline inline, double codeSize)
     {
         switch (inline)
         {
@@ -196,12 +250,12 @@ public sealed class MarkdownView : ContentControl
             {
                 var span = em.DelimiterChar == '~' ? new Span { TextDecorations = TextDecorations.Strikethrough }
                     : em.DelimiterCount >= 2 ? new Bold() : (Span)new Italic();
-                AddInlines(span.Inlines, em);
+                AddInlines(span.Inlines, em, codeSize);
                 return span;
             }
             case CodeInline code:
-                // Inline code: mono, a size under the text around it, on fill 1.
-                return new Run(code.Content) { FontFamily = Mono, FontSize = 13, Background = Brush("GuiFill1") };
+                // Inline code: mono at 0.875 of the text around it; MdText draws its chip
+                return new Run(code.Content) { FontFamily = Mono, FontSize = codeSize };
             case LineBreakInline br:
                 return br.IsHard ? new LineBreak() : new Run(" ");
             case LinkInline link when !link.IsImage:
@@ -223,7 +277,7 @@ public sealed class MarkdownView : ContentControl
             case ContainerInline c:
             {
                 var span = new Span();
-                AddInlines(span.Inlines, c);
+                AddInlines(span.Inlines, c, codeSize);
                 return span;
             }
             default:
@@ -266,11 +320,11 @@ public sealed class MarkdownView : ContentControl
         }
     }
 
-    /// <summary>A code block: a header with the language (small caps label) and a flat Copy button over the mono text.</summary>
+    /// <summary>A code block on its own surface: the language top left, Copy top right (shown on hover), the code scrolling sideways.</summary>
     private static Control CodeBlock(string code, string? language)
     {
         // The DS copy icon, a check for a moment once copied (Claude Code)
-        var glyph = new Icon { Data = Glyph("IconCopy"), Size = 15 };
+        var glyph = new Icon { Data = Glyph("IconCopy"), Size = 14 };
         var copy = new Button
         {
             Content = glyph,
@@ -287,10 +341,10 @@ public sealed class MarkdownView : ContentControl
             glyph.Data = Glyph("IconCheck");
             DispatcherTimer.RunOnce(() => glyph.Data = Glyph("IconCopy"), TimeSpan.FromSeconds(1.5));
         };
-        var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        var header = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), MinHeight = 26 };
         header.Children.Add(new TextBlock
         {
-            Text = language?.Trim().ToUpperInvariant() ?? "",
+            Text = language?.Trim().Split(' ')[0].ToLowerInvariant() ?? "",
             Classes = { "md-code-lang" },
             VerticalAlignment = VerticalAlignment.Center,
         });
@@ -303,20 +357,23 @@ public sealed class MarkdownView : ContentControl
         return new Border
         {
             Classes = { "codeblock" },
-            Child = new StackPanel { Spacing = 4, Children = { header, body } },
+            Child = new StackPanel { Spacing = 2, Children = { header, body } },
         };
     }
 
     private static Control List(ListBlock list)
     {
-        var panel = new StackPanel { Spacing = 4 };
+        var panel = new StackPanel { Spacing = 6 };
         var n = int.TryParse(list.OrderedStart, out var start) ? start : 1;
         foreach (var item in list.OfType<ListItemBlock>())
         {
             var row = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
             var task = item.Descendants<TaskList>().FirstOrDefault();
             if (task is null)
-                row.Children.Add(new TextBlock { Text = list.IsOrdered ? $"{n++}." : "•", Classes = { "body", "md-marker" }, MinWidth = 24, Margin = new Thickness(0, 0, 4, 0) });
+                // A light marker in a short column: bullets 18 px, numbers as wide as they need (at least 22)
+                row.Children.Add(list.IsOrdered
+                    ? new TextBlock { Text = $"{n++}.", Classes = { "body", "md-marker" }, MinWidth = 22, Margin = new Thickness(0, 0, 4, 0) }
+                    : new TextBlock { Text = "•", Classes = { "body", "md-marker" }, Width = 18, Margin = new Thickness(2, 0, 0, 0) });
             else
                 row.Children.Add(CheckBox(task.Checked));
             var content = Stack(item);
@@ -330,7 +387,7 @@ public sealed class MarkdownView : ContentControl
     /// <summary>The code coloured by its language (the info string after the fence), as in diffs and the file viewer.</summary>
     private static SelectableTextBlock Highlighted(string code, string? language)
     {
-        var tb = new SelectableTextBlock { FontFamily = Mono, Classes = { "md-code" }, TextWrapping = TextWrapping.NoWrap };
+        var tb = new SelectableTextBlock { Classes = { "md-code" }, TextWrapping = TextWrapping.NoWrap };
         var lang = SyntaxHighlighter.ForName(language?.Trim().Split(' ')[0]);
         if (lang is null) { tb.Text = code; return tb; }
         var inBlock = false;
@@ -412,7 +469,11 @@ public sealed class MarkdownView : ContentControl
         };
     }
 
-    private static readonly FontFamily Mono = new("Cascadia Mono, Consolas, DejaVu Sans Mono, monospace");
+    /// <summary>The design system's code font (GuiFontMono), with the same list as a fallback.</summary>
+    private static FontFamily Mono =>
+        Application.Current?.TryFindResource("GuiFontMono", out var v) == true && v is FontFamily f ? f : FallbackMono;
+
+    private static readonly FontFamily FallbackMono = new("SF Mono, Menlo, Cascadia Mono, Consolas, DejaVu Sans Mono, monospace");
 
     private static IBrush? Brush(string key) =>
         Application.Current?.TryGetResource(key, Application.Current.ActualThemeVariant, out var v) == true ? v as IBrush : null;

@@ -31,18 +31,9 @@ internal static class SessionFixtures
         "  Auto-compact buf [████░░░░░░░░░░░░░░░░░░░░] 15%  19660 tokens\n" +
         "  Free             [█████████████████░░░░░░░] 72%  93940 tokens";
 
-    public const string Usage =
-        "Usage\nInput tokens: 1200\nOutput tokens: 345\nCache read tokens: 0\nCache write tokens: 0\nTotal tokens: 1545\nPremium requests: 0\nCost: $0.012500";
-
-    /// <summary>A provider that reports quota windows (usage-report.ts renderUsageReports, fenced).</summary>
-    public const string UsageLimits =
-        "```\nUsage (2m ago)\n\nAnthropic\n- Claude 5 Hour — 5h window\n  me@example.com: 42.00% used (58.0% left)  ← in use by this session\n" +
-        "  [██████████░░░░░░░░░░░░░░] 42%\n  resets in 3h\n- Claude 7 Day\n  me@example.com: 91.50% used (8.5% left)\n  [██████████████████████░░] 92%\n  resets in 2d\n```";
-
     public static string Commands(string project) => JsonSerializer.Serialize(new Dictionary<string, object>
     {
         ["/context"] = Context,
-        ["/usage"] = Usage,
         ["/compact"] = new { text = "", later = "Compaction complete. Tokens: 48210 -> 9120 (saved 39090).", laterMs = 400 },
         ["/handoff"] = new { text = "", later = "Context handed off and compacted in place.", laterMs = 300 },
         ["/fresh"] = "Fresh provider session started (1 provider state pruned).",
@@ -91,25 +82,6 @@ public sealed class SessionOutputTests
         var fallback = SessionOutputs.ParseContext("Context\nWindow: 200000\nUsed: 50000")!;
         Assert.Equal(25, fallback.UsedPercent);
         Assert.Null(SessionOutputs.ParseContext("something else"));
-    }
-
-    [Fact]
-    public void Usage_is_read_as_totals_or_as_provider_limits()
-    {
-        var local = SessionOutputs.ParseUsage(SessionFixtures.Usage)!;
-        Assert.Equal(["Input tokens", "Output tokens", "Cache read tokens", "Cache write tokens", "Total tokens", "Premium requests", "Cost"], local.Totals.Select(t => t.Label));
-        Assert.Equal("$0.012500", local.Totals[^1].Value);
-        Assert.Empty(local.Limits);
-
-        var limits = SessionOutputs.ParseUsage(SessionFixtures.UsageLimits)!;
-        Assert.Empty(limits.Totals);
-        Assert.Equal("2m", limits.Age);
-        Assert.Equal(2, limits.Limits.Count);
-        Assert.Equal(("Anthropic", "Claude 5 Hour — 5h window", "me@example.com", 42.0, "resets in 3h", true),
-            (limits.Limits[0].Provider, limits.Limits[0].Label, limits.Limits[0].Account, limits.Limits[0].UsedPercent, limits.Limits[0].Resets, limits.Limits[0].InUse));
-        Assert.Equal(91.5, limits.Limits[1].UsedPercent);
-        Assert.False(limits.Limits[1].InUse);
-        Assert.Null(SessionOutputs.ParseUsage("No usage"));
     }
 
     [Fact]
@@ -166,7 +138,7 @@ public sealed class SessionAreaTests
     internal sealed record Env(MainWindow W, MainViewModel Vm, string Log, string Project, string Cli);
 
     internal static async Task<Env> OpenAsync(string scenario = "normal", double width = 1180, double height = 760, Dictionary<string, object>? cli = null,
-        Func<string, Dictionary<string, object>>? extraCommands = null)
+        Func<string, Dictionary<string, object>>? extraCommands = null, string? model = null)
     {
         var dir = TestProcesses.TempDir("session-area");
         var project = TestProcesses.TempDir("session-project");
@@ -191,7 +163,7 @@ public sealed class SessionAreaTests
             var spec = TestProcesses.FakeFactory(scenario, sessions)(req);
             return spec with
             {
-                Environment = new Dictionary<string, string?>(spec.Environment) { ["FAKE_OMP_COMMANDS"] = commands, ["FAKE_OMP_COMMAND_LOG"] = log },
+                Environment = new Dictionary<string, string?>(spec.Environment) { ["FAKE_OMP_COMMANDS"] = commands, ["FAKE_OMP_COMMAND_LOG"] = log, ["FAKE_MODEL"] = model },
             };
         };
         var s = new SessionController(launch, new LaunchRequest(project));
@@ -226,16 +198,16 @@ public sealed class SessionAreaTests
         }
     }
 
-    private static string[] Sent(Env e) => File.Exists(e.Log) ? File.ReadAllLines(e.Log) : [];
+    internal static string[] Sent(Env e) => File.Exists(e.Log) ? File.ReadAllLines(e.Log) : [];
 
-    private static async Task Send(Env e, string text)
+    internal static async Task Send(Env e, string text)
     {
         e.Vm.ComposerText = text;
         e.Vm.SendCommand.Execute(null);
         await Settle(100);
     }
 
-    private static async Task Close(Env e)
+    internal static async Task Close(Env e)
     {
         await e.Vm.DisposeAsync();
         e.W.Close();
@@ -409,14 +381,18 @@ public sealed class SessionAreaTests
         Assert.Equal(["System prompt", "System tools", "System context", "Skills", "Auto-compact buffer", "Free"], vm.Usage.ContextRows.Select(r => r.Label));
         Assert.Equal("4,518", vm.Usage.ContextRows[0].Tokens);
         Assert.True(vm.Usage.ContextRows[^1].IsFree);
-        Assert.Equal(["Input", "Output", "Cache read", "Cache write", "Total", "Premium requests", "Cost"], vm.Usage.Totals.Select(t => t.Label));
-        Assert.Equal("$0.01", vm.Usage.Totals[^1].Value);
-        Assert.Equal("1,200", vm.Usage.Totals[0].Value);
+        // get_session_stats: nothing spent before the first prompt (no cost row while it is zero)
+        Assert.Equal(["Input", "Output"], vm.Usage.Totals.Select(t => t.Label));
+        Assert.Equal("0", vm.Usage.Totals[0].Value);
 
         // Refreshes after each turn while open
         var before = Sent(e).Count(l => l == "/context");
         await Send(e, "one more");
         await Until(() => Sent(e).Count(l => l == "/context") > before && !vm.Usage.IsLoading, "refresh after the turn");
+        await Until(() => vm.Usage.Totals.Any(t => t.Label == "Cost"), "the turn's tokens and cost");
+        Assert.Equal(["Input", "Output", "Cache read", "Cost"], vm.Usage.Totals.Select(t => t.Label));
+        Assert.Equal(("18,680", "$0.08"), (vm.Usage.Totals[0].Value, vm.Usage.Totals[^1].Value));
+        Assert.DoesNotContain("/usage", Sent(e)); // never through the conversation's command channel
 
         // Compact now: straight to the running card, then omp's result
         await vm.Usage.CompactNowCommand.ExecuteAsync(null);
@@ -564,17 +540,29 @@ public sealed class SessionAreaTests
     }
 
     [AvaloniaFact]
-    public async Task The_slash_menu_marks_terminal_only_commands_with_where_they_go()
+    public async Task The_slash_menu_lists_terminal_only_commands_last_under_their_heading()
     {
         var e = await OpenAsync();
-        e.Vm.ComposerText = "/pl";
+        e.Vm.ComposerText = "/p";
         Dispatcher.UIThread.RunJobs();
-        var plan = e.Vm.CommandSuggestions.Single(c => c.Label == "/plan");
-        Assert.Equal("terminal", plan.Source);
+        var list = e.Vm.CommandSuggestions.ToList();
+        var firstTui = list.FindIndex(c => c.IsTerminalOnly);
+        Assert.True(firstTui >= 0);
+        Assert.All(list.Take(firstTui), c => Assert.False(c.IsTerminalOnly)); // what runs here comes first
+        Assert.All(list.Skip(firstTui), c => Assert.True(c.IsTerminalOnly));
+        Assert.True(list[firstTui].StartsTerminalGroup);
+        Assert.Single(list, c => c.StartsTerminalGroup);
+        Assert.Contains(list.Skip(firstTui), c => c.Label == "/plan");
+        // The window's own answers are ordinary entries; omp's builtins carry no routing label
         e.Vm.ComposerText = "/sett";
-        Assert.Equal("Settings", e.Vm.CommandSuggestions.Single(c => c.Label == "/settings").Source);
+        var settings = e.Vm.CommandSuggestions.Single(c => c.Label == "/settings");
+        Assert.False(settings.IsTerminalOnly);
+        Assert.False(settings.HasTag);
         e.Vm.ComposerText = "/comp";
-        Assert.Equal("builtin", e.Vm.CommandSuggestions.Single(c => c.Label == "/compact").Source);
+        Assert.False(e.Vm.CommandSuggestions.Single(c => c.Label == "/compact").HasTag);
+        // Commands the window does another way (quit, copy…) are not offered
+        e.Vm.ComposerText = "/qui";
+        Assert.DoesNotContain(e.Vm.CommandSuggestions, c => c.Label == "/quit");
         e.Vm.ComposerText = "";
         await Close(e);
     }

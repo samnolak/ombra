@@ -124,7 +124,11 @@ public sealed class ChatLayoutTests
             var container = w.FindControl<ListBox>("Transcript")!.ContainerFromItem(empty);
             if (container is not null) Assert.True(container.Bounds.Height < 1, "an empty reply took " + container.Bounds.Height);
         }
-        Assert.Equal([replies.Last(r => r.HasText)], replies.Where(r => r.ShowActions));
+        // The reply that ends the turn has the copy action once: on the "Worked for…" line after it, not a line of its own
+        var last = replies.Last(r => r.HasText);
+        Assert.DoesNotContain(replies, r => r.ShowActions);
+        Assert.Same(last, vm.Rows.OfType<TurnEndRowViewModel>().Last().Reply);
+        Assert.True(last.IsTurnEnd && last.HasTurnEndRow);
         Assert.Contains(vm.Rows.OfType<ToolRowViewModel>(), t => t.Name == "todo" && t.Summary == "init · 3 items");
         await vm.DisposeAsync();
         w.Close();
@@ -259,12 +263,15 @@ public sealed class ChatLayoutTests
         Assert.False(row.ShowTail);
         row.Update(new ToolItem(1, "t", "bash", "{}", ToolStatus.Running, "a\n\nb\nc\nd\ne\n", "$ make"));
         Assert.True(row.ShowTail);
-        Assert.Equal("b\nc\nd\ne", row.Tail);
+        Assert.Equal("c\nd\ne", row.Tail);
+        Assert.Equal(row.Tail, row.Result);
         row.IsExpanded = true;
         Assert.False(row.ShowTail); // the full output is open instead
+        Assert.False(row.ShowResult);
         row.IsExpanded = false;
         row.Update(new ToolItem(1, "t", "bash", "{}", ToolStatus.Succeeded, "a\nb\n", "$ make"));
         Assert.False(row.ShowTail);
+        Assert.Equal("a\nb", row.Result); // done: its first lines
     }
 
     [Fact]

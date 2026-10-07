@@ -218,6 +218,37 @@ public static class SessionCatalog
         string.Equals(a, b, StringComparison.Ordinal)
         || (string.Equals(a, b, StringComparison.OrdinalIgnoreCase) && Directory.Exists(a) && IsCaseInsensitive(a));
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> Keys = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// One string per folder: full path, links resolved (macOS /var → /private/var), no trailing separator, and
+    /// upper-cased on a case-insensitive volume. Two paths of the same existing folder get the same key.
+    /// </summary>
+    public static string PathKey(string path)
+    {
+        if (Keys.TryGetValue(path, out var known)) return known;
+        string full;
+        try { full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)); }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return path; }
+        var resolved = ResolveLinks(full);
+        if (!Directory.Exists(resolved)) return resolved; // may appear later: not remembered
+        var key = IsCaseInsensitive(resolved) ? resolved.ToUpperInvariant() : resolved;
+        if (Keys.Count > 4096) Keys.Clear();
+        Keys[path] = key;
+        return key;
+    }
+
+    /// <summary>Compares folders by <see cref="PathKey"/> (for sets and lookups of project folders).</summary>
+    public static readonly IEqualityComparer<string?> PathComparer = new FolderComparer();
+
+    private sealed class FolderComparer : IEqualityComparer<string?>
+    {
+        public bool Equals(string? x, string? y) =>
+            ReferenceEquals(x, y) || x is not null && y is not null && (string.Equals(x, y, StringComparison.Ordinal) || PathKey(x) == PathKey(y));
+
+        public int GetHashCode(string? obj) => obj is null ? 0 : StringComparer.Ordinal.GetHashCode(PathKey(obj));
+    }
+
     /// <summary>The path with every symbolic link / junction along it resolved (portable <c>realpath</c>).</summary>
     public static string ResolveLinks(string path) => ResolveLinks(path, depth: 0);
 

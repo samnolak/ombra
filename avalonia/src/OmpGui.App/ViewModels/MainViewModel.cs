@@ -128,10 +128,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsIdle => !IsRunning;
     public string ComposerHint => Phase switch
     {
-        SessionPhase.Running when HasDialog => "Answer above — or Esc to stop the run",
-        SessionPhase.Running => "Queue a message — Alt+Enter to steer",
+        SessionPhase.Running when HasDialog => "Answer the request above, or press Esc to stop",
+        SessionPhase.Running => $"Queue a message — {SendKeyHint} to queue, {KeyboardShortcuts.Steer} to steer",
         SessionPhase.Aborting => "Stopping…",
-        SessionPhase.Ready => "Ask omp anything — Shift+Enter for a new line",
+        SessionPhase.Ready => SendWithModifier ? $"Ask omp anything — {SendKeyHint} to send" : "Ask omp anything — Shift+Enter for a new line",
         SessionPhase.Faulted => "omp is not running.",
         _ => "Waiting for omp…",
     };
@@ -501,18 +501,37 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             retryable = false;
         }
         var turnOver = !IsRunning;
+        // The "Worked for…" line after the reply that ends a turn carries that reply's copy action
+        TurnEndRowViewModel? endLine = null;
         for (var i = Rows.Count - 1; i >= 0; i--)
         {
             switch (Rows[i])
             {
-                case UserRowViewModel: turnOver = true; break;
-                case ToolRowViewModel: turnOver = false; break; // the turn ends in tool calls: no actions mid-turn
+                case UserRowViewModel: turnOver = true; Release(); break;
+                case ToolRowViewModel: turnOver = false; Release(); break; // the turn ends in tool calls: no actions mid-turn
+                case TurnEndRowViewModel te:
+                    Release();
+                    endLine = te;
+                    break;
                 case AssistantRowViewModel a:
                     var end = turnOver && a.HasText;
                     if (a.IsTurnEnd != end) a.IsTurnEnd = end;
+                    var carried = end && endLine is not null;
+                    if (carried && endLine!.Reply != a) endLine.Reply = a;
+                    if (a.HasTurnEndRow != carried) a.HasTurnEndRow = carried;
                     if (end) turnOver = false;
+                    if (!carried) Release();
+                    endLine = null;
                     break;
             }
+        }
+        Release();
+
+        // A "Worked for…" line with no reply of its own (the turn ended in tool calls) has nothing to copy
+        void Release()
+        {
+            if (endLine?.Reply is not null) endLine.Reply = null;
+            endLine = null;
         }
     }
 
@@ -615,7 +634,13 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         if (IsRunning && _elapsedTimer is null)
         {
-            _elapsedTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => UpdateStatus());
+            _elapsedTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) =>
+            {
+                UpdateStatus();
+                // The live "Thinking… 4s" label of the reply being written
+                for (var i = Rows.Count - 1; i >= 0 && i >= Rows.Count - 8; i--)
+                    if (Rows[i] is AssistantRowViewModel { IsThinkingLive: true } live) live.Tick();
+            });
             _elapsedTimer.Start();
         }
         else if (!IsRunning && _elapsedTimer is not null)

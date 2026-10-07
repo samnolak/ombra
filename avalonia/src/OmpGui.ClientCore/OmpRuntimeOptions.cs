@@ -37,6 +37,8 @@ public sealed record OmpRuntimeOptions
     public string? Theme { get; init; }
     /// <summary>OS notification when a run ends or omp asks while the window is in the background (default on).</summary>
     public bool? Notifications { get; init; }
+    /// <summary>How the message box sends: <c>enter</c> (default; Shift+Enter adds a line) or <c>mod-enter</c> (⌘/Ctrl+Enter sends, Enter adds a line).</summary>
+    public string? SendKey { get; init; }
     /// <summary>Update manifest address (https, signed with the release key); unset = this client's release feed.</summary>
     public string? UpdateFeed { get; init; }
     /// <summary>Check the feed shortly after start and once a day (default on). Installing always waits for the user.</summary>
@@ -47,6 +49,8 @@ public sealed record OmpRuntimeOptions
     public string[]? SidebarProjects { get; init; }
     /// <summary>Project folders removed from the sidebar: their sessions are not listed (nothing is deleted on disk).</summary>
     public string[]? HiddenProjects { get; init; }
+    /// <summary>The sidebar's width as last dragged (220–480 px); null means the default.</summary>
+    public double? SidebarWidth { get; init; }
 
     public const string ConfigEnvVar = "OMPGUI_CONFIG";
 

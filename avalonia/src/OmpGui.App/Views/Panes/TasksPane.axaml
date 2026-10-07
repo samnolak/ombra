@@ -22,7 +22,7 @@
       <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding IsUnsupported}" Margin="8,0">
         <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="15" Margin="0,1,8,0" VerticalAlignment="Top" />
         <TextBlock Grid.Column="1" Classes="muted" TextWrapping="Wrap"
-                   Text="This omp does not report its subagents to the app, so only background jobs are listed." />
+                   Text="Subagents appear here with a newer omp. Update omp to see them; background jobs are listed either way." />
       </Grid>
 
       <!-- Subagents -->

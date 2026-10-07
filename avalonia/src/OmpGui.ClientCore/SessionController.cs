@@ -483,6 +483,9 @@ public sealed partial class SessionController : IAsyncDisposable
     {
         if (!OmpBuiltins.RunsOverRpc(command))
             return new(false, "", Error: $"/{OmpBuiltins.NameOf(command)} is not available over omp's RPC");
+        // This omp lacks the builtin (an older version): sent anyway it would become a message to the model.
+        if (!OmpBuiltins.RunsOverRpc(command, Snapshot().Commands))
+            return new(false, "", Error: $"This version of omp has no /{OmpBuiltins.NameOf(command)} command", Unsupported: true);
         if (_omp?.Connection is not { } conn) return new(false, "", Error: "omp is not running");
         if (Snapshot().SigningIn is { } provider) return new(false, "", Error: $"omp is busy with the sign-in to {provider}");
         await _commands.WaitAsync(ct).ConfigureAwait(false);
@@ -544,6 +547,27 @@ public sealed partial class SessionController : IAsyncDisposable
                 s.RemoveQueued(queued!.Seq);
                 s.AddNotice(NoticeLevel.Error, $"Could not queue the message ({e.Message}): {text}");
             });
+        }
+    }
+
+    /// <summary>
+    /// Takes a queued message back before omp delivers it (omp's <c>remove_queued_message</c>). Returns its images
+    /// when omp withdrew it; null when omp had already delivered it or did not answer. An omp without the command
+    /// (before 18.4.4) throws <see cref="RpcCommandException"/>.
+    /// </summary>
+    public async Task<IReadOnlyList<ImageAttachment>?> RemoveQueuedAsync(QueuedMessage message, CancellationToken ct = default)
+    {
+        var conn = RequireConnection();
+        try
+        {
+            var (removed, images) = await conn.RemoveQueuedMessageAsync(message.Text, message.Kind == QueueKind.Steer, ct).ConfigureAwait(false);
+            if (!removed) return null;
+            Mutate(s => s.RemoveQueued(message.Seq));
+            return [.. images.Select((i, n) => new ImageAttachment($"image {n + 1}", i.MimeType, i.Data))];
+        }
+        catch (Exception e) when (e is TimeoutException or RpcConnectionClosedException)
+        {
+            return null;
         }
     }
 

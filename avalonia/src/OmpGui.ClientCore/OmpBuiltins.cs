@@ -47,7 +47,24 @@ public static class OmpBuiltins
 
     /// <summary>True when omp runs <paramref name="text"/> itself over RPC (instead of sending it to the model).</summary>
     public static bool RunsOverRpc(string text) => NameOf(text) is { } n && OverRpc.Contains(n);
+
+    /// <summary>
+    /// True when omp runs <paramref name="text"/> itself according to the commands it listed (get_available_commands
+    /// lists exactly the builtins it runs over RPC). An omp that lacks the builtin would hand the text to the model as
+    /// a message, so a command it does not list must never be sent. An empty catalog (not read yet) falls back to
+    /// <see cref="OverRpc"/>.
+    /// </summary>
+    public static bool RunsOverRpc(string text, IReadOnlyList<SlashCommand> catalog)
+    {
+        if (!RunsOverRpc(text)) return false;
+        if (!catalog.Any(c => c.Source == "builtin")) return true;
+        var name = NameOf(text)!;
+        return catalog.Any(c => c.Source == "builtin" && (c.Name == name || c.Aliases.Contains(name)));
+    }
 }
 
-/// <summary>What a builtin slash command printed, and whether it started an agent run (e.g. /retry, /handoff).</summary>
-public sealed record SlashCommandResult(bool Ok, string Output, bool AgentInvoked = false, string? Error = null);
+/// <summary>
+/// What a builtin slash command printed, and whether it started an agent run (e.g. /retry, /handoff).
+/// <paramref name="Unsupported"/>: this omp has no such command, so it was never sent (an optional feature is missing).
+/// </summary>
+public sealed record SlashCommandResult(bool Ok, string Output, bool AgentInvoked = false, string? Error = null, bool Unsupported = false);

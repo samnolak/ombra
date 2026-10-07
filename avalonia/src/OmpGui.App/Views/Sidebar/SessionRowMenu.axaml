@@ -1,0 +1,40 @@
+<!-- A sidebar session's menu (right-click on the row, or its ⋯ on hover): Rename, Pin / Unpin, Copy path, Delete.
+     DataContext: the row's SessionItemViewModel (its commands are MainViewModel's: a popup cannot reach the window). -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Views.Sidebar.SessionRowMenu"
+             x:DataType="vm:SessionItemViewModel">
+  <StackPanel MinWidth="200" Spacing="2">
+    <Button x:Name="RenameItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+            Command="{Binding RenameCommand}" CommandParameter="{Binding}" AutomationProperties.Name="Rename">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconPencil}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="Rename" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Button x:Name="PinItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+            Command="{Binding TogglePinCommand}" CommandParameter="{Binding}" AutomationProperties.Name="{Binding PinLabel}">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconPin}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="{Binding PinLabel}" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Button x:Name="CopyPathItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+            Command="{Binding CopyPathCommand}" CommandParameter="{Binding}" AutomationProperties.Name="Copy path">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="Copy path" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Border Classes="menu-separator" />
+    <Button x:Name="DeleteItem" Classes="menu-item danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+            Command="{Binding DeleteCommand}" CommandParameter="{Binding}" AutomationProperties.Name="Delete">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconTrash}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="Delete…" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+  </StackPanel>
+</UserControl>

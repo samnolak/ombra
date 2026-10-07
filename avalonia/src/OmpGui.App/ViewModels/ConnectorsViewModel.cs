@@ -435,12 +435,14 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             if (version != _loadVersion) return;
             if (!list.Ok || list.AgentInvoked)
             {
-                LoadError = list.AgentInvoked ? "omp did not run /mcp list as a command." : list.Error ?? "omp did not answer.";
+                LoadError = list.Unsupported ? "This version of omp can't list connectors. Update omp to manage them here."
+                    : list.Error is { Length: > 0 } why && !list.AgentInvoked ? "Couldn't read the connectors from omp: " + why + "."
+                    : "Couldn't read the connectors from omp. Try again.";
                 return;
             }
             if (OmpMcp.ParseList(list.Output) is not { } entries)
             {
-                LoadError = list.Output.Length > 0 ? list.Output : "omp printed nothing for /mcp list.";
+                LoadError = list.Output.Length > 0 ? list.Output : "omp didn't return its connector list. Try again.";
                 return;
             }
             var tools = await _owner.RunOmpCommandAsync("/tools");
@@ -567,7 +569,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         if (!r.Ok || !ok)
         {
             HasOptions = false;
-            OptionsError = "omp's settings could not be read: " + Why(r);
+            OptionsError = "Couldn't read omp's settings: " + Why(r);
             return;
         }
         _syncingOptions = true;
