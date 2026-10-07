@@ -9,7 +9,7 @@ or patches omp.
 | OS | Architectures | Notes |
 |---|---|---|
 | Windows 11 (24H2 or later) | x64, arm64 | Windows 10 only in the Enterprise LTSC / IoT editions .NET 10 still supports; ordinary Windows 10 left support on 14 October 2025. The preview needs the WebView2 runtime (part of Windows 11). arm64: dictation's microphone is not available (no PortAudio build) |
-| macOS 14 (Sonoma) or later | Apple Silicon (arm64), Intel (x64) | .NET 10 supports macOS 14, 15 and 26; the package still declares macOS 12 as its minimum, but 12 and 13 are not supported |
+| macOS 14 (Sonoma) or later | Apple Silicon (arm64), Intel (x64) | .NET 10 supports macOS 14, 15 and 26; the package declares macOS 14 as its minimum |
 | Linux (glibc 2.27 or later) | x64, arm64 | For example Ubuntu 22.04+, Debian 12+, Fedora 42+, RHEL 8+. X11 or XWayland. The preview needs WebKitGTK (`libwebkit2gtk-4.1`), notifications need `notify-send` (libnotify). Dictation records through the bundled PortAudio (needs `libasound2` and the JACK client library `libjack-jackd2-0` / `jack-audio-connection-kit`) or, when that library is missing, through `parecord`, `pw-record` or `arecord` if one is installed. musl distributions (Alpine) are not supported |
 
 The download is self-contained: no .NET installation is needed. Supported OS versions follow
@@ -50,8 +50,9 @@ project yet), so the OS warns on first start:
    releases than 18.2.0 exist on npm, but this client is verified only with 18.2.0 — another version may work or
    may miss features.
 2. **No model provider.** omp needs a model. If it has none, the window says *Connect a model provider*.
-   **Open omp setup** opens omp's own interface in the terminal panel: type `/login` and pick a provider (or set
-   an API key the way omp describes), then press **Try again**. API keys stay in omp's configuration; the GUI
+   **Open omp setup** opens omp's own setup in the terminal beside the conversation, with the keyboard already in
+   it: on *Set up your providers* choose **Sign in** (arrow keys, Enter), pick a provider and finish in the browser
+   (or set an API key the way omp describes), then press **Try again**. API keys stay in omp's configuration; the GUI
    never stores them.
 3. Pick a project folder — the folder chip under the message box (*Choose a folder*) or **Open folder…** in the
    project menu — and write your first message.
@@ -78,7 +79,8 @@ project yet), so the OS warns on first start:
   **Open folder…**).
 - **Stop** — the Stop button or Esc stops the current run; if omp does not stop, the button offers Force stop.
 - **Terminal** — Ctrl+` (Ctrl on macOS too), the terminal button in the header or **⋮ → Terminal** opens a
-  terminal in the project folder: **+ Shell** for a shell, **+ omp TUI** for omp's own terminal UI, for features
+  terminal beside the conversation (drag its edge to resize it; in a narrow window it covers the conversation until
+  it is hidden), in the project folder, with the keyboard in it: **+ Shell** for a shell, **+ omp TUI** for omp's own terminal UI, for features
   omp offers only there (plan, goal, vibe…).
 - **Project menu** — click the project's name next to the session title: **Browse files** (the Files pane),
   **Show in Finder** / **Show in Explorer** / **Open in file manager**, **Open in VS Code** (or Cursor, Windsurf,

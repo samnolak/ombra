@@ -50,8 +50,6 @@ public sealed partial class MainWindow : Window
         CardsScroll.PropertyChanged += (_, e) => { if (e.Property == BoundsProperty || e.Property == ScrollViewer.MaxHeightProperty) FitCardsShadowRoom(); };
         SidebarScrim.PointerPressed += (_, e) => { if (Vm is { ShowSidebar: true } vm) { vm.ToggleSidebarCommand.Execute(null); e.Handled = true; } };
         SettingsScroll.SizeChanged += (_, e) => SettingsColumn.Width = Math.Max(0, Math.Min(SettingsColumn.MaxWidth, e.NewSize.Width - SettingsColumn.Margin.Left - SettingsColumn.Margin.Right));
-        // The terminal keeps at least 120 px of conversation above it, and never outgrows its row
-        ConversationArea.SizeChanged += (_, e) => TerminalPanel.MaxHeight = Math.Max(TerminalPanel.MinHeight, e.NewSize.Height - 120);
         RenameBox.AddHandler(KeyDownEvent, OnRenameKeyDown, RoutingStrategies.Tunnel);
         // Files and images dropped anywhere on the window go to the composer.
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
@@ -112,13 +110,11 @@ public sealed partial class MainWindow : Window
         ComposerToolbar.SizeChanged += (_, _) => QueueComposerFit();
         ComposerFooter.SizeChanged += (_, _) => QueueComposerFit();
         ComposerBox.PropertyChanged += (_, e) => { if (e.Property == BoundsProperty && e.OldValue is Rect o && e.NewValue is Rect n && o.Height != n.Height || e.Property == MarginProperty) FitPanels(); };
-        // A dragged preview (or side pane) width is kept for the next time it opens
-        PreviewSplitter.DragCompleted += (_, _) =>
-        {
-            _previewWidth = MainColumn.ColumnDefinitions[Grid.GetColumn(PreviewPanel)].ActualWidth;
-            if (SidePaneSplitter.IsVisible) _sidePaneWidth = MainColumn.ColumnDefinitions[2].ActualWidth; // between the two panels
-        };
-        SidePaneSplitter.DragCompleted += (_, _) => _sidePaneWidth = MainColumn.ColumnDefinitions[2].ActualWidth;
+        // A dragged side pane, preview or terminal width is kept for the next time it opens (a splitter between two
+        // docked panels resizes both)
+        PreviewSplitter.DragCompleted += (_, _) => KeepDraggedWidths();
+        SidePaneSplitter.DragCompleted += (_, _) => KeepDraggedWidths();
+        TerminalSplitter.DragCompleted += (_, _) => KeepDraggedWidths();
     }
 
     private bool _composerFitQueued;
@@ -140,49 +136,88 @@ public sealed partial class MainWindow : Window
 
     private MainViewModel? Vm => DataContext as MainViewModel;
 
-    private const double ChatMinWidth = 420, PreviewMinWidth = 320, SidePaneMinWidth = 280;
-    private double _previewWidth = 520, _sidePaneWidth = 340;
+    private const double ChatMinWidth = 420, PreviewMinWidth = 320, SidePaneMinWidth = 280, TerminalMinWidth = 360;
+    private double _previewWidth = 520, _sidePaneWidth = 340, _terminalWidth = 520;
+
+    private void KeepDraggedWidths()
+    {
+        var col = MainColumn.ColumnDefinitions;
+        if (SidePaneSplitter.IsVisible) _sidePaneWidth = col[Grid.GetColumn(SidePanePanel)].ActualWidth;
+        if (PreviewSplitter.IsVisible) _previewWidth = col[Grid.GetColumn(PreviewPanel)].ActualWidth;
+        if (TerminalSplitter.IsVisible) _terminalWidth = col[Grid.GetColumn(TerminalPanel)].ActualWidth;
+    }
     /// <summary>Both laid over a narrow conversation: the one opened last is on top.</summary>
     private bool _sidePaneOnTop;
 
     /// <summary>
-    /// Sidebar, conversation, side pane (Views menu) and preview share the window: the side panels count when deciding
-    /// that the sidebar has to give way. The side pane docks first (the narrower), the preview in what is left; each
-    /// gets what the conversation (at least 420) leaves, up to its preferred width, never less than its minimum. One
-    /// that does not fit is shown over the conversation until it is closed.
+    /// Sidebar, conversation, side pane (Views menu), preview and terminal share the window: the side panels count when
+    /// deciding that the sidebar has to give way. The side pane docks first (the narrower), then the preview, then the
+    /// terminal, each beside the conversation; each gets what the conversation (at least 420) leaves, up to its
+    /// preferred width, never less than its minimum. One that does not fit is shown over the conversation until it is
+    /// closed.
     /// </summary>
     private void FitPanels()
     {
         if (Vm is not { } vm) return;
         var preview = vm.IsPreviewOpen;
         var pane = vm.IsSidePaneOpen;
-        vm.IsNarrow = Bounds.Width < NarrowWidth + (preview ? PreviewMinWidth : 0) + (pane ? SidePaneMinWidth : 0) + (vm.IsDebugVisible ? 420 : 0);
+        var terminal = vm.IsTerminalOpen;
+        vm.IsNarrow = Bounds.Width < NarrowWidth + (preview ? PreviewMinWidth : 0) + (pane ? SidePaneMinWidth : 0)
+            + (terminal ? TerminalMinWidth : 0) + (vm.IsDebugVisible ? 420 : 0);
         FitSidebar(vm);
         var main = Bounds.Width - (vm.ShowSidebar && !vm.IsNarrow ? SidebarWidth : 0) - (vm.IsDebugVisible ? 421 : 0);
         var room = main - ChatMinWidth; // for the docked panels and their 1 px splitters
-        var paneDocked = pane && room >= 1 + SidePaneMinWidth;
-        var previewDocked = preview && room - (paneDocked ? 1 + SidePaneMinWidth : 0) >= 1 + PreviewMinWidth;
-        var paneWidth = !paneDocked ? 0 : Math.Clamp(_sidePaneWidth, SidePaneMinWidth, room - 1 - (previewDocked ? 1 + PreviewMinWidth : 0));
-        var previewWidth = !previewDocked ? 0 : Math.Clamp(_previewWidth, PreviewMinWidth, room - 1 - (paneDocked ? 1 + paneWidth : 0));
-        // Columns: conversation, then each docked panel after its splitter (a splitter resizes its two neighbours, so
-        // the preview takes columns 1–2 when the side pane is not docked there)
-        var previewColumn = paneDocked ? 4 : 2;
+        // Dock in this order while each still fits at its minimum: side pane, preview, terminal
+        var panels = new (Control Panel, GridSplitter Splitter, bool Open, double Min, double Preferred)[]
+        {
+            (SidePanePanel, SidePaneSplitter, pane, SidePaneMinWidth, _sidePaneWidth),
+            (PreviewPanel, PreviewSplitter, preview, PreviewMinWidth, _previewWidth),
+            (TerminalPanel, TerminalSplitter, terminal, TerminalMinWidth, _terminalWidth),
+        };
+        var docked = new bool[panels.Length];
+        var reserved = 0.0;
+        for (var i = 0; i < panels.Length; i++)
+        {
+            docked[i] = panels[i].Open && room - reserved >= 1 + panels[i].Min;
+            if (docked[i]) reserved += 1 + panels[i].Min;
+        }
+        // Each docked panel gets its preferred width while the others keep at least their minimum
+        var widths = new double[panels.Length];
+        var used = 0.0;
+        for (var i = 0; i < panels.Length; i++)
+        {
+            if (!docked[i]) continue;
+            var others = 0.0;
+            for (var j = i + 1; j < panels.Length; j++) if (docked[j]) others += 1 + panels[j].Min;
+            widths[i] = Math.Clamp(panels[i].Preferred, panels[i].Min, Math.Max(panels[i].Min, room - used - 1 - others));
+            used += 1 + widths[i];
+        }
+        // Columns: the conversation, then each docked panel after its splitter, in slots 2, 4, 6 (a splitter resizes
+        // its two neighbours, so docked panels take the slots in order with no empty column between them)
         var col = MainColumn.ColumnDefinitions;
         col[0].Width = new GridLength(1, GridUnitType.Star);
-        col[0].MinWidth = paneDocked || previewDocked ? ChatMinWidth : 0;
-        col[2].Width = paneDocked ? new GridLength(paneWidth) : previewDocked ? new GridLength(previewWidth) : GridLength.Auto;
-        col[4].Width = paneDocked && previewDocked ? new GridLength(previewWidth) : GridLength.Auto;
-        // Over the conversation: the whole column, or the conversation's part when the other panel is docked
-        Grid.SetColumn(SidePanePanel, paneDocked || !pane ? 2 : 0);
-        Grid.SetColumnSpan(SidePanePanel, paneDocked || !pane ? 1 : 5);
-        SidePanePanel.ZIndex = paneDocked || !pane ? 0 : _sidePaneOnTop ? 11 : 9;
-        SidePaneSplitter.IsVisible = paneDocked;
-        var over = preview && !previewDocked;
-        Grid.SetColumn(PreviewSplitter, previewColumn - 1);
-        Grid.SetColumn(PreviewPanel, over ? 0 : previewColumn);
-        Grid.SetColumnSpan(PreviewPanel, over ? (paneDocked ? 1 : 5) : 1);
-        PreviewPanel.ZIndex = over ? 10 : 0;
-        PreviewSplitter.IsVisible = previewDocked;
+        col[0].MinWidth = docked.Any(d => d) ? ChatMinWidth : 0;
+        for (var c = 2; c <= 6; c += 2) col[c].Width = GridLength.Auto;
+        var slot = 2;
+        for (var i = 0; i < panels.Length; i++)
+        {
+            var (panel, splitter, open, _, _) = panels[i];
+            splitter.IsVisible = docked[i];
+            if (docked[i])
+            {
+                col[slot].Width = new GridLength(widths[i]);
+                Grid.SetColumn(splitter, slot - 1);
+                Grid.SetColumn(panel, slot);
+                Grid.SetColumnSpan(panel, 1);
+                panel.ZIndex = 0;
+                slot += 2;
+                continue;
+            }
+            // Not docked: over the conversation's part (the whole column when nothing is docked), until it is closed
+            Grid.SetColumn(panel, 0);
+            Grid.SetColumnSpan(panel, 1);
+            panel.ZIndex = !open ? 0 : panel == TerminalPanel ? 12 : panel == SidePanePanel ? (_sidePaneOnTop ? 11 : 9) : (_sidePaneOnTop ? 9 : 10);
+        }
         // Cards (an approval, setup, todos) never push the composer off a low window: they scroll instead
         // (40 = the message box's margins and some air; its top margin grows by the pet's band when a pet is shown)
         CardsScroll.MaxHeight = Math.Max(96, Bounds.Height - 48 - Math.Max(ComposerBox.Bounds.Height, 96) - 34 - ComposerBox.Margin.Top
@@ -359,7 +394,7 @@ public sealed partial class MainWindow : Window
                     or nameof(MainViewModel.ApprovalLabel) or nameof(MainViewModel.CanQueue) or nameof(MainViewModel.IsIdle) or nameof(MainViewModel.IsRunning))
                     QueueComposerFit();
                 if (e.PropertyName is nameof(MainViewModel.ShowSidebar) or nameof(MainViewModel.IsPreviewOpen) or nameof(MainViewModel.IsDebugVisible)
-                    or nameof(MainViewModel.ActivePane))
+                    or nameof(MainViewModel.ActivePane) or nameof(MainViewModel.IsTerminalOpen))
                     FitPanels();
                 if (e.PropertyName == nameof(MainViewModel.ShowSetupScreen)) UpdateEmptyLayout(vm);
                 // A question on a low window: its answer buttons (at the card's end) in view, not its top
@@ -489,6 +524,12 @@ public sealed partial class MainWindow : Window
             control.Bind(IsVisibleProperty, new Avalonia.Data.Binding(nameof(TerminalViewModel.IsSelected)) { Source = t });
             control.ProcessExited += (_, e) => Dispatcher.UIThread.Post(() => t.OnExited(e.ExitCode));
             control.Loaded += (_, _) => StartWhenReady(control, t);
+            // The tab shown takes the keyboard: omp's setup and TUI are driven by keys, and typing went to the composer
+            t.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(TerminalViewModel.IsSelected) && t.IsSelected)
+                    Dispatcher.UIThread.Post(() => FocusTerminal(control), DispatcherPriority.Background);
+            };
             _terminals[t] = control;
             TerminalHost.Children.Add(control);
         }
@@ -514,6 +555,16 @@ public sealed partial class MainWindow : Window
         }
         t.Started = true;
         _ = LaunchAsync(control, t);
+        if (t.IsSelected) FocusTerminal(control);
+    }
+
+    /// <summary>Keys go to the terminal's view (the control itself only hosts it).</summary>
+    private static void FocusTerminal(Iciclecreek.Terminal.TerminalControl control)
+    {
+        if (!control.IsEffectivelyVisible) return;
+        var view = control.GetVisualDescendants().OfType<Iciclecreek.Terminal.TerminalView>().FirstOrDefault();
+        if (view is { Focusable: true }) view.Focus();
+        else control.Focus();
     }
 
     private static async Task LaunchAsync(Iciclecreek.Terminal.TerminalControl control, TerminalViewModel t)

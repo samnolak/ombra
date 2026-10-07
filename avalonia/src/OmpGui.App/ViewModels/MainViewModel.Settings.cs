@@ -110,8 +110,8 @@ public sealed partial class MainViewModel
     {
         StartProblem.NotFound when ShowInstallRuntime => RuntimeOffer,
         StartProblem.NotFound => "omp was not found on this computer. Set where it is in Settings → Advanced, then try again.",
-        // A word joiner after the slash: the line had broken as "run /" | "login" (the hint is not selectable text)
-        StartProblem.NoModel => "omp needs an AI provider before it can work. Open omp's setup, run /\u2060login and pick a provider (or add an API key), then try again.",
+        // omp's own setup opens on its provider step: Sign in with the keys (the terminal takes the keyboard)
+        StartProblem.NoModel => "omp needs an AI provider before it can work. Open omp's setup, choose Sign in and a provider (or add an API key), then try again.",
         _ => _last?.StartFailed == true
             ? "Check the omp command in Settings → Advanced, then try again. The error is under Show details."
             : "It can pick this conversation up where it stopped.",

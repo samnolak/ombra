@@ -1,3 +1,7 @@
+using Avalonia.Headless;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.VisualTree;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using OmpGui.App;
@@ -65,6 +69,68 @@ public sealed class TerminalUiTests
         w.Close();
         await Until(() => !w.IsVisible, "window closed", 15);
         await Until(() => !Alive(pid2), "no shell left after the window closed", 10);
+    }
+
+    /// <summary>
+    /// The terminal opens beside the conversation (not above it), full height, and takes the keyboard: in a new
+    /// session the composer sits in the middle of the page, and a panel under the transcript ended up at the top of
+    /// the window while typing still went to the composer (reported on macOS).
+    /// </summary>
+    [AvaloniaFact]
+    public async Task The_terminal_opens_beside_the_conversation_and_takes_the_keyboard()
+    {
+        var project = TestProcesses.TempDir("term-side");
+        var s = new SessionController(TestProcesses.FakeFactory("normal", TestProcesses.TempDir("term-side-sessions")), new LaunchRequest(project));
+        var vm = new MainViewModel(s, new AppArgs());
+        var w = new MainWindow { DataContext = vm, Width = 1400, Height = 820 };
+        w.Show();
+        vm.OnWindowOpened();
+        await Until(() => vm.Phase == SessionPhase.Ready, "ready");
+        Assert.Empty(vm.Rows); // a new session: the composer is in the middle of the page
+
+        vm.ToggleTerminalCommand.Execute(null);
+        var tab = Assert.Single(vm.Terminals);
+        var term = w.TerminalOf(tab)!;
+        await Until(() => term.IsLive || tab.HasExited, "shell started");
+        await Until(() => w.FindControl<Avalonia.Controls.Border>("TerminalPanel")!.Bounds.Width > 0, "panel laid out");
+
+        var panel = w.FindControl<Avalonia.Controls.Border>("TerminalPanel")!;
+        var header = w.FindControl<Avalonia.Controls.Border>("HeaderBar")!;
+        var composer = w.FindControl<Avalonia.Controls.Border>("ComposerBox")!;
+        var panelBox = panel.Bounds;
+        var composerRight = composer.TranslatePoint(new Avalonia.Point(composer.Bounds.Width, 0), w)!.Value.X;
+        var panelLeft = panel.TranslatePoint(default, w)!.Value.X;
+        Assert.True(panelLeft >= composerRight, $"terminal at x={panelLeft}, composer ends at x={composerRight}");
+        Assert.True(panelBox.Height >= w.Bounds.Height - 1, $"terminal {panelBox.Height} high in a {w.Bounds.Height} window");
+        Assert.True(header.IsEffectivelyVisible);
+        Assert.InRange(panelBox.Width, 360, 700);
+
+        // The keyboard is in the terminal, not the composer
+        var focused = w.FocusManager?.GetFocusedElement() as Avalonia.Visual;
+        Assert.NotNull(focused);
+        Assert.True(focused == term || focused.GetVisualAncestors().Contains(term), $"focus is on {focused}");
+
+        if (Environment.GetEnvironmentVariable("OMPGUI_REVIEW_DIR") is { Length: > 0 } dir)
+        {
+            await Task.Delay(600);
+            Dispatcher.UIThread.RunJobs();
+            Avalonia.Headless.AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            using var frame = w.CaptureRenderedFrame();
+            Directory.CreateDirectory(dir);
+            using var file = File.Create(Path.Combine(dir, "terminal-beside.png"));
+            frame?.Save(file, new Avalonia.Media.Imaging.PngBitmapEncoderOptions());
+        }
+
+        // A narrow window: the terminal covers the conversation instead of squeezing it
+        w.Width = 720;
+        await Until(() => Avalonia.Controls.Grid.GetColumn(panel) == 0, "terminal over the conversation");
+        Assert.True(panel.ZIndex > 0);
+        w.Width = 1400;
+        await Until(() => Avalonia.Controls.Grid.GetColumn(panel) > 0, "docked again");
+
+        vm.ToggleTerminalCommand.Execute(null);
+        await Until(() => !panel.IsVisible, "hidden");
+        w.Close();
     }
 
     [Fact]

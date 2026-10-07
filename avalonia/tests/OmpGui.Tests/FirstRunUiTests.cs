@@ -138,7 +138,7 @@ public sealed class FirstRunUiTests
         (var w, vm) = Open(vm, width, height);
         await Until(() => vm.CanRecover, "start failed");
         Assert.Equal("Connect a model provider", vm.RecoverTitle);
-        Assert.Contains("/login", vm.RecoverHint.Replace("\u2060", "")); // a word joiner keeps "/login" on one line
+        Assert.Contains("Sign in", vm.RecoverHint);
         var setUp = w.FindControl<Button>("SetUpProviderButton")!;
         await Until(() => Shown(setUp), "setup offered");
         Assert.False(Shown(w.FindControl<Button>("InstallRuntimeButton")!));
@@ -149,7 +149,8 @@ public sealed class FirstRunUiTests
         var tab = Assert.Single(vm.Terminals);
         Assert.Equal(TerminalKind.OmpTui, tab.Kind);
         Assert.True(vm.IsTerminalOpen);
-        Assert.Contains("/login", vm.ComposerMessage);
+        Assert.Contains("Sign in", vm.ComposerMessage);
+        Assert.DoesNotContain("/login", vm.ComposerMessage); // omp opens on its setup wizard, not its prompt
         vm.CloseTerminalCommand.Execute(tab);
         await vm.DisposeAsync();
         w.Close();

@@ -185,6 +185,7 @@ public sealed partial class MainViewModel
     private void SetUpProvider()
     {
         OpenOmpTui();
-        ComposerMessage = "In omp's terminal below: type /login and pick a provider (or set an API key), then press Restart omp.";
+        ComposerMessage = "omp's setup is open in the terminal beside the conversation: pick Sign in with the arrow keys and Enter, " +
+                          "choose a provider and finish in the browser (or set an API key), then press Try again.";
     }
 }
