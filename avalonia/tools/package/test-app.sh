@@ -42,7 +42,8 @@ if [ ! -d "$DATA" ]; then
   echo "settings copied from $PROD"
 fi
 
-osascript -e 'tell application "OMP GUI Test" to quit' >/dev/null 2>&1 || true
+# Quit a running copy without Apple Events (no automation permission needed): a plain signal to its process
+pkill -x -f "$DEST/Contents/MacOS/OmpGui" 2>/dev/null || true
 rm -rf "$DEST"
 ditto "$APP" "$DEST"
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
