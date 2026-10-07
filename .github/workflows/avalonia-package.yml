@@ -265,6 +265,9 @@ jobs:
           cd all/dist
           DRAFT=; [ "$KIND" = draft ] && DRAFT=--draft
           # Not marked pre-release, even for 0.x-alpha versions: clients read releases/latest, which skips pre-releases
+          # Only the platforms this run built (input "platforms"): a missing kind of package is not an error
+          shopt -s nullglob
+          FILES=(omp-gui-*.tar.gz omp-gui-*.zip ./*.sha256 SHA256SUMS update.json update.json.sig)
+          printf '%s\n' "${FILES[@]}"
           gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "OMP GUI $VERSION" \
-            --notes "${NOTES:-OMP GUI $VERSION}" $DRAFT \
-            omp-gui-*.tar.gz omp-gui-*.zip ./*.sha256 SHA256SUMS update.json update.json.sig
+            --notes "${NOTES:-OMP GUI $VERSION}" $DRAFT "${FILES[@]}"
