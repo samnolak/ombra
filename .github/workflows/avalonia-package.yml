@@ -182,6 +182,13 @@ jobs:
           pattern: omp-gui-*
           path: all
           merge-multiple: true
+      - name: Gather the files in all/dist
+        # upload-artifact roots each artifact at its files' common folder: update.json lands in all/, and a package
+        # without a smoke report lands there too. Everything a release ships goes to all/dist.
+        run: |
+          mkdir -p all/dist
+          find all -maxdepth 1 -type f \( -name 'omp-gui-*' -o -name 'update.json*' -o -name SHA256SUMS \) -exec mv -t all/dist {} +
+          ls -la all/dist
       - name: SHA256SUMS (verified against each package's own .sha256)
         run: |
           # The artifacts keep their folders: packages in dist/, smoke reports in smoke/.
@@ -234,6 +241,13 @@ jobs:
           pattern: omp-gui-*
           path: all
           merge-multiple: true
+      - name: Gather the files in all/dist
+        # upload-artifact roots each artifact at its files' common folder: update.json lands in all/, and a package
+        # without a smoke report lands there too. Everything a release ships goes to all/dist.
+        run: |
+          mkdir -p all/dist
+          find all -maxdepth 1 -type f \( -name 'omp-gui-*' -o -name 'update.json*' -o -name SHA256SUMS \) -exec mv -t all/dist {} +
+          ls -la all/dist
       - name: Check the signature as a client would
         run: |
           test -f all/dist/update.json.sig || { echo "update.json is not signed (UPDATE_SIGNING_KEY missing): no release"; exit 1; }
@@ -250,7 +264,7 @@ jobs:
         run: |
           cd all/dist
           DRAFT=; [ "$KIND" = draft ] && DRAFT=--draft
-          PRE=; case "$VERSION" in *-*) PRE=--prerelease ;; esac
+          # Not marked pre-release, even for 0.x-alpha versions: clients read releases/latest, which skips pre-releases
           gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "OMP GUI $VERSION" \
-            --notes "${NOTES:-OMP GUI $VERSION}" $DRAFT $PRE \
+            --notes "${NOTES:-OMP GUI $VERSION}" $DRAFT \
             omp-gui-*.tar.gz omp-gui-*.zip ./*.sha256 SHA256SUMS update.json update.json.sig
