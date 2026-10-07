@@ -49,6 +49,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _args = args;
         _settings = settings;
         if (configError is not null) Rows.Add(RowViewModel.Create(new NoticeItem(0, NoticeLevel.Warning, configError)));
+        ApprovalRules = _session.ApprovalRules ??= new ApprovalRuleSet(settings); // MainViewModel.Approvals.cs
+        _approvalActions = new ApprovalActions(AllowWithRuleAsync, DenyWithFeedbackAsync);
         Rows.CollectionChanged += (_, _) => NotifyRecoverLayout();
     }
 
@@ -538,7 +540,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private void ApplyExtensionUi(SessionSnapshot s)
     {
         var first = s.Dialogs.Count > 0 ? s.Dialogs[0] : null;
-        if (first?.Id != CurrentDialog?.Id) CurrentDialog = first is null ? null : new DialogViewModel(first, AnswerDialogAsync);
+        if (first?.Id != CurrentDialog?.Id) CurrentDialog = first is null ? null : new DialogViewModel(first, AnswerDialogAsync, _approvalActions);
         if (CurrentDialog is { } d) d.QueueText = s.Dialogs.Count > 1 ? $"1 of {s.Dialogs.Count}" : "";
         UpdateDialogTimer();
 

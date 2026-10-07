@@ -23,6 +23,8 @@ public sealed class AgentBrowserTests
         public bool HasPage { get; set; } = true;
         public AgentPageState State { get; set; } = new(new Uri("http://localhost:3000/"), false, false, null);
         public Func<string, string> Answer { get; set; } = _ => "{\"ok\":true}";
+        public Func<AgentScreenshot> Capture { get; set; } = () => throw new AgentBrowserException("not_supported", "No capture here.");
+        public int Captures { get; private set; }
 
         public Task ShowAsync(CancellationToken ct)
         {
@@ -46,6 +48,13 @@ public sealed class AgentBrowserTests
             if (!HasPage) throw new AgentBrowserException("no_page", "No page is open in the preview yet.");
             Scripts.Add(script);
             return Task.FromResult(Answer(script));
+        }
+
+        public Task<AgentScreenshot> CaptureAsync(CancellationToken ct)
+        {
+            if (!HasPage) throw new AgentBrowserException("no_page", "No page is open in the preview yet.");
+            Captures++;
+            return Task.FromResult(Capture());
         }
     }
 
@@ -173,14 +182,83 @@ public sealed class AgentBrowserTests
         Assert.Equal("unavailable", (await Call(bridge, "browser.wait", new JsonObject { ["timeout_ms"] = 1000 }))["error"]!["code"]!.GetValue<string>());
     }
 
+    /// <summary>A PNG's signature and IHDR header with this size: all the bridge reads of it.</summary>
+    private static byte[] Png(int width, int height)
+    {
+        var png = new byte[33];
+        new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, (byte)'I', (byte)'H', (byte)'D', (byte)'R' }.CopyTo(png, 0);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(png.AsSpan(16), width);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(png.AsSpan(20), height);
+        return png;
+    }
+
+    [Fact]
+    public async Task Screenshots_come_back_as_base64_png_the_way_cmux_answers()
+    {
+        var (bridge, page, surface) = await Opened();
+        var png = Png(3, 2);
+        page.Capture = () => AgentScreenshot.FromPng(png)!;
+        page.Answer = s => s == "location.href" ? "\"http://localhost:3000/\"" : "{\"ok\":true}";
+        var shot = await Call(bridge, "browser.screenshot", new JsonObject { ["surface_id"] = surface });
+        Assert.True(shot["ok"]!.GetValue<bool>(), shot.ToJsonString());
+        var result = shot["result"]!;
+        Assert.Equal(png, Convert.FromBase64String(result["png_base64"]!.GetValue<string>()));
+        Assert.Equal(3, result["width"]!.GetValue<int>());
+        Assert.Equal(2, result["height"]!.GetValue<int>());
+        Assert.Equal("http://localhost:3000/", result["url"]!.GetValue<string>());
+        Assert.Equal(surface, result["surface_id"]!.GetValue<string>());
+        Assert.Equal(1, page.Captures);
+    }
+
+    [Fact]
+    public async Task A_failed_screenshot_is_reported_with_its_code()
+    {
+        var (bridge, page, _) = await Opened();
+        page.Capture = () => throw new AgentBrowserException("screenshot_failed", "WebKit could not take the screenshot.");
+        var failed = await Call(bridge, "browser.screenshot");
+        Assert.Equal("screenshot_failed", failed["error"]!["code"]!.GetValue<string>());
+        Assert.Contains("WebKit", failed["error"]!["message"]!.GetValue<string>());
+
+        page.Capture = () => new AgentScreenshot([], 0, 0);
+        Assert.Equal("screenshot_failed", (await Call(bridge, "browser.screenshot"))["error"]!["code"]!.GetValue<string>());
+
+        // No tab open: refused before the page is asked
+        var none = new FakePage();
+        Assert.Equal("not_found", (await Call(new AgentBrowserBridge(none), "browser.screenshot"))["error"]!["code"]!.GetValue<string>());
+        Assert.Equal(0, none.Captures);
+    }
+
+    [Fact]
+    public void Png_size_is_read_from_the_header_and_other_bytes_are_refused()
+    {
+        var shot = AgentScreenshot.FromPng(Png(1280, 800));
+        Assert.Equal((1280, 800), (shot!.Width, shot.Height));
+        Assert.Null(AgentScreenshot.FromPng([1, 2, 3]));
+        Assert.Null(AgentScreenshot.FromPng(Png(0, 10)));
+        var jpeg = Png(3, 2);
+        jpeg[1] = 0xD8;
+        Assert.Null(AgentScreenshot.FromPng(jpeg));
+    }
+
+    [Fact]
+    public async Task The_native_capture_says_plainly_when_it_cannot_run()
+    {
+        // No web view yet (no platform handle): the agent is told to wait, nothing native is touched
+        var none = await Assert.ThrowsAsync<AgentBrowserException>(() => OmpGui.App.Platform.WebViewSnapshot.CaptureAsync(null, CancellationToken.None));
+        Assert.Equal("no_page", none.Code);
+        // A handle of no known web engine: not supported, with what to do instead
+        var other = await Assert.ThrowsAsync<AgentBrowserException>(() =>
+            OmpGui.App.Platform.WebViewSnapshot.CaptureAsync(new Avalonia.Platform.PlatformHandle(1, "HWND"), CancellationToken.None));
+        Assert.Equal("not_supported", other.Code);
+        Assert.Contains("tab.observe()", other.Message);
+    }
+
     [Fact]
     public async Task What_the_preview_cannot_do_is_said_plainly()
     {
         var (bridge, _, _) = await Opened();
         var shot = await Call(bridge, "browser.screenshot");
         Assert.Equal("not_supported", shot["error"]!["code"]!.GetValue<string>());
-        Assert.Contains("tab.observe()", shot["error"]!["message"]!.GetValue<string>());
-
         var file = await Call(bridge, "browser.navigate", new JsonObject { ["url"] = "file:///tmp/index.html" });
         Assert.Equal("invalid_params", file["error"]!["code"]!.GetValue<string>());
 

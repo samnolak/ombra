@@ -23,6 +23,25 @@ public sealed class AgentBrowserException(string code, string message) : Excepti
     public string Code { get; } = code;
 }
 
+/// <summary>A PNG capture of what the preview shows (the page's visible area).</summary>
+/// <param name="Png">The encoded image.</param>
+/// <param name="Width">Width in pixels (device pixels: twice the page's width on a Retina screen).</param>
+/// <param name="Height">Height in pixels.</param>
+public sealed record AgentScreenshot(byte[] Png, int Width, int Height)
+{
+    private static ReadOnlySpan<byte> Signature => [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
+    /// <summary>A screenshot from PNG bytes, its size read from the header; null when the bytes are not a PNG.</summary>
+    public static AgentScreenshot? FromPng(byte[] png)
+    {
+        // Signature, then the IHDR chunk first: length (4), "IHDR" (4), width and height (big-endian 4 each)
+        if (png.Length < 24 || !png.AsSpan(0, 8).SequenceEqual(Signature) || !png.AsSpan(12, 4).SequenceEqual("IHDR"u8)) return null;
+        var width = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(16, 4));
+        var height = System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(20, 4));
+        return width > 0 && height > 0 ? new AgentScreenshot(png, width, height) : null;
+    }
+}
+
 /// <summary>The preview panel as the agent's browser (implemented by the app on its UI thread).</summary>
 public interface IAgentBrowserPage
 {
@@ -38,6 +57,10 @@ public interface IAgentBrowserPage
     /// <summary>Runs <paramref name="script"/> in the page: the engine's result as text ("" when nothing came back).
     /// Throws <see cref="AgentBrowserException"/> ("no_page") when no page is open.</summary>
     Task<string> RunScriptAsync(string script, CancellationToken ct);
+
+    /// <summary>Captures what the preview shows as a PNG. Throws <see cref="AgentBrowserException"/>: "no_page" when no
+    /// page is open, "not_supported" where the web engine cannot capture, "screenshot_failed" when the capture failed.</summary>
+    Task<AgentScreenshot> CaptureAsync(CancellationToken ct);
 }
 
 /// <summary>
@@ -50,7 +73,8 @@ public interface IAgentBrowserPage
 /// </summary>
 /// <remarks>
 /// The preview shows one page: a new tab (<c>browser.open_split</c>) takes it over and the earlier tab's requests are
-/// refused with a clear message. Screenshots are not available (the embedded web views have no capture API).
+/// refused with a clear message. Screenshots capture the visible part of the page only (the web view's own snapshot
+/// call: no element clip, no full page), the same as a cmux surface.
 /// </remarks>
 public sealed partial class AgentBrowserBridge : IDisposable
 {
@@ -362,9 +386,20 @@ public sealed partial class AgentBrowserBridge : IDisposable
                 break;
             }
             case "browser.screenshot":
-                throw new AgentBrowserException("not_supported",
-                    "Screenshots are not available in the OMP GUI preview (its embedded web view has no capture API). " +
-                    "Read the page instead: tab.observe(), tab.extract() or tab.evaluate().");
+            {
+                // cmux's answer: the viewport as base64 PNG (omp's cmux backend scrolls a selector into view itself and
+                // says the image is the whole viewport; it resizes and saves the image)
+                var shot = await page.CaptureAsync(ct).ConfigureAwait(false);
+                if (shot.Png.Length == 0) throw new AgentBrowserException("screenshot_failed", "The preview returned an empty screenshot.");
+                result = new JsonObject
+                {
+                    ["png_base64"] = Convert.ToBase64String(shot.Png),
+                    ["width"] = shot.Width,
+                    ["height"] = shot.Height,
+                    ["url"] = await UrlAsync(page, ct).ConfigureAwait(false),
+                };
+                break;
+            }
             default:
                 throw new AgentBrowserException("method_not_found", $"Unknown method {method}");
         }

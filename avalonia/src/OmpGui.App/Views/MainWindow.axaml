@@ -741,20 +741,56 @@
                 <TextBlock Classes="muted" Text="{Binding Note}" IsVisible="{Binding HasNote}" TextWrapping="Wrap" FontSize="13" Margin="0,-4,0,0" />
                 <SelectableTextBlock Text="{Binding Message}" IsVisible="{Binding HasMessage}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontUi}" />
 
-                <!-- Tool approval -->
-                <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsApproval}">
-                  <Button AutomationProperties.Name="Allow" x:Name="AllowButton" Classes="accent md" MinWidth="120" Command="{Binding AllowCommand}" ToolTip.Tip="Let omp do this, this time (1 or Alt+A)">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                      <AccessText Text="_Allow" VerticalAlignment="Center" />
-                      <TextBlock Classes="key-hint" Text="1" VerticalAlignment="Center" />
+                <!-- Tool approval: Allow / Deny, Claude Code's "Yes, and don't ask again for …" (a rule kept for this session,
+                     this project or always; Settings → Permissions) and "No, and tell omp what to do differently" -->
+                <StackPanel Spacing="12" IsVisible="{Binding IsApproval}">
+                  <WrapPanel ItemSpacing="8" LineSpacing="8">
+                    <Button AutomationProperties.Name="Allow" x:Name="AllowButton" Classes="accent md" MinWidth="120" Command="{Binding AllowCommand}" ToolTip.Tip="Let omp do this, this time (1 or Alt+A)">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <AccessText Text="_Allow" VerticalAlignment="Center" />
+                        <TextBlock Classes="key-hint" Text="1" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Button>
+                    <Button AutomationProperties.Name="Deny" x:Name="DenyButton" Classes="md" MinWidth="120" Command="{Binding DenyCommand}" ToolTip.Tip="Don't do it; omp is told you said no (2 or Alt+D)">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <AccessText Text="_Deny" VerticalAlignment="Center" />
+                        <TextBlock Classes="key-hint" Text="2" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Button>
+                    <Button AutomationProperties.Name="Deny and say what to do instead" x:Name="FeedbackButton" Classes="md flat" Command="{Binding StartFeedbackCommand}"
+                            IsVisible="{Binding CanGiveFeedback}" IsEnabled="{Binding !IsWritingFeedback}" ToolTip.Tip="Deny, and tell omp what to do differently (3)">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Deny and say why…" VerticalAlignment="Center" />
+                        <TextBlock Classes="key-hint" Text="3" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Button>
+                  </WrapPanel>
+                  <!-- Don't ask again: allows now and keeps the rule. The three scopes wrap as one group, never split. -->
+                  <WrapPanel x:Name="AllowRuleRow" ItemSpacing="8" LineSpacing="6" IsVisible="{Binding CanAllowWithRule}">
+                    <TextBlock Classes="muted" Text="{Binding AllowWithRuleText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <Button x:Name="AllowSessionButton" Classes="chip" Content="This session" Command="{Binding AllowWithRuleCommand}" CommandParameter="session"
+                              ToolTip.Tip="{Binding RuleText, StringFormat='Allow now and keep {0} until the app quits'}" AutomationProperties.Name="Allow, and don't ask again in this session" />
+                      <Button x:Name="AllowProjectButton" Classes="chip" Content="This project" Command="{Binding AllowWithRuleCommand}" CommandParameter="project"
+                              ToolTip.Tip="{Binding RuleText, StringFormat='Allow now and keep {0} for this project folder'}" AutomationProperties.Name="Allow, and don't ask again in this project" />
+                      <Button x:Name="AllowAlwaysButton" Classes="chip" Content="Always" Command="{Binding AllowWithRuleCommand}" CommandParameter="always"
+                              ToolTip.Tip="{Binding RuleText, StringFormat='Allow now and keep {0} in every project'}" AutomationProperties.Name="Allow, and don't ask again in any project" />
                     </StackPanel>
-                  </Button>
-                  <Button AutomationProperties.Name="Deny" x:Name="DenyButton" Classes="md" MinWidth="120" Command="{Binding DenyCommand}" ToolTip.Tip="Don't do it; omp is told you said no (2 or Alt+D)">
+                  </WrapPanel>
+                  <!-- Deny and say why: the words reach omp as a steering message, read right after the denied tool -->
+                  <StackPanel x:Name="FeedbackForm" Spacing="8" IsVisible="{Binding IsWritingFeedback}">
+                    <TextBox x:Name="FeedbackBox" Text="{Binding FeedbackText}" PlaceholderText="Tell omp what to do instead" AutomationProperties.Name="What omp should do instead"
+                             ctl:FocusOnShow.When="{Binding IsWritingFeedback}">
+                      <TextBox.KeyBindings>
+                        <KeyBinding Gesture="Enter" Command="{Binding SendFeedbackCommand}" />
+                      </TextBox.KeyBindings>
+                    </TextBox>
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                      <AccessText Text="_Deny" VerticalAlignment="Center" />
-                      <TextBlock Classes="key-hint" Text="2" VerticalAlignment="Center" />
+                      <Button x:Name="SendFeedbackButton" Classes="md" Content="Deny and send" Command="{Binding SendFeedbackCommand}"
+                              ToolTip.Tip="omp doesn't do it and reads your words before its next step (Enter)" />
+                      <Button Classes="md flat" Content="Cancel" Command="{Binding CancelFeedbackCommand}" ToolTip.Tip="Back to the choices (Esc)" />
                     </StackPanel>
-                  </Button>
+                  </StackPanel>
                 </StackPanel>
 
                 <!-- Select (ask tool, extensions) -->
@@ -1388,6 +1424,7 @@
             </Border>
 
             <!-- Pages of their own (Views/Settings) -->
+            <settings:PermissionsSettings IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=permissions}" />
             <settings:ProviderUsageSettings IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=providers}" />
             <settings:ConnectorsSettings IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=connectors}" />
             <settings:PluginsSettings IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=plugins}" />

@@ -119,6 +119,9 @@ public sealed partial class ConversationState
     /// <summary>Dialogs with a deadline added since the controller last looked (it schedules their expiry).</summary>
     public List<PendingDialog> NewDeadlines { get; } = [];
 
+    /// <summary>Approval requests added since the controller last looked (it answers those a "don't ask again" rule covers).</summary>
+    public List<PendingDialog> NewApprovals { get; } = [];
+
     public IReadOnlyList<PendingDialog> Dialogs => _dialogs;
 
     private sealed class Row(long key, TranscriptItem item)
@@ -162,6 +165,7 @@ public sealed partial class ConversationState
         {
             _dialogs.Clear();
             NewDeadlines.Clear();
+            NewApprovals.Clear();
             DialogsToCancel.Clear();
             _extensionStatus.Clear();
             _widgets.Clear();
@@ -757,6 +761,7 @@ public sealed partial class ConversationState
                     Str(j, "placeholder"), Str(j, "prefill"), now, deadline);
                 _dialogs.Add(dialog);
                 if (deadline is not null) NewDeadlines.Add(dialog);
+                if (kind == DialogKind.Approval) NewApprovals.Add(dialog);
                 Touch();
                 break;
             case "cancel":

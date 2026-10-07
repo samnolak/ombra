@@ -751,6 +751,7 @@ public sealed partial class SessionController : IAsyncDisposable
         {
             PendingDialog[] deadlines = [];
             string[] toCancel = [];
+            List<(PendingDialog Dialog, ApprovalGrant Grant)>? autoAllowed = null;
             var reconcile = false;
             // When the line was read, not when the pump got to it: frames can wait in the queue (e.g. while history
             // loads at start), and dialog deadlines count from omp's send time.
@@ -780,6 +781,11 @@ public sealed partial class SessionController : IAsyncDisposable
                     toCancel = [.. _state.DialogsToCancel];
                     _state.DialogsToCancel.Clear();
                 }
+                if (_state.NewApprovals.Count > 0)
+                {
+                    autoAllowed = TakeCoveredApprovals(_state.NewApprovals);
+                    _state.NewApprovals.Clear();
+                }
             }
             if (reconcile) _ = ReconcileQueueAsync(conn);
             foreach (var id in toCancel)
@@ -787,6 +793,7 @@ public sealed partial class SessionController : IAsyncDisposable
                 try { await conn.CancelExtensionUiAsync(id).ConfigureAwait(false); }
                 catch (RpcConnectionClosedException) { }
             }
+            if (autoAllowed is not null) await AutoAllowAsync(conn, autoAllowed).ConfigureAwait(false);
             _changes.Writer.TryWrite(true);
             if (NeedsSettleProbe(conn)) EnsureSettleProbe(conn);
             foreach (var d in deadlines) _ = ExpireAtDeadlineAsync(d);

@@ -1038,8 +1038,9 @@ public sealed partial class MainWindow : Window
         if (e.Key == Key.Escape && Vm?.CurrentDialog is { } dialog && FocusManager?.GetFocusedElement() is Visual focused
             && DialogHost.IsVisualAncestorOf(focused))
         {
-            // Esc inside the dialog closes the dialog only; elsewhere it stops the run (which closes it too).
-            dialog.DismissCommand.Execute(null);
+            // Esc inside the dialog closes the dialog only (the "say why" box first); elsewhere it stops the run (which closes it too).
+            if (dialog.IsWritingFeedback) dialog.CancelFeedbackCommand.Execute(null);
+            else dialog.DismissCommand.Execute(null);
             e.Handled = true;
         }
         else if (e.Key == Key.Escape && Vm is { IsSettingsOpen: true } settingsOpen)

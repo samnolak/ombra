@@ -51,6 +51,8 @@ public sealed record OmpRuntimeOptions
     public string[]? HiddenProjects { get; init; }
     /// <summary>The sidebar's width as last dragged (220–480 px); null means the default.</summary>
     public double? SidebarWidth { get; init; }
+    /// <summary>"Don't ask again" rules for omp's approval requests (<see cref="ApprovalRuleSet"/>); session rules are never saved.</summary>
+    public SavedApprovalRule[]? ApprovalRules { get; init; }
 
     public const string ConfigEnvVar = "OMPGUI_CONFIG";
 

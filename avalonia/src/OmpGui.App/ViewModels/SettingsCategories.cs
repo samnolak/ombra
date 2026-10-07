@@ -25,6 +25,7 @@ public partial class MainViewModel
     public IReadOnlyList<SettingsCategoryViewModel> SettingsCategories { get; } =
     [
         new("general", "General", "IconSettings"),
+        new("permissions", "Permissions", "IconShield"),
         new("providers", "Model providers", "IconKey", "omp"),
         new("connectors", "Connectors", "IconPlug"),
         new("plugins", "Plugins and skills", "IconGrid"),

@@ -251,7 +251,13 @@ omp's own interface for them.
 - **Browser preview and page comments** — a local web app beside the conversation; comments pinned to page elements
   go with the next message. omp's own browser tool drives the preview: the app serves the protocol of omp's cmux
   backend (`CMUX_SOCKET_PATH`, see `AgentBrowserBridge`), so pages omp opens show there instead of in headless Chromium
-  (no screenshots; one page at a time).
+  (one page at a time; screenshots of the visible area through the web view's own snapshot call —
+  `Platform/WebViewSnapshot` — not full-page or element clips, as on a real cmux surface).
 - **Dictation** — speech to text on this computer, into the message box.
 - **Pets** — a pixel companion on the message box that follows what omp does (Settings › Pets).
 - **Plan history** — earlier plans and every change to the todo list, kept for the session (*Panes* area).
+- **Don't ask again / Deny and say why** (Claude Code's approval options) — omp 18.8's approval is a plain
+  Approve/Deny select and its own `tools.approval.<tool>: allow` can only allow a whole tool, so the client keeps the
+  rules (command prefix like `bash(npm test:*)`, exact command, or whole tool; this session / this project / always,
+  Settings › Permissions) and answers covered requests itself, noting *Allowed automatically* in the conversation.
+  A deny cannot carry a reason over RPC: the reason goes as a steering message, read right after the denied tool.

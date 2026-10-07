@@ -6,6 +6,8 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+    <!-- Platform/*WebViewSnapshot.cs: the web engines' snapshot calls (Objective-C blocks, COM, GLib callbacks) -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Precompiled startup code: 0.70 s instead of 1.37 s to a painted window on Linux (docs/research results). -->
     <PublishReadyToRun Condition="'$(RuntimeIdentifier)' != ''">true</PublishReadyToRun>
   </PropertyGroup>

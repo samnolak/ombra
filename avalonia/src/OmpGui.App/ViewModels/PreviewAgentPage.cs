@@ -10,6 +10,7 @@ namespace OmpGui.App.ViewModels;
 internal sealed class PreviewAgentPage(MainViewModel main) : IAgentBrowserPage
 {
     private const string NoPage = "No page is open in the preview yet: open one with browser.open(url) or tab.goto(url).";
+    private static readonly TimeSpan ShowDelay = TimeSpan.FromMilliseconds(300);
 
     public async Task ShowAsync(CancellationToken ct) =>
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -49,6 +50,27 @@ internal sealed class PreviewAgentPage(MainViewModel main) : IAgentBrowserPage
             return p.RunScript is { } run ? (true, await run(script)) : (false, (string?)null);
         }).WaitAsync(ct);
         return hasPage ? raw ?? "" : throw new AgentBrowserException("no_page", NoPage);
+    }
+
+    public async Task<AgentScreenshot> CaptureAsync(CancellationToken ct)
+    {
+        var opened = await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            main.Preview.NoteAgentActivity();
+            var closed = !main.IsPreviewOpen;
+            main.IsPreviewOpen = true;
+            return closed;
+        });
+        // The web view only draws while the panel shows it: give a panel just opened a moment to lay the page out
+        if (opened) await Task.Delay(ShowDelay, ct);
+        var shot = await Dispatcher.UIThread.InvokeAsync<AgentScreenshot?>(async () =>
+        {
+            var p = main.Preview;
+            p.NoteAgentActivity();
+            if (p.IsEngineUnavailable) throw new AgentBrowserException("unavailable", Unavailable(p));
+            return p.CaptureScreenshot is { } capture ? await capture(ct) : null;
+        }).WaitAsync(ct);
+        return shot ?? throw new AgentBrowserException("no_page", NoPage);
     }
 
     private static string Unavailable(PreviewViewModel p) =>

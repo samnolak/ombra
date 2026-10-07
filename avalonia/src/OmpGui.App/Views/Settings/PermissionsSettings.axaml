@@ -1,0 +1,69 @@
+<!-- Settings page "Permissions": the "don't ask again" rules given on approval cards (MainViewModel.Approvals.cs,
+     ClientCore ApprovalRules.cs), each with Remove. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Views.Settings.PermissionsSettings"
+             x:DataType="vm:MainViewModel">
+  <Panel DataContext="{Binding Permissions}">
+    <StackPanel x:DataType="vm:PermissionRulesViewModel" Spacing="16">
+
+      <Border x:Name="PermissionsMessageBar" Classes="ws-note" Classes.ok="{Binding !MessageIsError}" Classes.error="{Binding MessageIsError}" IsVisible="{Binding HasMessage}">
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <Panel Margin="0,0,10,0" VerticalAlignment="Top">
+            <ctl:Icon Classes="ok-mark" Data="{StaticResource IconCheckCircle}" Size="16" IsVisible="{Binding !MessageIsError}" />
+            <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" IsVisible="{Binding MessageIsError}" />
+          </Panel>
+          <SelectableTextBlock x:Name="PermissionsMessage" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" />
+          <Button Grid.Column="2" Classes="icon" Width="24" Height="24" Margin="8,-4,-6,-4" VerticalAlignment="Top" Command="{Binding DismissMessageCommand}"
+                  ToolTip.Tip="Dismiss" AutomationProperties.Name="Dismiss">
+            <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+          </Button>
+        </Grid>
+      </Border>
+
+      <Border Classes="section-card">
+        <StackPanel Spacing="12">
+          <TextBlock Classes="section" Text="Permission rules" />
+          <TextBlock Classes="muted" TextWrapping="Wrap"
+                     Text="When omp asks for permission and a rule here covers the request, this app answers Allow for you and notes it in the conversation. A command rule covers that command and longer ones starting with it — never commands chained with ; &amp;&amp; or |, redirected, or on several lines." />
+          <Border Classes="ws-note error" IsVisible="{Binding HasLoadError}">
+            <SelectableTextBlock x:Name="PermissionsLoadError" Text="{Binding LoadError}" TextWrapping="Wrap" FontSize="13" />
+          </Border>
+          <Border Classes="ws-note" IsVisible="{Binding IsEmpty}">
+            <TextBlock x:Name="PermissionsEmpty" TextWrapping="Wrap"
+                       Text="No rules yet. On a permission request, choose a “Don't ask again” option to add one." />
+          </Border>
+
+          <ItemsControl x:Name="PermissionRuleList" ItemsSource="{Binding Rules}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:PermissionRuleRowViewModel">
+                <Border Classes="ws-row">
+                  <Grid ColumnDefinitions="Auto,*,Auto">
+                    <ctl:Icon Data="{StaticResource IconShield}" Size="16" Margin="0,0.5,12,0" VerticalAlignment="Top" TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
+                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                      <WrapPanel ItemSpacing="8" LineSpacing="4">
+                        <TextBlock Classes="ws-title" Text="{Binding Description}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        <Border Classes="tag" VerticalAlignment="Center">
+                          <TextBlock Text="{Binding ScopeLabel}" FontSize="11" FontWeight="Medium" />
+                        </Border>
+                      </WrapPanel>
+                      <TextBlock Classes="mono tertiary" Text="{Binding RuleText}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding RuleText}" />
+                      <TextBlock Classes="tertiary" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Detail}" />
+                    </StackPanel>
+                    <Button Grid.Column="2" Classes="flat" Content="Remove" Command="{Binding RemoveCommand}" Margin="12,0,0,0" VerticalAlignment="Center"
+                            ToolTip.Tip="omp asks again for these requests" AutomationProperties.Name="{Binding Description, StringFormat='Remove rule: {0}'}" />
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </Panel>
+</UserControl>

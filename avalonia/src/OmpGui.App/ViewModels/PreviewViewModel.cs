@@ -84,6 +84,10 @@ public sealed partial class PreviewViewModel : ObservableObject
     /// <summary>Runs a script in the page and returns the engine's result; set by the view (it throws while no page is open).</summary>
     public Func<string, Task<string?>>? RunScript { get; set; }
 
+    /// <summary>Captures the page shown as a PNG (Platform/WebViewSnapshot); set by the view together with <see cref="RunScript"/>.
+    /// Failures are <see cref="OmpGui.ClientCore.AgentBrowserException"/>s with a message for the agent.</summary>
+    public Func<CancellationToken, Task<OmpGui.ClientCore.AgentScreenshot>>? CaptureScreenshot { get; set; }
+
     /// <summary>The last navigation failed (the server did not answer); reset when the next one starts.</summary>
     public bool LoadFailed { get; private set; }
 

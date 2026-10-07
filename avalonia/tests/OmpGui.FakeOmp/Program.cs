@@ -514,6 +514,28 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
             Emit(new { type = "tool_execution_end", toolCallId = tid, toolName = "bash", isError = ok != "Approve", result = new { content = new[] { new { type = "text", text = ok == "Approve" ? "done" : "Tool call denied by user: bash" } } } });
         }
     }
+    else if (!aborted && scenario == "approval-rules")
+    {
+        // omp 18.8's approval prompts as they are (tools/approval.ts formatApprovalPrompt with bash's and write's
+        // formatApprovalDetails): one request per line of the prompt — "write <path>" for the write tool, any other line a
+        // bash command — asked one after the other. FAKE_OMP_APPROVAL_LOG receives "<answer> <line>" for each.
+        var requests = message.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (var r = 0; r < requests.Length; r++)
+        {
+            var line = requests[r];
+            var write = line.StartsWith("write ", StringComparison.Ordinal);
+            var tool = write ? "write" : "bash";
+            var tid = $"r{r + 1}";
+            Emit(new { type = "tool_execution_start", toolCallId = tid, toolName = tool, args = write ? (object)new { path = line[6..], content = "hello" } : new { command = line } });
+            var did = $"ap{Interlocked.Increment(ref dialogSeq)}";
+            var title = write ? $"Allow tool: write\nPath: {line[6..]}\nContent:\nhello" : $"Allow tool: bash\nCommand: {line}";
+            var choice = await AskAsync(new { type = "extension_ui_request", id = did, method = "select", title, options = new[] { "Approve", "Deny" } }, did, null);
+            if (Environment.GetEnvironmentVariable("FAKE_OMP_APPROVAL_LOG") is { Length: > 0 } approvalLog)
+                File.AppendAllText(approvalLog, $"{choice ?? "(none)"} {line}\n");
+            var ok = choice == "Approve";
+            Emit(new { type = "tool_execution_end", toolCallId = tid, toolName = tool, isError = !ok, result = new { content = new[] { new { type = "text", text = ok ? "ran: " + line : "Tool call denied by user: " + tool } } } });
+        }
+    }
     else if (!aborted && scenario is "approval" or "approval-timeout")
     {
         Emit(new { type = "tool_execution_start", toolCallId = "t1", toolName = "bash", args = new { command = "echo hi" } });

@@ -12,14 +12,17 @@ namespace OmpGui.App.ViewModels;
 public sealed partial class DialogViewModel : ObservableObject
 {
     private readonly Func<string, DialogAnswer, Task> _answer;
+    private readonly ApprovalActions? _actions;
     private bool _answered;
 
-    public DialogViewModel(PendingDialog model, Func<string, DialogAnswer, Task> answer)
+    public DialogViewModel(PendingDialog model, Func<string, DialogAnswer, Task> answer, ApprovalActions? actions = null)
     {
         Model = model;
         _answer = answer;
+        _actions = model.Kind == DialogKind.Approval ? actions : null;
         _inputText = model.Prefill ?? "";
         Options = [.. model.Options.Select((o, i) => new DialogOptionViewModel(o, this, i + 1))];
+        SuggestedRule = _actions is null ? null : ApprovalRule.Suggest(ApprovalRequest.From(model));
         UpdateRemaining(DateTimeOffset.UtcNow);
     }
 
@@ -123,12 +126,55 @@ public sealed partial class DialogViewModel : ObservableObject
     [RelayCommand] private Task Allow() => AnswerAsync(new DialogAnswer.Value("Approve"));
     [RelayCommand] private Task Deny() => AnswerAsync(new DialogAnswer.Value("Deny"));
 
-    /// <summary>A digit key: 1 / 2 answer an approval (Allow / Deny), 1–9 pick a choice. False when the digit means nothing here.</summary>
+    // ── Claude Code's "Yes, and don't ask again for …" and "No, and tell omp what to do differently" ──
+
+    /// <summary>The rule this request offers (<c>bash(npm test:*)</c>, <c>write</c>); null when none fits or the card cannot keep rules.</summary>
+    public ApprovalRule? SuggestedRule { get; }
+    public bool CanAllowWithRule => SuggestedRule is not null;
+    /// <summary>"Don't ask again for commands starting with “npm test”".</summary>
+    public string AllowWithRuleText => SuggestedRule is { } r ? $"Don't ask again for {r.Description}" : "";
+    /// <summary>The rule as written in Settings → Permissions (the tooltip of the scope buttons).</summary>
+    public string RuleText => SuggestedRule?.Text ?? "";
+
+    /// <summary>Allow now and keep the rule: <paramref name="scope"/> is "session", "project" or "always".</summary>
+    [RelayCommand]
+    private async Task AllowWithRule(string? scope)
+    {
+        if (_answered || _actions is null || SuggestedRule is not { } rule) return;
+        var s = scope switch { "session" => ApprovalScope.Session, "project" => ApprovalScope.Project, "always" => ApprovalScope.Always, _ => (ApprovalScope?)null };
+        if (s is null) return;
+        _answered = true;
+        await _actions.AllowWithRule(Id, rule, s.Value);
+    }
+
+    public bool CanGiveFeedback => _actions is not null;
+    /// <summary>The "tell omp what to do instead" box is open.</summary>
+    [ObservableProperty] private bool _isWritingFeedback;
+    [ObservableProperty] private string _feedbackText = "";
+
+    [RelayCommand] private void StartFeedback() { if (CanGiveFeedback && !_answered) IsWritingFeedback = true; }
+    [RelayCommand] private void CancelFeedback() => IsWritingFeedback = false;
+
+    /// <summary>Deny, and send the words to omp as a steering message (read right after the denied tool). Empty: a plain deny.</summary>
+    [RelayCommand]
+    private async Task SendFeedback()
+    {
+        if (_answered || _actions is null) return;
+        _answered = true;
+        await _actions.DenyWithFeedback(Id, FeedbackText);
+    }
+
+    /// <summary>A digit key: 1 / 2 / 3 answer an approval (Allow / Deny / Deny and say why), 1–9 pick a choice. False when the digit means nothing here.</summary>
     public bool TryPick(int digit)
     {
         if (IsApproval && digit is 1 or 2)
         {
             (digit == 1 ? AllowCommand : DenyCommand).Execute(null);
+            return true;
+        }
+        if (IsApproval && digit == 3 && CanGiveFeedback)
+        {
+            StartFeedback();
             return true;
         }
         if (IsSelect && Options.FirstOrDefault(o => o.Number == digit) is { } option)
@@ -144,6 +190,9 @@ public sealed partial class DialogViewModel : ObservableObject
     [RelayCommand] private Task Dismiss() => AnswerAsync(new DialogAnswer.Cancelled());
     internal Task Choose(string label) => AnswerAsync(new DialogAnswer.Value(label));
 }
+
+/// <summary>What an approval card can do beyond Allow and Deny (SessionController.AllowWithRuleAsync / DenyWithFeedbackAsync).</summary>
+public sealed record ApprovalActions(Func<string, ApprovalRule, ApprovalScope, Task> AllowWithRule, Func<string, string, Task> DenyWithFeedback);
 
 public sealed partial class DialogOptionViewModel(DialogOption option, DialogViewModel owner, int number = 0) : ObservableObject
 {

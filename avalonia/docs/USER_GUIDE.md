@@ -87,8 +87,17 @@ project yet), so the OS warns on first start:
   restarts omp on the same session: once you stop pressing Shift+Tab, and never in the middle of a run (it waits for
   the run to end). When omp asks, a card in the conversation says what it wants (*omp wants to run a command*) and
   shows the command or file, with **Allow** / **Deny** (keys 1 / 2 or Alt/⌥+A / Alt/⌥+D; 1–9 pick an answer to a
-  question, omp's suggestion carries a *Recommended* badge); Esc closes the card without answering. omp offers only
-  allow or deny for one call: there is no "don't ask again" — use the mode for that.
+  question, omp's suggestion carries a *Recommended* badge); Esc closes the card without answering.
+  *Don't ask again for …* allows the request and keeps a rule for **This session** (until the app quits), **This
+  project** (the project folder) or **Always** (every project): for a command it covers commands starting with the
+  same words (`npm test` covers `npm test --watch`, not `npm testing`; `git status`, `npm run build` keep their
+  subcommand); for a command chained with `;` `&&` `|`, redirected or substituted, run through a wrapper (`sudo`,
+  `env`, `bash -c`) or destructive (`rm`, `mv`, `chmod`, `kill`…) only that exact command; for other tools every
+  request of that tool. A prefix rule never covers a chained, redirected or multi-line command, whatever it starts
+  with, and no rule covers a command omp shortened in its request. When a rule answers, the conversation says
+  *Allowed automatically — …*. **Deny and say why…** (key 3) opens a box: what you type (Enter sends, Esc closes the
+  box) denies the request and reaches omp as a steering message, read right after the denied tool. Rules are the
+  app's own (omp 18.8 can only allow a whole tool), listed with **Remove** in *Settings → Permissions*.
 - **Message box** — Enter sends; Shift+Enter adds a line (*Settings → General → Send messages with* switches to
   Ctrl/⌘+Enter to send, Enter then adds a line). While omp is working, **Queue** (or Enter) adds a
   follow-up and **Steer** (or Alt/⌥+Enter) hands a message to the current run at its next step. Queued messages are
@@ -143,8 +152,10 @@ project yet), so the OS warns on first start:
 - **omp browses in the preview** — when omp opens a web page with its browser tool, the page opens here rather
   than in a hidden browser: the preview opens by itself and you watch each step; a pulsing **omp** pill in its
   toolbar shows while omp reads, clicks or types on the page. The preview shows one page: a second tab omp opens
-  takes it over. omp reads pages as text (their elements and content); screenshots are not available in the
-  preview, and only http and https pages open (for a local file, ask omp to serve it, e.g. `python3 -m http.server`).
+  takes it over. omp reads pages as text (their elements and content) and can take screenshots of what the preview
+  shows: the visible part of the page (not the whole page, not one element), taken by the web view itself, so no
+  Screen Recording permission is needed; keep the preview open while omp works. Only http and https pages open
+  (for a local file, ask omp to serve it, e.g. `python3 -m http.server`).
   The terminal's omp uses the same preview. To give omp its own hidden browser back, run
   `omp config set browser.cmux false` (omp's setting for this kind of embedded browser) and restart omp.
 - **Comments on the page** — **Select element** in the preview's toolbar (or **+ → Comment on the page**, or
@@ -207,8 +218,8 @@ project yet), so the OS warns on first start:
 | Ctrl+Shift+S (⇧⌘S) | select an element in the preview to comment on |
 | Ctrl+Shift+Space (⇧⌘Space) | dictation (Enter finishes, Esc cancels) |
 | Ctrl+V (⌘V) | paste text, images or files (a long text becomes a chip) |
-| 1 / 2, Alt+A / Alt+D (⌥A / ⌥D) | allow / deny on an approval card; 1–9 pick an answer |
-| Esc | leave Settings, close the shortcut sheet, or a question card (when it has the focus), or stop the run |
+| 1 / 2 / 3, Alt+A / Alt+D (⌥A / ⌥D) | allow / deny / deny and say why on an approval card; 1–9 pick an answer |
+| Esc | leave Settings, close the shortcut sheet, the *say why* box, or a question card (when it has the focus), or stop the run |
 | F12 | event log (also *Settings → Diagnostics → RPC events*) |
 
 ### Session menu
@@ -286,6 +297,10 @@ their own below:
 
 - **General** — *Appearance* (System, Light or Dark), *Notifications* (see Daily use) and *Send messages with*
   (Enter, or Ctrl/⌘+Enter).
+- **Permissions** — the *Don't ask again* rules given on approval cards: what each covers, as the rule
+  (`bash(npm test:*)`), and where (*This session*, *This project* with its folder, *All projects*), each with
+  **Remove** — omp asks again from the next request. Project and always rules are kept in the GUI's settings file
+  (`approvalRules`), session rules only until the app quits.
 - **Model providers** — the providers omp can use, each with **Sign in** or *Signed in*; the browser link and any
   code appear above the message box. The list appears while omp is running. API keys stay in omp's configuration.
   Below it, *Plan usage* shows every signed-in account whose provider reports limits (subscription windows, spend),
