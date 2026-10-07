@@ -7,30 +7,51 @@ stdio) and shows what it does. Nothing here forks, patches or re-implements omp.
 The client is built with .NET 10 and Avalonia and lives in [`avalonia/`](avalonia). It is an independent project,
 not an official product of the omp, Bun, Anthropic or OpenAI projects.
 
-![OMP GUI: a conversation with the Plan pane open](avalonia/docs/design/screens/readme-window.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="avalonia/docs/design/screens/readme-window-dark.png">
+  <img alt="OMP GUI: a finished run with tool calls, a diff, the plan card and the message box" src="avalonia/docs/design/screens/readme-window.png">
+</picture>
+
+## Install
+
+Download the package for your system from the [latest release](https://github.com/samnolak/omp-gui/releases/latest)
+(macOS: unzip and move *OMP GUI.app* to Applications; Windows: unzip and run `OmpGui.exe`; Linux: unpack and run
+`install-desktop-entry.sh`). Packages are self-contained: no .NET needed. On first start without omp the app installs
+the pinned omp itself. After that the app finds new releases on its own (Settings → Updates) and installs them when
+you choose to. Model providers and API keys live in omp's configuration; the app has no account or sign-in of its own.
 
 ## What it does
 
-- **Conversation** — omp's replies as they stream, thinking folded ("Thought for 4s"), every tool call as a line with
-  its time, file changes as inline diffs, a summary at the end of each run ("Worked for 12s · 3 tools · 2 files
-  changed"), approval and question cards, follow-ups and steering while omp works, image attachments.
-- **Composer** — in the box: "+" (images, omp's slash commands and skills, connectors, plugins, page comments),
-  thinking level, the model with fast mode, extended context, advisor, auto-compact and auto-retry, dictation on this
-  computer, send (Queue and Steer while omp works). Under it: the project (before the first message), the permission
-  mode (Ask permissions / Accept edits / Bypass permissions) and a context gauge (`/context` breakdown and `/usage`
-  on click).
-- **Sessions** — every project's sessions, grouped by project, with search; rename, compact, hand off, fresh
-  provider session, retry, rewind, export, share, workspace folders, move, pin, memory and delete from the session
-  title's menu.
-- **Panes** (⋮ Views menu) — Plan (omp's todo list with checkboxes and its history), Background tasks (subagents and
-  jobs), Files (the project tree with git marks, a code viewer), a terminal (a shell, or omp's own terminal UI for
-  what omp offers only there) and a browser preview with comments on page elements.
-- **Settings** — General (appearance, notifications), Model providers, Connectors (MCP servers, Smithery search),
-  Plugins and skills, Computer use, Git and worktrees, SSH hosts, Pets, Updates, Advanced (which omp to run) and
-  Diagnostics. What belongs to omp is changed through omp's own commands and settings.
-- **First start without omp** — the client installs the pinned omp 18.8.0 on Bun 1.4.2 into its own folder, checked
-  against the hashes built into it. Model providers and keys stay in omp's configuration. Newer omp releases (18.3
-  and later) are not verified with this client yet; your own omp can be set in Settings → Advanced.
+The look and conventions follow Claude Code (warm light and dark themes, one clay accent, sentence-case wording);
+layout details follow the Codex desktop app.
+
+- **Conversation** — omp's replies as they stream; thinking folded ("Thought for 4s"); every tool call as one line
+  (status dot, name, argument) with a result line ("Read 120 lines", "Found 12 files", the first lines of output);
+  file changes as inline diffs; "Worked for 12s · 3 tools · 2 files changed" after each run; copy and "Rewind to here"
+  on hover; a greeting with starter prompts in a new session. The view follows new output, stays where you scrolled,
+  and a ↓ button brings you back.
+- **Approvals** — one card for approvals and questions: Allow (1), Deny (2), Deny and say why (3), and "Don't ask
+  again" for a command pattern (`bash(npm test:*)`) for this session, this project or always. Rules are listed and
+  removed in Settings → Permissions; a request a rule answers shows "Allowed automatically".
+- **Composer** — "+" (images, slash commands and skills, connectors, plugins, page comments), `/` and `@` menus,
+  long pastes as chips, thinking level, the model with fast mode, extended context, advisor, auto-compact and
+  auto-retry, dictation on this computer, Queue and Steer while omp works (queued messages can be removed or pulled
+  back with ↑). Under it: the project, the permission mode (Ask permissions / Accept edits / Bypass permissions, its
+  colour on the box; Shift+Tab cycles) and the context gauge.
+- **Usage** — the context gauge's popover shows the session's tokens and cost and, for signed-in cloud providers,
+  their plan limits (5-hour and weekly windows, % used, time to reset); Settings → Model providers shows all of them.
+- **Sessions** — every project's sessions in a resizable sidebar, newest message first, with search, pinned
+  sessions on top, status dots (working / needs your input / unseen reply) and per-row menus (rename, pin, copy path,
+  delete); add and remove projects; Ctrl+Tab cycles. The session title's menu adds compact, hand off, fresh provider
+  session, retry, rewind, export, share, workspace folders, move and memory.
+- **Panes** — Files (project tree with git marks, code viewer), Plan (omp's todo list and its history), Background
+  tasks (subagents and jobs), a terminal (a shell, or omp's own terminal UI) and a browser preview with page comments.
+  omp's browser tool works in that preview: it opens pages, reads them, clicks, types and takes screenshots.
+- **Pet** — an optional pixel pet that reacts to what omp does; drag it anywhere, click it to send a quick message.
+- **Settings** — a full-window page: General, Permissions, Model providers, Connectors (MCP servers, Smithery
+  search), Plugins and skills, Computer use, Git and worktrees, SSH hosts, Pets, Updates, Advanced (which omp to run)
+  and Diagnostics. What belongs to omp is changed through omp's own commands and settings.
+- **Keyboard** — ⌘/Ctrl+/ shows every shortcut.
 
 The [user guide](avalonia/docs/USER_GUIDE.md) describes all of it; [PARITY.md](avalonia/docs/PARITY.md) lists every
 omp flag, command and RPC feature with what the client offers for it.
@@ -45,15 +66,15 @@ omp flag, command and RPC feature with what the client offers for it.
 
 The versions are the ones [.NET 10 supports](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md)
 (ordinary Windows 10 left support in October 2025; macOS 12–13 are not supported). Packages are self-contained (no
-.NET installation needed) and unsigned: macOS 15+ asks you to allow the first start in *Privacy & Security* (the
-[user guide](avalonia/docs/USER_GUIDE.md#install) has the steps). **No release of this client is published yet.** Once one
-is, the app finds newer releases by itself and installs one when you choose to, together with the omp it brings;
-releases are signed with the project's release key.
+.NET installation needed) and not signed with Apple or Microsoft certificates: macOS 15+ asks you to allow the first
+start in *Privacy & Security* (the [user guide](avalonia/docs/USER_GUIDE.md#install) has the steps). Releases and
+their update feed are signed with the project's release key, and the app checks that signature before installing.
 
-What is verified, on Linux x64 only (details: [PROJECT_STATE.md](avalonia/docs/PROJECT_STATE.md)):
-the test suite with the real omp 18.8.0, and the packaged app in a real window with a real (small, generic) model —
-install, reply and streaming, stop, approvals, terminal, restart. Not verified yet: Windows and macOS at run time
-(no runners), arm64 at run time, the real speech model, larger models and hosted providers, code signing.
+Every release package is started on CI with a clean home folder (self-test: native libraries, omp install, omp over
+RPC) on macOS arm64, macOS x64 (Rosetta), Windows x64 and Linux x64; the arm64 Linux and Windows packages are
+cross-built only. On macOS the app renders with OpenGL: Avalonia 12.1's Metal path can show stale, stretched frames
+while the window resizes ([AvaloniaUI/Avalonia#22215](https://github.com/AvaloniaUI/Avalonia/pull/22215)). Details of
+what is verified where: [PROJECT_STATE.md](avalonia/docs/PROJECT_STATE.md).
 
 ## Build, run, test
 
@@ -76,6 +97,12 @@ A self-contained package for one platform, as CI builds it:
 dotnet publish src/OmpGui.App -c Release -r linux-x64 --self-contained -o <publish-dir>
 tools/package/package.sh linux-x64 <publish-dir> <out-dir> <version>
 ```
+
+On a Mac, `tools/package/test-app.sh` builds this checkout as *OMP GUI Test.app* next to the installed app, with its
+own settings folder (copied from the installed app on the first build), for trying changes before a release.
+
+A release is made by running `avalonia-package.yml` with a version and `release: published`: it builds and checks all
+six packages, signs `update.json`, and publishes the GitHub release that installed apps update to.
 
 CI ([`.github/workflows`](.github/workflows)): `avalonia-ci.yml` builds and tests on Linux, Windows and macOS and runs
 the real-omp smoke; `avalonia-package.yml` builds the packages for all six platforms and smoke-tests the four its
