@@ -354,7 +354,7 @@ yourself) when it cannot replace itself: when this user may not change the folde
 Files), or when it runs from a development build. From a terminal, `OmpGui --update` reports whether an update
 exists and `OmpGui --update --yes` installs it (`--restart` starts the new version afterwards); `OmpGui --version`
 prints the version. (`updateFeed` in the settings file points the check at another feed; its manifest must still
-be signed with the release key.) Pre-releases are not offered.
+be signed with the release key.) The newest published release is offered, alpha versions included.
 
 ## Diagnostics for a bug report
 
