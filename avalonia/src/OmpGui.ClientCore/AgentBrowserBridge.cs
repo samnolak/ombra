@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using OmpGui.ClientCore.Browser;
 using OmpGui.Rpc;
 
 namespace OmpGui.ClientCore;
@@ -42,13 +43,23 @@ public sealed record AgentScreenshot(byte[] Png, int Width, int Height)
     }
 }
 
-/// <summary>The preview panel as the agent's browser (implemented by the app on its UI thread).</summary>
+/// <summary>The preview pane as the agent's browser: it opens one tab per surface omp asks for (UI thread inside).</summary>
+public interface IAgentBrowserHost
+{
+    /// <summary>
+    /// A new tab in the pane for the agent, named <paramref name="surfaceId"/>, empty until it is navigated. The pane
+    /// shows it unless the user picked another tab. Throws <see cref="AgentBrowserException"/> when no tab can open.
+    /// </summary>
+    Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, CancellationToken ct);
+}
+
+/// <summary>One tab of the preview pane as the agent's browser (implemented by the app on its UI thread).</summary>
 public interface IAgentBrowserPage
 {
     /// <summary>Shows the preview without loading anything (an empty tab).</summary>
     Task ShowAsync(CancellationToken ct);
 
-    /// <summary>Shows the preview and starts loading <paramref name="address"/>; the address loading. Throws
+    /// <summary>Starts loading <paramref name="address"/> in this tab; the address loading. Throws
     /// <see cref="AgentBrowserException"/> when the preview refuses it (not http/https) or cannot show pages.</summary>
     Task<Uri> NavigateAsync(string address, CancellationToken ct);
 
@@ -58,9 +69,29 @@ public interface IAgentBrowserPage
     /// Throws <see cref="AgentBrowserException"/> ("no_page") when no page is open.</summary>
     Task<string> RunScriptAsync(string script, CancellationToken ct);
 
-    /// <summary>Captures what the preview shows as a PNG. Throws <see cref="AgentBrowserException"/>: "no_page" when no
+    /// <summary>Captures what the tab shows as a PNG. Throws <see cref="AgentBrowserException"/>: "no_page" when no
     /// page is open, "not_supported" where the web engine cannot capture, "screenshot_failed" when the capture failed.</summary>
     Task<AgentScreenshot> CaptureAsync(CancellationToken ct);
+
+    /// <summary>omp is done with the tab (<c>surface.close</c>): the pane drops it, or keeps it for the user while they look at it.</summary>
+    Task CloseAsync(CancellationToken ct);
+
+    /// <summary>The user closed the tab in the pane: the agent's requests for it are refused. Any thread.</summary>
+    bool IsClosed { get; }
+
+    /// <summary>The questions the page asks (JavaScript dialogs among them); null where nothing reports them. Any thread.</summary>
+    DialogBroker? Dialogs { get; }
+
+    /// <summary>Input the engine treats like the user's (trusted events, user activation); null where the preview has
+    /// none: the bridge then dispatches script events and says so in its answer. Any thread.</summary>
+    INativeInput? Input => null;
+
+    /// <summary>The app's script world in the page, apart from the page's own (the bridge's library lives there); null
+    /// where the engine has none: the library then runs in the page world. Any thread.</summary>
+    IIsolatedScripts? Isolated => null;
+
+    /// <summary>omp acts on the page until the result is disposed: what the page asks meanwhile goes to omp first. Any thread.</summary>
+    IDisposable? BeginAction() => null;
 }
 
 /// <summary>
@@ -72,19 +103,26 @@ public interface IAgentBrowserPage
 /// action is a script in the preview's web view; the preview opens when the agent opens a page.
 /// </summary>
 /// <remarks>
-/// The preview shows one page: a new tab (<c>browser.open_split</c>) takes it over and the earlier tab's requests are
-/// refused with a clear message. Screenshots capture the visible part of the page only (the web view's own snapshot
-/// call: no element clip, no full page), the same as a cmux surface.
+/// Each <c>browser.open_split</c> opens its own tab in the pane (its own web view), so the tabs of every omp process
+/// (sessions, the TUI tab) stay valid side by side until omp closes them (<c>surface.close</c>) or the user does.
+/// While a page shows a JavaScript dialog its scripts wait: requests answer <c>dialog_open</c> with the dialog's kind
+/// and text instead of stalling, and <c>browser.press</c> Enter/Escape answers it. <c>browser.wait</c> answers about a
+/// second before <c>timeout_ms</c>, when omp's own socket timer would give up. Screenshots capture the visible part of
+/// the page only (the web view's own snapshot call: no element clip, no full page), the same as a cmux surface.
 /// </remarks>
 public sealed partial class AgentBrowserBridge : IDisposable
 {
     public const string SocketVariable = "CMUX_SOCKET_PATH";
     public const string PasswordVariable = "CMUX_SOCKET_PASSWORD";
+    /// <summary>omp's cmux switch; the variable wins over the user's <c>browser.cmux</c> in both directions.</summary>
+    public const string CmuxFlagVariable = "PI_BROWSER_CMUX";
 
     /// <summary>What omp reads from a real cmux terminal: removed, so omp never addresses a cmux window instead.</summary>
     private static readonly string[] CmuxVariables = ["CMUX_WORKSPACE_ID", "CMUX_SURFACE_ID", "CMUX_RELAY_ID", "CMUX_RELAY_TOKEN"];
 
     private static readonly TimeSpan Poll = TimeSpan.FromMilliseconds(100);
+    /// <summary>How much earlier than <c>timeout_ms</c> browser.wait answers: omp's socket timer uses the same value.</summary>
+    private static readonly TimeSpan WaitMargin = TimeSpan.FromSeconds(1);
     private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
     private static readonly JsonNodeOptions NodeOptions = new();
     private static readonly JsonDocumentOptions DocumentOptions = new() { MaxDepth = 512 };
@@ -100,8 +138,10 @@ public sealed partial class AgentBrowserBridge : IDisposable
     private readonly string? _directory;
     private Socket? _listener;
     private string? _pipeName;
-    private string? _surface;
+    /// <summary>The open tabs by surface id, oldest first.</summary>
+    private readonly OrderedDictionary<string, IAgentBrowserPage> _surfaces = new(StringComparer.Ordinal);
     private long _run;
+    private readonly AgentBrowserScripts _scripts = AgentBrowserScripts.CreateRandom();
 
     private AgentBrowserBridge(string endpoint, string password, string? directory)
     {
@@ -111,7 +151,7 @@ public sealed partial class AgentBrowserBridge : IDisposable
     }
 
     /// <summary>For tests: a bridge that only dispatches (no socket).</summary>
-    internal AgentBrowserBridge(IAgentBrowserPage page) : this("", "", null) => Page = page;
+    internal AgentBrowserBridge(IAgentBrowserHost host) : this("", "", null) => Host = host;
 
     /// <summary>The socket path (or <c>\\.\pipe\…</c> on Windows) omp connects to.</summary>
     public string Endpoint { get; }
@@ -119,8 +159,11 @@ public sealed partial class AgentBrowserBridge : IDisposable
     /// <summary>What omp sends first (<c>auth &lt;password&gt;</c>).</summary>
     public string Password { get; }
 
-    /// <summary>The page the agent drives; until it is set, requests are answered "unavailable".</summary>
-    public IAgentBrowserPage? Page { get; set; }
+    /// <summary>The pane the agent opens tabs in; until it is set, requests are answered "unavailable".</summary>
+    public IAgentBrowserHost? Host { get; set; }
+
+    /// <summary>The page scripts (their random global names), for tests.</summary>
+    internal AgentBrowserScripts Scripts => _scripts;
 
     /// <summary>Starts listening; null (and a line on stderr) when this system offers no local socket.</summary>
     public static AgentBrowserBridge? TryStart()
@@ -168,9 +211,9 @@ public sealed partial class AgentBrowserBridge : IDisposable
     }
 
     /// <summary>
-    /// <paramref name="spec"/> with the variables that send omp's browser tool here. A variable the user set in the
-    /// settings' environment stays as they set it (e.g. their own CMUX_SOCKET_PATH); PI_BROWSER_CMUX=0 or omp's
-    /// <c>browser.cmux: false</c> turn this off on omp's side.
+    /// <paramref name="spec"/> with the variables that send omp's browser tool here (socket, password and
+    /// PI_BROWSER_CMUX=1, which wins over omp's <c>browser.cmux: false</c>). A variable the user set in the settings'
+    /// environment stays as they set it (e.g. their own CMUX_SOCKET_PATH, or PI_BROWSER_CMUX=0).
     /// </summary>
     public OmpLaunchSpec AddTo(OmpLaunchSpec spec)
     {
@@ -178,6 +221,7 @@ public sealed partial class AgentBrowserBridge : IDisposable
         if (env.ContainsKey(SocketVariable)) return spec;
         env[SocketVariable] = Endpoint;
         env[PasswordVariable] = Password;
+        env.TryAdd(CmuxFlagVariable, "1");
         foreach (var k in CmuxVariables) env.TryAdd(k, null);
         return spec with { Environment = env };
     }
@@ -308,24 +352,25 @@ public sealed partial class AgentBrowserBridge : IDisposable
 
     internal async Task<JsonObject> DispatchAsync(string method, JsonObject p, CancellationToken ct)
     {
-        var page = Page ?? throw new AgentBrowserException("unavailable", "The OMP GUI window is not ready yet.");
+        var host = Host ?? throw new AgentBrowserException("unavailable", "The OMP GUI window is not ready yet.");
         switch (method)
         {
             case "system.ping":
                 return new JsonObject { ["pong"] = true };
             case "browser.open_split":
-                return await OpenAsync(page, p, ct).ConfigureAwait(false);
+                return await OpenAsync(host, p, ct).ConfigureAwait(false);
             case "surface.close":
-                lock (_gate)
-                {
-                    // The page stays in the preview for the user to see; this tab is over.
-                    if (Str(p, "surface_id") is { } closing && closing == _surface) _surface = null;
-                }
+            {
+                IAgentBrowserPage? closing = null;
+                if (Str(p, "surface_id") is { } id)
+                    lock (_gate) _surfaces.Remove(id, out closing);
+                if (closing is not null) await closing.CloseAsync(ct).ConfigureAwait(false);
                 return new JsonObject();
+            }
         }
         if (!method.StartsWith("browser.", StringComparison.Ordinal))
             throw new AgentBrowserException("method_not_found", $"Unknown method {method}");
-        var surface = Surface(p);
+        var (surface, page) = Surface(p);
         JsonObject result;
         switch (method)
         {
@@ -353,38 +398,31 @@ public sealed partial class AgentBrowserBridge : IDisposable
             {
                 var interactive = Bool(p, "interactive") ?? false;
                 var depth = Num(p, "max_depth") ?? 12;
-                var value = await EvaluateAsync(page, AgentBrowserScripts.Call("snapshot", interactive, depth, !interactive), ct).ConfigureAwait(false);
+                var value = await LibraryAsync(page, "snapshot", ct, interactive, depth, !interactive).ConfigureAwait(false);
                 result = value as JsonObject ?? throw new AgentBrowserException("js_error", "The page did not return a snapshot.");
                 break;
             }
-            case "browser.click" or "browser.dblclick" or "browser.hover" or "browser.focus" or "browser.check" or "browser.uncheck"
-                or "browser.scroll_into_view":
-                await EvaluateAsync(page, AgentBrowserScripts.Call("act", method["browser.".Length..], Selector(p), null), ct).ConfigureAwait(false);
+            case "browser.click" or "browser.dblclick" or "browser.hover" or "browser.check" or "browser.uncheck":
+                result = await ActAsync(page, method["browser.".Length..], Selector(p), new JsonObject(), ct).ConfigureAwait(false);
+                break;
+            case "browser.focus" or "browser.scroll_into_view":
+                await LibraryAsync(page, "act", ct, method["browser.".Length..], Selector(p), null).ConfigureAwait(false);
                 result = new JsonObject();
                 break;
             case "browser.type" or "browser.fill":
-                await EvaluateAsync(page, AgentBrowserScripts.Call("act", method["browser.".Length..], Selector(p),
-                    new JsonObject { ["text"] = Str(p, "text") ?? "" }), ct).ConfigureAwait(false);
-                result = new JsonObject();
+                result = await ActAsync(page, method["browser.".Length..], Selector(p), new JsonObject { ["text"] = Str(p, "text") ?? "" }, ct)
+                    .ConfigureAwait(false);
                 break;
             case "browser.press":
             {
                 var key = Str(p, "key") ?? throw new AgentBrowserException("invalid_params", "browser.press needs a key");
-                await EvaluateAsync(page, AgentBrowserScripts.Call("press", key), ct).ConfigureAwait(false);
-                result = new JsonObject();
+                // Enter / Escape answer a JavaScript dialog the page shows, as a person would
+                result = AnswerDialog(page, key) ? new JsonObject() : await PressAsync(page, key, ct).ConfigureAwait(false);
                 break;
             }
             case "browser.scroll":
-            {
-                var dx = Num(p, "dx") ?? 0;
-                var dy = Num(p, "dy") ?? 0;
-                var script = Str(p, "selector") is { } selector
-                    ? AgentBrowserScripts.Call("act", "scroll", selector, new JsonObject { ["dx"] = dx, ["dy"] = dy })
-                    : AgentBrowserScripts.Call("scroll", dx, dy);
-                await EvaluateAsync(page, script, ct).ConfigureAwait(false);
-                result = new JsonObject();
+                result = await ScrollAsync(page, Str(p, "selector"), Num(p, "dx") ?? 0, Num(p, "dy") ?? 0, ct).ConfigureAwait(false);
                 break;
-            }
             case "browser.screenshot":
             {
                 // cmux's answer: the viewport as base64 PNG (omp's cmux backend scrolls a selector into view itself and
@@ -407,47 +445,224 @@ public sealed partial class AgentBrowserBridge : IDisposable
         return result;
     }
 
-    private async Task<JsonObject> OpenAsync(IAgentBrowserPage page, JsonObject p, CancellationToken ct)
+    /// <summary>browser.open_split: a tab of its own in the pane; the tabs opened before stay as they are.</summary>
+    private async Task<JsonObject> OpenAsync(IAgentBrowserHost host, JsonObject p, CancellationToken ct)
     {
         var address = Str(p, "url") is { Length: > 0 } u ? u : "about:blank";
-        string url;
-        if (address == "about:blank")
-        {
-            await page.ShowAsync(ct).ConfigureAwait(false);
-            url = await UrlAsync(page, ct).ConfigureAwait(false);
-        }
-        else url = (await page.NavigateAsync(address, ct).ConfigureAwait(false)).AbsoluteUri;
         var id = Guid.NewGuid().ToString().ToUpperInvariant();
-        lock (_gate) _surface = id;
+        var page = await host.OpenTabAsync(id, ct).ConfigureAwait(false);
+        Watch(page.Dialogs);
+        string url;
+        try
+        {
+            if (address == "about:blank")
+            {
+                await page.ShowAsync(ct).ConfigureAwait(false);
+                url = await UrlAsync(page, ct).ConfigureAwait(false);
+            }
+            else url = (await page.NavigateAsync(address, ct).ConfigureAwait(false)).AbsoluteUri;
+        }
+        catch
+        {
+            await page.CloseAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+        lock (_gate) _surfaces[id] = page;
         return new JsonObject { ["surface_id"] = id, ["url"] = url, ["workspace_id"] = "omp-gui", ["created_split"] = false };
     }
 
-    /// <summary>The tab a request names: the current one (or none named).</summary>
-    private string Surface(JsonObject p)
+    /// <summary>The tab a request names (the newest open one when it names none).</summary>
+    private (string Id, IAgentBrowserPage Page) Surface(JsonObject p)
     {
         var asked = Str(p, "surface_id");
         lock (_gate)
         {
-            if (_surface is null)
-                throw new AgentBrowserException("not_found", "No browser tab is open in the OMP GUI preview: open one first.");
-            if (asked is not null && asked != _surface)
-                throw new AgentBrowserException("not_found",
-                    "This tab was replaced by a newer one: the OMP GUI preview shows one page at a time. Use the newest tab, or open this one again.");
-            return _surface;
+            if (asked is null)
+            {
+                // Tabs the user closed are gone for good
+                for (var i = _surfaces.Count - 1; i >= 0; i--)
+                    if (_surfaces.GetAt(i).Value.IsClosed) _surfaces.RemoveAt(i);
+                if (_surfaces.Count == 0)
+                    throw new AgentBrowserException("not_found", "No browser tab is open in the OMP GUI preview: open one first.");
+                var (id, newest) = _surfaces.GetAt(_surfaces.Count - 1);
+                return (id, newest);
+            }
+            if (!_surfaces.TryGetValue(asked, out var page))
+                throw new AgentBrowserException("not_found", "This browser tab is closed in the OMP GUI preview: open a new one.");
+            if (page.IsClosed)
+            {
+                _surfaces.Remove(asked);
+                throw new AgentBrowserException("not_found", "The user closed this tab in the OMP GUI preview: open a new one if the page is still needed.");
+            }
+            return (asked, page);
         }
     }
 
-    private static async Task<string> UrlAsync(IAgentBrowserPage page, CancellationToken ct)
+    // ── JavaScript dialogs: the page's scripts wait while one is open ──
+
+    /// <summary>How long a question omp's own action caused (confirm, prompt, "Leave page?") waits for omp before the
+    /// user gets its card instead (an unanswered one would hold the page).</summary>
+    internal TimeSpan HandOffAfter { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>Brokers already watched, and the questions whose hand-off is scheduled.</summary>
+    private readonly HashSet<DialogBroker> _watched = [];
+    private readonly HashSet<BrowserDialog> _handOffs = [];
+
+    /// <summary>
+    /// Watches the questions of a tab's page: an alert omp's action caused is accepted (OK) at once, as the agent
+    /// would; a confirm, prompt or "Leave page?" omp caused goes to the user after <see cref="HandOffAfter"/> unless omp
+    /// answered it; a file chooser, download, permission or pop-up question omp caused goes to the user at once (cmux
+    /// cannot answer those). The user's own dialogs are never touched.
+    /// </summary>
+    private void Watch(DialogBroker? broker)
+    {
+        if (broker is null) return;
+        lock (_gate)
+        {
+            if (!_watched.Add(broker)) return;
+        }
+        broker.Changed += (_, _) => OnDialogsChanged(broker);
+        OnDialogsChanged(broker);
+    }
+
+    private void OnDialogsChanged(DialogBroker broker)
+    {
+        foreach (var dialog in broker.AgentPending)
+        {
+            if (dialog.IsCompleted) continue;
+            if (!dialog.IsModal)
+            {
+                // cmux has no file, download, permission or pop-up methods: the user answers what omp's action caused
+                broker.HandToUser(dialog);
+                continue;
+            }
+            if (dialog.Kind == BrowserDialogKind.Alert)
+            {
+                dialog.Complete(null);
+                continue;
+            }
+            lock (_gate)
+            {
+                if (!_handOffs.Add(dialog)) continue;
+            }
+            _ = HandOffLaterAsync(broker, dialog);
+        }
+    }
+
+    private async Task HandOffLaterAsync(DialogBroker broker, BrowserDialog dialog)
+    {
+        try { await Task.Delay(HandOffAfter, _cts.Token).ConfigureAwait(false); }
+        catch (OperationCanceledException) { return; }
+        finally
+        {
+            lock (_gate) _handOffs.Remove(dialog);
+        }
+        if (!dialog.IsCompleted) broker.HandToUser(dialog);
+    }
+
+    /// <summary>The JavaScript dialog holding the page's scripts; an alert omp caused is accepted on the way (OK).</summary>
+    private static BrowserDialog? Blocking(DialogBroker broker)
+    {
+        while (broker.CurrentModal is { } dialog)
+        {
+            if (!(dialog.RoutedToAgent && dialog.Kind == BrowserDialogKind.Alert)) return dialog;
+            dialog.Complete(null);
+        }
+        return null;
+    }
+
+    /// <summary>What the agent is told while the page shows <paramref name="dialog"/> (code <c>dialog_open</c>).</summary>
+    internal AgentBrowserException DialogOpen(BrowserDialog dialog)
+    {
+        var (what, how) = dialog.Kind switch
+        {
+            BrowserDialogKind.Alert => ("an alert", "press Enter with browser.press to close it"),
+            BrowserDialogKind.Prompt => ("a prompt", "press Enter (OK, with its default text) or Escape (Cancel) with browser.press"),
+            BrowserDialogKind.BeforeUnload => ("a \"Leave page?\" dialog", "press Enter to leave the page or Escape to stay, with browser.press"),
+            _ => ("a confirm dialog", "press Enter (OK) or Escape (Cancel) with browser.press"),
+        };
+        var text = dialog.Message is { Length: > 0 } m ? $": \"{Clip(m)}\"" : "";
+        var who = dialog.RoutedToAgent
+            ? $"{how}; unanswered after {HandOffAfter.TotalSeconds:0.#} s, it goes to the user in the OMP GUI preview."
+            : $"the user is asked in the OMP GUI preview (or {how}).";
+        return new AgentBrowserException("dialog_open", $"The page is showing {what}{text}. Its scripts wait until it is answered: {who}");
+    }
+
+    /// <summary>Answers the page's JavaScript dialog for <c>browser.press</c> Enter (OK) or Escape (Cancel); false when none is open.</summary>
+    private bool AnswerDialog(IAgentBrowserPage page, string key)
+    {
+        if (page.Dialogs is not { } broker || Blocking(broker) is not { } dialog) return false;
+        bool accept = key switch
+        {
+            "Enter" => true,
+            "Escape" or "Esc" => false,
+            _ => throw DialogOpen(dialog),
+        };
+        object? answer = dialog.Request switch
+        {
+            AlertRequest => null,
+            PromptRequest prompt => accept ? prompt.Default ?? "" : null,
+            _ => accept,
+        };
+        dialog.Complete(answer); // false when the user answered it at the same moment: answered either way
+        return true;
+    }
+
+    /// <summary>
+    /// Runs <paramref name="script"/> unless the page shows a JavaScript dialog, and stops waiting for it when one opens
+    /// meanwhile (the script itself opened it, e.g. a click on a "Delete" button that confirms): <c>dialog_open</c>.
+    /// An alert omp caused is accepted and the script goes on.
+    /// </summary>
+    private Task<string> RunScriptAsync(IAgentBrowserPage page, string script, CancellationToken ct) =>
+        UnlessDialogAsync(page, c => page.RunScriptAsync(script, c), ct);
+
+    /// <summary><paramref name="start"/> with <see cref="RunScriptAsync(IAgentBrowserPage, string, CancellationToken)"/>'s rules for JavaScript dialogs.</summary>
+    private async Task<T> UnlessDialogAsync<T>(IAgentBrowserPage page, Func<CancellationToken, Task<T>> start, CancellationToken ct)
+    {
+        if (page.Dialogs is not { } broker) return await start(ct).ConfigureAwait(false);
+        if (Blocking(broker) is { } open) throw DialogOpen(open);
+        var opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnChanged(object? sender, EventArgs e)
+        {
+            if (broker.CurrentModal is not null) opened.TrySetResult();
+        }
+        broker.Changed += OnChanged;
+        try
+        {
+            var run = start(ct);
+            OnChanged(null, EventArgs.Empty);
+            while (true)
+            {
+                if (await Task.WhenAny(run, opened.Task).ConfigureAwait(false) == run) return await run.ConfigureAwait(false);
+                if (Blocking(broker) is { } dialog)
+                {
+                    // The script finishes once the dialog is answered; nobody waits for its value any more
+                    _ = run.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
+                        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                    throw DialogOpen(dialog);
+                }
+                opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); // came and went already
+                OnChanged(null, EventArgs.Empty);
+            }
+        }
+        finally
+        {
+            broker.Changed -= OnChanged;
+        }
+    }
+
+    private async Task<string> UrlAsync(IAgentBrowserPage page, CancellationToken ct)
     {
         try
         {
-            var href = await page.RunScriptAsync("location.href", ct).ConfigureAwait(false);
+            var href = await RunScriptAsync(page, "location.href", ct).ConfigureAwait(false);
             href = Unquote(href);
             if (Uri.TryCreate(href, UriKind.Absolute, out var u)) return u.AbsoluteUri;
         }
-        catch (Exception e) when (e is not OperationCanceledException && e is not AgentBrowserException { Code: not "no_page" })
+        catch (Exception e) when (e is not OperationCanceledException && e is not AgentBrowserException { Code: not ("no_page" or "dialog_open") })
         {
-            // No page yet, or the engine refused the script mid-navigation: the address the preview knows
+            // No page yet, a dialog holds the page's scripts, or the engine refused the script mid-navigation: the
+            // address the preview knows
         }
         var state = await page.GetStateAsync(ct).ConfigureAwait(false);
         return state.Url?.AbsoluteUri ?? "about:blank";
@@ -457,16 +672,16 @@ public sealed partial class AgentBrowserBridge : IDisposable
     internal async Task<JsonNode?> EvaluateAsync(IAgentBrowserPage page, string expression, CancellationToken ct)
     {
         var run = Interlocked.Increment(ref _run);
-        var text = await RunAsync(page, AgentBrowserScripts.Wrap(expression, run, viaEval: false), ct).ConfigureAwait(false);
+        var text = await RunAsync(page, _scripts.Wrap(expression, run, viaEval: false), ct).ConfigureAwait(false);
         if (text is null)
         {
             // Nothing came back: the script did not parse as an expression (nothing ran: try it as statements), or the
             // page went away while it ran (a click that navigates): then there is no value.
             string ran;
-            try { ran = Unquote(await page.RunScriptAsync(AgentBrowserScripts.RanCheck(run), ct).ConfigureAwait(false)); }
+            try { ran = Unquote(await RunScriptAsync(page, _scripts.RanCheck(run), ct).ConfigureAwait(false)); }
             catch (Exception e) when (e is not OperationCanceledException and not AgentBrowserException) { return null; }
             if (ran != "false") return null;
-            text = await RunAsync(page, AgentBrowserScripts.Wrap(expression, run, viaEval: true), ct).ConfigureAwait(false)
+            text = await RunAsync(page, _scripts.Wrap(expression, run, viaEval: true), ct).ConfigureAwait(false)
                 ?? throw new AgentBrowserException("js_error", "The page did not run the script.");
         }
         JsonObject answer;
@@ -498,41 +713,56 @@ public sealed partial class AgentBrowserBridge : IDisposable
         return value;
     }
 
-    private static async Task<string?> RunAsync(IAgentBrowserPage page, string script, CancellationToken ct)
+    private async Task<string?> RunAsync(IAgentBrowserPage page, string script, CancellationToken ct)
     {
         string text;
-        try { text = await page.RunScriptAsync(script, ct).ConfigureAwait(false); }
+        try { text = await RunScriptAsync(page, script, ct).ConfigureAwait(false); }
         catch (AgentBrowserException) { throw; }
         catch (Exception e) when (e is not OperationCanceledException) { return null; }
         text = Unquote(text);
         return text.Length == 0 || text == "null" || text == "undefined" ? null : text;
     }
 
+    /// <summary>
+    /// How long browser.wait waits for <paramref name="timeout"/>: omp gives up on the socket at <c>timeout_ms</c>
+    /// itself, so the answer (a clean timeout error) comes about a second earlier (a quarter earlier for short waits).
+    /// </summary>
+    internal static TimeSpan WaitBudget(TimeSpan timeout) => timeout - (timeout >= WaitMargin * 4 ? WaitMargin : timeout / 4);
+
     /// <summary>browser.wait: a load state, a selector, a URL part, until the deadline.</summary>
     private async Task WaitAsync(IAgentBrowserPage page, JsonObject p, CancellationToken ct)
     {
-        var timeout = Math.Clamp(Num(p, "timeout_ms") ?? 30_000, 0, 600_000);
+        var budget = WaitBudget(TimeSpan.FromMilliseconds(Math.Clamp(Num(p, "timeout_ms") ?? 30_000, 0, 600_000)));
         var selector = Str(p, "selector");
         var urlPart = Str(p, "url_contains");
         var load = Str(p, "load_state") ?? (selector is null && urlPart is null ? "complete" : null);
+        var what = selector is not null ? $"selector {selector}" : urlPart is not null ? $"a URL containing {urlPart}" : $"the page to be {load}";
+        var timedOut = new AgentBrowserException("timeout", $"Timed out after {budget.TotalMilliseconds:0} ms waiting for {what}");
+        // A script the page does not answer (a hung page) ends at the deadline too
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(budget);
         var clock = Stopwatch.StartNew();
-        while (true)
+        try
         {
-            var state = await page.GetStateAsync(ct).ConfigureAwait(false);
-            if (state.Unavailable is { } why) throw new AgentBrowserException("unavailable", why);
-            if (await MetAsync(page, state, load, selector, urlPart, ct).ConfigureAwait(false))
+            while (true)
             {
-                if (load is not null && state.LoadFailed)
-                    throw new AgentBrowserException("navigation_failed",
-                        $"{state.Url?.AbsoluteUri ?? "The page"} did not load: is the server running?");
-                return;
+                var state = await page.GetStateAsync(deadline.Token).ConfigureAwait(false);
+                if (state.Unavailable is { } why) throw new AgentBrowserException("unavailable", why);
+                if (await MetAsync(page, state, load, selector, urlPart, deadline.Token).ConfigureAwait(false))
+                {
+                    if (load is not null && state.LoadFailed)
+                        throw new AgentBrowserException("navigation_failed",
+                            $"{state.Url?.AbsoluteUri ?? "The page"} did not load: is the server running?");
+                    return;
+                }
+                var left = budget - clock.Elapsed;
+                if (left <= TimeSpan.Zero) throw timedOut;
+                await Task.Delay(left < Poll ? left : Poll, deadline.Token).ConfigureAwait(false);
             }
-            if (clock.Elapsed.TotalMilliseconds >= timeout)
-            {
-                var what = selector is not null ? $"selector {selector}" : urlPart is not null ? $"a URL containing {urlPart}" : $"the page to be {load}";
-                throw new AgentBrowserException("timeout", $"Timed out after {timeout:0} ms waiting for {what}");
-            }
-            await Task.Delay(Poll, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw timedOut;
         }
     }
 
@@ -542,7 +772,7 @@ public sealed partial class AgentBrowserBridge : IDisposable
         {
             if (state.IsLoading) return false;
             string ready;
-            try { ready = Unquote(await page.RunScriptAsync("document.readyState", ct).ConfigureAwait(false)); }
+            try { ready = Unquote(await RunScriptAsync(page, "document.readyState", ct).ConfigureAwait(false)); }
             catch (AgentBrowserException e) when (e.Code == "no_page") { return true; } // an empty tab is loaded
             catch (Exception e) when (e is not OperationCanceledException and not AgentBrowserException) { return false; } // between two documents
             if (load == "interactive" ? ready == "loading" : ready is not ("complete" or "")) return false;
@@ -552,7 +782,7 @@ public sealed partial class AgentBrowserBridge : IDisposable
         {
             try
             {
-                var found = await EvaluateAsync(page, "!!(" + AgentBrowserScripts.Library + ").resolve(" + AgentBrowserScripts.Literal(selector) + ")", ct).ConfigureAwait(false);
+                var found = await LibraryAsync(page, "exists", ct, selector).ConfigureAwait(false);
                 if (found?.GetValueKind() != JsonValueKind.True) return false;
             }
             catch (AgentBrowserException e) when (e.Code == "no_page") { return false; }
@@ -592,6 +822,6 @@ public sealed partial class AgentBrowserBridge : IDisposable
 
     private static string Clip(string s) => s.Length > 200 ? s[..200] + "…" : s;
 
-    [GeneratedRegex(@"^(?<code>not_found|invalid_params|invalid_target): (?<message>.*)$", RegexOptions.Singleline)]
+    [GeneratedRegex(@"^(?<code>not_found|invalid_params|invalid_target|blocked): (?<message>.*)$", RegexOptions.Singleline)]
     private static partial Regex CodedError();
 }

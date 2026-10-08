@@ -66,7 +66,9 @@ public static class WorkspaceTools
             Environment = env,
         }, timeout, ct).ConfigureAwait(false);
         var timedOut = r.ExitCode == -1 && r.Stderr.EndsWith("timed out", StringComparison.Ordinal);
-        return new ToolResult(r.ExitCode, r.Stdout, timedOut ? $"{command.File} did not answer within {timeout.TotalSeconds:0} s" : r.Stderr, TimedOut: timedOut);
+        // What the tool printed before the deadline stays (ssh's log shows how far it got); the last line says why it stopped
+        return new ToolResult(r.ExitCode, r.Stdout,
+            timedOut ? r.Stderr[..^"timed out".Length] + $"{command.File} did not answer within {timeout.TotalSeconds:0} s" : r.Stderr, TimedOut: timedOut);
     }, ct);
 
     /// <summary>The full path of an executable on PATH (with PATHEXT on Windows), or null.</summary>

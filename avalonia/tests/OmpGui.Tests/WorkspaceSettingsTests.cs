@@ -397,8 +397,18 @@ public sealed class WorkspaceSettingsTests
     {
         var f = new WorkspaceFixture();
         f.Commands["/ssh list"] = "box | example.com | me | 2222 [user]\nlab | 10.1.1.1 | - | 22 [user]";
-        f.Tools["ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 -p 2222 me@example.com exit"] = new ToolResult(0, "", "");
-        f.Tools["ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 10.1.1.1 exit"] = new ToolResult(255, "", "me@10.1.1.1: Permission denied (publickey,password).\n");
+        const string common = "ssh -n -o LogLevel=DEBUG1 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 -o ControlPath=none";
+        f.Tools[common + " -p 2222 me@example.com exit"] = new ToolResult(0, "", "");
+        f.Tools[common + " 10.1.1.1 exit"] = new ToolResult(255, "", """
+            debug1: Connecting to 10.1.1.1 [10.1.1.1] port 22.
+            debug1: Connection established.
+            debug1: Local version string SSH-2.0-OpenSSH_10.3
+            debug1: Remote protocol version 2.0, remote software version OpenSSH_9.6
+            debug1: Server host key: ssh-ed25519 SHA256:AAAAexampleexampleexampleexampleexampleexample
+            debug1: Host '10.1.1.1' is known and matches the ED25519 host key.
+            debug1: Authentications that can continue: publickey,password
+            me@10.1.1.1: Permission denied (publickey,password).
+            """);
         var vm = await f.StartAsync(TestProcesses.TempDir("ws-project"));
         var page = vm.SshSettings;
         await page.LoadAsync();

@@ -93,6 +93,17 @@ static string FakeUsageJson()
         disabledCredentials = Array.Empty<object>(),
     });
 }
+// How this omp was started, for tests of what the app passes to every omp: FAKE_OMP_LAUNCH_LOG names a file that gets
+// one JSON line per start with the arguments and every PI_* / CMUX_* / NODE_* variable this process sees.
+if (Environment.GetEnvironmentVariable("FAKE_OMP_LAUNCH_LOG") is { Length: > 0 } launchLog)
+{
+    var seen = new JsonObject();
+    foreach (System.Collections.DictionaryEntry e in Environment.GetEnvironmentVariables())
+        if (e.Key is string k && (k.StartsWith("PI_", StringComparison.Ordinal) || k.StartsWith("CMUX_", StringComparison.Ordinal) || k.StartsWith("NODE_", StringComparison.Ordinal)))
+            seen[k] = e.Value as string;
+    var started = new JsonObject { ["args"] = new JsonArray(args.Select(a => (JsonNode?)a).ToArray()), ["env"] = seen };
+    File.AppendAllText(launchLog, started.ToJsonString() + "\n");
+}
 // Builtin slash commands answered like omp answers them over RPC: FAKE_OMP_COMMANDS names a JSON file mapping a
 // command prefix ("/mcp list") to the text it prints; each command sent is appended to FAKE_OMP_COMMAND_LOG.
 var cannedCommands = Environment.GetEnvironmentVariable("FAKE_OMP_COMMANDS") is { Length: > 0 } cmdFile && File.Exists(cmdFile)

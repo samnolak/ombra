@@ -3,6 +3,8 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform;
+using Avalonia.Platform.Storage;
+using Avalonia.VisualTree;
 using OmpGui.App.ViewModels;
 
 namespace OmpGui.App.Controls;
@@ -19,14 +21,20 @@ public partial class PreviewPanel : UserControl
     internal readonly record struct EngineProbe(bool Available, string Engine, string Detail);
 
     private PreviewViewModel? _vm;
+    /// <summary>The active tab's web view (null while it has none).</summary>
     private NativeWebView? _web;
-    private Uri? _pending;
+    /// <summary>Every tab's web view; the inactive ones stay alive (hidden), so omp's tabs keep their pages.</summary>
+    private readonly Dictionary<PreviewTab, NativeWebView> _webs = [];
+    /// <summary>Navigations waiting for the panel to be in a window (the web view is created then).</summary>
+    private readonly Dictionary<PreviewTab, Uri> _pending = [];
+    /// <summary>Pop-up tabs: the engine's own web view of each, hosted as it is.</summary>
+    private readonly Dictionary<PreviewTab, PopupViewHost> _popups = [];
 
     public PreviewPanel() => InitializeComponent();
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
 
-    /// <summary>The web view, once created (null until the first navigation, and where the engine is unavailable).</summary>
+    /// <summary>The active tab's web view, once created (null until its first navigation, and where the engine is unavailable).</summary>
     internal NativeWebView? WebView => _web;
 
     protected override void OnDataContextChanged(EventArgs e)
@@ -35,32 +43,53 @@ public partial class PreviewPanel : UserControl
         if (_vm is { } old)
         {
             old.NavigationRequested -= OnNavigationRequested;
+            old.TabNavigationRequested -= NavigateTab;
+            old.TabClosed -= OnTabClosed;
             old.ReloadRequested -= OnReloadRequested;
             old.BackRequested -= OnBackRequested;
             old.ForwardRequested -= OnForwardRequested;
             old.OpenExternallyRequested -= OnOpenExternallyRequested;
             old.PropertyChanged -= OnVmPropertyChanged;
             old.Annotations.CollectionChanged -= OnAnnotationsChanged;
-            old.RunScript = null;
-            old.CaptureScreenshot = null;
+            foreach (var t in old.Tabs)
+            {
+                t.RunScript = null;
+                t.CaptureScreenshot = null;
+            }
+            old.Dialogs.PropertyChanged -= OnDialogsPropertyChanged;
+            old.Dialogs.CaptureSnapshot = null;
+            old.Dialogs.PickFiles = null;
+            old.PopupOpened -= HostPopup;
+            old.ShowDownloadRequested -= OnShowDownloadRequested;
+            old.Downloads.PickSaveLocation = null;
         }
         _vm = DataContext as PreviewViewModel;
         if (_vm is { } vm)
         {
             vm.NavigationRequested += OnNavigationRequested;
+            vm.TabNavigationRequested += NavigateTab;
+            vm.TabClosed += OnTabClosed;
             vm.ReloadRequested += OnReloadRequested;
             vm.BackRequested += OnBackRequested;
             vm.ForwardRequested += OnForwardRequested;
             vm.OpenExternallyRequested += OnOpenExternallyRequested;
             vm.PropertyChanged += OnVmPropertyChanged;
             vm.Annotations.CollectionChanged += OnAnnotationsChanged;
-            // A page chosen while the panel was not in a window yet (or by an earlier panel).
-            if (vm.CurrentUrl is { } current && _web is null) OnNavigationRequested(current);
-            if (_web is not null)
+            vm.Dialogs.PropertyChanged += OnDialogsPropertyChanged;
+            vm.Dialogs.PickFiles = PickFilesAsync;
+            vm.Dialogs.CaptureSnapshot = CaptureDialogSnapshotAsync; // the page behind a card (null while no web view)
+            vm.PopupOpened += HostPopup;
+            vm.ShowDownloadRequested += OnShowDownloadRequested;
+            vm.Downloads.PickSaveLocation = PickSaveLocationAsync;
+            if (vm.Dialogs.Card is not null) OnDialogCardShown();
+            // Pages chosen while the panel was not in a window yet (or by an earlier panel).
+            foreach (var t in vm.Tabs)
             {
-                vm.RunScript = RunScriptAsync;
-                vm.CaptureScreenshot = CaptureScreenshotAsync;
+                if (t.IsPopup) HostPopup(t);
+                else if (_webs.TryGetValue(t, out var web)) Connect(t, web);
+                else if ((t == vm.ActiveTab ? vm.CurrentUrl : t.Url) is { } current) NavigateTab(t, current);
             }
+            ShowActiveTab();
         }
     }
 
@@ -78,35 +107,55 @@ public partial class PreviewPanel : UserControl
 
     private void OnNavigationRequested(Uri uri)
     {
-        if (_vm is null || _vm.IsEngineUnavailable) return;
-        if (_web is not null)
+        if (_vm is { } vm) NavigateTab(vm.ActiveTab, uri);
+    }
+
+    /// <summary>Loads <paramref name="uri"/> in <paramref name="tab"/>'s web view (created once the panel is in a window).</summary>
+    private void NavigateTab(PreviewTab tab, Uri uri)
+    {
+        if (_vm is null || _vm.IsEngineUnavailable || tab.IsClosed) return;
+        if (tab.Popup is { } popup)
         {
-            _web.Navigate(uri);
+            popup.Navigate(uri);
             return;
         }
-        _pending = uri;
+        if (_webs.TryGetValue(tab, out var web))
+        {
+            web.Navigate(uri);
+            return;
+        }
+        _pending[tab] = uri;
         Realize();
     }
 
     private void OnReloadRequested()
     {
-        if (_web is not null) _web.Refresh();
+        if (_vm?.ActiveTab.Popup is { } popup) popup.Reload();
+        else if (_web is not null) _web.Refresh();
         else if (_vm?.CurrentUrl is { } uri) OnNavigationRequested(uri);
     }
 
-    private void OnBackRequested() => _web?.GoBack();
+    private void OnBackRequested()
+    {
+        if (_vm?.ActiveTab.Popup is { } popup) popup.GoBack();
+        else _web?.GoBack();
+    }
 
-    private void OnForwardRequested() => _web?.GoForward();
+    private void OnForwardRequested()
+    {
+        if (_vm?.ActiveTab.Popup is { } popup) popup.GoForward();
+        else _web?.GoForward();
+    }
 
     private void OnOpenExternallyRequested(Uri uri)
     {
         if (TopLevel.GetTopLevel(this)?.Launcher is { } launcher) _ = launcher.LaunchUriAsync(uri);
     }
 
-    /// <summary>Creates the web view for a pending navigation once the panel is shown in a window.</summary>
+    /// <summary>Creates the web views for pending navigations once the panel is shown in a window.</summary>
     private void Realize()
     {
-        if (_pending is null || _web is not null || _vm is null || _vm.IsEngineUnavailable) return;
+        if (_pending.Count == 0 || _vm is null || _vm.IsEngineUnavailable) return;
         if (!IsEffectivelyVisible || TopLevel.GetTopLevel(this) is not { } top)
         {
             // Hidden by a container, or not in a window yet: try again after the next layout pass (a container that
@@ -122,15 +171,28 @@ public partial class PreviewPanel : UserControl
             Unavailable(probe.Engine, probe.Detail);
             return;
         }
-        var uri = _pending;
-        _pending = null;
+        foreach (var (tab, uri) in _pending.ToList())
+        {
+            _pending.Remove(tab);
+            if (tab.IsClosed) continue;
+            if (_webs.TryGetValue(tab, out var existing)) existing.Navigate(uri);
+            else if (!CreateWebView(tab, uri, probe)) return;
+        }
+    }
+
+    /// <summary>The web view of <paramref name="tab"/>, loading <paramref name="uri"/>; false when the engine failed (the card shows).</summary>
+    private bool CreateWebView(PreviewTab tab, Uri uri, EngineProbe probe)
+    {
         try
         {
             var web = new NativeWebView();
+            web.EnvironmentRequested += OnWebEnvironmentRequested;
             web.NavigationStarted += OnWebNavigationStarted;
             web.NavigationCompleted += OnWebNavigationCompleted;
             web.NewWindowRequested += OnWebNewWindowRequested;
             web.WebMessageReceived += OnWebMessageReceived;
+            web.AdapterCreated += OnWebAdapterCreated; // native hooks: the page's questions and events (Platform/BrowserHooks.cs)
+            web.AdapterDestroyed += OnWebAdapterDestroyed;
             web.PropertyChanged += (_, e) =>
             {
                 // The engine turned out to be missing after all (the adapter factory reports it): same card.
@@ -138,55 +200,170 @@ public partial class PreviewPanel : UserControl
                     Unavailable(probe.Engine, info.UnavailableReason ?? "");
             };
             web.Navigate(uri); // remembered until the native adapter exists, then loaded
-            _web = web;
-            this.FindControl<Border>("WebHost")!.Child = web;
-            _vm.RunScript = RunScriptAsync; // the agent's browser (AgentBrowserBridge) runs its scripts here
-            _vm.CaptureScreenshot = CaptureScreenshotAsync; // and takes its screenshots
+            web.IsVisible = tab == _vm?.ActiveTab;
+            _webs[tab] = web;
+            this.FindControl<Panel>("WebHost")!.Children.Add(web);
+            Connect(tab, web);
+            // omp's viewport (Tern): at most that size, top-left; the pane's size when none
+            ApplyViewport(tab, web);
+            tab.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(PreviewTab.Viewport)) ApplyViewport(tab, web);
+            };
+            ShowActiveTab();
+            return true;
         }
         catch (Exception e)
         {
             Unavailable(probe.Engine, e.Message);
+            return false;
         }
+    }
+
+    /// <summary>The agent's browser (AgentBrowserBridge) runs its scripts in the tab's web view and takes its screenshots.</summary>
+    private static void Connect(PreviewTab tab, NativeWebView web)
+    {
+        tab.RunScript = script => RunScriptAsync(web, script);
+        tab.CaptureScreenshot = ct => CaptureScreenshotAsync(web, ct);
+    }
+
+    private static void ApplyViewport(PreviewTab tab, NativeWebView web)
+    {
+        var size = tab.Viewport;
+        web.MaxWidth = size?.Width ?? double.PositiveInfinity;
+        web.MaxHeight = size?.Height ?? double.PositiveInfinity;
+        web.HorizontalAlignment = size is null ? Avalonia.Layout.HorizontalAlignment.Stretch : Avalonia.Layout.HorizontalAlignment.Left;
+        web.VerticalAlignment = size is null ? Avalonia.Layout.VerticalAlignment.Stretch : Avalonia.Layout.VerticalAlignment.Top;
+    }
+
+    /// <summary>The active tab's web view shows (the others stay alive, hidden); the toolbar and the cards follow it.</summary>
+    private void ShowActiveTab()
+    {
+        if (_vm is not { } vm) return;
+        _web = _webs.GetValueOrDefault(vm.ActiveTab);
+        foreach (var (tab, web) in _webs) web.IsVisible = tab == vm.ActiveTab;
+        foreach (var (tab, host) in _popups) host.IsVisible = tab == vm.ActiveTab;
+        _ = SyncAnnotationsAsync();
     }
 
     private void OnLayoutUpdatedWhilePending(object? sender, EventArgs e)
     {
-        if (_pending is null || _web is not null) LayoutUpdated -= OnLayoutUpdatedWhilePending;
+        if (_pending.Count == 0) LayoutUpdated -= OnLayoutUpdatedWhilePending;
         else if (IsEffectivelyVisible) Realize();
+    }
+
+    /// <summary>A tab left the pane: its web view goes.</summary>
+    private void OnTabClosed(PreviewTab tab)
+    {
+        _pending.Remove(tab);
+        if (_popups.Remove(tab, out var host)) this.FindControl<Panel>("WebHost")!.Children.Remove(host);
+        if (!_webs.Remove(tab, out var web))
+        {
+            ShowActiveTab();
+            return;
+        }
+        Drop(web);
+        if (_web == web) _web = null;
+        ShowActiveTab();
+    }
+
+    /// <summary>
+    /// A page opened a pop-up: its web view (the engine's, built with the opener's configuration) is hosted as the
+    /// tab's page; the agent's browser can drive it like any tab.
+    /// </summary>
+    private void HostPopup(PreviewTab tab)
+    {
+        if (tab.Popup is not { IsClosed: false } popup || _popups.ContainsKey(tab)) return;
+        var host = new PopupViewHost(popup) { IsVisible = tab == _vm?.ActiveTab };
+        _popups[tab] = host;
+        this.FindControl<Panel>("WebHost")!.Children.Add(host);
+        tab.RunScript = popup.RunScriptAsync;
+        tab.CaptureScreenshot = ct => Platform.WebViewSnapshot.CaptureAsync(host.Handle, ct);
+        var (input, isolated) = Platform.NativeInputs.For(host.Handle); // the agent's input and helper world (B4)
+        tab.SetNative(host.Handle, input, isolated);
+        ShowActiveTab();
+    }
+
+    private void Drop(NativeWebView web)
+    {
+        this.FindControl<Panel>("WebHost")!.Children.Remove(web);
+        web.EnvironmentRequested -= OnWebEnvironmentRequested;
+        web.NavigationStarted -= OnWebNavigationStarted;
+        web.NavigationCompleted -= OnWebNavigationCompleted;
+        web.NewWindowRequested -= OnWebNewWindowRequested;
+        web.WebMessageReceived -= OnWebMessageReceived;
+        web.AdapterCreated -= OnWebAdapterCreated;
+        web.AdapterDestroyed -= OnWebAdapterDestroyed;
+        DetachNativeHooks(web);
     }
 
     private void Unavailable(string engine, string detail)
     {
-        _pending = null;
-        if (_web is { } web)
+        _pending.Clear();
+        _web = null;
+        foreach (var (tab, web) in _webs)
         {
-            _web = null;
-            this.FindControl<Border>("WebHost")!.Child = null;
-            web.NavigationStarted -= OnWebNavigationStarted;
-            web.NavigationCompleted -= OnWebNavigationCompleted;
-            web.NewWindowRequested -= OnWebNewWindowRequested;
-            web.WebMessageReceived -= OnWebMessageReceived;
+            Drop(web);
+            tab.RunScript = null;
+            tab.CaptureScreenshot = null;
+            tab.SetNative(null, null, null);
         }
-        if (_vm is { } vm)
-        {
-            vm.RunScript = null;
-            vm.CaptureScreenshot = null;
-        }
+        _webs.Clear();
         _vm?.ReportEngineUnavailable(engine, detail);
     }
 
-    /// <summary>A script in the page (the agent's browser): the engine's result as it came back (JSON text or a bare string).</summary>
-    private async Task<string?> RunScriptAsync(string script)
+    /// <summary>The tab whose web view raised an event.</summary>
+    private PreviewTab? TabOf(object? sender)
     {
-        if (_web is not { } web) throw new InvalidOperationException("No page is open in the preview.");
-        return await web.InvokeScript(script);
+        foreach (var (tab, web) in _webs)
+            if (ReferenceEquals(web, sender)) return tab;
+        return null;
     }
 
-    /// <summary>A screenshot of the page (the agent's browser): the web view's own snapshot, no screen capture.</summary>
-    private Task<OmpGui.ClientCore.AgentScreenshot> CaptureScreenshotAsync(CancellationToken ct) =>
-        _web is { } web
-            ? Platform.WebViewSnapshot.CaptureAsync(web.TryGetPlatformHandle(), ct)
-            : throw new OmpGui.ClientCore.AgentBrowserException("no_page", "No page is open in the preview.");
+    // ── Native hooks (Platform/BrowserHooks.cs): the page's questions go to the tab's BrowserPageHooks (cards, downloads, pop-ups) ──
+
+    private readonly Dictionary<NativeWebView, Task<IDisposable?>> _nativeHooks = [];
+
+    /// <summary>macOS: Safari's user agent (WKWebView's own lacks the "Version/… Safari/…" part sites look for).</summary>
+    private static void OnWebEnvironmentRequested(object? sender, WebViewEnvironmentRequestedEventArgs e)
+    {
+        if (e is AppleWKWebViewEnvironmentRequestedEventArgs apple && Platform.BrowserHooks.ApplicationNameForUserAgent is { } name)
+            apple.ApplicationNameForUserAgent = name;
+    }
+
+    private void OnWebAdapterCreated(object? sender, WebViewAdapterEventArgs e)
+    {
+        if (sender is not NativeWebView web || TabOf(web) is not { } tab) return;
+        DetachNativeHooks(web);
+        var handle = e.TryGetPlatformHandle();
+        _nativeHooks[web] = Platform.BrowserHooks.AttachAsync(handle, tab.Page);
+        var (input, isolated) = Platform.NativeInputs.For(handle); // the agent's input and helper world (B4)
+        tab.SetNative(handle, input, isolated);
+    }
+
+    private void OnWebAdapterDestroyed(object? sender, WebViewAdapterEventArgs e)
+    {
+        if (sender is not NativeWebView web) return;
+        DetachNativeHooks(web);
+        TabOf(web)?.SetNative(null, null, null);
+    }
+
+    /// <summary>Removes the hooks; what the page still asks gets the engine's default answer.</summary>
+    private void DetachNativeHooks(NativeWebView web)
+    {
+        if (_nativeHooks.Remove(web, out var attach)) _ = Platform.BrowserHooks.DetachAsync(attach);
+    }
+
+    /// <summary>The engine hooks of <paramref name="web"/> are in place (they open pop-ups as tabs).</summary>
+    private bool HasNativeHooks(NativeWebView web) =>
+        _nativeHooks.TryGetValue(web, out var attach) && attach.IsCompletedSuccessfully && attach.Result is not null;
+
+    /// <summary>A script in a tab's page (the agent's browser): the engine's result as it came back (JSON text or a bare string).</summary>
+    private static async Task<string?> RunScriptAsync(NativeWebView web, string script) => await web.InvokeScript(script);
+
+    /// <summary>A screenshot of a tab's page (the agent's browser): the web view's own snapshot, no screen capture.</summary>
+    private static Task<OmpGui.ClientCore.AgentScreenshot> CaptureScreenshotAsync(NativeWebView web, CancellationToken ct) =>
+        Platform.WebViewSnapshot.CaptureAsync(web.TryGetPlatformHandle(), ct);
 
     private void OnWebNavigationStarted(object? sender, WebViewNavigationStartingEventArgs e)
     {
@@ -196,18 +373,27 @@ public partial class PreviewPanel : UserControl
             e.Cancel = true;
             return;
         }
-        _vm?.OnNavigationStarted(e.Request);
+        if (TabOf(sender) is not { } tab) return;
+        // omp's allowed hosts (Tern allow): a refused page is not loaded, and omp hears of it
+        if (e.Request is { } next && tab.NavigationFilter?.Invoke(next) == false)
+        {
+            e.Cancel = true;
+            return;
+        }
+        _vm?.OnNavigationStarted(tab, e.Request);
     }
 
     private async void OnWebNavigationCompleted(object? sender, WebViewNavigationCompletedEventArgs e)
     {
-        if (_web is not { } web || _vm is not { } vm) return;
-        vm.OnNavigationCompleted(e.Request, e.IsSuccess, web.CanGoBack, web.CanGoForward);
+        if (sender is not NativeWebView web || TabOf(web) is not { } tab || _vm is not { } vm) return;
+        vm.OnNavigationCompleted(tab, e.Request, e.IsSuccess, web.CanGoBack, web.CanGoForward);
+        if (e.IsSuccess) tab.Page.RaiseFinished(e.Request);
         if (e.IsSuccess) await InjectAnnotationsAsync(web);
         try
         {
-            var raw = await web.InvokeScript("document.title");
-            vm.Title = DecodeScriptString(raw);
+            var title = DecodeScriptString(await web.InvokeScript("document.title"));
+            if (tab == vm.ActiveTab) vm.Title = title;
+            else tab.Title = title;
         }
         catch (Exception)
         {
@@ -270,6 +456,11 @@ public partial class PreviewPanel : UserControl
 
     private void OnVmPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(PreviewViewModel.ActiveTab))
+        {
+            ShowActiveTab();
+            return;
+        }
         if (e.PropertyName != nameof(PreviewViewModel.IsAnnotating)) return;
         _ = SyncAnnotationsAsync();
         // Keys go to the page while commenting (Esc there leaves the mode)
@@ -278,14 +469,108 @@ public partial class PreviewPanel : UserControl
 
     private void OnAnnotationsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) => _ = SyncAnnotationsAsync();
 
-    /// <summary>target="_blank" links: local pages stay in the preview, the rest go to the system browser.</summary>
+    /// <summary>
+    /// target="_blank" links. With the engine hooks (macOS), http(s) links go on to the engine, which opens them as a
+    /// pop-up tab keeping <c>window.opener</c>; otherwise local pages stay in the preview and the rest go to the system
+    /// browser.
+    /// </summary>
     private void OnWebNewWindowRequested(object? sender, WebViewNewWindowRequestedEventArgs e)
     {
+        if (sender is NativeWebView web && OperatingSystem.IsMacOS() && HasNativeHooks(web) && PreviewViewModel.IsAllowed(e.Request))
+        {
+            e.Handled = false;
+            return;
+        }
         e.Handled = true;
         if (e.Request is not { } uri || !PreviewViewModel.IsAllowed(uri)) return;
-        if (PreviewViewModel.IsLocal(uri)) _vm?.NavigateCommand.Execute(uri.AbsoluteUri);
-        else OnOpenExternallyRequested(uri);
+        if (!PreviewViewModel.IsLocal(uri)) OnOpenExternallyRequested(uri);
+        else if (_vm is { } vm && TabOf(sender) is { } tab && tab != vm.ActiveTab) _webs[tab].Navigate(uri); // a tab in the background
+        else _vm?.NavigateCommand.Execute(uri.AbsoluteUri);
     }
+
+    // ── Cards for the page's questions (BrowserDialogsViewModel over DialogBroker) ──
+
+    /// <summary>The page as a picture for the card's background: the engine's own snapshot (no screen capture).</summary>
+    private async Task<Avalonia.Media.Imaging.Bitmap?> CaptureDialogSnapshotAsync(CancellationToken ct)
+    {
+        var handle = _vm?.ActiveTab is { } active && _popups.TryGetValue(active, out var host) ? host.Handle : _web?.TryGetPlatformHandle();
+        if (handle is null) return null;
+        var shot = await Platform.WebViewSnapshot.CaptureAsync(handle, ct);
+        using var png = new MemoryStream(shot.Png, writable: false);
+        return new Avalonia.Media.Imaging.Bitmap(png);
+    }
+
+    /// <summary>A download card's "Save" (no folder chosen yet) or "Save as…": the system's save panel, which asks before replacing a file.</summary>
+    private async Task<string?> PickSaveLocationAsync(string fileName, string? folder)
+    {
+        if (TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return null;
+        var options = new FilePickerSaveOptions { SuggestedFileName = fileName, ShowOverwritePrompt = true };
+        if (folder is not null && Directory.Exists(folder)) options.SuggestedStartLocation = await storage.TryGetFolderFromPathAsync(folder);
+        var file = await storage.SaveFilePickerAsync(options);
+        return file?.TryGetLocalPath();
+    }
+
+    /// <summary>"Show in Finder": the folder of a saved download (the user asked for it).</summary>
+    private void OnShowDownloadRequested(OmpGui.ClientCore.Browser.BrowserDownload download)
+    {
+        if (download.Path is not { } path || Path.GetDirectoryName(path) is not { Length: > 0 } folder) return;
+        if (TopLevel.GetTopLevel(this)?.Launcher is { } launcher) _ = launcher.LaunchDirectoryInfoAsync(new DirectoryInfo(folder));
+    }
+
+    /// <summary>A file card's "Choose…": the system's picker (the user asked for it), local paths only.</summary>
+    private async Task<IReadOnlyList<string>?> PickFilesAsync(OmpGui.ClientCore.Browser.FileChooserRequest request)
+    {
+        if (TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return null;
+        if (request.AllowDirectories)
+        {
+            var folders = await storage.OpenFolderPickerAsync(new() { AllowMultiple = request.Multiple });
+            return [.. folders.Select(f => f.TryGetLocalPath()).OfType<string>()];
+        }
+        var patterns = request.Accept.Where(a => a.StartsWith('.')).Select(a => "*" + a).ToList();
+        var mimes = request.Accept.Where(a => a.Contains('/')).ToList();
+        var options = new Avalonia.Platform.Storage.FilePickerOpenOptions { AllowMultiple = request.Multiple };
+        if (patterns.Count > 0 || mimes.Count > 0)
+            options.FileTypeFilter = [new("Accepted files") { Patterns = patterns.Count > 0 ? patterns : null, MimeTypes = mimes.Count > 0 ? mimes : null }];
+        var files = await storage.OpenFilePickerAsync(options);
+        return [.. files.Select(f => f.TryGetLocalPath()).OfType<string>()];
+    }
+
+    private void OnDialogsPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(BrowserDialogsViewModel.Card) && _vm?.Dialogs.Card is not null) OnDialogCardShown();
+    }
+
+    /// <summary>A card opened (or the next one in line): its mark, and the keyboard in its first field (Enter answers, Esc cancels).</summary>
+    private void OnDialogCardShown() =>
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (_vm?.Dialogs.Card is not { } card) return;
+            // The card's own named parts (template parts inside its text boxes and buttons share names like PART_…)
+            var parts = this.GetVisualDescendants().OfType<Control>()
+                .Where(c => c.DataContext == card && c.Name?.StartsWith("BrowserDialog", StringComparison.Ordinal) == true)
+                .DistinctBy(c => c.Name).ToDictionary(c => c.Name!, c => c);
+            if (parts.GetValueOrDefault("BrowserDialogIcon") is Icon icon && this.TryFindResource(IconFor(card.Kind), out var data))
+                icon.Data = data as Avalonia.Media.Geometry;
+            var target = parts.GetValueOrDefault(card.FirstFocus switch
+            {
+                "UserName" => "BrowserDialogUser",
+                "Password" => "BrowserDialogPassword",
+                "Prompt" => "BrowserDialogPrompt",
+                _ => card.HasTertiary ? "BrowserDialogPrimaryStacked" : "BrowserDialogPrimary",
+            });
+            target?.Focus(Avalonia.Input.NavigationMethod.Tab);
+        }, Avalonia.Threading.DispatcherPriority.Loaded);
+
+    private static string IconFor(OmpGui.ClientCore.Browser.BrowserDialogKind kind) => kind switch
+    {
+        OmpGui.ClientCore.Browser.BrowserDialogKind.Credentials => "IconKey",
+        OmpGui.ClientCore.Browser.BrowserDialogKind.FileChooser => "IconFile",
+        OmpGui.ClientCore.Browser.BrowserDialogKind.Download => "IconDownload",
+        OmpGui.ClientCore.Browser.BrowserDialogKind.Permission => "IconShield",
+        OmpGui.ClientCore.Browser.BrowserDialogKind.PopupNotice => "IconExternal",
+        OmpGui.ClientCore.Browser.BrowserDialogKind.BeforeUnload => "IconAlert",
+        _ => "IconGlobe",
+    };
 
     /// <summary>Engines return script results as JSON ("\"Title\""); some return the bare string.</summary>
     internal static string DecodeScriptString(string? raw)

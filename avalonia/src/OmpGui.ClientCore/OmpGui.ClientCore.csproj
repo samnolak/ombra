@@ -5,5 +5,7 @@
   <ItemGroup>
     <ProjectReference Include="..\OmpGui.Rpc\OmpGui.Rpc.csproj" />
     <InternalsVisibleTo Include="OmpGui.Tests" />
+    <!-- tools/verify/webview-harness drives the agent browser bridge against a real WKWebView (scenario agent-native) -->
+    <InternalsVisibleTo Include="WebViewHarness" />
   </ItemGroup>
 </Project>

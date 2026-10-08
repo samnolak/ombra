@@ -6,6 +6,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
+             xmlns:cb="using:OmpGui.ClientCore.Browser"
              x:Class="OmpGui.App.Controls.PreviewPanel"
              x:DataType="vm:PreviewViewModel"
              Background="{DynamicResource GuiWindow}"
@@ -31,6 +32,32 @@
       <Setter Property="Padding" Value="8,0,10,0" />
       <Setter Property="Margin" Value="0,0,4,0" />
       <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <!-- Tabs: the user's own page and one per page omp opened (shown once omp opened one) -->
+    <Style Selector="Border.preview-tabs">
+      <Setter Property="Padding" Value="6,4" />
+      <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+    <Style Selector="Border.preview-tab">
+      <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusControl}" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="MaxWidth" Value="200" />
+    </Style>
+    <Style Selector="Border.preview-tab.active">
+      <Setter Property="Background" Value="{DynamicResource GuiSegmentSelected}" />
+    </Style>
+    <Style Selector="Border.preview-tab Button.flat">
+      <Setter Property="Height" Value="28" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Padding" Value="10,0,6,0" />
+      <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusControl}" />
+    </Style>
+    <!-- Downloads of the pane's pages, under the page -->
+    <Style Selector="Border.preview-downloads">
+      <Setter Property="Padding" Value="10,8" />
+      <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
     </Style>
   </UserControl.Styles>
 
@@ -88,6 +115,43 @@
                    IsVisible="{Binding IsLoading}" />
     </Panel>
 
+    <!-- ── Tabs (omp's pages, each with its own web view) ── -->
+    <Border x:Name="TabStrip" DockPanel.Dock="Top" Classes="preview-tabs" IsVisible="{Binding ShowTabStrip}">
+      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+        <ItemsControl x:Name="TabItems" ItemsSource="{Binding Tabs}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" Spacing="4" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:PreviewTab">
+              <Border Classes="preview-tab" Classes.active="{Binding IsActive}">
+                <DockPanel>
+                  <Button DockPanel.Dock="Right" Classes="icon" Width="22" Height="22" Margin="0,0,3,0" IsVisible="{Binding CanClose}"
+                          Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).CloseTabCommand}" CommandParameter="{Binding}"
+                          ToolTip.Tip="Close tab" AutomationProperties.Name="Close tab">
+                    <ctl:Icon Data="{StaticResource IconClose}" Size="12" />
+                  </Button>
+                  <Button Classes="flat" Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).SelectTabCommand}" CommandParameter="{Binding}"
+                          ToolTip.Tip="{Binding ToolTip}" AutomationProperties.Name="{Binding Header}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <Ellipse Classes="state-dot running" IsVisible="{Binding IsLoading}" />
+                      <TextBlock Text="{Binding Header}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                 FontSize="{DynamicResource GuiFontS}" />
+                      <!-- A window the page opened (sign-in pop-ups): it closes itself when done -->
+                      <TextBlock Classes="tertiary" Text="Pop-up" IsVisible="{Binding IsPopup}" VerticalAlignment="Center"
+                                 FontSize="{DynamicResource GuiFontXs}" />
+                    </StackPanel>
+                  </Button>
+                </DockPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </Border>
+
     <!-- ── Suggestions (local addresses from tool output) while nothing is open ── -->
     <ItemsControl x:Name="SuggestionRow" DockPanel.Dock="Top" ItemsSource="{Binding Suggestions}"
                   IsVisible="{Binding ShowSuggestionRow}" Margin="10,10,10,0">
@@ -117,6 +181,44 @@
       </DockPanel>
     </Border>
 
+    <!-- ── Downloads (saved where the user chose; the folder opens from here) ── -->
+    <Border x:Name="DownloadsStrip" DockPanel.Dock="Bottom" Classes="preview-downloads" IsVisible="{Binding HasDownloads}">
+      <DockPanel>
+        <Button x:Name="ClearDownloadsButton" DockPanel.Dock="Right" Classes="icon" Width="26" Height="26" VerticalAlignment="Top"
+                Command="{Binding ClearDownloadsCommand}" ToolTip.Tip="Clear finished downloads" AutomationProperties.Name="Clear downloads">
+          <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+        </Button>
+        <ScrollViewer MaxHeight="132" HorizontalScrollBarVisibility="Disabled">
+          <ItemsControl x:Name="DownloadItems" ItemsSource="{Binding Downloads.Items}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Spacing="4" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="cb:BrowserDownload">
+                <DockPanel AutomationProperties.Name="{Binding FileName}">
+                  <Button DockPanel.Dock="Right" Classes="md" Content="Show in Finder" IsVisible="{Binding IsFinished}" Margin="8,0,0,0"
+                          Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).ShowDownloadCommand}" CommandParameter="{Binding}"
+                          AutomationProperties.Name="Show in Finder" />
+                  <Button DockPanel.Dock="Right" Classes="md" Content="Stop" IsVisible="{Binding IsActive}" Margin="8,0,0,0"
+                          Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).CancelDownloadCommand}" CommandParameter="{Binding}"
+                          AutomationProperties.Name="Stop download" />
+                  <ctl:Icon DockPanel.Dock="Left" Data="{StaticResource IconDownload}" Size="16" Margin="0,2,8,0" VerticalAlignment="Top"
+                            TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" FontSize="{DynamicResource GuiFontS}"
+                               ToolTip.Tip="{Binding Path}" />
+                    <TextBlock Classes="tertiary" Text="{Binding StatusText}" TextTrimming="CharacterEllipsis" FontSize="{DynamicResource GuiFontXs}" />
+                  </StackPanel>
+                </DockPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+
     <Panel>
       <!-- Empty: nothing opened yet -->
       <StackPanel x:Name="EmptyState" IsVisible="{Binding ShowEmptyState}" HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -140,8 +242,105 @@
         </StackPanel>
       </Border>
 
-      <!-- The page: PreviewPanel.axaml.cs puts the NativeWebView here on the first navigation -->
-      <Border x:Name="WebHost" IsVisible="{Binding ShowWebView}" />
+      <!-- The page's web process ended: no blank page, one click brings it back -->
+      <Border x:Name="CrashPage" Classes="card" IsVisible="{Binding ShowCrashPage}" HorizontalAlignment="Center" VerticalAlignment="Center"
+              Margin="24" MaxWidth="420">
+        <StackPanel Spacing="10">
+          <DockPanel>
+            <ctl:Icon DockPanel.Dock="Left" Classes="warning-mark" Data="{StaticResource IconAlert}" Size="18" Margin="0,0,10,0" VerticalAlignment="Top" />
+            <TextBlock Classes="section" Text="This page stopped working" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontM}" />
+          </DockPanel>
+          <TextBlock Classes="muted" Text="Its web content process ended. Reload to open it again." TextWrapping="Wrap" />
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button x:Name="CrashReloadButton" Classes="accent" Content="Reload" Command="{Binding ReloadCommand}" />
+            <Button x:Name="CrashOpenExternallyButton" Content="Open in browser" Command="{Binding OpenExternallyCommand}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- The navigation failed (server unreachable, refused certificate…): why, and Try again -->
+      <Border x:Name="ErrorPage" Classes="card" IsVisible="{Binding ShowErrorPage}" HorizontalAlignment="Center" VerticalAlignment="Center"
+              Margin="24" MaxWidth="420">
+        <StackPanel Spacing="10">
+          <DockPanel>
+            <ctl:Icon DockPanel.Dock="Left" Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="18" Margin="0,0,10,0" VerticalAlignment="Top" />
+            <TextBlock x:Name="ErrorPageTitle" Classes="section" Text="{Binding ErrorTitle}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontM}" />
+          </DockPanel>
+          <SelectableTextBlock x:Name="ErrorPageDetail" Classes="muted" Text="{Binding ErrorDetail}" TextWrapping="Wrap" />
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button x:Name="ErrorRetryButton" Classes="accent" Content="Try again" Command="{Binding ReloadCommand}" />
+            <Button x:Name="ErrorOpenExternallyButton" Content="Open in browser" Command="{Binding OpenExternallyCommand}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- The pages: PreviewPanel.axaml.cs puts one NativeWebView per tab here (the active tab's shows), and pop-ups' own views -->
+      <Panel x:Name="WebHost" IsVisible="{Binding ShowWebView}" />
+
+      <!-- ── A question from the page (sign-in, alert, file, download, permission, popup): BrowserDialogsViewModel ──
+           The native web view draws over anything here, so while a card is open it is hidden and the page shows as the
+           picture taken just before (or the plain surface) under a scrim. One card at a time; Enter answers with the
+           main button, Esc cancels. -->
+      <Panel x:Name="BrowserDialogLayer" IsVisible="{Binding Dialogs.IsOpen}" ClipToBounds="True">
+        <Image x:Name="BrowserDialogSnapshot" Source="{Binding Dialogs.Snapshot}" IsVisible="{Binding Dialogs.HasSnapshot}"
+               Stretch="Uniform" HorizontalAlignment="Left" VerticalAlignment="Top" />
+        <Border Background="{DynamicResource GuiBackdrop}" />
+        <ContentControl x:Name="BrowserDialogHost" Content="{Binding Dialogs.Card}" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                        MaxWidth="400" Margin="16">
+          <ContentControl.ContentTemplate>
+            <DataTemplate x:DataType="vm:BrowserDialogCardViewModel">
+              <Border x:Name="BrowserDialogCard" Classes="dialog browser-dialog" Background="{DynamicResource GuiSurface1}" BoxShadow="{DynamicResource GuiShadowPopup}"
+                      AutomationProperties.Name="{Binding Title}">
+                <Border.KeyBindings>
+                  <KeyBinding Gesture="Enter" Command="{Binding PrimaryCommand}" />
+                  <KeyBinding Gesture="Escape" Command="{Binding CancelCommand}" />
+                </Border.KeyBindings>
+                <StackPanel Spacing="12">
+                  <Grid ColumnDefinitions="Auto,*,Auto">
+                    <ctl:Icon x:Name="BrowserDialogIcon" Classes="dialog-mark" Size="18" Margin="0,1,10,0" VerticalAlignment="Top" />
+                    <SelectableTextBlock x:Name="BrowserDialogTitle" Grid.Column="1" Classes="dialog-title" Text="{Binding Title}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Classes="tertiary" Text="{Binding QueueText}" IsVisible="{Binding HasQueue}" Margin="12,0,0,0"
+                               VerticalAlignment="Center" ToolTip.Tip="More questions from this page are waiting" />
+                  </Grid>
+                  <TextBlock Classes="muted" Text="{Binding Detail}" IsVisible="{Binding HasDetail}" TextWrapping="Wrap" Margin="0,-6,0,0" />
+                  <ScrollViewer MaxHeight="220" HorizontalScrollBarVisibility="Disabled" IsVisible="{Binding HasMessage}">
+                    <SelectableTextBlock x:Name="BrowserDialogMessage" Text="{Binding Message}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontUi}" />
+                  </ScrollViewer>
+                  <DockPanel IsVisible="{Binding HasError}">
+                    <ctl:Icon DockPanel.Dock="Left" Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" Margin="0,1,8,0" VerticalAlignment="Top" />
+                    <TextBlock Classes="error" Text="{Binding Error}" TextWrapping="Wrap" />
+                  </DockPanel>
+                  <DockPanel IsVisible="{Binding HasWarning}">
+                    <ctl:Icon DockPanel.Dock="Left" Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,1,8,0" VerticalAlignment="Top" />
+                    <TextBlock Classes="warning" Text="{Binding Warning}" TextWrapping="Wrap" />
+                  </DockPanel>
+                  <StackPanel Spacing="8" IsVisible="{Binding IsCredentials}">
+                    <TextBox x:Name="BrowserDialogUser" Text="{Binding UserName}" PlaceholderText="Username" AutomationProperties.Name="Username" />
+                    <TextBox x:Name="BrowserDialogPassword" Text="{Binding Password}" PasswordChar="•" PlaceholderText="Password" AutomationProperties.Name="Password" />
+                  </StackPanel>
+                  <TextBox x:Name="BrowserDialogPrompt" Text="{Binding PromptText}" IsVisible="{Binding IsPrompt}" AutomationProperties.Name="Answer" />
+                  <TextBlock Classes="muted" Text="{Binding Note}" IsVisible="{Binding HasNote}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+                  <!-- Two answers: in a row, the main one last. Three (permission, download): stacked full width, the main one first. -->
+                  <WrapPanel ItemSpacing="8" LineSpacing="8" HorizontalAlignment="Right" IsVisible="{Binding !HasTertiary}">
+                    <Button x:Name="BrowserDialogSecondary" Classes="md" Content="{Binding SecondaryLabel}" Command="{Binding SecondaryCommand}" IsVisible="{Binding HasSecondary}"
+                            AutomationProperties.Name="{Binding SecondaryLabel}" ToolTip.Tip="Esc" />
+                    <Button x:Name="BrowserDialogPrimary" Classes="accent md" MinWidth="88" Content="{Binding PrimaryLabel}" Command="{Binding PrimaryCommand}"
+                            AutomationProperties.Name="{Binding PrimaryLabel}" ToolTip.Tip="Enter" />
+                  </WrapPanel>
+                  <StackPanel Spacing="8" IsVisible="{Binding HasTertiary}">
+                    <Button x:Name="BrowserDialogPrimaryStacked" Classes="accent md" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                            Content="{Binding PrimaryLabel}" Command="{Binding PrimaryCommand}" AutomationProperties.Name="{Binding PrimaryLabel}" ToolTip.Tip="Enter" />
+                    <Button x:Name="BrowserDialogTertiary" Classes="md" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                            Content="{Binding TertiaryLabel}" Command="{Binding TertiaryCommand}" AutomationProperties.Name="{Binding TertiaryLabel}" />
+                    <Button x:Name="BrowserDialogSecondaryStacked" Classes="md" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                            Content="{Binding SecondaryLabel}" Command="{Binding SecondaryCommand}" AutomationProperties.Name="{Binding SecondaryLabel}" ToolTip.Tip="Esc" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ContentControl.ContentTemplate>
+        </ContentControl>
+      </Panel>
     </Panel>
   </DockPanel>
 </UserControl>

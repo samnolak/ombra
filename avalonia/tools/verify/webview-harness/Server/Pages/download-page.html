@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>downloads</title>
+<p><a id="attachment" href="/download/attachment">Content-Disposition: attachment</a></p>
+<p><a id="adownload" href="/download/plain.txt" download="saved.txt">&lt;a download&gt; of a text file</a></p>
+<p><a id="blob" download="blob.txt">&lt;a download&gt; of a blob: URL</a></p>
+<script>
+  document.getElementById('blob').href = URL.createObjectURL(new Blob(['hello blob\n'], { type: 'text/plain' }));
+</script>

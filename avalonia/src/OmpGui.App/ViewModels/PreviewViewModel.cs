@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.ClientCore.Browser;
 
 namespace OmpGui.App.ViewModels;
 
@@ -40,7 +41,8 @@ public sealed partial class PreviewViewModel : ObservableObject
 
     /// <summary>The page shown (or being loaded); null while the panel is empty.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsEmpty), nameof(HasPage), nameof(ShowEmptyState), nameof(ShowSuggestionRow), nameof(ShowFallback), nameof(ShowWebView))]
+    [NotifyPropertyChangedFor(nameof(IsEmpty), nameof(HasPage), nameof(ShowEmptyState), nameof(ShowSuggestionRow), nameof(ShowFallback), nameof(ShowWebView),
+        nameof(ShowCrashPage), nameof(ShowErrorPage))]
     [NotifyCanExecuteChangedFor(nameof(ReloadCommand), nameof(OpenExternallyCommand), nameof(ToggleAnnotateCommand))]
     private Uri? _currentUrl;
 
@@ -64,9 +66,19 @@ public sealed partial class PreviewViewModel : ObservableObject
 
     /// <summary>Set by the view when the platform's web engine cannot be used (not installed, no native window).</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowFallback), nameof(ShowWebView), nameof(FallbackText))]
+    [NotifyPropertyChangedFor(nameof(ShowFallback), nameof(ShowWebView), nameof(FallbackText), nameof(ShowCrashPage), nameof(ShowErrorPage))]
     [NotifyCanExecuteChangedFor(nameof(ToggleAnnotateCommand))]
     private bool _isEngineUnavailable;
+
+    /// <summary>The page's web process ended (crash, killed): the crash page shows instead of the blank web view.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowWebView), nameof(ShowCrashPage), nameof(ShowErrorPage))]
+    private bool _isCrashed;
+
+    /// <summary>Why the last navigation failed, as the engine said (the error page shows it); null when it did not.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowWebView), nameof(ShowErrorPage), nameof(ErrorTitle), nameof(ErrorDetail))]
+    private BrowserLoadFailure? _loadError;
 
     /// <summary>The engine the platform needs ("WebKitGTK", "Microsoft Edge WebView2", "WebKit").</summary>
     [ObservableProperty]
@@ -81,18 +93,50 @@ public sealed partial class PreviewViewModel : ObservableObject
 
     private DispatcherTimer? _agentIdle;
 
-    /// <summary>Runs a script in the page and returns the engine's result; set by the view (it throws while no page is open).</summary>
-    public Func<string, Task<string?>>? RunScript { get; set; }
+    /// <summary>The tabs: the user's own first (always there), then one per page omp's browser tool opened.</summary>
+    public ObservableCollection<PreviewTab> Tabs { get; }
 
-    /// <summary>Captures the page shown as a PNG (Platform/WebViewSnapshot); set by the view together with <see cref="RunScript"/>.
-    /// Failures are <see cref="OmpGui.ClientCore.AgentBrowserException"/>s with a message for the agent.</summary>
-    public Func<CancellationToken, Task<OmpGui.ClientCore.AgentScreenshot>>? CaptureScreenshot { get; set; }
+    /// <summary>The tab the pane shows; the page properties of this model (address, title, loading…) are its.</summary>
+    [ObservableProperty] private PreviewTab _activeTab;
+
+    /// <summary>The tab strip shows once omp opened a tab of its own.</summary>
+    public bool ShowTabStrip => Tabs.Count > 1;
+
+    /// <summary>The tab omp used last.</summary>
+    private PreviewTab? _agentTab;
+
+    /// <summary>
+    /// The pane follows omp to the tab it opens or navigates, unless the user picked another tab; picking omp's tab
+    /// again (or closing the one picked) follows omp again.
+    /// </summary>
+    public bool FollowsAgent { get; private set; } = true;
+
+    /// <summary>The view navigates this tab's web view (a tab other than the active one: omp's, in the background).</summary>
+    public event Action<PreviewTab, Uri>? TabNavigationRequested;
+
+    /// <summary>A tab left the pane: the view drops its web view.</summary>
+    public event Action<PreviewTab>? TabClosed;
 
     /// <summary>The last navigation failed (the server did not answer); reset when the next one starts.</summary>
-    public bool LoadFailed { get; private set; }
-
-    public PreviewViewModel()
+    public bool LoadFailed
     {
+        get;
+        private set
+        {
+            field = value;
+            ActiveTab.LoadFailed = value;
+        }
+    }
+
+    public PreviewViewModel(BrowserSiteSettings? siteSettings = null)
+    {
+        SiteSettings = siteSettings ?? new BrowserSiteSettings();
+        Downloads = new BrowserDownloads(SiteSettings);
+        Downloads.Items.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasDownloads));
+        Tabs = [Configure(new PreviewTab("", isAgentTab: false) { IsActive = true })];
+        _activeTab = Tabs[0];
+        Dialogs.Follow(_activeTab.Dialogs);
+        Tabs.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ShowTabStrip));
         Suggestions.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(HasSuggestions));
@@ -100,7 +144,22 @@ public sealed partial class PreviewViewModel : ObservableObject
             OnPropertyChanged(nameof(EmptyText));
         };
         Annotations.CollectionChanged += (_, _) => OnAnnotationsChanged();
+        Dialogs.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(BrowserDialogsViewModel.CoversPage)) OnPropertyChanged(nameof(ShowWebView));
+        };
     }
+
+    /// <summary>The page's questions (sign-in, alerts, files, downloads, permissions, popups) as cards over the page.</summary>
+    public BrowserDialogsViewModel Dialogs { get; } = new();
+
+    /// <summary>"Always allow on this site" answers and the folder downloads are saved to.</summary>
+    public BrowserSiteSettings SiteSettings { get; }
+
+    /// <summary>The pane's downloads (the strip at the bottom) and where they are saved.</summary>
+    public BrowserDownloads Downloads { get; }
+
+    public bool HasDownloads => Downloads.Items.Count > 0;
 
     /// <summary>Local addresses found in tool output and terminal lines, most recent first (at most <see cref="MaxSuggestions"/>).</summary>
     public ObservableCollection<string> Suggestions { get; } = [];
@@ -116,8 +175,24 @@ public sealed partial class PreviewViewModel : ObservableObject
         : "Start a dev server and its address shows up here";
     public bool ShowSuggestionRow => IsEmpty && HasSuggestions;
     public bool ShowFallback => HasPage && IsEngineUnavailable;
-    public bool ShowWebView => HasPage && !IsEngineUnavailable;
+    /// <summary>The native web view shows; hidden while a card, the crash page or the error page covers the page (it would draw over them).</summary>
+    public bool ShowWebView => HasPage && !IsEngineUnavailable && !Dialogs.CoversPage && !IsCrashed && LoadError is null;
+    public bool ShowCrashPage => HasPage && !IsEngineUnavailable && IsCrashed;
+    public bool ShowErrorPage => HasPage && !IsEngineUnavailable && !IsCrashed && LoadError is not null;
     public string FallbackText => $"The embedded browser needs {EngineName} on this system";
+
+    /// <summary>The error page's title: a certificate problem, or a page that could not be opened.</summary>
+    public string ErrorTitle => LoadError?.IsCertificateError == true ? "This connection isn't private" : "The page couldn't be opened";
+
+    /// <summary>The engine's reason and the address that failed.</summary>
+    public string ErrorDetail => LoadError is not { } f ? ""
+        : f.Url is { } u && IsAllowed(u) ? $"{Display(u)}: {f.Message}" : f.Message;
+
+    /// <summary>The view navigates <see cref="PreviewTab.Popup"/>-less tabs itself; pop-up tabs host the engine's own view (created by the page).</summary>
+    public event Action<PreviewTab>? PopupOpened;
+
+    /// <summary>"Show in Finder" for a finished download (the view opens its folder).</summary>
+    public event Action<BrowserDownload>? ShowDownloadRequested;
 
     /// <summary>The view navigates its web view to this address (already checked: http or https).</summary>
     public event Action<Uri>? NavigationRequested;
@@ -149,6 +224,9 @@ public sealed partial class PreviewViewModel : ObservableObject
         Title = "";
         IsLoading = true;
         LoadFailed = false;
+        LoadError = null;
+        IsCrashed = false;
+        Dialogs.Broker.CancelAll(); // the questions of the page left behind
         NavigationRequested?.Invoke(uri);
     }
 
@@ -172,10 +250,198 @@ public sealed partial class PreviewViewModel : ObservableObject
         _agentIdle.Start();
     }
 
+    // ── Tabs ──
+
+    /// <summary>omp's Tern browser opened <paramref name="tab"/> empty (about:blank): its web view is made now, so omp
+    /// can script and capture it before its first navigation.</summary>
+    public void OpenBlankForAgent(PreviewTab tab)
+    {
+        if (tab.IsClosed || tab.Url is not null) return;
+        TabNavigationRequested?.Invoke(tab, new Uri("about:blank"));
+    }
+
+    /// <summary>omp's browser tool opened a page (a cmux surface): a tab of its own, shown unless the user picked another.</summary>
+    public PreviewTab OpenAgentTab(string id)
+    {
+        var tab = Configure(new PreviewTab(id, isAgentTab: true));
+        Tabs.Add(tab);
+        _agentTab = tab;
+        if (FollowsAgent) ActiveTab = tab;
+        return tab;
+    }
+
+    /// <summary>
+    /// The engine hooks of <paramref name="tab"/>'s web view answer here: the page's questions go to the pane's cards,
+    /// downloads to <see cref="Downloads"/>, pop-ups become tabs; failures and crashes show their pages.
+    /// </summary>
+    private PreviewTab Configure(PreviewTab tab)
+    {
+        var page = tab.Page;
+        page.Broker = () => tab.Dialogs;
+        page.AgentActive = () => tab.IsAgentActing;
+        page.SiteSettings = SiteSettings;
+        page.ChooseDownloadPath = (request, ct) => Downloads.ChooseDestinationAsync(request, page.Broker(), ct);
+        page.OpenPopup = popup => tab.IsClosed ? null : OpenPopupTab(tab, popup).Page;
+        page.Failed += failure => OnUi(() => OnNavigationFailed(tab, failure));
+        page.Terminated += () => OnUi(() => OnPageCrashed(tab));
+        page.DownloadChanged += download => OnUi(() => OnDownloadChanged(tab, download));
+        if (tab.Popup is { } popup)
+        {
+            // Pop-ups have no NativeWebView: their own delegate reports the loading
+            page.Started += url => OnUi(() => OnNavigationStarted(tab, url));
+            page.Finished += url => OnUi(() =>
+            {
+                if (tab.IsClosed) return;
+                OnNavigationCompleted(tab, url, true, popup.CanGoBack, popup.CanGoForward);
+                if (tab == ActiveTab) Title = popup.Title;
+                else tab.Title = popup.Title;
+            });
+            page.Closed += () => OnUi(() => RemoveTab(tab));
+        }
+        return tab;
+    }
+
+    private static void OnUi(Action action)
+    {
+        if (Dispatcher.UIThread.CheckAccess()) action();
+        else Dispatcher.UIThread.Post(action);
+    }
+
+    /// <summary>
+    /// A page in <paramref name="opener"/> opened a new window: a tab right after the opener (and its other pop-ups),
+    /// shown at once when the opener is the tab on screen. It closes itself (<c>window.close()</c>), with its opener, or
+    /// by the user's ×; the opener is shown again then.
+    /// </summary>
+    public PreviewTab OpenPopupTab(PreviewTab opener, BrowserPopup popup)
+    {
+        var tab = Configure(new PreviewTab("", isAgentTab: false) { Popup = popup, Opener = opener });
+        if (IsAllowed(popup.RequestedUrl))
+        {
+            tab.Url = popup.RequestedUrl;
+            tab.Address = Display(popup.RequestedUrl!);
+        }
+        tab.IsLoading = true;
+        var at = Tabs.IndexOf(opener);
+        while (at + 1 < Tabs.Count && IsPopupOf(Tabs[at + 1], opener)) at++;
+        Tabs.Insert(at < 0 ? Tabs.Count : at + 1, tab);
+        PopupOpened?.Invoke(tab);
+        if (opener == ActiveTab) ActiveTab = tab;
+        return tab;
+    }
+
+    private static bool IsPopupOf(PreviewTab tab, PreviewTab opener)
+    {
+        for (var o = tab.Opener; o is not null; o = o.Opener)
+            if (o == opener) return true;
+        return false;
+    }
+
+    /// <summary>omp shows <paramref name="tab"/> (opened or navigated it): the pane follows unless the user picked another tab.</summary>
+    public void ShowForAgent(PreviewTab tab)
+    {
+        if (tab.IsClosed) return;
+        _agentTab = tab;
+        if (FollowsAgent) ActiveTab = tab;
+    }
+
+    /// <summary>omp navigates <paramref name="tab"/>: like the address box when it is the active tab; the reason when refused.</summary>
+    public string? NavigateTabForAgent(PreviewTab tab, string address)
+    {
+        ShowForAgent(tab);
+        if (tab == ActiveTab) return NavigateForAgent(address);
+        if (!TryNormalize(address, out var uri, out var error)) return error;
+        tab.Url = uri;
+        tab.Address = Display(uri);
+        tab.Title = "";
+        tab.Message = "";
+        tab.IsLoading = true;
+        tab.LoadFailed = false;
+        TabNavigationRequested?.Invoke(tab, uri);
+        return null;
+    }
+
+    /// <summary>The user picks a tab; picking omp's latest tab lets the pane follow omp again.</summary>
+    [RelayCommand]
+    private void SelectTab(PreviewTab? tab)
+    {
+        if (tab is null || tab.IsClosed) return;
+        ActiveTab = tab;
+        FollowsAgent = tab == _agentTab || _agentTab is null;
+    }
+
+    /// <summary>The user closes one of omp's tabs or a pop-up (their own tab stays); omp's requests for it are refused from now on.</summary>
+    [RelayCommand]
+    private void CloseTab(PreviewTab? tab)
+    {
+        if (tab is null || !tab.CanClose) return;
+        if (tab == ActiveTab && tab.IsAgentTab) FollowsAgent = true;
+        RemoveTab(tab);
+    }
+
+    /// <summary>omp is done with <paramref name="tab"/>: it leaves the pane, unless the user is looking at it (then it stays until they close it).</summary>
+    public void CloseTabForAgent(PreviewTab tab)
+    {
+        if (_agentTab == tab) _agentTab = null;
+        if (tab == ActiveTab && Tabs.Contains(tab)) return;
+        RemoveTab(tab);
+    }
+
+    private void RemoveTab(PreviewTab tab)
+    {
+        var i = Tabs.IndexOf(tab);
+        if (i <= 0) return; // the user's own tab stays
+        // Its pop-ups go with it
+        foreach (var popup in Tabs.Where(t => t.Opener == tab).ToList()) RemoveTab(popup);
+        i = Tabs.IndexOf(tab);
+        if (tab == ActiveTab)
+            ActiveTab = tab.Opener is { IsClosed: false } opener && Tabs.Contains(opener) ? opener : Tabs[i + 1 < Tabs.Count ? i + 1 : i - 1];
+        Tabs.RemoveAt(i);
+        tab.MarkClosed();
+        if (_agentTab == tab) _agentTab = null;
+        tab.Popup?.Close();
+        TabClosed?.Invoke(tab);
+    }
+
+    partial void OnActiveTabChanging(PreviewTab value)
+    {
+        // What the toolbar showed stays with the tab left behind
+        var old = ActiveTab;
+        old.Address = Address;
+        old.CanGoBack = CanGoBack;
+        old.CanGoForward = CanGoForward;
+        old.Message = Message;
+        old.LoadError = LoadError;
+        old.Crashed = IsCrashed;
+        old.IsActive = false;
+    }
+
+    partial void OnActiveTabChanged(PreviewTab value)
+    {
+        value.IsActive = true;
+        IsAnnotating = false;
+        Dialogs.Follow(value.Dialogs); // the cards show this tab's questions; the others' wait for their tab
+        CurrentUrl = value.Url;
+        Address = value.Address;
+        Title = value.Title;
+        IsLoading = value.IsLoading;
+        LoadFailed = value.LoadFailed;
+        CanGoBack = value.CanGoBack;
+        CanGoForward = value.CanGoForward;
+        Message = value.Message;
+        LoadError = value.LoadError;
+        IsCrashed = value.Crashed;
+    }
+
+    // The active tab's page state is the model's: kept in step for the tab strip
+    partial void OnCurrentUrlChanged(Uri? value) => ActiveTab.Url = value;
+    partial void OnTitleChanged(string value) => ActiveTab.Title = value;
+    partial void OnIsLoadingChanged(bool value) => ActiveTab.IsLoading = value;
+
     [RelayCommand(CanExecute = nameof(HasPage))]
     private void Reload()
     {
         Message = "";
+        Dialogs.Broker.CancelAll();
         if (IsEngineUnavailable && CurrentUrl is { } uri)
         {
             // The engine may have been installed since: the view checks again and embeds the page, or shows the card.
@@ -184,15 +450,31 @@ public sealed partial class PreviewViewModel : ObservableObject
             NavigationRequested?.Invoke(uri);
             return;
         }
+        // The error page's "Try again": the address that failed (the engine still holds the page before it)
+        if (LoadError?.Url is { } failed && IsAllowed(failed) && !IsCrashed)
+        {
+            Navigate(Display(failed));
+            return;
+        }
+        LoadError = null;
+        IsCrashed = false;
         IsLoading = true;
         ReloadRequested?.Invoke();
     }
 
     [RelayCommand(CanExecute = nameof(CanGoBack))]
-    private void Back() => BackRequested?.Invoke();
+    private void Back()
+    {
+        Dialogs.Broker.CancelAll();
+        BackRequested?.Invoke();
+    }
 
     [RelayCommand(CanExecute = nameof(CanGoForward))]
-    private void Forward() => ForwardRequested?.Invoke();
+    private void Forward()
+    {
+        Dialogs.Broker.CancelAll();
+        ForwardRequested?.Invoke();
+    }
 
     [RelayCommand(CanExecute = nameof(HasPage))]
     private void OpenExternally()
@@ -205,6 +487,39 @@ public sealed partial class PreviewViewModel : ObservableObject
     {
         IsAnnotating = false;
         CloseRequested?.Invoke();
+    }
+
+    // ── Downloads (the strip at the bottom of the pane) ──
+
+    [RelayCommand]
+    private void ShowDownload(BrowserDownload? download)
+    {
+        if (download is { IsFinished: true, Path: not null }) ShowDownloadRequested?.Invoke(download);
+    }
+
+    [RelayCommand]
+    private void CancelDownload(BrowserDownload? download) => download?.Cancel();
+
+    [RelayCommand]
+    private void ClearDownloads() => Downloads.ClearDone();
+
+    private void OnDownloadChanged(PreviewTab tab, BrowserDownload download)
+    {
+        if (download.State == BrowserDownloadState.Asking && !tab.IsClosed)
+        {
+            // A navigation that turned into a download: the page stays where it was
+            if (tab == ActiveTab)
+            {
+                IsLoading = false;
+                if (IsAllowed(download.PageUrl))
+                {
+                    CurrentUrl = download.PageUrl;
+                    Address = Display(download.PageUrl!);
+                }
+            }
+            else tab.IsLoading = false;
+        }
+        Downloads.Track(download);
     }
 
     /// <summary>
@@ -325,11 +640,57 @@ public sealed partial class PreviewViewModel : ObservableObject
 
     // ── Reported by the view ──
 
+    /// <summary>A tab's web view started loading: the toolbar follows for the active tab, the tab keeps it otherwise.</summary>
+    public void OnNavigationStarted(PreviewTab tab, Uri? uri)
+    {
+        if (tab == ActiveTab)
+        {
+            OnNavigationStarted(uri);
+            return;
+        }
+        tab.IsLoading = true;
+        tab.LoadFailed = false;
+        tab.LoadError = null;
+        tab.Crashed = false;
+        if (IsAllowed(uri))
+        {
+            tab.Url = uri;
+            tab.Address = Display(uri!);
+        }
+    }
+
+    /// <summary>A tab's web view finished (or failed) loading.</summary>
+    public void OnNavigationCompleted(PreviewTab tab, Uri? uri, bool success, bool canGoBack, bool canGoForward)
+    {
+        if (tab == ActiveTab)
+        {
+            OnNavigationCompleted(uri, success, canGoBack, canGoForward);
+            return;
+        }
+        tab.IsLoading = false;
+        tab.LoadFailed = !success;
+        tab.CanGoBack = canGoBack;
+        tab.CanGoForward = canGoForward;
+        if (success)
+        {
+            tab.LoadError = null;
+            tab.Crashed = false;
+        }
+        if (IsAllowed(uri))
+        {
+            tab.Url = uri;
+            tab.Address = Display(uri!);
+        }
+        tab.Message = success ? "" : $"{(uri is null ? "The page" : Display(uri))} did not load. Is the server running?";
+    }
+
     /// <summary>The web view started loading <paramref name="uri"/> (also for links clicked in the page).</summary>
     public void OnNavigationStarted(Uri? uri)
     {
         IsLoading = true;
         LoadFailed = false;
+        LoadError = null;
+        IsCrashed = false;
         if (IsAllowed(uri))
         {
             CurrentUrl = uri;
@@ -349,7 +710,47 @@ public sealed partial class PreviewViewModel : ObservableObject
             CurrentUrl = uri;
             Address = Display(uri!);
         }
+        if (success)
+        {
+            LoadError = null;
+            IsCrashed = false;
+        }
         Message = success ? "" : $"{(uri is null ? "The page" : Display(uri))} did not load. Is the server running?";
+    }
+
+    /// <summary>
+    /// A tab's navigation failed as the engine reported it (macOS): the error page says why, with Try again; the page
+    /// before stays in the engine. A failed main view shows no spinner afterwards.
+    /// </summary>
+    public void OnNavigationFailed(PreviewTab tab, BrowserLoadFailure failure)
+    {
+        if (tab.IsClosed) return;
+        if (tab == ActiveTab)
+        {
+            IsLoading = false;
+            LoadFailed = true;
+            Message = "";
+            LoadError = failure;
+            return;
+        }
+        tab.IsLoading = false;
+        tab.LoadFailed = true;
+        tab.Message = "";
+        tab.LoadError = failure;
+    }
+
+    /// <summary>A tab's web process ended: the crash page (Reload, Open in browser) replaces the blank page; its questions were cancelled.</summary>
+    public void OnPageCrashed(PreviewTab tab)
+    {
+        if (tab.IsClosed) return;
+        if (tab == ActiveTab)
+        {
+            IsLoading = false;
+            IsCrashed = true;
+            return;
+        }
+        tab.IsLoading = false;
+        tab.Crashed = true;
     }
 
     /// <summary>The platform's web engine cannot be used: the panel shows a card with "Open in browser" instead.</summary>

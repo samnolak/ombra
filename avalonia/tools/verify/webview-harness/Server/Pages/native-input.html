@@ -1,0 +1,63 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>native input self-test</title>
+<style>
+  body { margin: 0; font: 16px -apple-system, sans-serif; height: 2000px; }
+  #b { position: absolute; left: 40px; top: 30px; width: 180px; height: 50px; }
+  #hover { position: absolute; left: 260px; top: 30px; width: 160px; height: 50px; background: #eee; }
+  #t { position: absolute; left: 40px; top: 110px; width: 300px; height: 30px; }
+  #ta { position: absolute; left: 380px; top: 110px; width: 300px; height: 60px; }
+  #ce { position: absolute; left: 40px; top: 190px; width: 300px; height: 60px; border: 1px solid #888; }
+  #scroller { position: absolute; left: 40px; top: 280px; width: 300px; height: 150px; overflow: auto; border: 1px solid #888; }
+  #scroller div { height: 1200px; }
+  #slider { position: absolute; left: 380px; top: 280px; width: 300px; height: 40px; background: #ddd; touch-action: none; user-select: none; }
+  #dbl { position: absolute; left: 380px; top: 340px; width: 160px; height: 40px; background: #cde; user-select: none; }
+  #cb { position: absolute; left: 40px; top: 450px; width: 20px; height: 20px; }
+  #sel { position: absolute; left: 80px; top: 450px; width: 120px; }
+</style>
+<button id="b">Click me</button>
+<div id="hover">Hover me</div>
+<input id="t" type="text">
+<textarea id="ta"></textarea>
+<div id="ce" contenteditable="true"></div>
+<div id="scroller"><div>tall</div></div>
+<div id="slider">drag me</div>
+<div id="dbl">double click me</div>
+<input id="cb" type="checkbox" aria-label="Agree">
+<select id="sel" aria-label="Pick"><option value="one">One</option><option value="two">Two</option></select>
+<script>
+  // What the page can observe about each input event: is it trusted, does the page have user activation now.
+  window.__log = [];
+  const ua = () => navigator.userActivation
+    ? { isActive: navigator.userActivation.isActive, hasBeenActive: navigator.userActivation.hasBeenActive }
+    : null;
+  const record = (e, extra) => window.__log.push({
+    type: e.type, target: e.target.id || e.target.nodeName, isTrusted: e.isTrusted, userActivation: ua(),
+    buttons: e.buttons, button: e.button, detail: e.detail, inputType: e.inputType, key: e.key, code: e.code, data: e.data,
+    metaKey: e.metaKey, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, deltaY: e.deltaY, clientX: e.clientX, clientY: e.clientY, ...extra,
+  });
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'dblclick', 'mouseover', 'mouseenter', 'pointermove', 'mousemove', 'wheel'])
+    document.addEventListener(type, e => record(e), true);
+  for (const type of ['keydown', 'keyup', 'beforeinput', 'input'])
+    document.addEventListener(type, e => record(e), true);
+  b.addEventListener('click', e => {
+    // a popup inside the click handler only works with real user activation
+    let popup = null;
+    try { popup = window.open('about:blank', '_blank'); } catch (err) { }
+    record(e, { windowOpenReturned: popup !== null });
+    if (popup) popup.close();
+  });
+  document.addEventListener('click', e => { if (e.target !== b) record(e); }, true);
+  // the page handles ⌘K itself (a command palette); ⌘J it leaves alone
+  document.addEventListener('keydown', e => { if (e.metaKey && e.key === 'k') { e.preventDefault(); window.__paletteOpened = true; } });
+  // a slider that follows the pointer only while the primary button is held (e.buttons === 1)
+  window.__drag = [];
+  slider.addEventListener('pointerdown', e => slider.setPointerCapture && slider.setPointerCapture(e.pointerId));
+  slider.addEventListener('pointermove', e => window.__drag.push({ buttons: e.buttons, x: e.clientX, trusted: e.isTrusted }));
+  window.__scrolls = 0;
+  scroller.addEventListener('scroll', () => window.__scrolls++);
+  // the page patches what a helper script would trust (an isolated world must not see it)
+  const realRect = Element.prototype.getBoundingClientRect;
+  Element.prototype.getBoundingClientRect = function () { const r = realRect.call(this); return { left: -999, top: -999, width: r.width, height: r.height, right: 0, bottom: 0, x: -999, y: -999 }; };
+  window.__pageSecret = 'page-only';
+</script>

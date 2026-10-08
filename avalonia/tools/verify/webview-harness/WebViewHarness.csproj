@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Windowless WKWebView harness (docs/BROWSER_PLAN.md B0): run.sh <scenario>. macOS only; not part of OmpGui.sln.
+       No Avalonia, no window on screen, no permission prompts. The app's macOS WebKit hooks (src/OmpGui.App/Platform/Mac)
+       are compiled in as source when present (APP_HOOKS), so scenarios exercise the app's own code. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>OmpGui.WebViewHarness</RootNamespace>
+    <AssemblyName>WebViewHarness</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AppPlatformMac>$(MSBuildThisFileDirectory)../../../src/OmpGui.App/Platform/Mac/</AppPlatformMac>
+  </PropertyGroup>
+  <PropertyGroup Condition="Exists('$(AppPlatformMac)WebKitHooks.cs')">
+    <DefineConstants>$(DefineConstants);APP_HOOKS</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="Exists('$(AppPlatformMac)NativeInput.cs')">
+    <!-- B4: the app's native input and isolated world (Platform/Mac/NativeInput.cs, IsolatedWorld.cs) -->
+    <DefineConstants>$(DefineConstants);APP_INPUT</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Platform/Mac/*.cs must stay free of Avalonia types (they are compiled here without Avalonia). -->
+    <Compile Include="$(AppPlatformMac)**/*.cs" Link="AppHooks/%(RecursiveDir)%(Filename)%(Extension)" />
+    <ProjectReference Include="../../../src/OmpGui.ClientCore/OmpGui.ClientCore.csproj" />
+    <None Include="Server/Pages/*.html" Link="Pages/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

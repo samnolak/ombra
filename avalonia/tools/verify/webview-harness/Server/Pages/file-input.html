@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>file input</title>
+<input id="f" type="file" multiple accept=".txt,text/plain">
+<script>
+  window.__files = null;
+  window.__events = [];
+  const input = document.getElementById('f');
+  input.addEventListener('cancel', () => window.__events.push('cancel'));
+  input.addEventListener('change', async () => {
+    window.__events.push('change');
+    const out = [];
+    for (const f of input.files) out.push({ name: f.name, size: f.size, text: await f.text() });
+    window.__files = out;
+  });
+</script>

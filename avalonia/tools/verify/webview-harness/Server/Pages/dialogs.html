@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>dialogs</title>
+<p>alert / confirm / prompt. Each call records what the page got back in <code>window.__log</code>.</p>
+<script>
+  window.__log = [];
+  function run(kind, ...args) {
+    const started = performance.now();
+    let value;
+    if (kind === 'alert') value = alert(...args);
+    if (kind === 'confirm') value = confirm(...args);
+    if (kind === 'prompt') value = prompt(...args);
+    // page JS is suspended while the dialog is open: elapsed shows how long
+    window.__log.push({ kind, value: value === undefined ? '(undefined)' : value, elapsedMs: Math.round(performance.now() - started) });
+  }
+  // run all three from one task so the order is fixed
+  window.runAll = () => setTimeout(() => {
+    run('alert', 'Saved.');
+    run('confirm', 'Delete project?');
+    run('confirm', 'Really delete?');
+    run('prompt', 'Your name?', 'Ada');
+    run('prompt', 'Cancelled prompt');
+    window.__done = true;
+  }, 0);
+</script>

@@ -11,6 +11,8 @@
 //   BASHCALL            one `bash` tool call (exec tier: needs approval unless approval mode is yolo)
 //   TOOLCALL            one `read` tool call, then a final answer
 //   BIGREPLY <kib>      a single reply of <kib> KiB (drives omp's rpc_chunk path when > 1 MiB)
+//   BROWSERCALL <url>   one `eval` tool call running `browser.open({url})` (exec tier), then a final answer that says
+//                       whether the system prompt carried the OMP GUI browser note (NOTE-SEEN=yes|no)
 //   SLOW                a long reply streamed slowly (for abort tests)
 //   SLOWSHORT           a few seconds of streaming (for messages sent while the agent works)
 //   anything else       a short streamed reply
@@ -74,6 +76,17 @@ function plan(body) {
 	if (/TOOLCALL/.test(lastUser) && hasTools && toolNames.has("read")) {
 		if (toolResults === 0) return { text: "Reading the file first.", tool: { name: "read", args: { path: "README.md" } } };
 		return { text: "I read the file. It exists and has content. TOOLCALL done." };
+	}
+	m = /BROWSERCALL\s+(\S+)/.exec(lastUser);
+	if (m && hasTools && toolNames.has("eval")) {
+		const system = msgs.filter(x => x.role === "system" || x.role === "developer").map(x => textOf(x.content)).join("\n");
+		const seen = system.includes("the OMP GUI's built-in browser") ? "yes" : "no";
+		if (toolResults === 0) {
+			const code = `const tab = await browser.open({ url: ${JSON.stringify(m[1])}, persist: true });\nprint(await tab.url());`;
+			return { text: `Opening the page. NOTE-SEEN=${seen}`, tool: { name: "eval", args: { language: "js", code } } };
+		}
+		const result = textOf(afterLastUser.filter(x => x.role === "tool").at(-1)?.content);
+		return { text: `BROWSERCALL done. NOTE-SEEN=${seen} RESULT=${result.slice(0, 400)}` };
 	}
 	m = /BIGREPLY\s+(\d+)/.exec(lastUser);
 	if (m) {

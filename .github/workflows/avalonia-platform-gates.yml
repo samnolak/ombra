@@ -45,6 +45,11 @@ jobs:
       - name: Result
         if: ${{ !cancelled() }}
         run: cat "$RUNNER_TEMP/gate/result.txt" || true
+      - name: WebKit harness (windowless WKWebView scenarios, docs/BROWSER_PLAN.md B0)
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/gate"
+          HARNESS_ISOLATION_CHECK=1 tools/verify/webview-harness/run.sh all > "$RUNNER_TEMP/gate/webview-harness.json"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
@@ -55,6 +60,7 @@ jobs:
             ${{ runner.temp }}/gate/*.csv
             ${{ runner.temp }}/gate/trx
             ${{ runner.temp }}/gate/dist/*.sha256
+            ${{ runner.temp }}/gate/webview-harness.json
 
   windows:
     if: ${{ inputs.platforms != 'macos' }}

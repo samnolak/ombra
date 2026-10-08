@@ -46,7 +46,10 @@ public sealed partial class MainViewModel
 
     private PreviewViewModel NewPreview()
     {
-        var p = new PreviewViewModel();
+        // "Always allow on this site" and the download folder are kept next to the client settings (this run only without them)
+        var folder = _settings?.Path is { } settingsPath ? Path.GetDirectoryName(settingsPath) : null;
+        var p = new PreviewViewModel(new OmpGui.ClientCore.Browser.BrowserSiteSettings(
+            string.IsNullOrEmpty(folder) ? null : Path.Combine(folder, "browser-sites.json")));
         p.CloseRequested += () => IsPreviewOpen = false;
         // Comments on the page go with the next message: they count as content, and the panel's Send sends it
         p.Annotations.CollectionChanged += (_, _) =>

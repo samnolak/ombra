@@ -51,6 +51,8 @@ public sealed record OmpSessionState(
 public sealed record OmpModel(string Provider, string Id, string Name, bool Reasoning, bool AcceptsImages, long ContextWindow)
 {
     public string Key => $"{Provider}/{Id}";
+    /// <summary>The provider's API address (omp's <c>baseUrl</c>); null when omp did not list one.</summary>
+    public string? BaseUrl { get; init; }
 }
 
 /// <summary>A provider omp can sign in to (<c>get_login_providers</c>).</summary>
@@ -176,7 +178,8 @@ public static class OmpCommands
                 && input.EnumerateArray().Any(x => x.ValueKind == JsonValueKind.String && x.GetString() == "image");
             list.Add(new OmpModel(provider, id, Str(m, "name") ?? id,
                 m.TryGetProperty("reasoning", out var re) && re.ValueKind == JsonValueKind.True, images,
-                m.TryGetProperty("contextWindow", out var cw) && cw.ValueKind == JsonValueKind.Number && cw.TryGetInt64(out var n) ? n : 0));
+                m.TryGetProperty("contextWindow", out var cw) && cw.ValueKind == JsonValueKind.Number && cw.TryGetInt64(out var n) ? n : 0)
+            { BaseUrl = Str(m, "baseUrl") });
         }
         return list;
     }

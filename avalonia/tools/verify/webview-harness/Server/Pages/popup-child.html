@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>sign-in popup</title>
+<p>Signing you in…</p>
+<script>
+  const hasOpener = !!window.opener;
+  if (hasOpener) window.opener.postMessage({ code: 'oauth-code-123', hasOpener, name: window.name }, '*');
+  setTimeout(() => window.close(), 100);
+</script>

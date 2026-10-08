@@ -1613,6 +1613,16 @@
                     </StackPanel>
                   </Border>
                 </Grid>
+                <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
+                    <TextBlock Text="Agent uses the OMP GUI browser" FontWeight="Medium" />
+                    <TextBlock Classes="muted" TextWrapping="Wrap"
+                               Text="omp opens web pages in the preview pane, where you see them, instead of its own browser. Applies to chats started or restarted from now on" />
+                  </StackPanel>
+                  <ToggleButton x:Name="AgentBrowserBox" Grid.Column="1" Classes="switch" IsChecked="{Binding AgentUsesGuiBrowser}"
+                                AutomationProperties.Name="Agent uses the OMP GUI browser" VerticalAlignment="Center" />
+                </Grid>
               </StackPanel>
             </Border>
 
@@ -1733,6 +1743,8 @@
                            IsVisible="{Binding RuntimeInstallText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
               </StackPanel>
             </Border>
+            <!-- Advanced › Network: corporate network certificates and the connection check (Views/Settings/NetworkSettings) -->
+            <settings:NetworkSettings x:Name="NetworkSettingsPage" IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=advanced}" />
 
             <!-- Diagnostics and files -->
             <Border Classes="section-card" IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=diagnostics}">

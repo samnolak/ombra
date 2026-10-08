@@ -274,6 +274,15 @@ public sealed partial class MainViewModel
         if (IsSettingsOpen) Persist(o => o with { Notifications = value });
     }
 
+    /// <summary>omp's browser tool drives the built-in browser (Settings → General; default on). Saved when chosen; omp
+    /// processes started from then on (new chats, restarts, the terminal's omp) follow it.</summary>
+    [ObservableProperty] private bool _agentUsesGuiBrowser = true;
+
+    partial void OnAgentUsesGuiBrowserChanged(bool value)
+    {
+        if (IsSettingsOpen) Persist(o => o with { AgentUsesGuiBrowser = value });
+    }
+
     /// <summary>
     /// The message box sends with <c>enter</c> (Shift+Enter adds a line) or <c>mod-enter</c> (⌘/Ctrl+Enter sends,
     /// Enter adds a line). Saved when chosen.
@@ -502,6 +511,7 @@ public sealed partial class MainViewModel
             if (!HasUnsavedRuntime) ShowSavedRuntime(o);
             SettingsTheme = o.Theme ?? "system";
             NotificationsEnabled = o.Notifications ?? true;
+            AgentUsesGuiBrowser = o.AgentUsesGuiBrowser ?? true;
             SettingsMessage = "";
             RefreshRuntimeStatus();
             IsSettingsOpen = true;

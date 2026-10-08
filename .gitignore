@@ -4,10 +4,15 @@
 .env
 .env.*
 omp-gui.local.json
+*.local.json
 *.pem
 *.key
 *.p12
 *.pfx
+*.crt
+*.cer
+*.csr
+browser-sites.json
 harness/profile/agent/*.yml
 !harness/profile/agent/*.example.yml
 harness/profile/agent/mcp.json

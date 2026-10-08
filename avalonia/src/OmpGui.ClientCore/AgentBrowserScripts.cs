@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 
 namespace OmpGui.ClientCore;
@@ -8,17 +9,31 @@ namespace OmpGui.ClientCore;
 /// Every request script is one expression; the bridge wraps it (<see cref="Wrap"/>) so its value, or what it threw,
 /// comes back as JSON text whatever the engine (WKWebView, WebView2, WebKitGTK) does with script results.
 /// </summary>
-internal static class AgentBrowserScripts
+/// <remarks>
+/// Where the page has the app's isolated world (<see cref="Browser.IIsolatedScripts"/>, macOS) the library runs there
+/// (<see cref="IsolatedCall"/>). Elsewhere it runs in the page's own world, kept where the page cannot trivially swap
+/// it: under a random global name chosen per bridge (<see cref="Name"/>, not guessable before the first install),
+/// defined non-enumerable, non-writable and non-configurable, the object frozen and carrying a random seal. A library is
+/// reused only when all of that holds; a configurable or unsealed value under the name is replaced, a non-configurable
+/// one that is not ours is refused (<c>blocked</c>). omp's own <c>browser.eval</c> scripts always run in the page world.
+/// </remarks>
+internal sealed class AgentBrowserScripts
 {
     /// <summary>
-    /// The page library, defined once per document (<c>globalThis.__ompAgent</c>): element refs of the latest
+    /// The page library as a function of (name, seal), installed once per document: element refs of the latest
     /// snapshot, the snapshot itself and the input actions. It throws <c>Error("code: message")</c> for the errors the
-    /// bridge reports with a code (not_found, invalid_params, invalid_target).
+    /// bridge reports with a code (not_found, invalid_params, invalid_target, blocked).
     /// </summary>
-    internal const string Library = """
-(() => {
-  if (globalThis.__ompAgent && globalThis.__ompAgent.v === 1) return globalThis.__ompAgent;
-  const A = { v: 1, refs: new Map() };
+    private const string LibrarySource = """
+((name, seal) => {
+  const d = Object.getOwnPropertyDescriptor(globalThis, name);
+  if (d) {
+    const o = d.value;
+    if (!d.configurable && !d.writable && !d.enumerable && !d.get && !d.set && o && typeof o === "object" &&
+        Object.isFrozen(o) && Object.getPrototypeOf(o) === Object.prototype && o.v === 2 && o.seal === seal) return o;
+    if (!d.configurable) throw new Error("blocked: the page defined a global under the name this browser's scripts use; reload the page");
+  }
+  const A = { v: 2, seal, refs: new Map() };
   const SKIP = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "HEAD", "META", "LINK", "TITLE", "OMP-ANNOTATE"]);
   const INTERACTIVE = new Set(["button", "link", "textbox", "searchbox", "checkbox", "radio", "combobox", "listbox", "option",
     "menuitem", "menuitemcheckbox", "menuitemradio", "tab", "switch", "slider", "spinbutton", "treeitem"]);
@@ -119,6 +134,14 @@ internal static class AgentBrowserScripts
         const inner = deepQuery(el.shadowRoot, selector);
         if (inner) return inner;
       }
+      if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
+        let doc = null;
+        try { doc = el.contentDocument; } catch (e) { } // another origin: out of reach
+        if (doc) {
+          const inner = deepQuery(doc, selector);
+          if (inner) return inner;
+        }
+      }
     }
     return null;
   };
@@ -142,7 +165,7 @@ internal static class AgentBrowserScripts
       (ref ? " (element refs come from the latest snapshot of this page: observe it again)" : ""));
   };
   A.snapshot = (interactiveOnly, maxDepth, withHtml) => {
-    A.refs = new Map();
+    A.refs.clear();
     const refs = {};
     const lines = [];
     let count = 0;
@@ -402,28 +425,160 @@ internal static class AgentBrowserScripts
     }
     return true;
   };
-  Object.defineProperty(globalThis, "__ompAgent", { value: A, configurable: true, writable: true });
+  // ── For input the engine treats like the user's (the bridge sends it): where to act, whether it got there, and
+  //    when the page has settled. Coordinates are the top viewport's CSS pixels (same-origin frames' offsets added).
+  const MENU_INPUTS = new Set(["color", "date", "datetime-local", "month", "week", "time"]);
+  const offsetOf = doc => {
+    let x = 0, y = 0, w = doc.defaultView;
+    while (w && w !== window && w.frameElement) {
+      const fe = w.frameElement, r = fe.getBoundingClientRect(), cs = fe.ownerDocument.defaultView.getComputedStyle(fe);
+      x += r.left + fe.clientLeft + (parseFloat(cs.paddingLeft) || 0);
+      y += r.top + fe.clientTop + (parseFloat(cs.paddingTop) || 0);
+      w = w.parent;
+    }
+    return { x, y };
+  };
+  const reaches = (el, node) => {
+    for (let n = node; n; n = n.parentNode || n.host) if (n === el) return true;
+    return !!(node && node.control === el); // its label
+  };
+  const hitAt = (doc, x, y) => {
+    let hit = doc.elementFromPoint(x, y);
+    while (hit && hit.shadowRoot) {
+      const inner = hit.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === hit) break;
+      hit = inner;
+    }
+    return hit;
+  };
+  const describe = el => el.tagName.toLowerCase() + (el.id ? "#" + el.id : "") +
+    (el.classList && el.classList.length ? "." + Array.from(el.classList).slice(0, 2).join(".") : "");
+  const focusedIn = el => {
+    let a = el.ownerDocument.activeElement;
+    while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+    return a === el || (el.isContentEditable && el.contains(a));
+  };
+  const checkable = el => (el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio")) ||
+    ["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"].includes((el.getAttribute("role") || "").toLowerCase());
+  const isChecked = el => el.tagName === "INPUT" && "checked" in el ? !!el.checked : el.getAttribute("aria-checked") === "true";
+  A.target = (selector, action) => {
+    const el = A.must(selector);
+    if (action !== "focus") reveal(el);
+    const doc = el.ownerDocument, view = doc.defaultView, r = el.getBoundingClientRect(), off = offsetOf(doc);
+    const type = el.tagName === "INPUT" ? (el.type || "text").toLowerCase() : "";
+    const t = {
+      tag: el.tagName.toLowerCase(), visible: !hidden(el) && r.width > 0 && r.height > 0,
+      disabled: !!el.disabled || el.getAttribute("aria-disabled") === "true",
+      editable: textField(el) || el.isContentEditable, focused: focusedIn(el),
+      checkable: checkable(el), checked: isChecked(el), menu: el.tagName === "SELECT" || MENU_INPUTS.has(type),
+      x: off.x + r.left + r.width / 2, y: off.y + r.top + r.height / 2, covered: null, inView: false,
+    };
+    if (!t.visible) return t;
+    // The centre, else the first other point where a click would land on the element (not on what covers it)
+    let hit = null;
+    for (const [fx, fy] of [[0.5, 0.5], [0.25, 0.5], [0.75, 0.5], [0.5, 0.25], [0.5, 0.75], [0.2, 0.2], [0.8, 0.8]]) {
+      const lx = r.left + r.width * fx, ly = r.top + r.height * fy;
+      if (lx < 0 || ly < 0 || lx >= view.innerWidth || ly >= view.innerHeight) continue;
+      const x = off.x + lx, y = off.y + ly;
+      if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
+      t.inView = true;
+      hit = hitAt(doc, lx, ly);
+      if (reaches(el, hit)) {
+        t.x = x;
+        t.y = y;
+        return t;
+      }
+    }
+    if (hit) t.covered = describe(hit);
+    return t;
+  };
+  A.viewport = () => ({ x: innerWidth / 2, y: innerHeight / 2 });
+  A.exists = selector => !!A.resolve(selector);
+  // Whether the next event of a type reached the element (a cover or a moved element takes the click instead)
+  let armed = null;
+  const watch = e => {
+    if (!armed || armed.type !== e.type) return;
+    const node = typeof e.composedPath === "function" ? e.composedPath()[0] : e.target;
+    if (reaches(armed.el, node)) { armed.reached = true; armed.trusted = e.isTrusted; }
+  };
+  for (const type of ["click", "mouseover"]) addEventListener(type, watch, true);
+  A.arm = (selector, type) => {
+    const el = A.must(selector);
+    armed = el.ownerDocument === document ? { el, type, reached: false, trusted: false } : null; // frames: not watched
+    return !!armed;
+  };
+  A.armed = () => {
+    const r = armed && { reached: armed.reached, trusted: armed.trusted };
+    armed = null;
+    return r;
+  };
+  // How long the page has been still: DOM mutations and finished resource loads, in ms
+  let lastMutation = performance.now(), lastResource = 0;
+  try {
+    new MutationObserver(() => { lastMutation = performance.now(); })
+      .observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+    new PerformanceObserver(list => { for (const e of list.getEntries()) if (e.responseEnd > lastResource) lastResource = e.responseEnd; })
+      .observe({ type: "resource", buffered: true });
+  } catch (e) { }
+  A.quiet = () => {
+    const now = performance.now();
+    return { mutation: Math.round(now - lastMutation), network: Math.round(now - lastResource), ready: document.readyState };
+  };
+  Object.freeze(A);
+  Object.defineProperty(globalThis, name, { value: A, configurable: false, writable: false, enumerable: false });
   return A;
-})()
+})
 """;
 
+    /// <param name="name">The global the library lives under (an identifier the page cannot guess).</param>
+    /// <param name="seal">What a library of ours carries (<c>seal</c>); checked before it is reused.</param>
+    /// <param name="runMark">The global marking the latest run (<see cref="RanCheck"/>).</param>
+    internal AgentBrowserScripts(string name, string seal, string runMark)
+    {
+        Name = name;
+        RunMark = runMark;
+        Library = "(" + LibrarySource + ")(" + Literal(name) + ", " + Literal(seal) + ")";
+        IsolatedCall = "(name, args) => " + Library + "[name](...args)";
+    }
+
+    /// <summary>Scripts with a fresh random name, seal and run mark (one set per bridge).</summary>
+    internal static AgentBrowserScripts CreateRandom() => new("_" + RandomHex(8), RandomHex(16), "_" + RandomHex(8));
+
+    private static string RandomHex(int bytes) => Convert.ToHexString(RandomNumberGenerator.GetBytes(bytes)).ToLowerInvariant();
+
+    /// <summary>The global the library is installed under.</summary>
+    internal string Name { get; }
+
+    /// <summary>The global the run mark is set on.</summary>
+    internal string RunMark { get; }
+
+    /// <summary>The expression whose value is the page library (installed, or the verified one already there).</summary>
+    internal string Library { get; }
+
+    /// <summary>
+    /// The library as a function of (name, args) for the app's isolated world (<see cref="Browser.IIsolatedScripts"/>):
+    /// there the page can neither see nor replace it, and its built-ins are the engine's own.
+    /// </summary>
+    internal string IsolatedCall { get; }
+
     /// <summary>A call into the page library: <c>(library).name(args…)</c>, the arguments as JSON.</summary>
-    internal static string Call(string name, params JsonNode?[] args) =>
-        "(" + Library + ")." + name + "(" + string.Join(", ", args.Select(a => a?.ToJsonString() ?? "null")) + ")";
+    internal string Call(string name, params JsonNode?[] args) =>
+        Library + "." + name + "(" + string.Join(", ", args.Select(a => a?.ToJsonString() ?? "null")) + ")";
 
     /// <summary>A JavaScript string literal.</summary>
     internal static string Literal(string s) => JsonValue.Create(s)!.ToJsonString();
 
     /// <summary>
     /// <paramref name="expression"/> wrapped so the engine returns JSON text: <c>{"ok": value}</c>, <c>{"err": message}</c>
-    /// or <c>{"promise": true}</c>. The first statement marks the run with <paramref name="run"/>: a script that does
-    /// not parse as an expression leaves the mark unset, and the bridge runs it again through indirect eval
-    /// (<paramref name="viaEval"/>), which also takes statements.
+    /// or <c>{"promise": true}</c>. The first statement marks the run with <paramref name="run"/> (a non-enumerable global
+    /// under <see cref="RunMark"/>): a script that does not parse as an expression leaves the mark unset, and the bridge
+    /// runs it again through indirect eval (<paramref name="viaEval"/>), which also takes statements.
     /// </summary>
-    internal static string Wrap(string expression, long run, bool viaEval)
+    internal string Wrap(string expression, long run, bool viaEval)
     {
         var body = viaEval ? "(0, eval)(" + Literal(expression) + ")" : "(\n" + expression + "\n)";
-        return "globalThis.__ompBridgeRun = " + run.ToString(CultureInfo.InvariantCulture) + ";\n"
+        return "Object.defineProperty(globalThis, " + Literal(RunMark) + ", { value: " + run.ToString(CultureInfo.InvariantCulture)
+            + ", configurable: true, writable: true, enumerable: false });\n"
             + "(() => {\n"
             + "  let r;\n"
             + "  try {\n"
@@ -439,5 +594,5 @@ internal static class AgentBrowserScripts
     }
 
     /// <summary>Whether the run marked <paramref name="run"/> started (answers "true" or "false").</summary>
-    internal static string RanCheck(long run) => "String(globalThis.__ompBridgeRun === " + run.ToString(CultureInfo.InvariantCulture) + ")";
+    internal string RanCheck(long run) => "String(globalThis[" + Literal(RunMark) + "] === " + run.ToString(CultureInfo.InvariantCulture) + ")";
 }

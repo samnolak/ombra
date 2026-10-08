@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>opener</title>
+<p>OAuth-style opener: <code>window.open</code> a child that posts a code back and closes itself.</p>
+<script>
+  window.__messages = [];
+  window.__events = [];
+  window.addEventListener('message', e => window.__messages.push({ data: e.data, origin: e.origin }));
+  window.openPopup = () => {
+    const w = window.open('/popup/child', 'oauth', 'width=480,height=640');
+    window.__events.push({ event: 'opened', returnedWindow: w !== null });
+    if (!w) return;
+    const timer = setInterval(() => {
+      if (w.closed) {
+        clearInterval(timer);
+        window.__events.push({ event: 'closed' });
+        window.__closed = true;
+      }
+    }, 50);
+  };
+</script>

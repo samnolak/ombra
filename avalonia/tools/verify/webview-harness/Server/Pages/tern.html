@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Tern conformance</title>
+<style>
+  body { font: 16px -apple-system, sans-serif; margin: 20px; }
+  .tall { height: 2400px; }
+</style>
+</head>
+<body>
+<!-- tools/verify/tern-conformance/conformance.ts (webkit): omp's Tern client drives this page through the app's Tern host. -->
+<h1 id="heading">Tern conformance</h1>
+<ul><li>one</li><li>two</li><li>three</li></ul>
+<button id="trusted">Trusted click</button>
+<form id="form"><input id="name" type="text" autocomplete="off"></form>
+<button id="alert">Alert</button>
+<button id="confirm">Confirm</button>
+<input id="upload" type="file">
+<a id="download" href="/download/attachment">Download the report</a>
+<iframe src="/tern-frame" width="320" height="80"></iframe>
+<div class="tall"></div>
+<script>
+  document.getElementById("trusted").addEventListener("click", e => {
+    window.clickState = { isTrusted: e.isTrusted, activation: navigator.userActivation.isActive };
+  });
+  document.getElementById("form").addEventListener("submit", e => {
+    e.preventDefault();
+    window.submitted = document.getElementById("name").value;
+  });
+  document.getElementById("alert").addEventListener("click", () => {
+    alert("Hello from the page");
+    window.alerted = true;
+  });
+  document.getElementById("confirm").addEventListener("click", () => {
+    window.confirmAnswer = confirm("Proceed?");
+  });
+</script>
+</body>
+</html>

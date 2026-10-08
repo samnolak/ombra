@@ -135,11 +135,12 @@ public sealed class DiagnosticsBundle
         if (value.IndexOf('=') is var eq and > 0 && eq < value.Length - 1) secrets.Add(value[(eq + 1)..]);
     }
 
-    /// <summary><c>environment</c> / <c>env</c>, or a field named like a credential (<c>apiKey</c>, <c>token</c>, <c>clientSecret</c>…).</summary>
+    /// <summary><c>environment</c> / <c>env</c>, a field named like a credential (<c>apiKey</c>, <c>token</c>, <c>clientSecret</c>…),
+    /// or the corporate CA file's path (only the corporate-trust mode is reported).</summary>
     private static bool IsSecretName(string key)
     {
         var k = key.Replace("_", "").Replace("-", "").ToLowerInvariant();
-        return k is "environment" or "env" || k.EndsWith("key", StringComparison.Ordinal) || k.EndsWith("keys", StringComparison.Ordinal)
+        return k is "environment" or "env" or "corporatetrustbundle" || k.EndsWith("key", StringComparison.Ordinal) || k.EndsWith("keys", StringComparison.Ordinal)
             || k.Contains("token") || k.Contains("secret") || k.Contains("password") || k.Contains("credential");
     }
 

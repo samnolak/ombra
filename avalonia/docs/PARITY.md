@@ -251,8 +251,49 @@ omp's own interface for them.
 - **Browser preview and page comments** — a local web app beside the conversation; comments pinned to page elements
   go with the next message. omp's own browser tool drives the preview: the app serves the protocol of omp's cmux
   backend (`CMUX_SOCKET_PATH`, see `AgentBrowserBridge`), so pages omp opens show there instead of in headless Chromium
-  (one page at a time; screenshots of the visible area through the web view's own snapshot call —
-  `Platform/WebViewSnapshot` — not full-page or element clips, as on a real cmux surface).
+  (each `browser.open_split` is a pane tab with its own web view, `ViewModels/PreviewTab`, valid until
+  `surface.close` or the user closes it, so tabs of different omp processes never evict each other; `browser.wait`
+  answers ~1 s before `timeout_ms`, ahead of omp's socket timer; while the page shows a JavaScript dialog requests
+  answer `dialog_open` with its kind and text and `browser.press` Enter/Escape answers it (an alert omp caused is
+  accepted at once; a confirm/prompt omp caused goes to the user's card after 10 s unanswered); on macOS the helper
+  library runs in the app's own `WKContentWorld` (`Platform/Mac/IsolatedWorld`, without a user gesture) and element
+  actions are native input (`Platform/Mac/NativeInput`: NSEvents to the WKWebView's responder methods, `insertText:`,
+  trusted with user activation; paced by `ClientCore/Browser/NativeInputActions`, settle on DOM/network quiet), with
+  `"input": "synthetic"` + reason where that is not possible (no native input on WebView2/WebKitGTK yet, `<select>` and
+  date/colour fields, hover in an inactive window); elsewhere the library lives in the page world under a random
+  per-run global, non-writable, non-configurable and frozen with a seal; screenshots of the visible area through the
+  web view's own snapshot call — `Platform/WebViewSnapshot` — not full-page or element clips, as on a real cmux surface).
+  It is the agent's default for every omp the app starts (chats, the terminal's omp), by omp's official mechanisms
+  only (`ClientCore/Browser/AgentBrowserDefaults`): `PI_BROWSER_CMUX=1` and `PI_BROWSER_RELAY=0` per process, an
+  app-owned overlay appended to `PI_CONFIG_FILES` (`browser.enabled: true`, `cdpUrl: ""`, `cmux: true`,
+  `idleCloseSec: 0`) and an `--extension` whose `before_agent_start` appends a note that the user sees this browser
+  (not `--append-system-prompt`, which would replace the user's `APPEND_SYSTEM.md`); Settings › General › *Agent uses
+  the OMP GUI browser* (default on) turns all of it off. The user's omp files are never written.
+  Native windows a page opens (sign-in for HTTP auth, `alert` / `confirm` / `prompt`, *Leave this page?*, file
+  chooser, download, permission, popup) are cards in the preview, one at a time over a frozen picture of the page
+  (`ClientCore/Browser/DialogBroker`, `ViewModels/BrowserDialogsViewModel`), as cmux routes them: what omp's browser
+  tool caused waits for the agent as modal state, what the user caused is the user's, sign-in is always the user's.
+  HTTP auth (Basic, Digest, NTLM, Negotiate, proxies; Avalonia 12.1's WKWebView delegate answers none, so the server's
+  401 page showed): `webView:didReceiveAuthenticationChallenge:completionHandler:` added to Avalonia's navigation
+  delegate class (`Platform/Mac/WebKitHooks`), WebView2 `BasicAuthenticationRequested` (`Platform/Windows/WebView2Hooks`),
+  WebKitGTK `authenticate` (`Platform/Linux/WebKitGtkHooks`); credentials for the session only, server trust and client
+  certificates keep the engine's default handling.
+  macOS (BROWSER_PLAN B2, `Platform/Mac/WebKitPage*`, `WebKitDownloads`, `PopupWebViewHost`; per tab through
+  `ClientCore/Browser/BrowserPageHooks`): a `WKUIDelegate` of the app's own for alert/confirm/prompt, *Leave this page?*,
+  file inputs and camera/microphone (*Always allow on this site* kept in `browser-sites.json` next to the client
+  settings); `window.open` / `target=_blank` open as pane tabs built from WebKit's configuration, so `window.opener`
+  works for OAuth pop-ups and `window.close()` closes the tab; failed navigations show an error page with the engine's
+  reason and *Try again*, a crashed web process a crash page with *Reload* / *Open in browser* (its questions cancelled);
+  downloads go to the folder the user chose (the save panel until then; never a default folder) and are listed under
+  the page; the user agent is Safari's (`Version/… Safari/605.1.15`, Safari's version only when its WebKit is the one
+  loaded). Logins persist across restarts in WebKit's default persistent data store (Avalonia's choice when no store
+  is set). Not on macOS: passkeys (Apple-gated entitlement), camera (no usage description: WebKit refuses before
+  asking), Storage Access (WebKit's own alert), element fullscreen.
+- **Corporate network certificates** — Settings › Advanced › Network: on request only, every omp the app starts
+  (chats, siblings, restarts, the omp terminal tab, `omp` CLI calls) trusts the certificate authorities macOS trusts
+  (`NODE_USE_SYSTEM_CA=1`, Bun 1.4.2) or an app-validated copy of a CA file (`NODE_EXTRA_CA_CERTS`); the user's own
+  variables always win (`ClientCore/Network/CorporateTrust`). A connection check makes one keyless request with the
+  engine's Bun and environment and classifies TLS / DNS / refused / proxy / timeout. omp has no setting for this.
 - **Dictation** — speech to text on this computer, into the message box.
 - **Pets** — a pixel companion on the message box that follows what omp does; dragged off it, it floats anywhere on
   the desktop over other apps, like Codex's pet (Settings › Pets).

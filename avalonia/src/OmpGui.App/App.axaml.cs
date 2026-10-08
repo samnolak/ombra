@@ -45,10 +45,15 @@ public sealed class App : Application
                 // After an update that brought a new pack, omp runs from the earlier one until the new one is installed.
                 return (installer.FindInstalled() ?? installer.FindPrevious()?.Runtime) is { } rt ? rt.ApplyTo(o) : o;
             }
-            // omp's browser tool drives the preview panel (AgentBrowserBridge: the cmux protocol omp speaks)
+            // omp's browser tool drives the preview panel — over Tern (TernHost: tabs with trusted native input) or cmux
+            // (AgentBrowserBridge, also the fallback a Tern-less omp finds) — and is made the agent's default for every omp
+            // started here unless the setting is off (AgentBrowserDefaults)
             var agentBrowser = AgentBrowserBridge.TryStart();
-            OmpLaunchSpec WithBrowser(OmpLaunchSpec spec) => agentBrowser?.AddTo(spec) ?? spec;
-            OmpLaunchSpec Launch(LaunchRequest request) => WithBrowser(Current().ToLaunchSpec(request));
+            var tern = agentBrowser is not null && OmpGui.ClientCore.Browser.AgentBrowserDefaults.ChooseBackend() == OmpGui.ClientCore.Browser.AgentBrowserBackend.Tern
+                ? OmpGui.ClientCore.Browser.TernHost.TryStart() : null;
+            var browserDefaults = agentBrowser is null ? null
+                : new OmpGui.ClientCore.Browser.AgentBrowserDefaults(agentBrowser, Path.Combine(Path.GetDirectoryName(Path.GetFullPath(store.Path))!, "agent-browser"), tern);
+            OmpLaunchSpec Launch(LaunchRequest request) => browserDefaults?.ForSession(Current(), request) ?? Current().ToLaunchSpec(request);
             configError ??= options.ApprovalModeWarning;
             var initial = new LaunchRequest(options.WorkingDirectory ?? ExistingDirectory(options.LastWorkingDirectory),
                 ApprovalMode: OmpRuntimeOptions.EffectiveApprovalMode(options.ApprovalMode));
@@ -60,7 +65,7 @@ public sealed class App : Application
             var updater = OmpGui.App.Services.UpdateInstaller.ForThisApp(out var noInstall);
             var vm = new MainViewModel(session, args, configError, store)
             {
-                OmpTuiLaunch = dir => WithBrowser(Current().ToTuiLaunchSpec(dir)),
+                OmpTuiLaunch = dir => browserDefaults?.ForTui(Current(), dir) ?? Current().ToTuiLaunchSpec(dir),
                 OmpCliLaunch = (cliArgs, dir) => Current().ToCliLaunchSpec(cliArgs, dir),
                 RuntimeInstaller = installer,
                 Updates = new OmpGui.App.Services.UpdateChecker(new HttpClient { Timeout = TimeSpan.FromMinutes(30) },
@@ -81,8 +86,13 @@ public sealed class App : Application
             };
             if (agentBrowser is not null)
             {
-                agentBrowser.Page = new PreviewAgentPage(vm);
+                agentBrowser.Host = new PreviewAgentHost(vm);
                 desktop.Exit += (_, _) => agentBrowser.Dispose();
+            }
+            if (tern is not null)
+            {
+                tern.Browser = new TernPreviewHost(vm);
+                desktop.Exit += (_, _) => tern.Dispose();
             }
             var window = new MainWindow { DataContext = vm, Notifier = CreateNotifier() };
             desktop.MainWindow = window;

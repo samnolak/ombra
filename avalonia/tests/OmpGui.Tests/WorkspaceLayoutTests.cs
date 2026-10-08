@@ -83,8 +83,10 @@ public sealed class WorkspaceLayoutTests
                 ["task.isolation.enabled"] = true });
             f.Tools["gh auth status"] = new ToolResult(0, "github.com\n  ✓ Logged in to github.com account octocat (keyring)\n  - Active account: true\n", "");
             f.Tools["xdpyinfo"] = new ToolResult(0, "number of extensions:    2\n    RANDR\n    XTEST\nscreen #0:\n", "");
-            f.Tools["ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 -p 2222 ci@build.example.com exit"] = new ToolResult(0, "", "");
-            f.Tools["ssh -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 10.1.1.20 exit"] = new ToolResult(255, "", "ssh: connect to host 10.1.1.20 port 22: Connection timed out\n");
+            const string ssh = "ssh -n -o LogLevel=DEBUG1 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 -o ControlPath=none";
+            f.Tools[ssh + " -p 2222 ci@build.example.com exit"] = new ToolResult(0, "", "");
+            f.Tools[ssh + " 10.1.1.20 exit"] = new ToolResult(255, "", "debug1: Connecting to 10.1.1.20 [10.1.1.20] port 22.\ndebug1: Connection established.\n"
+                + "debug1: Local version string SSH-2.0-OpenSSH_10.3\nConnection timed out during banner exchange\nConnection to 10.1.1.20 port 22 timed out\n");
             var git = WorkspaceFixture.HasGit;
             var (repo, worktree) = git ? f.MakeRepo() : (TestProcesses.TempDir("ws-repo"), TestProcesses.TempDir("ws-worktree"));
             if (git) File.WriteAllText(Path.Combine(worktree, "wip.txt"), "wip\n");

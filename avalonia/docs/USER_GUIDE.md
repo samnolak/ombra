@@ -198,13 +198,48 @@ project yet), so the OS warns on first start:
   missing the panel says what to install and offers **Open in browser**.
 - **omp browses in the preview** — when omp opens a web page with its browser tool, the page opens here rather
   than in a hidden browser: the preview opens by itself and you watch each step; a pulsing **omp** pill in its
-  toolbar shows while omp reads, clicks or types on the page. The preview shows one page: a second tab omp opens
-  takes it over. omp reads pages as text (their elements and content) and can take screenshots of what the preview
+  toolbar shows while omp reads, clicks or types on the page. Each page omp opens gets a tab of its own (a strip of
+  tabs appears above the page): the preview shows omp's newest tab, your own page stays in the first tab, and tabs of
+  different chats don't push each other out. Pick another tab and the preview stays on it while omp works in the
+  background (picking omp's latest tab follows omp again); × closes one of omp's tabs (omp is told it is gone). If a
+  page shows an alert or *OK / Cancel* question, omp is told what it says instead of waiting, and answers it with
+  Enter or Esc like you would; an alert omp's own click causes is simply accepted, and a question omp caused but
+  hasn't answered within 10 seconds comes to you as a card. omp reads pages as text (their elements and content) and can take screenshots of what the preview
   shows: the visible part of the page (not the whole page, not one element), taken by the web view itself, so no
-  Screen Recording permission is needed; keep the preview open while omp works. Only http and https pages open
+  Screen Recording permission is needed; keep the preview open while omp works (a screenshot of a tab in the
+  background shows that tab for a moment). Only http and https pages open
   (for a local file, ask omp to serve it, e.g. `python3 -m http.server`).
-  The terminal's omp uses the same preview. To give omp its own hidden browser back, run
-  `omp config set browser.cmux false` (omp's setting for this kind of embedded browser) and restart omp.
+  Every omp the app starts uses it by default: each chat and the terminal's omp. omp is told that you see this
+  browser, so pages you should look at or sign in to, and anything on localhost, open here rather than in your system
+  browser; a `browser.cdpUrl` or browser relay set in omp's own settings does not take over. Your omp configuration
+  files are not changed (the app passes its own settings layer and note only to the omp processes it starts). To
+  give omp its own browser back, turn off **Settings → General → Agent uses the OMP GUI browser**; chats started or
+  restarted after that use omp's own browser settings.
+  On macOS omp's clicks, typing, keys and scrolling reach the page as if you did them (pages treat them as real input,
+  so pop-ups, sign-in windows and file pickers work); the composer keeps your keyboard, and when you use the page
+  yourself omp waits until you pause. Hovering only works while the OMP GUI window is the active one, as in Safari.
+  omp's helper scripts live apart from the page, which cannot see or change them. On Windows and Linux omp's input is
+  still simulated by scripts, and omp is told so.
+- **Questions from the page** — when a page in the preview asks something (a sign-in for a password-protected site,
+  an alert, *OK / Cancel*, a text answer, *Leave this page?*, a file to upload, a download, the camera or another
+  permission, a new window), the preview shows it as a card over a still picture of the page, one at a time (*1 more*
+  says others wait). Enter answers with the main button, Esc cancels; the first field takes the keyboard. Going to
+  another address, reloading, back or forward closes the questions of the page you left. What omp's own clicks on the
+  page cause is left to omp; a sign-in card is always yours, and omp never sees what you type there.
+  A password-protected site (HTTP sign-in, such as a staging server behind nginx's `auth_basic`) shows *<site> wants
+  you to sign in* with its realm and **Username** / **Password**: **Sign in** loads the page, a wrong password asks
+  again with *That username or password didn't work*, **Cancel** shows the site's own *401* page. The sign-in is kept
+  until you quit the app (never written to the keychain) and goes to that site only; on a plain `http:` site the card
+  warns that the connection isn't secure.
+  On macOS: a new window a page opens (a sign-in pop-up, a `target=_blank` link) opens as a tab marked *Pop-up* next to
+  the page that opened it, still connected to it, so *Sign in with…* pop-ups hand their result back and close
+  themselves; × closes one, and closing a page closes its pop-ups. A camera or microphone request asks with **Allow
+  once** / **Always allow on this site** / **Don't allow** (the always answers are kept between runs). A page that
+  can't be opened shows why with **Try again**; a page whose web process stopped shows *This page stopped working* with
+  **Reload**. Downloads ask first: **Save** puts the file in the folder you chose last time (the save panel asks the
+  first time, so nothing lands in a folder you didn't pick), **Save as…** always asks; they are listed under the page
+  with their progress, **Stop** and **Show in Finder**. Logins (cookies) are kept between runs. Sites see Safari's own
+  user agent.
 - **Comments on the page** — **Select element** in the preview's toolbar (or **+ → Comment on the page**, or
   Ctrl/⌘+Shift+S) turns on the mode: point at an element (it is outlined), click it, write what to change and press
   **Comment** (or Enter). A numbered pin marks the element on the page and the comment becomes a chip in the message
@@ -377,7 +412,48 @@ their own below:
   is `bun` with `--no-install` and the path to omp's `cli.ts`); *Profile* (`OMP_PROFILE`); **Save and restart omp**,
   and **Install omp 18.8.0** or **Reinstall**. Unlike the rest of Settings, these three fields apply only with Save
   and restart omp: until then the page says *Unsaved changes* (with **Discard**), and the edits stay when you leave
-  Settings and come back.
+  Settings and come back. *Network*: corporate network certificates and a connection check (next section).
+
+## Corporate network certificates
+
+On a network that inspects HTTPS (a company proxy or security product re-signs traffic with its own certificate
+authority), omp fails with `SELF_SIGNED_CERT_IN_CHAIN` or *unable to get local issuer certificate*: Bun, the runtime
+omp runs on, does not trust that authority by default. **Settings → Advanced → Network → Set up corporate network
+certificates…** fixes this for omp only when you ask; nothing runs at start and nothing changes before you press
+**Enable** on the card that explains it.
+
+- **macOS certificates** (macOS, the default there): omp trusts the certificate authorities macOS trusts — your
+  Keychain with its trust settings, evaluated by macOS (the app reads and copies nothing). Every omp the app starts
+  gets `NODE_USE_SYSTEM_CA=1`.
+- **A certificate file** (every platform; the only way on Windows and Linux): choose your organisation's CA
+  certificate (`.pem`, `.crt` or `.cer`, from IT). The app checks it first — certificate authorities only
+  (`CA:true` with `keyCertSign`), valid now, no private key in the file — and shows how many it holds and until when
+  they are valid. It keeps its own copy, readable only by you, in the `network-trust` folder next to the GUI settings
+  file, and every omp it starts gets `NODE_EXTRA_CA_CERTS` pointing at that copy. Your file is not changed.
+
+What it covers: omp's HTTPS connections (model providers, web tools) and the Bun and Node.js programs omp starts, as
+they inherit its environment — every chat, sibling chats, restarts and omp terminal tabs opened from then on.
+Certificate checks stay on: a server signed by an authority nobody trusts is still refused. What it does not change:
+the system's trust store, VPN, proxies and routes; the built-in browser; and tools with their own network stack
+(curl, git, Python and others), which need their own settings. Open chats restart omp to use it: idle ones at once,
+a working one when its run ends (the page says how many are waiting); an omp terminal tab already open keeps the
+setting it started with.
+
+Your own settings win: when you set `NODE_USE_SYSTEM_CA`, `NODE_EXTRA_CA_CERTS` or a CA flag in `NODE_OPTIONS`
+(`--use-system-ca`, `--use-openssl-ca`, `--use-bundled-ca`) yourself — in the environment the app starts with or in
+the GUI settings' `environment` — the app adds nothing for that variable and the page shows what is set. If you
+already use your own `NODE_EXTRA_CA_CERTS` file, the file mode is refused rather than replacing or merging it: add
+your organisation's certificates to that file instead.
+
+**Turn off** removes the setting and deletes only the copy the app made; omp restarts without it. The GUI settings
+file keeps only the mode (`corporateTrust`) and the copy's location; diagnostics include the mode only.
+
+**Connection check** (same card): one request without a key — **Network request to api.anthropic.com without a
+key**, the same for api.openai.com, and for the current model's provider when omp lists its address — made by omp's
+own runtime with the same settings as omp. It says whether HTTPS works (any answer from the server, 401 included:
+no key was sent, so it does not show the model works), or why not: an untrusted certificate (with its code), a name
+that does not resolve, a refused or cut connection, a proxy asking for sign-in (407), or no answer within 10 seconds.
+It works only when omp runs on the Bun runtime (the one the app installs, or your own `bun` command).
 
 ## Connectors (MCP servers)
 
@@ -451,8 +527,18 @@ omp reads only when it starts say so and offer **Restart omp**.
   git. Its menu copies the name, starts a new worktree from here, or opens these settings.
 - **SSH hosts** — the machines omp's ssh tool can run commands on (keys only, no passwords), saved in omp's
   `ssh.json` for all projects or for this project. **Add host…** and **Remove** use omp's `/ssh add` and
-  `/ssh remove`; **Test** connects the way omp does (no password prompt, 8 s to connect; a new host's key is added
-  to `known_hosts`) and runs `exit`. While omp isn't running the page shows the saved hosts only.
+  `/ssh remove`; **Test** connects the way omp does — the system `ssh` with your SSH config (its `HostName`, `Port`,
+  `ProxyJump`, `ProxyCommand` apply), no password prompt, a new host's key added to `known_hosts`, a changed one
+  refused — over a fresh connection, and runs `exit`. ssh gets 8 s for the TCP connection and another 8 s for the
+  server's SSH greeting. A failed test lists the stages in order — address, TCP connection, the server's SSH
+  greeting, protocol negotiation, host key check, sign-in — each marked passed (✓), failed (✗) or not reached, the
+  route (direct with its port, or through a jump host / proxy command, whose own connection the test can't see), the
+  check left to do outside the app when the cause isn't visible from this computer, ssh's last line, and a code such
+  as `banner-timeout` without addresses or names. Example: *TCP connection established, but the server's SSH
+  greeting did not arrive within 8 s* — ssh reached the server's port and sent its greeting, and no answer came;
+  what to look at next is sshd on the server (the hosting provider's console) and the same test from another
+  network. The test runs only when you press **Test**; ssh's log is read for the stages and not kept or put into
+  the diagnostics file. While omp isn't running the page shows the saved hosts only.
 
 ## Pets
 
@@ -576,6 +662,8 @@ them. omp's own data is left alone; remove `~/.omp` only if you want to remove o
 - **omp didn't start** — the card says so; **Show details** has the error. Check the omp command in **Settings →
   Advanced**, then **Try again** (after omp stops in the middle of a session the button reads **Restart omp**; both
   continue the same session).
+- **SELF_SIGNED_CERT_IN_CHAIN / unable to get local issuer certificate** — your network inspects HTTPS: see
+  [Corporate network certificates](#corporate-network-certificates).
 - **Dictation: the audio library needs libjack.so.0** (Linux) — no system recorder was found either. Install
   PulseAudio's or PipeWire's recorder (`pulseaudio-utils` / `pipewire-bin`) or `alsa-utils`, or the JACK client
   library (`libjack-jackd2-0` or `libjack0` on Debian/Ubuntu, `jack-audio-connection-kit` on Fedora).

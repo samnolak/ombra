@@ -135,7 +135,10 @@ tools/release/keygen.sh <dir>                    # a new release key pair (see t
 Packages: `.github/workflows/avalonia-package.yml` (artifacts; `tools/package/package.sh`, `smoke.sh`). User guide:
 [`USER_GUIDE.md`](USER_GUIDE.md). Verification tools in `tools/verify`: `background-test.sh` (20 min minimized),
 `linux-benchmark.sh`, `linux-notification-check.sh`, `scale-shots.sh` (the package at 100 / 150 / 200 %),
-`secret-scan.sh` (run before committing logs or screenshots), `windows-*.ps1` (not executed: no Windows machine).
+`secret-scan.sh` (run before committing logs or screenshots), `windows-*.ps1` (not executed: no Windows machine),
+`webview-harness/run.sh <scenario|all>` (macOS: the built-in browser's WKWebView hooks in a windowless process — no
+window on screen, no permission prompt; JSON per scenario, exit 0 = all checks passed; `HARNESS_ISOLATION_CHECK=1`
+also checks the unified log for TCC requests; runs in the macOS job of `avalonia-platform-gates.yml`).
 
 ## Known issues / limits
 

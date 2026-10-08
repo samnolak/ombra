@@ -1,0 +1,11 @@
+<!doctype html>
+<title>beforeunload</title>
+<p id=r>unsaved changes</p>
+<script>
+  window.__asked = 0;
+  addEventListener('beforeunload', e => {
+    window.__asked++;
+    e.preventDefault();
+    e.returnValue = '';
+  });
+</script>

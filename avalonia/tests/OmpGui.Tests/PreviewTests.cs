@@ -1,3 +1,4 @@
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
@@ -246,7 +247,8 @@ public sealed class PreviewTests
         var (w, panel, vm) = Show();
         Assert.True(Named<StackPanel>(panel, "EmptyState").IsEffectivelyVisible);
         Assert.False(Named<Border>(panel, "FallbackCard").IsVisible);
-        Assert.False(Named<Border>(panel, "WebHost").IsVisible);
+        Assert.False(Named<Panel>(panel, "WebHost").IsVisible);
+        Assert.False(Named<Border>(panel, "TabStrip").IsVisible); // tabs show once omp opened a page of its own
         Assert.False(Named<ItemsControl>(panel, "SuggestionRow").IsVisible);
         Assert.Contains(panel.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "Start a dev server and its address shows up here");
         Assert.Equal(48, Named<Button>(panel, "BackButton").Parent is Grid g && g.Parent is Border b ? b.Height : 0);
@@ -266,6 +268,39 @@ public sealed class PreviewTests
     }
 
     [AvaloniaFact]
+    public void Omps_tabs_show_in_a_strip_the_user_can_switch_and_close()
+    {
+        var (w, panel, vm) = Show();
+        var a = vm.OpenAgentTab("A");
+        vm.NavigateTabForAgent(a, "localhost:3000");
+        var b = vm.OpenAgentTab("B");
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(Named<Border>(panel, "TabStrip").IsEffectivelyVisible);
+        var tabs = Named<ItemsControl>(panel, "TabItems").GetVisualDescendants().OfType<Border>().Where(x => x.Classes.Contains("preview-tab")).ToList();
+        Assert.Equal(3, tabs.Count);
+        Assert.Equal([false, false, true], tabs.Select(x => x.Classes.Contains("active")));
+        // The user's own tab has no close button; omp's do
+        var closers = tabs.Select(x => x.GetVisualDescendants().OfType<Button>().Any(c => c.IsVisible && AutomationProperties.GetName(c) == "Close tab")).ToList();
+        Assert.Equal([false, true, true], closers);
+        Assert.Contains(tabs[1].GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "localhost:3000");
+
+        // A click on a tab shows it; its close button drops it
+        var select = tabs[1].GetVisualDescendants().OfType<Button>().First(c => c.Classes.Contains("flat"));
+        select.Command!.Execute(select.CommandParameter);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Same(a, vm.ActiveTab);
+        Assert.Equal("http://localhost:3000", vm.Address);
+        var close = tabs[2].GetVisualDescendants().OfType<Button>().First(c => AutomationProperties.GetName(c) == "Close tab");
+        close.Command!.Execute(close.CommandParameter);
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(b.IsClosed);
+        Assert.Equal(2, vm.Tabs.Count);
+        using var frame = w.CaptureRenderedFrame();
+        Assert.NotNull(frame);
+        w.Close();
+    }
+
+    [AvaloniaFact]
     public void Without_a_web_engine_the_panel_shows_the_fallback_card_and_never_creates_a_web_view()
     {
         var (w, panel, vm) = Show();
@@ -281,7 +316,7 @@ public sealed class PreviewTests
         Assert.True(vm.IsEngineUnavailable);
         Assert.Null(panel.WebView);
         Assert.False(Named<StackPanel>(panel, "EmptyState").IsVisible);
-        Assert.False(Named<Border>(panel, "WebHost").IsVisible);
+        Assert.False(Named<Panel>(panel, "WebHost").IsVisible);
         Assert.True(Named<Border>(panel, "FallbackCard").IsEffectivelyVisible);
         Assert.StartsWith("The embedded browser needs ", vm.FallbackText);
         Assert.Contains(panel.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == vm.FallbackText);

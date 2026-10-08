@@ -56,6 +56,18 @@ public sealed record OmpRuntimeOptions
     /// <summary>How many chats keep their own omp running at once (default 4): opening one more closes the idle chat used
     /// longest ago; a working one is never closed.</summary>
     public int? MaxOpenSessions { get; init; }
+    /// <summary>omp's browser tool drives the app's built-in browser (default on): see
+    /// <see cref="Browser.AgentBrowserDefaults"/>. Off: omp's own browser settings decide, the app adds nothing.</summary>
+    public bool? AgentUsesGuiBrowser { get; init; }
+    /// <summary>Settings › Advanced › Corporate network certificates (<see cref="Network.CorporateTrust"/>): null (off),
+    /// <c>system</c> (macOS: Bun trusts what macOS trusts) or <c>pem</c> (Bun also trusts <see cref="CorporateTrustBundle"/>).</summary>
+    public string? CorporateTrust { get; init; }
+    /// <summary>The app's own copy of the user's CA file (mode <c>pem</c>), in its settings folder.</summary>
+    public string? CorporateTrustBundle { get; init; }
+
+    /// <summary>The environment omp inherits from the app, as launches see it (null: this process's; tests replace it).</summary>
+    [JsonIgnore]
+    public Func<string, string?>? InheritedEnvironment { get; init; }
 
     public const string ConfigEnvVar = "OMPGUI_CONFIG";
 
@@ -116,6 +128,7 @@ public sealed record OmpRuntimeOptions
         // colours and the locale away from an interactive terminal UI. A null value still means "not set for omp".
         var env = new Dictionary<string, string?>(Environment);
         if (Profile is not null) env["OMP_PROFILE"] = Profile;
+        Network.CorporateTrust.Apply(env, this, InheritedEnvironment ?? System.Environment.GetEnvironmentVariable);
         return new OmpLaunchSpec { FileName = rpc.FileName, Arguments = args, WorkingDirectory = rpc.WorkingDirectory, Environment = env };
     }
 
@@ -151,6 +164,8 @@ public sealed record OmpRuntimeOptions
         };
         foreach (var (k, v) in Environment) env[k] = v;
         if (Profile is not null) env["OMP_PROFILE"] = Profile;
+        // Corporate network certificates (Settings › Advanced), unless the user set the variable themselves
+        Network.CorporateTrust.Apply(env, this, InheritedEnvironment ?? System.Environment.GetEnvironmentVariable);
         return new OmpLaunchSpec
         {
             FileName = Command ?? "omp",

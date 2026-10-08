@@ -1,0 +1,39 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>trusted input self-test</title>
+<style>
+  body { margin: 0; font: 16px -apple-system, sans-serif; }
+  #b { position: absolute; left: 40px; top: 40px; width: 200px; height: 60px; }
+  #t { position: absolute; left: 40px; top: 140px; width: 300px; height: 30px; }
+  #ce { position: absolute; left: 40px; top: 200px; width: 300px; height: 60px; border: 1px solid #888; }
+</style>
+<button id="b">Click me</button>
+<input id="t" type="text">
+<div id="ce" contenteditable="true"></div>
+<script>
+  // What the page can observe about each input event: is it trusted, does the page have user activation now.
+  window.__log = [];
+  const ua = () => navigator.userActivation
+    ? { isActive: navigator.userActivation.isActive, hasBeenActive: navigator.userActivation.hasBeenActive }
+    : null;
+  const record = (e, extra) => window.__log.push({
+    type: e.type, target: e.target.id || e.target.nodeName, isTrusted: e.isTrusted,
+    userActivation: ua(), buttons: e.buttons, inputType: e.inputType, key: e.key, data: e.data, ...extra,
+  });
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'focus'])
+    for (const el of [b, t, ce]) el.addEventListener(type, e => record(e));
+  for (const type of ['keydown', 'keyup', 'beforeinput', 'input'])
+    document.addEventListener(type, e => record(e), true);
+  b.addEventListener('click', e => {
+    // a popup inside the click handler only works with real user activation
+    let popup = null;
+    try { popup = window.open('about:blank', '_blank'); } catch (err) { }
+    record(e, { windowOpenReturned: popup !== null });
+    if (popup) popup.close();
+  });
+  window.__probe = {
+    webdriver: navigator.webdriver === true,
+    ompGlobals: Object.keys(window).filter(k => k.startsWith('__omp')),
+    userActivationApi: !!navigator.userActivation,
+  };
+</script>
