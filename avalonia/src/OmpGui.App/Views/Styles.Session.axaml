@@ -204,13 +204,9 @@
   <Style Selector="ToggleButton.thinking-toggle:checked ctl|Icon.chevron">
     <Setter Property="RenderTransform" Value="rotate(90deg)" />
   </Style>
+  <!-- Pulses while omp thinks (ctl:Pulse, not a style animation: that would redraw the window every vsync) -->
   <Style Selector="TextBlock.thinking-label.live">
-    <Style.Animations>
-      <Animation Duration="0:0:1.1" IterationCount="INFINITE" PlaybackDirection="Alternate" Easing="SineEaseInOut">
-        <KeyFrame Cue="0%"><Setter Property="Opacity" Value="1" /></KeyFrame>
-        <KeyFrame Cue="100%"><Setter Property="Opacity" Value="0.45" /></KeyFrame>
-      </Animation>
-    </Style.Animations>
+    <Setter Property="ctl:Pulse.Low" Value="0.45" />
   </Style>
   <Style Selector="Border.thinking-body">
     <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
@@ -259,12 +255,14 @@
     <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
     <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderHover}" />
   </Style>
-  <Style Selector="Button.greeting-project TextBlock">
+  <!-- By class, not "Button.greeting-project TextBlock": the project menu opens from this button, so its popup's text
+       would match a descendant selector and render at greeting size -->
+  <Style Selector="TextBlock.greeting-project-name">
     <Setter Property="FontSize" Value="{DynamicResource GuiFontXxl}" />
     <Setter Property="FontWeight" Value="Medium" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
   </Style>
-  <Style Selector="Button.greeting-project ctl|Icon">
+  <Style Selector="ctl|Icon.greeting-project-chevron">
     <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextTertiary}" />
   </Style>
   <!-- A starter prompt: an outlined chip; it fills the message box -->
@@ -327,12 +325,8 @@
   <!-- Only while something runs, so an idle window does not redraw -->
   <Style Selector="Ellipse.tool-dot.running">
     <Setter Property="Fill" Value="{DynamicResource GuiTextTertiary}" />
-    <Style.Animations>
-      <Animation Duration="0:0:0.9" IterationCount="INFINITE" PlaybackDirection="Alternate" Easing="SineEaseInOut">
-        <KeyFrame Cue="0%"><Setter Property="Opacity" Value="1" /></KeyFrame>
-        <KeyFrame Cue="100%"><Setter Property="Opacity" Value="0.2" /></KeyFrame>
-      </Animation>
-    </Style.Animations>
+    <Setter Property="ctl:Pulse.Low" Value="0.2" />
+    <Setter Property="ctl:Pulse.Duration" Value="0:0:0.9" />
   </Style>
   <Style Selector="Ellipse.tool-dot.done">
     <Setter Property="Fill" Value="{DynamicResource GuiStatusSuccess}" />
@@ -425,7 +419,7 @@
     <Setter Property="Background" Value="{DynamicResource GuiStatusWarningSoft}" />
     <Setter Property="Padding" Value="12,8" />
   </Style>
-  <!-- "Jump to latest": a small round ↓ over the conversation's bottom-right corner -->
+  <!-- "Jump to latest": a small round ↓ centred over the conversation's bottom, above the message box -->
   <Style Selector="Button#JumpToLatest">
     <Setter Property="Width" Value="32" />
     <Setter Property="Height" Value="32" />

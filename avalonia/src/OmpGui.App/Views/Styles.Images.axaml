@@ -1,0 +1,68 @@
+<!-- Attached images: thumbnails (Controls/ImageThumb in composer chips, sent and queued messages) and the image viewer
+     (Controls/ImageViewer), on the design system's tokens (Tokens.axaml), as in Styles.axaml. -->
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctl="using:OmpGui.App.Controls">
+
+  <!-- ─────────────── Thumbnails ─────────────── -->
+  <!-- A rounded square on a quiet fill (seen while it decodes, and behind a transparent image), with a hairline edge
+       so a white screenshot does not melt into a light bubble -->
+  <Style Selector="Border.image-thumb">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+  </Style>
+  <Style Selector="ctl|Icon.image-missing">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+  <!-- A thumbnail is a button that opens the viewer: bare, the edge darkens on hover, the focus ring on keyboard focus -->
+  <Style Selector="Button.image-thumb">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Stretch" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+  <Style Selector="Button.image-thumb:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.image-thumb:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.image-thumb:pointerover Border.image-thumb">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderStrong}" />
+  </Style>
+  <Style Selector="Button.image-thumb:pressed Border.image-thumb">
+    <Setter Property="Opacity" Value="0.85" />
+  </Style>
+  <!-- The thumbnails of a sent message -->
+  <Style Selector="Button.image-thumb.in-message">
+    <Setter Property="Width" Value="72" />
+    <Setter Property="Height" Value="72" />
+  </Style>
+  <!-- The preview of a composer chip -->
+  <Style Selector="Button.image-thumb.in-chip">
+    <Setter Property="Width" Value="52" />
+    <Setter Property="Height" Value="52" />
+  </Style>
+  <!-- One line in the queue -->
+  <Style Selector="Button.image-thumb.in-queue">
+    <Setter Property="Width" Value="24" />
+    <Setter Property="Height" Value="24" />
+  </Style>
+  <Style Selector="Button.image-thumb.in-queue ctl|Icon.image-missing">
+    <Setter Property="Size" Value="14" />
+  </Style>
+  <Style Selector="Button.image-thumb.in-queue Border.image-thumb">
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius4}" />
+  </Style>
+
+  <!-- ─────────────── The viewer ─────────────── -->
+  <Style Selector="Border.image-backdrop">
+    <Setter Property="Background" Value="{DynamicResource GuiImageBackdrop}" />
+  </Style>
+  <Style Selector="Image.viewer-image">
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+</Styles>

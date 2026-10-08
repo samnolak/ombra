@@ -75,7 +75,7 @@ public sealed partial class MainViewModel
         IsTerminalOpen = true;
     }
 
-    private string? ProjectDirectory() => _last?.Cwd is { } cwd && Directory.Exists(cwd) ? cwd : null;
+    private string? ProjectDirectory() => _open.Last?.Cwd is { } cwd && Directory.Exists(cwd) ? cwd : null;
 
     /// <summary>
     /// The user's shell: $SHELL (macOS, Linux), else %ComSpec% (Windows), else sh. $SHELL counts only when it names an

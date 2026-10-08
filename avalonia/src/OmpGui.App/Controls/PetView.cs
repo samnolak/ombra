@@ -15,10 +15,12 @@ namespace OmpGui.App.Controls;
 /// Draws a pixel pet alive: <see cref="PetLife"/> says what it does at each moment (breathing, blinks, glances, idle
 /// actions, its mood's motion, reactions to the pointer, a click and typing) and <see cref="PetFrames"/> renders that at
 /// the screen's own pixels, nearest-neighbour, so pet pixels stay crisp squares (at a scale that is not a whole number
-/// of screen pixels it renders at the next whole one and lets the screen scale it down smoothly). A one-shot timer wakes
-/// only when the picture changes next, and only while the pet is on screen in the active window: hidden, detached or in
-/// a background window it shows a still and no timer runs; a mood that lasts (asleep, a question nobody answers) comes
-/// to rest on a still too. An <see cref="Image"/>, so layout checks count it as the content of the button it sits in.
+/// of screen pixels it renders at the next whole one and lets the screen scale it down smoothly; moved to a screen of
+/// another density, it renders again for that one). A one-shot timer wakes only when the picture changes next, and only
+/// while the pet is on screen in the active window: hidden, detached or in a background window it shows a still and no
+/// timer runs; a mood that lasts (asleep, a question nobody answers) comes to rest on a still too. On the desktop, in a
+/// window of its own that is never the active one, <see cref="InForeground"/> says whether the app is in front. An
+/// <see cref="Image"/>, so layout checks count it as the content of the button it sits in.
 /// </summary>
 public sealed class PetView : Image
 {
@@ -28,6 +30,7 @@ public sealed class PetView : Image
     public static readonly StyledProperty<bool> AnimateProperty = AvaloniaProperty.Register<PetView, bool>(nameof(Animate), true);
     public static readonly StyledProperty<bool> BodyOnlyProperty = AvaloniaProperty.Register<PetView, bool>(nameof(BodyOnly));
     public static readonly StyledProperty<int> AttentionProperty = AvaloniaProperty.Register<PetView, int>(nameof(Attention));
+    public static readonly StyledProperty<bool?> InForegroundProperty = AvaloniaProperty.Register<PetView, bool?>(nameof(InForeground));
 
     private const int MaxCached = 64;
 
@@ -35,6 +38,9 @@ public sealed class PetView : Image
     private readonly Dictionary<string, WriteableBitmap> _bitmaps = [];
     private PetLife _life;
     private string? _key;
+    /// <summary>Draws the picture on screen.</summary>
+    private readonly FrameView _view = new();
+    private TopLevel? _top;
     private Window? _window;
     private bool _attached;
     private Visual[] _ancestors = [];
@@ -42,8 +48,7 @@ public sealed class PetView : Image
     public PetView()
     {
         Focusable = false;
-        Stretch = Stretch.Fill;
-        RenderOptions.SetBitmapInterpolationMode(this, BitmapInterpolationMode.None);
+        VisualChildren.Add(_view);
         _life = new PetLife(_now());
         _life.Begin(PetMood.Idle, _now());
         _timer.Tick += (_, _) => Tick();
@@ -59,6 +64,12 @@ public sealed class PetView : Image
     public bool BodyOnly { get => GetValue(BodyOnlyProperty); set => SetValue(BodyOnlyProperty, value); }
     /// <summary>Changes when the user types: the pet glances at the message box.</summary>
     public int Attention { get => GetValue(AttentionProperty); set => SetValue(AttentionProperty, value); }
+    /// <summary>
+    /// Null (in the app's window): the pet moves while its window is active. On the desktop its window sets whether
+    /// the app is in front: then it moves; behind other apps it moves only while omp is busy, asks or reports
+    /// (what it is there for, at a glance) and rests on a still when idle or asleep.
+    /// </summary>
+    public bool? InForeground { get => GetValue(InForegroundProperty); set => SetValue(InForegroundProperty, value); }
 
     private int SourceWidth => BodyOnly ? PetArt.BodySize : PetFrames.Width;
 
@@ -113,19 +124,31 @@ public sealed class PetView : Image
         }
         else if (change.Property == IsVisibleProperty) UpdateTimer();
         else if (change.Property == PixelScaleProperty || change.Property == BodyOnlyProperty) { InvalidateMeasure(); Redraw(); }
-        else if (change.Property == AnimateProperty) Restart();
+        else if (change.Property == AnimateProperty || change.Property == InForegroundProperty) Restart();
     }
 
-    protected override Size MeasureOverride(Size availableSize) =>
-        new(SourceWidth * Math.Max(0.5, PixelScale), PetFrames.Height * Math.Max(0.5, PixelScale));
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        var size = new Size(SourceWidth * Math.Max(0.5, PixelScale), PetFrames.Height * Math.Max(0.5, PixelScale));
+        _view.Measure(size);
+        return size;
+    }
 
-    protected override Size ArrangeOverride(Size finalSize) => MeasureOverride(finalSize);
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        var size = new Size(SourceWidth * Math.Max(0.5, PixelScale), PetFrames.Height * Math.Max(0.5, PixelScale));
+        _view.Arrange(new Rect(size));
+        return size;
+    }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
         _attached = true;
-        _window = TopLevel.GetTopLevel(this) as Window;
+        _top = TopLevel.GetTopLevel(this);
+        _window = _top as Window;
+        // Moved to a screen of another density (the desktop pet crossing from a Retina screen to a 1× one)
+        if (_top is not null) _top.ScalingChanged += OnScalingChanged;
         // Any ancestor hidden (the settings page closing, the pet switched off) or the window going to the background
         // (or minimised) stops the timer; shown or active again restarts it. The window is one of the ancestors.
         _ancestors = [.. this.GetVisualAncestors()];
@@ -137,6 +160,8 @@ public sealed class PetView : Image
     {
         base.OnDetachedFromVisualTree(e);
         _attached = false;
+        if (_top is not null) _top.ScalingChanged -= OnScalingChanged;
+        _top = null;
         _window = null;
         foreach (var a in _ancestors) a.PropertyChanged -= OnAncestorChanged;
         _ancestors = [];
@@ -156,6 +181,8 @@ public sealed class PetView : Image
         if (e.Property == IsVisibleProperty || e.Property == WindowBase.IsActiveProperty || e.Property == Window.WindowStateProperty)
             Dispatcher.UIThread.Post(Restart, DispatcherPriority.Background);
     }
+
+    private void OnScalingChanged(object? sender, EventArgs e) => Redraw();
 
     // ───────────────────────────── The pointer ─────────────────────────────
 
@@ -195,7 +222,12 @@ public sealed class PetView : Image
 
     // ───────────────────────────── Timer and drawing ─────────────────────────────
 
-    private bool Visible => _attached && IsEffectivelyVisible && _window is not { IsActive: false } && _window?.WindowState != WindowState.Minimized;
+    private bool Visible => _attached && IsEffectivelyVisible && _window?.WindowState != WindowState.Minimized && InForeground switch
+    {
+        null => _window is not { IsActive: false },
+        true => true,
+        false => Mood is not (PetMood.Idle or PetMood.Sleeping),
+    };
 
     private bool ShouldAnimate(DateTimeOffset now) => Animate && Look is not null && Visible && !_life.IsResting(now);
 
@@ -250,7 +282,7 @@ public sealed class PetView : Image
     {
         if (Look is not { } look)
         {
-            Source = null;
+            _view.Show(null, BitmapInterpolationMode.None);
             _key = null;
             return;
         }
@@ -266,9 +298,30 @@ public sealed class PetView : Image
             bmp = ToBitmap(PetFrames.Render(look, pose, scale, BodyOnly));
             _bitmaps[key] = bmp;
         }
-        RenderOptions.SetBitmapInterpolationMode(this, smooth ? BitmapInterpolationMode.MediumQuality : BitmapInterpolationMode.None);
-        Source = bmp;
-        InvalidateVisual();
+        _view.Show(bmp, smooth ? BitmapInterpolationMode.MediumQuality : BitmapInterpolationMode.None);
+    }
+
+    /// <summary>
+    /// Shows the frames, stretched over the pet's box. A child of its own rather than <see cref="Image.Source"/>: a new
+    /// source re-measures the image, so every frame would lay out the window around it (and raise its LayoutUpdated);
+    /// a new frame here only repaints. What it draws takes the pointer for the pet (the events bubble up to it).
+    /// </summary>
+    private sealed class FrameView : Control
+    {
+        private WriteableBitmap? _frame;
+
+        public void Show(WriteableBitmap? frame, BitmapInterpolationMode interpolation)
+        {
+            _frame = frame;
+            RenderOptions.SetBitmapInterpolationMode(this, interpolation);
+            InvalidateVisual();
+        }
+
+        public override void Render(DrawingContext context)
+        {
+            if (_frame is { } frame && Bounds.Width > 0 && Bounds.Height > 0)
+                context.DrawImage(frame, new Rect(frame.Size), new Rect(Bounds.Size));
+        }
     }
 
     private static WriteableBitmap ToBitmap(PetFrame f)

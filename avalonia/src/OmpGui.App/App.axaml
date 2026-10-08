@@ -31,5 +31,6 @@
     <StyleInclude Source="avares://OmpGui/Views/Styles.Workspace.axaml" />
     <StyleInclude Source="avares://OmpGui/Views/Styles.Session.axaml" />
     <StyleInclude Source="avares://OmpGui/Views/Styles.Composer.axaml" />
+    <StyleInclude Source="avares://OmpGui/Views/Styles.Images.axaml" />
   </Application.Styles>
 </Application>

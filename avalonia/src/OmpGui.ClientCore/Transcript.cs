@@ -9,15 +9,22 @@ public enum NoticeLevel { Info, Warning, Error }
 /// <summary>Immutable transcript rows handed to the UI. <see cref="Key"/> is stable for the row's lifetime.</summary>
 public abstract record TranscriptItem(long Key);
 
-public sealed record UserItem(long Key, string Text, bool Confirmed, int ImageCount = 0) : TranscriptItem(Key);
+public sealed record UserItem(long Key, string Text, bool Confirmed) : TranscriptItem(Key)
+{
+    /// <summary>The images sent with the message (none: an empty list).</summary>
+    public IReadOnlyList<ImageAttachment> Images { get; init; } = [];
+}
 
-/// <summary>An image sent with a prompt (<c>ImageContent</c>: base64 data + MIME type).</summary>
+/// <summary>
+/// An image sent with a prompt (<c>ImageContent</c>: base64 data + MIME type). <see cref="Data"/> is empty when omp
+/// returned a message without the image's bytes (a history whose stored image is gone).
+/// </summary>
 public sealed record ImageAttachment(string Name, string MimeType, byte[] Data);
 
 public enum QueueKind { Steer, FollowUp }
 
 /// <summary>A message sent while the agent was working; it joins the transcript when omp delivers it.</summary>
-public sealed record QueuedMessage(long Seq, QueueKind Kind, string Text, int ImageCount);
+public sealed record QueuedMessage(long Seq, QueueKind Kind, string Text, IReadOnlyList<ImageAttachment> Images);
 
 public sealed record AssistantItem(long Key, string Text, string Thinking, bool Streaming, string? StopReason, string? Error) : TranscriptItem(Key);
 

@@ -174,10 +174,12 @@ public sealed class UpdateUiTests
         Assert.NotNull(launched);
         var script = File.ReadAllText(launched!.ArgumentList[0]);
         Assert.Contains($"kill -0 {Environment.ProcessId}", script);
-        Assert.Contains("nohup '" + Path.Combine(root, "OmpGui") + "'", script);
+        // The relaunch: macOS opens the app bundle (Launch Services), elsewhere the executable is started detached
+        var relaunch = OperatingSystem.IsMacOS() ? "open '" + root + "'" : "nohup '" + Path.Combine(root, "OmpGui") + "'";
+        Assert.Contains(relaunch, script);
         // Run it as if this process had quit (and without starting the stand-in app again).
         using (var exited = Process.Start(new ProcessStartInfo("/bin/sh", "-c true"))!) { exited.WaitForExit(); script = script.Replace($"kill -0 {Environment.ProcessId}", $"kill -0 {exited.Id}"); }
-        script = string.Join('\n', script.Split('\n').Where(l => !l.Contains("nohup", StringComparison.Ordinal)));
+        script = string.Join('\n', script.Split('\n').Where(l => !l.Contains(relaunch, StringComparison.Ordinal)));
         var copy = Path.Combine(parent, "run.sh");
         File.WriteAllText(copy, script);
         using (var p = Process.Start(new ProcessStartInfo("/bin/sh", [copy]))!) p.WaitForExit();

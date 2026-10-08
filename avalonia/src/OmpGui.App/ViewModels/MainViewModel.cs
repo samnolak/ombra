@@ -5,6 +5,7 @@ using System.Text;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Services;
 using OmpGui.ClientCore;
 using OmpGui.Rpc;
 
@@ -19,42 +20,39 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private const long MinimizedGcAllocationThreshold = 32L * 1024 * 1024;
     private static readonly TimeSpan MinimizedAttentionInterval = TimeSpan.FromSeconds(1);
 
-    private readonly SessionController _session;
     private readonly AppArgs _args;
     private readonly CancellationTokenSource _cts = new();
-    private readonly Dictionary<long, RowViewModel> _rowsByKey = [];
+    private readonly RowList _rows = [];
     private long _lastDebugSeq;
     private long _uiApplies;
     private long _ompSpawnTs;
     private long _ompReadyTs;
     private volatile string _windowState = "Normal";
-    // Completed while the window is visible. While minimized the pump waits on it instead of applying:
+    // Completed while the window is visible. While minimized the pumps wait on it instead of applying:
     // Avalonia renders nothing then, and every control touched meanwhile stays queued in the renderer's
     // dirty set until the next frame, so UI updates in a minimized window only grow memory.
     private TaskCompletionSource _visible = NewCompleted();
     private Task? _dispose;
     private DispatcherTimer? _elapsedTimer;
     private DispatcherTimer? _dialogTimer;
-    private long _lastEditorSeq;
-    private long _lastUrlSeq;
-    private long _transcriptEpoch;
-    private SessionSnapshot? _last;
-    private long _optimisticAfterVersion = -1;
-    private Task? _pump;
     private int _disposed;
 
     public MainViewModel(SessionController session, AppArgs args, string? configError = null, ClientSettingsStore? settings = null)
     {
-        _session = session;
         _args = args;
         _settings = settings;
         if (configError is not null) Rows.Add(RowViewModel.Create(new NoticeItem(0, NoticeLevel.Warning, configError)));
-        ApprovalRules = _session.ApprovalRules ??= new ApprovalRuleSet(settings); // MainViewModel.Approvals.cs
+        ApprovalRules = session.ApprovalRules ??= new ApprovalRuleSet(settings); // MainViewModel.Approvals.cs
         _approvalActions = new ApprovalActions(AllowWithRuleAsync, DenyWithFeedbackAsync);
+        _host = new SessionHost(session, MayClose) { MaxProcesses = LoadMaxOpenSessions() }; // MainViewModel.OpenSessions.cs
+        _host.Closed += OnHostClosed;
+        _open = Register(session);
         Rows.CollectionChanged += (_, _) => NotifyRecoverLayout();
     }
 
-    public ObservableCollection<RowViewModel> Rows { get; } = [];
+    /// <summary>The shown chat's rows (each open chat keeps its own while another is shown: MainViewModel.OpenSessions.cs).</summary>
+    public ObservableCollection<RowViewModel> Rows => _rows;
+
     public ObservableCollection<string> DebugLog { get; } = [];
 
     [ObservableProperty]
@@ -64,12 +62,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SendCommand))]
     [NotifyCanExecuteChangedFor(nameof(AbortCommand))]
-    [NotifyCanExecuteChangedFor(nameof(NewSessionCommand))]
-    [NotifyCanExecuteChangedFor(nameof(OpenSessionCommand))]
-    [NotifyCanExecuteChangedFor(nameof(OpenFolderCommand))]
     [NotifyCanExecuteChangedFor(nameof(StartRenameCommand))]
     [NotifyCanExecuteChangedFor(nameof(SteerCommand))]
-    [NotifyPropertyChangedFor(nameof(IsRunning), nameof(IsIdle), nameof(ComposerHint), nameof(CanQueue), nameof(StopLabel))]
+    [NotifyPropertyChangedFor(nameof(IsRunning), nameof(IsIdle), nameof(ComposerHint), nameof(CanQueue), nameof(StopLabel), nameof(ApprovalPendingNote))]
     private SessionPhase _phase = SessionPhase.NotStarted;
 
     /// <summary>The dialog omp is waiting on (the first of possibly several).</summary>
@@ -104,9 +99,6 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsSigningIn), nameof(SigningInText))]
     [NotifyCanExecuteChangedFor(nameof(SendCommand))]
-    [NotifyCanExecuteChangedFor(nameof(NewSessionCommand))]
-    [NotifyCanExecuteChangedFor(nameof(OpenSessionCommand))]
-    [NotifyCanExecuteChangedFor(nameof(OpenFolderCommand))]
     [NotifyCanExecuteChangedFor(nameof(StartRenameCommand))]
     private string? _signingIn;
 
@@ -156,7 +148,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _windowState = state;
         if (state == "Minimized")
         {
-            if (_visible.Task.IsCompleted) _visible = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (_visible.Task.IsCompleted)
+            {
+                _visible = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _ = CollectWhileMinimizedAsync(_visible.Task, _cts.Token); // MainViewModel.OpenSessions.cs
+            }
             // Nothing to show while minimized; the next apply after restore restarts the elapsed-time tick.
             _elapsedTimer?.Stop();
             _elapsedTimer = null;
@@ -165,7 +161,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         }
         else
         {
-            _visible.TrySetResult();
+            var wasMinimized = _visible.TrySetResult();
+            WakeFront();
+            // The shown chat's updates were only looked at meanwhile: its newest state, now
+            if (wasMinimized && !IsClosing) Apply(Session.Snapshot());
             UpdateDialogTimer();
             CurrentDialog?.UpdateRemaining(DateTimeOffset.UtcNow);
         }
@@ -195,12 +194,12 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task StartAsync()
     {
-        _pump = Task.Run(() => PumpAsync(_cts.Token));
+        var first = _open;
         if (_args.TimelinePath is not null) _ = Task.Run(() => TimelineAsync(_args.TimelinePath, _cts.Token));
         _ompSpawnTs = Stopwatch.GetTimestamp();
         try
         {
-            await _session.StartAsync(_cts.Token).ConfigureAwait(false);
+            await StartSessionAsync(first).ConfigureAwait(false); // MainViewModel.OpenSessions.cs
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
@@ -209,10 +208,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
         _ompReadyTs = Stopwatch.GetTimestamp();
-        AppendStartupLog($"omp_spawn_to_session_ready_ms={RpcTimings.Ms(_ompSpawnTs, _ompReadyTs):F0} omp_pid={_session.ProcessId}");
+        AppendStartupLog($"omp_spawn_to_session_ready_ms={RpcTimings.Ms(_ompSpawnTs, _ompReadyTs):F0} omp_pid={first.Controller.ProcessId}");
         SmokeExit();
         if (_args.BenchLatency > 0) await RunLatencyBenchAsync(_args.BenchLatency, _args.BenchOut ?? "latency.csv").ConfigureAwait(false);
-        if (_args.AutoPrompt is { } p) await _session.PromptAsync(p, _cts.Token).ConfigureAwait(false);
+        if (_args.AutoPrompt is { } p) await first.Controller.PromptAsync(p, _cts.Token).ConfigureAwait(false);
     }
 
     /// <summary>Ready: a new prompt. Running: queued as a follow-up. Needs text or an image.</summary>
@@ -232,21 +231,29 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     /// message box's, or the pet's message box's).</summary>
     private async Task SubmitAsync(Func<(string Text, ImageAttachment[] Images)> take)
     {
+        // The chat it goes to: another one may be shown by the time omp answers
+        var open = _open;
+        (string Text, ImageAttachment[] Images) content = ("", []);
         try
         {
             if (Phase == SessionPhase.Running)
             {
-                var (queued, queuedImages) = take();
-                await _session.QueueAsync(QueueKind.FollowUp, queued, queuedImages, _cts.Token);
-                Apply(_session.Snapshot());
+                content = take();
+                await open.Controller.QueueAsync(QueueKind.FollowUp, content.Text, content.Images, _cts.Token);
+                ApplyIfShown(open);
                 return;
             }
-            var (text, images) = take();
+            content = take();
             // Reflect Running at once instead of waiting for the next pump tick.
-            _optimisticAfterVersion = _session.Snapshot().Version;
+            open.OptimisticAfterVersion = open.Controller.Snapshot().Version;
             Phase = SessionPhase.Running;
-            await _session.PromptAsync(text, images, _cts.Token);
-            SettleOptimisticPhase();
+            await open.Controller.PromptAsync(content.Text, content.Images, _cts.Token);
+            SettleOptimisticPhase(open);
+        }
+        catch (OmpNotRunningException)
+        {
+            if (open == _open) PutBackUnsent(content);
+            SettleOptimisticPhase(open);
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested)
         {
@@ -262,18 +269,19 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand(CanExecute = nameof(CanAbort))]
     private async Task AbortAsync()
     {
+        var open = _open;
         try
         {
             if (Phase == SessionPhase.Aborting)
             {
-                await _session.ForceStopAsync(_cts.Token);
-                Apply(_session.Snapshot());
+                await open.Controller.ForceStopAsync(_cts.Token);
+                ApplyIfShown(open);
                 return;
             }
-            _optimisticAfterVersion = _session.Snapshot().Version;
+            open.OptimisticAfterVersion = open.Controller.Snapshot().Version;
             Phase = SessionPhase.Aborting;
-            await _session.AbortAsync(_cts.Token);
-            SettleOptimisticPhase();
+            await open.Controller.AbortAsync(_cts.Token);
+            SettleOptimisticPhase(open);
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested)
         {
@@ -282,10 +290,10 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>The command finished: Core's phase is authoritative again, even if no newer snapshot comes.</summary>
-    private void SettleOptimisticPhase()
+    private void SettleOptimisticPhase(OpenSession open)
     {
-        _optimisticAfterVersion = -1;
-        Apply(_session.Snapshot());
+        open.OptimisticAfterVersion = -1;
+        ApplyIfShown(open);
     }
 
     [RelayCommand]
@@ -293,10 +301,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task AnswerDialogAsync(string id, DialogAnswer answer)
     {
+        var open = _open;
         try
         {
-            await _session.AnswerDialogAsync(id, answer, _cts.Token);
-            Apply(_session.Snapshot());
+            await open.Controller.AnswerDialogAsync(id, answer, _cts.Token);
+            ApplyIfShown(open);
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested)
         {
@@ -321,166 +330,125 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     private void DismissPendingUrl() => PendingUrl = null;
 
-    /// <summary>Wakes on Core changes, coalesces bursts and applies the newest snapshot on the UI thread.</summary>
-    private async Task PumpAsync(CancellationToken ct)
-    {
-        long lastApply = 0;
-        try
-        {
-            while (await _session.Changes.WaitToReadAsync(ct).ConfigureAwait(false))
-            {
-                _session.Changes.TryRead(out _);
-                if (!_visible.Task.IsCompleted)
-                {
-                    // Minimized: Core keeps going; apply the newest snapshot the moment the window is back.
-                    await WaitWhileMinimizedAsync(ct).ConfigureAwait(false);
-                    lastApply = 0;
-                }
-                var wait = MinApplyInterval - Stopwatch.GetElapsedTime(lastApply);
-                if (lastApply != 0 && wait > TimeSpan.Zero) await Task.Delay(wait, ct).ConfigureAwait(false);
-                _session.Changes.TryRead(out _);
-                var snapshot = _session.Snapshot();
-                try
-                {
-                    await Dispatcher.UIThread.InvokeAsync(() => Apply(snapshot), DispatcherPriority.Background);
-                }
-                catch (Exception e) when (e is not OperationCanceledException)
-                {
-                    // One bad update must not stop all later ones; the next snapshot is complete anyway.
-                    Console.Error.WriteLine("UI update failed: " + e);
-                }
-                lastApply = Stopwatch.GetTimestamp();
-            }
-            // Core completed its change stream (session disposed): show the final state.
-            var final = _session.Snapshot();
-            await Dispatcher.UIThread.InvokeAsync(() => Apply(final), DispatcherPriority.Background);
-        }
-        catch (OperationCanceledException) { }
-    }
-
-    /// <summary>
-    /// Waits for the window to be visible again. Meanwhile the Core still parses omp's stream (~6 MB/min of
-    /// short-lived allocations). With nothing rendered there is no GC pressure from the renderer, and the
-    /// workstation GC's gen0 budget can be hundreds of MB, so that garbage would sit in RSS until restore.
-    /// Bound it: every 30 s, collect the young generations once 32 MB have been allocated since the last check.
-    /// Nothing is applied to the UI meanwhile, but a run that ends or a question omp asks must still reach the user:
-    /// on a change, at most once a second, the attention check alone runs on the newest snapshot.
-    /// </summary>
-    private async Task WaitWhileMinimizedAsync(CancellationToken ct)
-    {
-        var allocatedAtLastCheck = GC.GetTotalAllocatedBytes();
-        Task<bool>? change = null;
-        Task? gcCheck = null;
-        while (!_visible.Task.IsCompleted)
-        {
-            change ??= _session.Changes.WaitToReadAsync(ct).AsTask();
-            gcCheck ??= Task.Delay(MinimizedGcCheckInterval, ct);
-            await Task.WhenAny(_visible.Task, change, gcCheck).ConfigureAwait(false);
-            ct.ThrowIfCancellationRequested();
-            if (_visible.Task.IsCompleted) return;
-            if (change.IsCompleted)
-            {
-                if (!await change.ConfigureAwait(false)) return; // the session ended: the pump shows its final state
-                change = null;
-                _session.Changes.TryRead(out _);
-                var snapshot = _session.Snapshot();
-                try
-                {
-                    await Dispatcher.UIThread.InvokeAsync(() => CheckAttention(snapshot), DispatcherPriority.Background);
-                }
-                catch (Exception e) when (e is not OperationCanceledException)
-                {
-                    Console.Error.WriteLine("Attention check failed: " + e);
-                }
-                await Task.WhenAny(_visible.Task, Task.Delay(MinimizedAttentionInterval, ct)).ConfigureAwait(false);
-                ct.ThrowIfCancellationRequested();
-            }
-            if (gcCheck.IsCompleted)
-            {
-                gcCheck = null;
-                var allocated = GC.GetTotalAllocatedBytes();
-                if (!_visible.Task.IsCompleted && allocated - allocatedAtLastCheck > MinimizedGcAllocationThreshold)
-                {
-                    GC.Collect(1, GCCollectionMode.Forced, blocking: true);
-                    allocatedAtLastCheck = allocated;
-                }
-            }
-        }
-    }
-
     internal void Apply(SessionSnapshot s)
     {
+        var open = _open;
         // Snapshots reach the UI thread by two paths (the pump, and commands applying the state right after they
         // finish). The pump's may have been taken earlier: never let an older snapshot overwrite a newer one, or a
         // run that already ended shows as running again and stays so.
-        if (_last is not null && s.Version < _last.Version) return;
+        if (open.Last is { } last && s.Version < last.Version) return;
+        var perf = PerfLog.StartApply(); // OMPGUI_PERF=1 only
         Interlocked.Increment(ref _uiApplies);
-        var changed = false;
-        var newConversation = s.TranscriptEpoch != _transcriptEpoch;
+        var newConversation = s.TranscriptEpoch != open.TranscriptEpoch;
         if (newConversation)
         {
-            // Another session (or a restarted omp): the old rows belong to a different conversation.
+            // Another session (or a restarted omp): the old rows belong to a different conversation. Rows that hold
+            // decoded images let them go.
+            foreach (var old in Rows) (old as IDisposable)?.Dispose();
             Rows.Clear();
-            _rowsByKey.Clear();
-            _transcriptEpoch = s.TranscriptEpoch;
-            changed = true;
+            open.RowsByKey.Clear();
+            open.AppliedItems = [];
+            open.TranscriptEpoch = s.TranscriptEpoch;
         }
-        foreach (var item in s.Items)
+        // Core hands out the same item instance until the item changes, so a slot that still holds the instance the
+        // last applied snapshot had there needs nothing: while a reply streams only its own row is looked at, not
+        // every row of a long conversation 30 times a second.
+        var items = s.Items;
+        var applied = open.AppliedItems;
+        int added = 0, updated = 0;
+        for (var i = 0; i < items.Count; i++)
         {
+            var item = items[i];
+            if (i < applied.Count && ReferenceEquals(applied[i], item)) continue;
             OfferPreviewUrls(item); // MainViewModel.Preview.cs: local URLs in new tool output become preview suggestions
-            if (_rowsByKey.TryGetValue(item.Key, out var row))
+            if (open.RowsByKey.TryGetValue(item.Key, out var row))
             {
-                if (!ReferenceEquals(row.Model, item))
-                {
-                    row.Update(item);
-                    changed = true;
-                }
+                if (ReferenceEquals(row.Model, item)) continue;
+                row.Update(item);
+                updated++;
             }
             else
             {
                 row = RowViewModel.Create(item);
-                _rowsByKey[item.Key] = row;
+                open.RowsByKey[item.Key] = row;
                 Rows.Add(row);
-                changed = true;
+                added++;
             }
         }
-
-        var debugAdded = false;
-        foreach (var d in s.DebugTail)
-        {
-            if (d.Seq <= _lastDebugSeq) continue;
-            debugAdded = true;
-            DebugLog.Add($"{d.At.ToLocalTime():HH:mm:ss.fff}  {d.Type,-22} {d.Summary}");
-            _lastDebugSeq = d.Seq;
-        }
-        while (DebugLog.Count > DebugLines) DebugLog.RemoveAt(0);
+        open.AppliedItems = items;
+        var changed = newConversation || added + updated > 0;
+        var debugAdded = IsDebugVisible && AppendDebugLines(s.DebugTail);
+        perf?.Lap("rows");
 
         ApplyExtensionUi(s);
         ApplyQueue(s);
         ApplyCommandsAndProgress(s);
         ApplyPanes(s); // MainViewModel.Panes.cs: the plan and the background tasks
+        perf?.Lap("panes");
 
         // A snapshot taken before our optimistic Send/Stop must not flip the phase back for a frame.
         var wasRunning = IsRunning;
-        if (s.Version > _optimisticAfterVersion) Phase = s.Phase;
-        var fileChanged = s.SessionFile != _last?.SessionFile;
+        if (s.Version > open.OptimisticAfterVersion) Phase = s.Phase;
+        var fileChanged = s.SessionFile != open.Last?.SessionFile;
+        // From omp's snapshots, not the phase shown: Send shows Running before omp reports it, so the shown phase never
+        // changes when the run's first snapshot comes, and no rescan followed a sent message (a new chat's row kept the
+        // title it had before its first message, its order the time before it).
+        var runChanged = IsRun(open.Last) != IsRun(s);
         HasError = s.Phase == SessionPhase.Faulted;
-        _last = s;
+        open.Last = open.Seen = s;
         ApplySessionInfo(s);
         ApplyModelInfo(s);
         ApplySessionArea(s); // MainViewModel.Session.cs: context ring, pin, session menu
-        CheckAttention(s);
+        CheckAttention(open, s);
+        WhenIdle(open, s); // MainViewModel.OpenSessions.cs: a restart that waited for the run to end
         if (s.Phase == SessionPhase.Ready) RememberProject(s.Cwd);
         // Another session, a sent message (the run starts) or a finished run changes the list (new file, the time of the
         // last message that orders it, first-message title).
-        if (fileChanged || wasRunning != IsRunning) RequestCatalogRefresh();
+        if (fileChanged || runChanged) RequestCatalogRefresh();
         UpdateStatus();
         ApplyPet(s); // MainViewModel.Pets.cs
         UpdateElapsedTimer();
+        perf?.Lap("header");
         if (changed || wasRunning != IsRunning) MarkTurnEnds();
+        perf?.Lap("turns");
         if (newConversation) ScrollToLatestRequested?.Invoke(); // a chat opens on its latest message
         if (changed) TranscriptChanged?.Invoke();
-        if (debugAdded) DebugLogAppended?.Invoke();
+        if (debugAdded)
+        {
+            RefreshOmpProcesses(force: false); // MainViewModel.OpenSessions.cs
+            DebugLogAppended?.Invoke();
+        }
+        perf?.End(items.Count, added, updated);
+    }
+
+    private static bool IsRun(SessionSnapshot? s) => s?.Phase is SessionPhase.Running or SessionPhase.Aborting;
+
+    /// <summary>
+    /// The event log is filled only while its panel is shown (<see cref="OnIsDebugVisibleChanged"/> fills it from the
+    /// newest snapshot when it opens): hidden, a list updated line by line 30 times a second is work nobody sees.
+    /// </summary>
+    private bool AppendDebugLines(IReadOnlyList<DebugEntry> tail)
+    {
+        // The new entries are the last ones: find where they start instead of reading all of Core's tail
+        var from = tail.Count;
+        while (from > 0 && tail[from - 1].Seq > _lastDebugSeq) from--;
+        if (from == tail.Count) return false;
+        for (var i = from; i < tail.Count; i++)
+            DebugLog.Add($"{tail[i].At.ToLocalTime():HH:mm:ss.fff}  {tail[i].Type,-22} {tail[i].Summary}");
+        _lastDebugSeq = tail[^1].Seq;
+        while (DebugLog.Count > DebugLines) DebugLog.RemoveAt(0);
+        return true;
+    }
+
+    partial void OnIsDebugVisibleChanged(bool value)
+    {
+        if (!value) return;
+        RefreshOmpProcesses();
+        if (_open.Last is not { } s) return;
+        // Opened: the lines Core still holds (as many as the list keeps), not what was left from the last time
+        DebugLog.Clear();
+        _lastDebugSeq = 0;
+        AppendDebugLines(s.DebugTail);
     }
 
     /// <summary>
@@ -544,20 +512,24 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         if (CurrentDialog is { } d) d.QueueText = s.Dialogs.Count > 1 ? $"1 of {s.Dialogs.Count}" : "";
         UpdateDialogTimer();
 
-        var widgets = string.Join("\n", s.Widgets.SelectMany(w => w.Lines));
-        if (widgets != WidgetsText) WidgetsText = widgets;
+        // Core copies the same widget records into every snapshot: the lines are joined again only when one changed
+        if (_open.Last is not { } last || !s.Widgets.SequenceEqual(last.Widgets, ReferenceEqualityComparer.Instance))
+        {
+            var widgets = string.Join("\n", s.Widgets.SelectMany(w => w.Lines));
+            if (widgets != WidgetsText) WidgetsText = widgets;
+        }
 
         // Separate counters: both requests can land in one apply, in either order.
-        if (s.EditorText is { } et && et.Seq > _lastEditorSeq)
+        if (s.EditorText is { } et && et.Seq > _open.LastEditorSeq)
         {
             ComposerText = et.Text;
-            _lastEditorSeq = et.Seq;
+            _open.LastEditorSeq = et.Seq;
         }
-        if (s.OpenUrl is { } ou && ou.Seq > _lastUrlSeq)
+        if (s.OpenUrl is { } ou && ou.Seq > _open.LastUrlSeq)
         {
             PendingUrl = ou.Target;
             PendingUrlInstructions = ou.Instructions ?? "";
-            _lastUrlSeq = ou.Seq;
+            _open.LastUrlSeq = ou.Seq;
         }
         SigningIn = s.SigningIn;
     }
@@ -580,7 +552,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void UpdateStatus()
     {
-        if (_last is not { } s) return;
+        if (_open.Last is not { } s) return;
         // The shown phase (an optimistic Send or Stop sets it before omp confirms): a first frame said "Ready" while running
         if (Phase != SessionPhase.Running) IsWaitingOnUser = false;
         StatusText = Phase switch
@@ -665,7 +637,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         var sb = new StringBuilder("i,t0_t1_ms,t1_t2_ms,t2_t3_ms,t3_t4_ms,t0_t4_ms\n");
         for (var i = 0; i < n; i++)
         {
-            var r = await _session.ProbeAsync(_cts.Token).ConfigureAwait(false);
+            var r = await Session.ProbeAsync(_cts.Token).ConfigureAwait(false);
             var t4 = await Dispatcher.UIThread.InvokeAsync(() => Stopwatch.GetTimestamp(), DispatcherPriority.Normal);
             var t = r.Timings;
             sb.Append(CultureInfo.InvariantCulture, $"{i},{RpcTimings.Ms(t.Sent, t.Flushed):F4},{RpcTimings.Ms(t.Flushed, t.ResponseRead):F4},")
@@ -682,8 +654,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private void SmokeExit()
     {
         if (_args.SmokeExitAfterMs <= 0) return;
-        var snap = _session.Snapshot();
-        AppendStartupLog($"smoke phase={snap.Phase} start_problem={snap.StartProblem} omp_pid={_session.ProcessId}");
+        var snap = Session.Snapshot();
+        AppendStartupLog($"smoke phase={snap.Phase} start_problem={snap.StartProblem} omp_pid={Session.ProcessId}");
         _ = Task.Delay(_args.SmokeExitAfterMs).ContinueWith(_ => Dispatcher.UIThread.Post(() =>
             (Avalonia.Application.Current?.ApplicationLifetime as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow?.Close()),
             TaskScheduler.Default);
@@ -699,7 +671,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         {
             do
             {
-                var s = _session.Snapshot();
+                var s = Session.Snapshot();
                 var chars = s.Items.OfType<AssistantItem>().Sum(a => (long)a.Text.Length);
                 var tools = s.Items.OfType<ToolItem>().Count();
                 await w.WriteLineAsync(string.Create(CultureInfo.InvariantCulture,
@@ -735,14 +707,13 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         if (_tasksCreated) Tasks.Shutdown();
         _visible.TrySetResult();
         await DisposeDictationAsync();
-        // Cancel first: a start still in progress then disposes its omp instead of finishing it.
+        // Cancel first: a start still in progress then disposes its omp instead of finishing it. Every chat's omp stops
+        // at once (MainViewModel.OpenSessions.cs).
         _cts.Cancel();
-        await _session.DisposeAsync();
-        if (_pump is not null)
-        {
-            try { await _pump.WaitAsync(TimeSpan.FromSeconds(2)); }
-            catch (Exception e) when (e is TimeoutException or OperationCanceledException) { }
-        }
+        await _host.DisposeAsync();
+        var pumps = _opens.Values.Select(o => o.Pump).OfType<Task>().ToArray();
+        try { await Task.WhenAll(pumps).WaitAsync(TimeSpan.FromSeconds(2)); }
+        catch (Exception e) when (e is TimeoutException or OperationCanceledException) { }
         _cts.Dispose();
         ApplyUpdateOnQuit();
     }

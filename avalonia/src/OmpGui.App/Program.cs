@@ -28,6 +28,9 @@ public sealed record AppArgs
     public bool Restart { get; init; }
     public string? UpdateFeed { get; init; }
 
+    /// <summary>A run a script drives and nobody watches (package smoke, benchmark): it must end, never wait without limit.</summary>
+    public bool IsUnattended => SmokeExitAfterMs > 0 || ExitAfterBench || BenchLatency > 0 || BenchOut is not null;
+
     public static AppArgs Parse(string[] args)
     {
         var a = new AppArgs();
@@ -74,8 +77,36 @@ internal static class Program
         }
         if (Args.Update) return Services.UpdateCli.RunAsync(Args).GetAwaiter().GetResult();
         if (Args.SelfTest) return Services.SelfTest.RunAsync(Args).GetAwaiter().GetResult();
-        return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        // The window app has no visible console: its errors go to client.log (the command-line modes above print them)
+        Services.ClientLog.Shared.HookProcess();
+        // A run nobody watches (package smoke, benchmark) waits a bounded time, then fails with the error instead of hanging
+        TimeSpan? displayLimit = Args.IsUnattended ? Platform.DisplayWait.UnattendedLimit : null;
+        if (OperatingSystem.IsMacOS())
+            Platform.DisplayWait.UntilActive(Platform.DisplayWait.MacHasActiveDisplay, Thread.Sleep, m => Services.ClientLog.Shared.Write("display", m), displayLimit);
+        try
+        {
+            return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        }
+        catch (InvalidOperationException e) when (OperatingSystem.IsMacOS() && Platform.DisplayWait.IsRenderTimerFailure(e))
+        {
+            // The display slept between the check above and Avalonia's setup, which cannot run twice in one process:
+            // wait for it again and start over in a new process. A few times at most, so a render timer that fails for
+            // another reason ends the app with its error in client.log instead of starting it forever.
+            Services.ClientLog.Shared.Write("display", e);
+            var attempt = int.TryParse(Environment.GetEnvironmentVariable(RelaunchVariable), out var n) ? n : 0;
+            if (attempt >= MaxRelaunches || Args.IsUnattended || Environment.ProcessPath is not { } self) return 1;
+            Platform.DisplayWait.UntilActive(Platform.DisplayWait.MacHasActiveDisplay, Thread.Sleep, m => Services.ClientLog.Shared.Write("display", m));
+            var start = new ProcessStartInfo(self) { UseShellExecute = false };
+            foreach (var arg in args) start.ArgumentList.Add(arg);
+            start.Environment[RelaunchVariable] = (attempt + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            Process.Start(start)?.Dispose();
+            return 0;
+        }
     }
+
+    /// <summary>How many times in a row the app started itself again after its render timer failed (see Main).</summary>
+    private const string RelaunchVariable = "OMPGUI_DISPLAY_RELAUNCH";
+    private const int MaxRelaunches = 3;
 
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()

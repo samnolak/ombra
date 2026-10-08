@@ -273,6 +273,41 @@ public sealed class FilesPaneTests
     }
 
     [AvaloniaFact]
+    public async Task The_tree_keeps_up_while_files_keep_changing()
+    {
+        // A build or a long command writes into the project without a pause: the tree shows new files as they come,
+        // not once the writing stops (a refresh put off again by every change never ran while omp worked)
+        var root = FileTestRepo.Create(git: false);
+        var f = await FileTestRepo.Shown(FileTestRepo.Vm(root), git: false);
+        using var cts = new CancellationTokenSource();
+        var writer = Task.Run(async () =>
+        {
+            for (var i = 0; !cts.IsCancellationRequested; i++)
+            {
+                File.WriteAllText(Path.Combine(root, "build.out"), i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                await Task.Delay(50);
+            }
+        });
+        try
+        {
+            // The pane's own first refresh is over before the file comes: only the disk events can show it
+            var settled = DateTime.UtcNow.AddSeconds(1.5);
+            while (DateTime.UtcNow < settled)
+            {
+                Dispatcher.UIThread.RunJobs();
+                await Task.Delay(15);
+            }
+            File.WriteAllText(Path.Combine(root, "first.txt"), "1\n");
+            await FileTestRepo.Until(() => f.Nodes.Any(n => n.Name == "first.txt"), "the new file while the writes go on", seconds: 5);
+        }
+        finally
+        {
+            await cts.CancelAsync();
+            await writer;
+        }
+    }
+
+    [AvaloniaFact]
     public async Task Files_omp_changed_in_this_session_come_from_its_edit_and_write_rows()
     {
         var root = FileTestRepo.Create(git: false);

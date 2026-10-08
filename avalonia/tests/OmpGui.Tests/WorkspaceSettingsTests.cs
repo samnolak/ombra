@@ -157,15 +157,13 @@ public sealed class WorkspaceSettingsTests
         Assert.Equal(2, page.Worktrees.Count);
         Assert.True(page.Worktrees[0].IsMain && page.Worktrees[0].IsCurrent);
         Assert.Equal("feature/x", page.Worktrees[1].Title);
-        Assert.True(WorkspaceFixture_SamePath(worktree, page.Worktrees[1].Path));
+        Assert.True(SessionCatalog.SamePath(worktree, page.Worktrees[1].Path));
         Assert.True(page.GhSignedIn);
         Assert.Equal("Signed in as octocat", page.GhLabel);
         Assert.True(page.SettingsLoaded);
         Assert.Contains("no separate environments", GitSettingsViewModel.EnvironmentsNote);
         await vm.DisposeAsync();
     }
-
-    private static bool WorkspaceFixture_SamePath(string a, string b) => GitProbe.SamePath(a, b);
 
     [AvaloniaFact]
     public async Task A_worktree_with_changes_is_not_removed_a_clean_one_is_after_confirming()
@@ -193,7 +191,8 @@ public sealed class WorkspaceSettingsTests
         Assert.False(Directory.Exists(worktree));
         Assert.Single(page.Worktrees);
         Assert.Contains("Branch feature/x is still there", page.Message);
-        Assert.Contains(f.ToolLog, c => c == $"git worktree remove {worktree}");
+        // git names the worktree with links resolved (macOS: /var is /private/var): the same folder either way
+        Assert.Contains(f.ToolLog, c => c.StartsWith("git worktree remove ", StringComparison.Ordinal) && SessionCatalog.SamePath(c["git worktree remove ".Length..], worktree));
         await vm.DisposeAsync();
     }
 

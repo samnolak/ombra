@@ -10,11 +10,13 @@
              x:DataType="vm:MainViewModel">
   <Button x:Name="MenuButton" Classes="header-project" ToolTip.Tip="{Binding ShownProjectPath}"
           AutomationProperties.Name="{Binding ProjectName, StringFormat='Project {0}'}">
-    <Grid ColumnDefinitions="Auto,*,Auto">
-      <ctl:Icon Data="{StaticResource IconFolder}" Size="15" VerticalAlignment="Center" />
-      <TextBlock Grid.Column="1" Classes="project-name" Text="{Binding ProjectName}" Margin="6,0,0,0" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-      <ctl:Icon Grid.Column="2" Classes="project-chevron" Data="{StaticResource IconChevronDown}" Size="14" Margin="3,0,0,0" VerticalAlignment="Center" />
-    </Grid>
+    <!-- A dock, not a grid: in a narrow header the name and chevron are hidden, and a grid's Auto column kept the hidden
+         chevron's width (the bare folder icon sat off the middle of a too-wide button) -->
+    <DockPanel>
+      <ctl:Icon DockPanel.Dock="Left" Data="{StaticResource IconFolder}" Size="15" VerticalAlignment="Center" />
+      <ctl:Icon DockPanel.Dock="Right" Classes="project-chevron" Data="{StaticResource IconChevronDown}" Size="14" Margin="3,0,0,0" VerticalAlignment="Center" />
+      <TextBlock Classes="project-name" Text="{Binding ProjectName}" Margin="6,0,0,0" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+    </DockPanel>
     <Button.Flyout>
       <Flyout Placement="BottomEdgeAlignedLeft" ctl:ChoiceMenu.CloseOnChoice="True">
         <StackPanel x:Name="MenuPanel" Width="300" Spacing="2">

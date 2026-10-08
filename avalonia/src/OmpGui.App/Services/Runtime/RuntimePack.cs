@@ -122,6 +122,9 @@ public sealed class RuntimeInstaller
     /// <summary>Runs a child process to completion; replaceable in tests.</summary>
     public Func<ProcessStartInfo, TimeSpan, CancellationToken, Task<ProcessResult>> Run { get; init; } = RunProcessAsync;
 
+    /// <summary>How long the download may go without a byte before it fails as stalled; shorter in tests.</summary>
+    public TimeSpan StallTimeout { get; init; } = TimeSpan.FromSeconds(60);
+
     /// <summary>The installed pack, or null when there is none or it is incomplete.</summary>
     public InstalledRuntime? FindInstalled()
     {
@@ -297,18 +300,26 @@ public sealed class RuntimeInstaller
         if (!build.Integrity.StartsWith("sha512-", StringComparison.Ordinal)) throw new InvalidDataException("only sha512 integrities are accepted");
         var expected = Convert.FromBase64String(build.Integrity["sha512-".Length..]);
         var tgz = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(exePath)!)!, "bun.tgz");
-        using (var response = await _http.GetAsync($"{_registry}/{build.TarballPath}", HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false))
+        // The client has no total timeout (a pack is tens of MB on any connection); a connection that stays open and
+        // sends nothing would show the last progress forever, and --self-test --install-runtime has no Cancel. Each wait
+        // (the headers, then every read) gets StallTimeout; a chunk that arrives restarts it.
+        using var stall = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        stall.CancelAfter(StallTimeout);
+        try
         {
+            using var response = await _http.GetAsync($"{_registry}/{build.TarballPath}", HttpCompletionOption.ResponseHeadersRead, stall.Token).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
             var total = response.Content.Headers.ContentLength ?? 0;
-            await using var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            await using var source = await response.Content.ReadAsStreamAsync(stall.Token).ConfigureAwait(false);
             await using var output = new FileStream(tgz, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16, useAsync: true);
             using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA512);
             var buffer = new byte[1 << 16];
             long written = 0;
             int n;
-            while ((n = await source.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+            stall.CancelAfter(StallTimeout);
+            while ((n = await source.ReadAsync(buffer, stall.Token).ConfigureAwait(false)) > 0)
             {
+                stall.CancelAfter(StallTimeout);
                 written += n;
                 if (written > MaxTarballBytes) throw new InvalidDataException($"{build.Package} is larger than {MaxTarballBytes >> 20} MB");
                 sha.AppendData(buffer, 0, n);
@@ -317,6 +328,10 @@ public sealed class RuntimeInstaller
             }
             if (!CryptographicOperations.FixedTimeEquals(sha.GetHashAndReset(), expected))
                 throw new InvalidDataException($"{build.Package}@{RuntimePack.BunVersion} does not match its pinned integrity.");
+        }
+        catch (Exception e) when (e is OperationCanceledException or IOException && stall.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            throw new TimeoutException($"The download stalled (no data for {StallTimeout.TotalSeconds:0} s). Check the connection and try again.");
         }
 
         // Only the verified tarball is opened, and only the Bun executable is taken out of it.

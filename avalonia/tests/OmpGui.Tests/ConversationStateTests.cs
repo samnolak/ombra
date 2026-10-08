@@ -245,7 +245,7 @@ public sealed class ConversationStateTests
         s.SetPhase(SessionPhase.Ready, T);
         s.AddUserPrompt("long task");
         s.SetPhase(SessionPhase.Running, T);
-        s.Enqueue(QueueKind.FollowUp, "later", 0);
+        s.Enqueue(QueueKind.FollowUp, "later", []);
         s.EndRun(interrupted: true, T);
         s.Apply(F("""{"type":"agent_start"}"""), T);
         s.Apply(F("""{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"long task"}]}}"""), T);
@@ -256,7 +256,7 @@ public sealed class ConversationStateTests
         // Delivered with the same text: dequeued. Expanded by omp (other text): the oldest is taken.
         s.Apply(F("""{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"later"}]}}"""), T);
         Assert.Empty(s.Snapshot().Queued);
-        s.Enqueue(QueueKind.FollowUp, "/tmpl arg", 0);
+        s.Enqueue(QueueKind.FollowUp, "/tmpl arg", []);
         s.Apply(F("""{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"expanded template text"}]}}"""), T);
         Assert.Empty(s.Snapshot().Queued);
         Assert.Equal(["long task", "later", "expanded template text"], s.Snapshot().Items.OfType<UserItem>().Select(u => u.Text));

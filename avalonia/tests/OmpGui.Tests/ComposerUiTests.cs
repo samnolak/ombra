@@ -90,7 +90,7 @@ public sealed class ComposerUiTests
         vm.ComposerText = "look " + vm.ComposerText;
         vm.SendCommand.Execute(null);
         await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.OfType<UserRowViewModel>().Any(u => u.Confirmed && u.HasImages), "sent with image");
-        Assert.Equal("1 image", vm.Rows.OfType<UserRowViewModel>().Single().ImagesText);
+        Assert.Single(vm.Rows.OfType<UserRowViewModel>().Single().Previews);
         Assert.Empty(vm.Attachments);
         await vm.DisposeAsync();
         w.Close();
@@ -232,7 +232,7 @@ public sealed class ComposerUiTests
         var (w, vm, s) = await OpenAsync();
         var composer = w.FindControl<TextBox>("Composer")!;
         composer.Focus();
-        var box = w.FindControl<Border>("ComposerBox")!;
+        var pill = w.FindControl<Button>("ApprovalButton")!;
         Assert.Null(vm.ShownApprovalMode); // omp's default: no mode chosen in this test's settings
 
         // Two quick steps: each shown at once, one omp restart once the keys pause
@@ -242,7 +242,7 @@ public sealed class ComposerUiTests
         w.KeyPress(Key.Tab, RawInputModifiers.Shift, PhysicalKey.Tab, null);
         Assert.Equal("write", vm.ShownApprovalMode);
         Assert.True(vm.IsAcceptEdits);
-        Assert.Contains("mode-write", box.Classes);
+        Assert.Contains("mode-write", pill.Classes);
         Assert.Equal("Accept edits", vm.ApprovalLabel);
         Assert.True(composer.IsFocused); // the keys stay in the message box
         await Until(() => s.Snapshot().ApprovalMode == "write" && vm.Phase == SessionPhase.Ready && vm.PendingApprovalMode is null, "omp restarted in Accept edits");
@@ -264,7 +264,7 @@ public sealed class ComposerUiTests
         Assert.True(vm.ConfirmYolo);
         Assert.Equal("write", vm.ShownApprovalMode);
         await vm.SetApprovalModeCommand.ExecuteAsync("yolo");
-        Assert.Contains("mode-yolo", box.Classes);
+        Assert.Contains("mode-yolo", pill.Classes);
         await Until(() => s.Snapshot().ApprovalMode == "yolo" && vm.Phase == SessionPhase.Ready, "bypass");
         Assert.Equal("Bypass permissions", vm.ApprovalLabel);
         await vm.DisposeAsync();

@@ -54,28 +54,27 @@ public sealed partial class MainViewModel
     {
         if (!CanRunOmpCommands) return (false, "omp isn't running. Start it, then try again.");
         if (IsRunning) return (false, "omp is replying. Try again when the reply ends.");
-        var r = await RunOmpCommandAsync(branch.Length == 0 ? "/wt" : "/wt " + branch, TimeSpan.FromMinutes(3), Lifetime);
+        // This chat's omp throughout: another chat may be shown by the time omp has made the worktree
+        var open = _open;
+        var session = open.Controller;
+        var r = await session.RunSlashCommandAsync(branch.Length == 0 ? "/wt" : "/wt " + branch, TimeSpan.FromMinutes(3), Lifetime);
         if (!r.Ok) return (false, r.Error ?? "omp did not answer.");
         if (WorkspaceParsers.ParseMovedToWorktree(r.Output) is not { } moved)
             return (false, r.Output.Length > 0 ? r.Output : "omp did not create the worktree.");
         try
         {
-            await _session.FollowSessionMoveAsync(moved.Path, Lifetime);
-            AfterSessionChange();
+            await session.FollowSessionMoveAsync(moved.Path, Lifetime);
+            ApplyIfShown(open);
+            RequestCatalogRefresh();
         }
         catch (OperationCanceledException) when (Lifetime.IsCancellationRequested) { }
         return (true, r.Output);
     }
 
-    /// <summary>A new session in another folder (a worktree): omp restarts there.</summary>
+    /// <summary>A new session in another folder (a worktree): a new omp starts there, beside the chats already open.</summary>
     internal async Task OpenFolderInNewSessionAsync(string folder)
     {
-        try
-        {
-            IsSettingsOpen = false;
-            await _session.OpenFolderAsync(folder, Lifetime);
-            AfterSessionChange();
-        }
-        catch (OperationCanceledException) when (Lifetime.IsCancellationRequested) { }
+        IsSettingsOpen = false;
+        await OpenProjectAsync(folder); // MainViewModel.OpenSessions.cs
     }
 }

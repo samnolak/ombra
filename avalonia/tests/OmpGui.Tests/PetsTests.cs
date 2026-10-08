@@ -620,8 +620,8 @@ public sealed class PetsTests
         await Settle(100);
         Assert.True(composer.IsFocused);
         var perch = w.FindControl<PetPerch>("PetPerch")!;
-        var pet = perch.FindControl<PetView>("Pet")!;
-        var chat = perch.FindControl<TextBox>("PetChatBox")!;
+        var pet = perch.Stage.Pet;
+        var chat = perch.Stage.PetChatBox;
         Assert.True(pet.IsEffectivelyVisible);
         Assert.False(chat.IsEffectivelyVisible);
         // The pet sits on the message box's top edge, at its right end
@@ -639,10 +639,10 @@ public sealed class PetsTests
         Assert.True(chat.IsFocused, "the pet's message box did not take the keyboard");
         Assert.True(vm.Pets.IsBubbleOpen);
         Assert.False(string.IsNullOrWhiteSpace(vm.Pets.BubbleText));
-        var bubble = perch.FindControl<StackPanel>("PetBubble")!;
+        var bubble = perch.Stage.PetBubble;
         Assert.True(bubble.IsEffectivelyVisible);
         Assert.True(Box(bubble, w).Right <= petBox.Left + 1, "the bubble covers the pet");
-        var chatBox = Box(perch.FindControl<Border>("PetChat")!, w);
+        var chatBox = Box(perch.Stage.PetChat, w);
         Assert.True(chatBox.Bottom <= petBox.Top, "the message box covers the pet");
         Assert.False(chatBox.Intersects(Box(bubble, w)), "the message box covers the bubble");
         Assert.Empty(PetCovers(w));
@@ -681,12 +681,13 @@ public sealed class PetsTests
     }
 
     [AvaloniaFact]
-    public async Task The_pet_can_be_dragged_anywhere_in_the_window_and_stays_inside_it()
+    public async Task Inside_the_window_the_pet_can_be_dragged_anywhere_in_it_and_stays_inside_it()
     {
         var path = Path.Combine(TestProcesses.TempDir("pets-place"), "omp-gui.local.json");
         var (w, vm) = await Open("normal", store: new ClientSettingsStore(path));
+        vm.Pets.SetRoamCommand.Execute("window");
         var perch = w.FindControl<PetPerch>("PetPerch")!;
-        var pet = perch.FindControl<PetView>("Pet")!;
+        var pet = perch.Stage.Pet;
         var composer = w.FindControl<Border>("ComposerBox")!;
         var from = Box(pet, w).Center;
         // A press that moves a little is still a click
@@ -726,13 +727,13 @@ public sealed class PetsTests
         // The bubble follows it (on its left, room permitting)
         vm.Pets.TalkCommand.Execute(null);
         await Settle(100);
-        var bubble = Box(perch.FindControl<StackPanel>("PetBubble")!, w);
+        var bubble = Box(perch.Stage.PetBubble, w);
         Assert.True(bubble.Right <= Box(pet, w).Left + 1 && bubble.Right >= Box(pet, w).Left - 4, "the bubble is not beside the pet");
         await Close(w, vm);
 
         // The place survives a restart
         (w, vm) = await Open("normal", width: 800, height: 600, store: new ClientSettingsStore(path));
-        pet = w.FindControl<PetPerch>("PetPerch")!.FindControl<PetView>("Pet")!;
+        pet = w.FindControl<PetPerch>("PetPerch")!.Stage.Pet;
         Assert.True(vm.Pets.IsRoaming);
         Assert.Equal(w.Bounds.Width, Box(pet, w).Right, 1);
         Assert.Equal(w.Bounds.Height, Box(pet, w).Bottom, 1);
@@ -754,7 +755,8 @@ public sealed class PetsTests
     public async Task A_pet_dropped_close_to_its_perch_sits_on_it_again()
     {
         var (w, vm) = await Open("normal");
-        var pet = w.FindControl<PetPerch>("PetPerch")!.FindControl<PetView>("Pet")!;
+        vm.Pets.SetRoamCommand.Execute("window");
+        var pet = w.FindControl<PetPerch>("PetPerch")!.Stage.Pet;
         vm.Pets.MoveTo(new Point(0.5, 0.5));
         await Settle(150);
         Assert.True(vm.Pets.IsRoaming);
@@ -773,6 +775,263 @@ public sealed class PetsTests
         Assert.Equal(box.Top + 1, Box(pet, w).Bottom, 0.5);
         Assert.Equal(vm.Pets.PerchHeight - 1, w.FindControl<Border>("ComposerBox")!.Margin.Top);
         await Close(w, vm);
+    }
+
+    // ───────────────────────────── On the desktop ─────────────────────────────
+
+    /// <summary>A MacBook (menu bar and Dock taken off its work area) with a 4K monitor at 2× on its right, set higher.</summary>
+    private static readonly PetScreen Laptop = new("Built-in Retina Display", new PixelRect(0, 0, 1512, 982), new PixelRect(0, 33, 1512, 882), 1, true);
+    private static readonly PetScreen External = new("DELL U2720Q", new PixelRect(1512, -200, 2560, 1440), new PixelRect(1512, -175, 2560, 1415), 2);
+
+    private sealed class FakeScreens(params PetScreen[] all) : IPetScreens
+    {
+        public IReadOnlyList<PetScreen> All { get; private set; } = all;
+        public event EventHandler? Changed;
+
+        /// <summary>A monitor plugged in or out.</summary>
+        public void Set(params PetScreen[] all)
+        {
+            All = all;
+            Changed?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>Drags the desktop pet with the pointer going from <paramref name="from"/> to <paramref name="to"/> on the desktop.</summary>
+    private static void DragOnDesktop(PetWindow pw, PixelPoint from, PixelPoint to)
+    {
+        // The window moves under the pointer: each step is where the pointer is on the desktop, seen from the window now
+        pw.MouseDown(pw.PointToClient(from), MouseButton.Left);
+        for (var i = 1; i <= 4; i++)
+            pw.MouseMove(pw.PointToClient(new PixelPoint(from.X + (to.X - from.X) * i / 4, from.Y + (to.Y - from.Y) * i / 4)));
+        pw.MouseUp(pw.PointToClient(to), MouseButton.Left);
+    }
+
+    [Fact]
+    public void On_the_desktop_the_pet_stays_on_the_work_areas_and_crosses_only_where_monitors_touch()
+    {
+        var pet = new Size(72, 48);
+        // Side by side, the right one set higher: the edge they share is x = 1512, from y = 33 to 915
+        IReadOnlyList<PetScreen> both = [Laptop, External];
+        Assert.Equal(new PixelPoint(1480, 400), PetDesktop.Clamp(both, new PixelPoint(1480, 400), pet)); // straddles the shared edge
+        Assert.True(PetDesktop.Covered(both, new PixelRect(1480, 400, 72, 48)));
+        // Past the bottom of the laptop, into its Dock: pulled back above the Dock
+        Assert.Equal(new PixelPoint(700, 915 - 48), PetDesktop.Clamp(both, new PixelPoint(700, 950), pet));
+        // Straddling the laptop's bottom-right corner, part of it over nothing: onto the monitor its middle is on
+        Assert.Equal(new PixelPoint(1512, 900), PetDesktop.Clamp(both, new PixelPoint(1500, 900), pet));
+        // Under the menu bar, off the top of the laptop: just below the menu bar
+        Assert.Equal(new PixelPoint(300, 33), PetDesktop.Clamp(both, new PixelPoint(300, -40), pet));
+        // On the 2× monitor the pet takes twice the desktop pixels: kept whole inside its right edge
+        Assert.Equal(new PixelPoint(4072 - 144, 100), PetDesktop.Clamp(both, new PixelPoint(4060, 100), pet));
+        // In a gap between two monitors that do not touch: onto the nearest one
+        IReadOnlyList<PetScreen> apart = [Laptop, External with { Bounds = new PixelRect(1700, 0, 2560, 1440), WorkingArea = new PixelRect(1700, 0, 2560, 1440) }];
+        Assert.Equal(new PixelPoint(1700, 300), PetDesktop.Clamp(apart, new PixelPoint(1650, 300), pet));
+        Assert.Equal(new PixelPoint(1512 - 72, 300), PetDesktop.Clamp(apart, new PixelPoint(1500, 300), pet));
+        // One above the other, the laptop's menu bar between their work areas: the pet goes up onto the upper one and
+        // back down, never resting on the menu bar
+        var upper = new PetScreen("LG UltraFine", new PixelRect(0, -1080, 1920, 1080), new PixelRect(0, -1080, 1920, 1080), 1);
+        IReadOnlyList<PetScreen> stacked = [Laptop, upper];
+        Assert.Equal(new PixelPoint(100, -48), PetDesktop.Clamp(stacked, new PixelPoint(100, -30), pet));
+        Assert.Equal(new PixelPoint(100, 33), PetDesktop.Clamp(stacked, new PixelPoint(100, 20), pet));
+        Assert.Equal(new PixelPoint(100, -600), PetDesktop.Clamp(stacked, new PixelPoint(100, -600), pet));
+
+        // Saved relative to its monitor: the monitor moved in the arrangement, the pet moves with it
+        var place = PetDesktop.Place(both, new PixelPoint(2000, 100), pet);
+        Assert.Equal((External.Name, 488, 300), (place.Screen, place.X, place.Y));
+        IReadOnlyList<PetScreen> moved = [Laptop, External with { Bounds = new PixelRect(-2560, 0, 2560, 1440), WorkingArea = new PixelRect(-2560, 0, 2560, 1415) }];
+        Assert.Equal(new PixelPoint(-2560 + 488, 300), PetDesktop.Resolve(moved, place, pet));
+        // Its monitor gone: onto the nearest one that is left
+        Assert.Equal(new PixelPoint(1512 - 72, 100), PetDesktop.Resolve([Laptop], place, pet));
+    }
+
+    [AvaloniaFact]
+    public async Task On_the_desktop_the_pet_goes_anywhere_on_any_monitor_and_stays_where_dropped()
+    {
+        var path = Path.Combine(TestProcesses.TempDir("pets-desktop"), "omp-gui.local.json");
+        var (w, vm) = await Open("normal", store: new ClientSettingsStore(path));
+        w.Position = new PixelPoint(100, 60); // the app's window covers 100…1280 × 60…820 of the laptop
+        var perch = w.FindControl<PetPerch>("PetPerch")!;
+        var screens = new FakeScreens(Laptop, External);
+        perch.Screens = screens;
+        Assert.True(vm.Pets.IsRoamDesktop); // the default
+        var composer = w.FindControl<Border>("ComposerBox")!;
+        var pet = perch.Stage.Pet;
+        var size = PetStage.PetSize(vm.Pets);
+
+        // Dragged off the message box: at once in a window of its own; out of the app's window, it follows the pointer
+        var from = Box(pet, w).Center;
+        w.MouseDown(from, MouseButton.Left);
+        w.MouseMove(from + new Vector(-10, -10));
+        var pw = perch.DesktopWindow!;
+        Assert.NotNull(pw);
+        Assert.True(pw.IsVisible);
+        Assert.Equal(0, perch.Stage.Opacity); // not two pets
+        var to = new Point(-60, 300);
+        w.MouseMove(to);
+        w.MouseUp(to, MouseButton.Left);
+        await Settle(150);
+        Assert.True(vm.Pets.IsOnDesktop);
+        Assert.False(perch.IsEffectivelyVisible);
+        Assert.Equal(1, perch.Stage.Opacity);
+        // Its middle under the pointer (two roundings to whole desktop pixels on the way)
+        var pointer = w.PointToScreen(to);
+        Assert.InRange(pw.At.X + size.Width / 2 - pointer.X, -2, 2);
+        Assert.InRange(pw.At.Y + size.Height / 2 - pointer.Y, -2, 2);
+        Assert.True(pw.At.X + size.Width < w.Position.X, "the pet is not outside the app's window");
+        // The window is the pet, so clicks around it reach the apps below; it floats, out of the taskbar
+        Assert.Equal(pw.At, pw.Position);
+        Assert.Equal((size.Width, size.Height), (pw.Width, pw.Height));
+        Assert.True(pw.Topmost);
+        Assert.False(pw.ShowInTaskbar);
+        Assert.Equal(WindowDecorations.None, pw.WindowDecorations);
+        Assert.Equal(6, composer.Margin.Top); // the message box gives the pet's band back
+        Assert.Equal(Laptop.Name, vm.Pets.DesktopPlace!.Screen);
+
+        // Dragged by itself onto the 4K monitor, in desktop pixels
+        DragOnDesktop(pw, new PixelPoint(pw.At.X + 36, pw.At.Y + 24), new PixelPoint(2500, 400));
+        await Settle(100);
+        Assert.Equal(new PixelPoint(2464, 376), pw.At);
+        Assert.Equal((External.Name, 2464 - 1512, 376 + 200), (vm.Pets.DesktopPlace!.Screen, vm.Pets.DesktopPlace.X, vm.Pets.DesktopPlace.Y));
+        Assert.Equal(size.Width, pw.Width); // the same size in layout units
+
+        // Its bubble opens beside it, on the monitor's work area; the pet stays put, the window grows around it
+        vm.Pets.TalkCommand.Execute(null);
+        await Settle(150);
+        Assert.True(pw.Stage.PetBubble.IsEffectivelyVisible);
+        Assert.Equal(new PixelPoint(2464, 376), pw.At);
+        var petInWindow = pw.Stage.Pet.TranslatePoint(default, pw)!.Value;
+        Assert.Equal(pw.At.X, pw.Position.X + (int)Math.Round(petInWindow.X * External.Scaling));
+        Assert.Equal(pw.At.Y, pw.Position.Y + (int)Math.Round(petInWindow.Y * External.Scaling));
+        Assert.True(Box(pw.Stage.PetBubble, pw).Right <= Box(pw.Stage.Pet, pw).Left + 1, "the bubble covers the pet");
+        if (Dir is not null)
+        {
+            Directory.CreateDirectory(Path.Combine(Dir, "pets"));
+            using var frame = pw.CaptureRenderedFrame();
+            using var file = File.Create(Path.Combine(Dir, "pets", "desktop-bubble.png"));
+            frame?.Save(file, new PngBitmapEncoderOptions());
+        }
+        vm.Pets.TalkCommand.Execute(null);
+        await Settle(150);
+        Assert.Equal((size.Width, size.Height), (pw.Width, pw.Height));
+
+        // The 4K monitor unplugged: the pet comes over to the laptop; plugged back, it goes back where it was left
+        screens.Set(Laptop);
+        await Settle(50);
+        Assert.Equal(new PixelPoint(1512 - 72, 376), pw.At);
+        screens.Set(Laptop, External);
+        await Settle(50);
+        Assert.Equal(new PixelPoint(2464, 376), pw.At);
+
+        // Nothing pops up over the pet in its little window (a tooltip there would take the next press)
+        Assert.False(ToolTip.GetIsOpen(pw.Stage.Pet));
+
+        // Dragged down past the laptop's Dock: it stops on the Dock's edge
+        DragOnDesktop(pw, new PixelPoint(pw.At.X + 36, pw.At.Y + 24), new PixelPoint(700, 2000));
+        await Settle(100);
+        Assert.Equal(915 - 48, pw.At.Y);
+        Assert.Equal(Laptop.Name, vm.Pets.DesktopPlace!.Screen);
+
+        // It keeps moving behind other apps only while omp is busy; it renders again for a screen of another density
+        pw.Stage.Pet.InForeground = false;
+        await Settle(50);
+        Assert.False(pw.Stage.Pet.IsPlaying);
+        vm.Pets.Mood = PetMood.Working;
+        await Settle(50);
+        Assert.True(pw.Stage.Pet.IsPlaying);
+        vm.Pets.Mood = PetMood.Idle;
+        await Settle(50);
+        Assert.False(pw.Stage.Pet.IsPlaying);
+        Assert.Contains("|0|2|", pw.Stage.Pet.FrameKey);
+        pw.SetRenderScaling(2);
+        await Settle(50);
+        Assert.Contains("|0|4|", pw.Stage.Pet.FrameKey);
+        pw.SetRenderScaling(1);
+
+        // It stays out while the settings page covers the conversation
+        await vm.OpenSettingsAtAsync("pets");
+        await Settle();
+        Assert.True(pw.IsVisible);
+        vm.CloseSettingsCommand.Execute(null);
+        await Settle();
+
+        // The place survives a restart
+        await Close(w, vm);
+        Assert.False(pw.IsVisible);
+        (w, vm) = await Open("normal", store: new ClientSettingsStore(path));
+        w.Position = new PixelPoint(100, 60);
+        perch = w.FindControl<PetPerch>("PetPerch")!;
+        perch.Screens = new FakeScreens(Laptop, External);
+        await Settle(100);
+        pw = perch.DesktopWindow!;
+        Assert.True(pw.IsVisible);
+        Assert.Equal(915 - 48, pw.At.Y);
+        Assert.False(perch.IsEffectivelyVisible);
+
+        // Dropped close to its perch on the message box, it sits there again
+        composer = w.FindControl<Border>("ComposerBox")!;
+        var perchAt = composer.PointToScreen(new Point(composer.Bounds.Width - PetsViewModel.PetInset - size.Width, 1 - size.Height));
+        DragOnDesktop(pw, new PixelPoint(pw.At.X + 36, pw.At.Y + 24), new PixelPoint(perchAt.X + 36 + 6, perchAt.Y + 24 - 5));
+        await Settle(150);
+        Assert.False(vm.Pets.IsRoaming);
+        Assert.False(pw.IsVisible);
+        Assert.True(perch.IsEffectivelyVisible);
+        Assert.Equal(Box(composer, w).Top + 1, Box(perch.Stage.Pet, w).Bottom, 0.5);
+        Assert.Equal(vm.Pets.PerchHeight - 1, composer.Margin.Top);
+        await Close(w, vm);
+    }
+
+    [AvaloniaFact]
+    public async Task A_pet_left_in_the_window_by_an_older_version_moves_to_the_same_spot_on_the_desktop()
+    {
+        var path = Path.Combine(TestProcesses.TempDir("pets-migrate"), "omp-gui.local.json");
+        File.WriteAllText(path, "{ \"pet\": { \"x\": 0.25, \"y\": 0.4 } }");
+        var (w, vm) = await Open("normal", store: new ClientSettingsStore(path));
+        var perch = w.FindControl<PetPerch>("PetPerch")!;
+        await Until(() => vm.Pets.IsOnDesktop, "on the desktop");
+        var size = PetStage.PetSize(vm.Pets);
+        var inWindow = new Point(0.25 * (perch.Bounds.Width - size.Width), 0.4 * (perch.Bounds.Height - size.Height));
+        Assert.Equal(perch.PointToScreen(inWindow), perch.DesktopWindow!.At);
+        Assert.True(perch.DesktopWindow.IsVisible);
+        Assert.False(perch.IsEffectivelyVisible);
+        await Close(w, vm);
+        var pet = JsonNode.Parse(File.ReadAllText(path))!["pet"]!.AsObject();
+        Assert.Null(pet["x"]);
+        Assert.Equal("desktop", (string?)pet["roam"]);
+        Assert.NotNull(pet["desktop"]);
+    }
+
+    [AvaloniaFact]
+    public async Task The_desktop_pet_stays_when_a_quit_is_answered_with_keep_working()
+    {
+        var path = Path.Combine(TestProcesses.TempDir("pets-quit"), "omp-gui.local.json");
+        File.WriteAllText(path, "{ \"pet\": { \"x\": 0.25, \"y\": 0.4 } }");
+        var (w, vm) = await Open("slow-stream", store: new ClientSettingsStore(path));
+        var perch = w.FindControl<PetPerch>("PetPerch")!;
+        await Until(() => vm.Pets.IsOnDesktop && perch.DesktopWindow is { IsVisible: true }, "on the desktop");
+        var pw = perch.DesktopWindow!;
+        vm.ComposerText = "write a long answer";
+        vm.SendCommand.Execute(null);
+        await Until(() => vm.IsRunning, "running");
+
+        // ⌘Q: Avalonia's lifetime closes every window without an owner, the pet's too, before it shuts down
+        // (ClassicDesktopStyleApplicationLifetime.DoShutdown: CloseCore(ApplicationShutdown, isProgrammatic, ignoreCancel))
+        var closeCore = typeof(Window).GetMethod("CloseCore", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        foreach (var window in new Window[] { w, pw })
+            closeCore.Invoke(window, [WindowCloseReason.ApplicationShutdown, false, false]);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("quit", vm.SessionCard?.Kind);
+        Assert.True(pw.IsVisible);
+
+        // Keep working: the pet is still out where it was
+        vm.SessionCard!.Secondary!.Command.Execute(null);
+        await Settle(100);
+        Assert.Same(pw, perch.DesktopWindow);
+        Assert.True(pw.IsVisible);
+        Assert.True(vm.Pets.IsOnDesktop);
+
+        // Quitting for real closes it with the app
+        await Close(w, vm);
+        Assert.False(pw.IsVisible);
+        Assert.Null(perch.DesktopWindow);
     }
 
     [AvaloniaFact]
@@ -824,7 +1083,7 @@ public sealed class PetsTests
         var (w, vm) = await Open("normal");
         var perch = w.FindControl<PetPerch>("PetPerch")!;
         var composer = w.FindControl<Border>("ComposerBox")!;
-        var pet = perch.FindControl<PetView>("Pet")!;
+        var pet = perch.Stage.Pet;
         Assert.True(perch.IsEffectivelyVisible);
         Assert.True(pet.IsPlaying);
         Assert.Equal(vm.Pets.PerchHeight - 1, composer.Margin.Top);
@@ -857,7 +1116,7 @@ public sealed class PetsTests
         var (w, vm) = await Open("normal", 800, PetsViewModel.MinWindowHeight - 40);
         var perch = w.FindControl<PetPerch>("PetPerch")!;
         var composer = w.FindControl<Border>("ComposerBox")!;
-        var pet = perch.FindControl<PetView>("Pet")!;
+        var pet = perch.Stage.Pet;
         Assert.False(vm.Pets.HasRoom);
         Assert.False(perch.IsEffectivelyVisible);
         Assert.False(pet.IsPlaying);
@@ -887,6 +1146,8 @@ public sealed class PetsTests
         Assert.True(p.ShowPet); // on by default
         Assert.Equal("pi", p.Chosen!.Id);
         p.Size = "small";
+        Assert.True(p.IsRoamDesktop); // the default
+        p.SetRoamCommand.Execute("window");
         p.StartCreateCommand.Execute(null);
         Assert.Equal(PetArt.Cat, p.DraftBody);
         Assert.Equal("Natural", p.CoatOptions[0].Name);
@@ -917,6 +1178,7 @@ public sealed class PetsTests
         p = vm.Pets;
         Assert.False(p.ShowPet);
         Assert.Equal("small", p.Size);
+        Assert.True(p.IsRoamWindow);
         Assert.Equal("cat", p.Chosen!.Id);
         Assert.Equal("Tiger", p.Chosen.Name);
         Assert.Equal("cocoa", p.Chosen.Look.Coat?.Id);

@@ -10,14 +10,66 @@ namespace OmpGui.App.ViewModels;
 
 public sealed record ApprovalModeOption(string Mode, string Label, string Description);
 
+public enum ModelRowKind { Model, Family, Back }
+
+/// <summary>A row of the model menu: a model, a family of models that opens to its versions, or the way back.</summary>
 public sealed partial class ModelItemViewModel(OmpModel model) : ObservableObject
 {
+    /// <summary>The model; on a family row its newest version, on the back row the open family's first.</summary>
     public OmpModel Model { get; } = model;
-    public string Name => Model.Name;
+    public ModelRowKind Kind { get; init; }
+    /// <summary>Family and back rows: the family's name ("Claude Sonnet").</summary>
+    public string Family { get; init; } = "";
+    public int Versions { get; init; }
+    /// <summary>A model listed under the same name as another (omp's aliases: "claude-haiku-4-5" and its dated id):
+    /// its id tells them apart, as Claude's desktop app labels such duplicates.</summary>
+    public bool ShowId { get; init; }
+    public bool IsFamily => Kind == ModelRowKind.Family;
+    public bool IsBack => Kind == ModelRowKind.Back;
+    public string Name => Kind switch
+    {
+        ModelRowKind.Family => Family,
+        ModelRowKind.Back => "All models",
+        _ => Model.Name,
+    };
     public string Key => Model.Key;
     public string Provider => Model.Provider;
-    public string Detail => Model.ContextWindow > 0 ? $"{Model.Provider} · {Model.ContextWindow / 1000:N0}k context" : Model.Provider;
+    public string Detail => Kind switch
+    {
+        ModelRowKind.Family => $"{Model.Provider} · {Versions} versions · newest {Model.Name}",
+        ModelRowKind.Back => $"{Model.Provider} · {Family}",
+        _ => string.Join(" · ", new[] { Model.Provider, ShowId ? Model.Id : null,
+            Model.ContextWindow > 0 ? $"{Model.ContextWindow / 1000:N0}k context" : null }.Where(s => s is not null)),
+    };
     [ObservableProperty] private bool _isCurrent;
+
+    /// <summary>The name without its version words: "Claude Sonnet 4.5" → "Claude Sonnet", "Gemini 2.5 Pro" →
+    /// "Gemini Pro". A name with no version, or only a version, is its own family.</summary>
+    public static string FamilyOf(string name)
+    {
+        var words = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var kept = words.Where(w => !IsVersion(w)).ToArray();
+        return kept.Length == 0 || kept.Length == words.Length ? name : string.Join(' ', kept);
+    }
+
+    /// <summary>The version words of a name as numbers to sort by, newest first ("4.5" → [4, 5]).</summary>
+    public static int[] VersionOf(string name) =>
+        name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(IsVersion)
+            .SelectMany(w => w.Split('.')).Select(p => int.TryParse(new string(p.TakeWhile(char.IsAsciiDigit).ToArray()), out var n) ? n : 0).ToArray();
+
+    private static bool IsVersion(string word) => char.IsAsciiDigit(word[0]);
+
+    /// <summary>Newest first: by version numbers, then by id descending (a dated id after its alias).</summary>
+    public static int CompareNewestFirst(OmpModel a, OmpModel b)
+    {
+        var (x, y) = (VersionOf(a.Name), VersionOf(b.Name));
+        for (var i = 0; i < Math.Max(x.Length, y.Length); i++)
+        {
+            var c = (i < y.Length ? y[i] : 0).CompareTo(i < x.Length ? x[i] : 0);
+            if (c != 0) return c;
+        }
+        return string.CompareOrdinal(a.Id, b.Id);
+    }
 }
 
 public sealed partial class LoginProviderViewModel(OmpLoginProvider provider) : ObservableObject
@@ -54,12 +106,12 @@ public sealed partial class MainViewModel
     private async Task FetchThinkingLevelsAsync(string model)
     {
         IReadOnlyList<string>? levels;
-        try { levels = await _session.GetThinkingLevelsAsync(_cts.Token); }
+        try { levels = await Session.GetThinkingLevelsAsync(_cts.Token); }
         catch (OperationCanceledException) { return; }
-        if (_last?.Model != model) return; // the model changed again meanwhile: that fetch decides
+        if (_open.Last?.Model != model) return; // the model (or the chat) changed meanwhile: that fetch decides
         _thinkingLevelsKnown = levels is not null;
         ThinkingOptions = levels ?? ThinkingLevels;
-        if (_last is { } last) ApplyModelInfo(last);
+        if (_open.Last is { } last) ApplyModelInfo(last);
     }
 
     /// <summary>omp named the levels of the current model (else the menu is the full list and the catalog decides).</summary>
@@ -73,8 +125,8 @@ public sealed partial class MainViewModel
     {
         try
         {
-            _allModels = await _session.GetModelsAsync(_cts.Token);
-            if (_last is { } last) ApplyModelInfo(last);
+            _allModels = await Session.GetModelsAsync(_cts.Token);
+            if (_open.Last is { } last) ApplyModelInfo(last);
         }
         catch (Exception e) when (e is OperationCanceledException or InvalidOperationException or IOException or TimeoutException
                                       or OmpGui.Rpc.RpcCommandException or OmpGui.Rpc.RpcConnectionClosedException or OmpGui.Rpc.RpcProtocolException)
@@ -116,9 +168,9 @@ public sealed partial class MainViewModel
     [ObservableProperty] private bool _isSettingsOpen;
     /// <summary>The settings page has too little width for its page list beside the page: the list becomes a strip on top.</summary>
     [ObservableProperty] private bool _isSettingsNarrow;
-    [ObservableProperty] private string _settingsCommand = "";
-    [ObservableProperty] private string _settingsPrefixArgs = "";
-    [ObservableProperty] private string _settingsProfile = "";
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasUnsavedRuntime))] private string _settingsCommand = "";
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasUnsavedRuntime))] private string _settingsPrefixArgs = "";
+    [ObservableProperty, NotifyPropertyChangedFor(nameof(HasUnsavedRuntime))] private string _settingsProfile = "";
     [ObservableProperty] private string _settingsTheme = "system";
     [ObservableProperty] private string _settingsMessage = "";
     [ObservableProperty] private bool _providersLoading;
@@ -133,7 +185,7 @@ public sealed partial class MainViewModel
     {
         StartProblem.NotFound => "Install omp to get started",
         StartProblem.NoModel => "Connect a model provider",
-        _ => _last?.StartFailed == true ? "omp didn't start" : "omp stopped",
+        _ => _open.Last?.StartFailed == true ? "omp didn't start" : "omp stopped",
     };
 
     public string RecoverHint => StartProblem switch
@@ -142,7 +194,7 @@ public sealed partial class MainViewModel
         StartProblem.NotFound => "omp was not found on this computer. Set where it is in Settings → Advanced, then try again.",
         // omp's own setup opens on its provider step: Sign in with the keys (the terminal takes the keyboard)
         StartProblem.NoModel => "omp needs an AI provider before it can work. Open omp's setup, choose Sign in and a provider (or add an API key), then try again.",
-        _ => _last?.StartFailed == true
+        _ => _open.Last?.StartFailed == true
             ? "Check the omp command in Settings → Advanced, then try again. The error is under Show details."
             : "It can pick this conversation up where it stopped.",
     };
@@ -159,12 +211,12 @@ public sealed partial class MainViewModel
     public bool IsConversationEmpty => Rows.All(r => r is NoticeRowViewModel);
 
     /// <summary>What omp or the system said, for the curious and for bug reports (under "Show details").</summary>
-    public string ErrorDetail => CanRecover ? _last?.LastError?.Trim() ?? "" : "";
+    public string ErrorDetail => CanRecover ? _open.Last?.LastError?.Trim() ?? "" : "";
     public bool HasErrorDetail => ErrorDetail.Length > 0;
 
     [ObservableProperty] private bool _isErrorDetailOpen;
 
-    public string RecoverLabel => _last?.StartFailed == true ? "Try again" : "Restart omp";
+    public string RecoverLabel => _open.Last?.StartFailed == true ? "Try again" : "Restart omp";
 
     /// <summary>Getting started (omp not installed, no provider yet) is onboarding, not an error: the app mark, no warning.</summary>
     public bool IsOnboarding => StartProblem is StartProblem.NotFound or StartProblem.NoModel;
@@ -174,11 +226,20 @@ public sealed partial class MainViewModel
 
     public string RecoverSettingsLabel => StartProblem == StartProblem.NotFound ? "Use my own omp…" : "Settings";
 
+    /// <summary>
+    /// The notices the new-session page lists above its greeting: the rows while <see cref="ShowGreeting"/> (all notices
+    /// then), otherwise none. A collection of its own, not <see cref="Rows"/> itself: a list bound to every row would
+    /// build a control for each one of a long conversation while hidden, again on every chat switch.
+    /// </summary>
+    public System.Collections.ObjectModel.ObservableCollection<RowViewModel> GreetingNotices { get; } = [];
+
     private void NotifyRecoverLayout()
     {
         OnPropertyChanged(nameof(ShowSetupScreen));
         OnPropertyChanged(nameof(ShowRecoverCard));
         OnPropertyChanged(nameof(ShowGreeting));
+        if (ShowGreeting) Reconcile(GreetingNotices, Rows);
+        else if (GreetingNotices.Count > 0) GreetingNotices.Clear();
     }
 
     partial void OnModelFilterChanged(string value) => ApplyModelFilter();
@@ -196,8 +257,9 @@ public sealed partial class MainViewModel
 
     partial void OnSelectedThinkingChanged(string? value)
     {
-        if (_applyingThinking || value is null || value == _last?.ThinkingLevel || Phase != SessionPhase.Ready) return;
-        _ = _session.SetThinkingLevelAsync(value, _cts.Token).ContinueWith(_ => PostToUi(() => Apply(_session.Snapshot())), TaskScheduler.Default);
+        if (_applyingThinking || value is null || value == _open.Last?.ThinkingLevel || Phase != SessionPhase.Ready) return;
+        var open = _open;
+        _ = open.Controller.SetThinkingLevelAsync(value, _cts.Token).ContinueWith(_ => PostToUi(() => ApplyIfShown(open)), TaskScheduler.Default);
     }
 
     partial void OnSettingsThemeChanged(string value)
@@ -245,8 +307,9 @@ public sealed partial class MainViewModel
         {
             IsModelMenuOpen = true;
             ModelFilter = "";
+            _openModelFamily = null;
             ModelsLoading = true;
-            _allModels = await _session.GetModelsAsync(_cts.Token);
+            _allModels = await Session.GetModelsAsync(_cts.Token);
             ModelsLoading = false;
             ApplyModelFilter();
         }
@@ -261,10 +324,19 @@ public sealed partial class MainViewModel
     {
         try
         {
+            if (item is null) return;
+            if (item.Kind != ModelRowKind.Model)
+            {
+                // A family opens to its versions, back returns to the families; the menu stays open
+                if (item.IsFamily) OpenModelFamily(item);
+                else CloseModelFamily();
+                return;
+            }
             IsModelMenuOpen = false;
-            if (item is null || Phase != SessionPhase.Ready) return;
-            await _session.SetModelAsync(item.Model, _cts.Token);
-            Apply(_session.Snapshot());
+            if (Phase != SessionPhase.Ready) return;
+            var open = _open;
+            await open.Controller.SetModelAsync(item.Model, _cts.Token);
+            ApplyIfShown(open);
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested)
         {
@@ -272,15 +344,66 @@ public sealed partial class MainViewModel
         }
     }
 
+    /// <summary>The family whose versions the model menu shows (provider, family); null: the families.</summary>
+    private (string Provider, string Family)? _openModelFamily;
+
+    /// <summary>The model menu replaced its rows after a family opened or closed: the row to put the keyboard on.</summary>
+    public event Action<int>? ModelRowsNavigated;
+
+    public void OpenModelFamily(ModelItemViewModel family)
+    {
+        if (!family.IsFamily) return;
+        _openModelFamily = (family.Provider, family.Family);
+        ApplyModelFilter();
+        // On the current version if it is in this family, else on the newest (the row after "All models")
+        var current = Models.ToList().FindIndex(m => m.IsCurrent);
+        ModelRowsNavigated?.Invoke(current > 0 ? current : Math.Min(1, Models.Count - 1));
+    }
+
+    /// <summary>Back to the families, on the one that was open. False when no family is open.</summary>
+    public bool CloseModelFamily()
+    {
+        if (_openModelFamily is not { } open) return false;
+        _openModelFamily = null;
+        ApplyModelFilter();
+        ModelRowsNavigated?.Invoke(Math.Max(0, Models.ToList().FindIndex(m => m.IsFamily && (m.Provider, m.Family) == open)));
+        return true;
+    }
+
+    /// <summary>A search lists every matching model, flat. Otherwise one row per family ("Claude Sonnet"; a family
+    /// of one is just its model) that opens to its versions, newest first.</summary>
     private void ApplyModelFilter()
     {
         var f = ModelFilter.Trim();
         Models.Clear();
-        foreach (var m in _allModels.Where(m => f.Length == 0 || m.Key.Contains(f, StringComparison.OrdinalIgnoreCase) || m.Name.Contains(f, StringComparison.OrdinalIgnoreCase)))
-            Models.Add(new ModelItemViewModel(m) { IsCurrent = m.Key == _last?.Model });
+        // Two entries under one name (an alias and its dated id) show their ids
+        var sharedNames = _allModels.GroupBy(m => (m.Provider, m.Name)).Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet();
+        ModelItemViewModel Row(OmpModel m) => new(m) { IsCurrent = m.Key == _open.Last?.Model, ShowId = sharedNames.Contains((m.Provider, m.Name)) };
+        if (f.Length > 0)
+        {
+            _openModelFamily = null; // a search spans every family
+            foreach (var m in _allModels.Where(m => m.Key.Contains(f, StringComparison.OrdinalIgnoreCase) || m.Name.Contains(f, StringComparison.OrdinalIgnoreCase)))
+                Models.Add(Row(m));
+            return;
+        }
+        var families = _allModels.GroupBy(m => (m.Provider, Family: ModelItemViewModel.FamilyOf(m.Name)))
+            .Select(g => (g.Key, Versions: g.Order(Comparer<OmpModel>.Create(ModelItemViewModel.CompareNewestFirst)).ToList())).ToList();
+        if (_openModelFamily is { } open && families.FirstOrDefault(g => g.Key == open).Versions is { } chosen)
+        {
+            Models.Add(new ModelItemViewModel(chosen[0]) { Kind = ModelRowKind.Back, Family = open.Family });
+            foreach (var m in chosen) Models.Add(Row(m));
+            return;
+        }
+        _openModelFamily = null;
+        foreach (var (key, versions) in families)
+            Models.Add(versions.Count == 1 ? Row(versions[0]) : new ModelItemViewModel(versions[0])
+            {
+                Kind = ModelRowKind.Family, Family = key.Family, Versions = versions.Count,
+                IsCurrent = versions.Any(m => m.Key == _open.Last?.Model),
+            });
     }
 
-    // Concurrent: a choice made while an earlier one waits (for the run to end, or for Shift+Tab to pause) replaces it
+    // Concurrent: a choice made while an earlier one waits (for the runs to end, or for Shift+Tab to pause) replaces it
     [RelayCommand(AllowConcurrentExecutions = true)]
     private async Task SetApprovalModeAsync(string mode)
     {
@@ -294,24 +417,67 @@ public sealed partial class MainViewModel
             }
             ConfirmYolo = false;
             Persist(o => o with { ApprovalMode = mode });
-            // Changing approvals restarts omp: never mid-run (it switches once omp is idle), and not on every step of a
-            // Shift+Tab through the modes: the newest choice applies once the keys pause.
+            // A launch flag: every open chat's omp restarts with it (new chats start with it). Never mid-run (each one
+            // switches once its omp is idle), and not on every step of a Shift+Tab through the modes: the newest choice
+            // applies once the keys pause.
+            _chosenApprovalMode = mode;
             _approvalChosenAt = DateTime.UtcNow;
-            var waiting = PendingApprovalMode is not null;
+            foreach (var open in _opens.Values) open.PendingApprovalMode = mode;
             PendingApprovalMode = mode;
-            if (waiting) return; // the loop already waiting picks up the newest choice
-            while (Phase is SessionPhase.Running or SessionPhase.Aborting or SessionPhase.Stopping or SessionPhase.Starting
-                   || DateTime.UtcNow - _approvalChosenAt < ApprovalSettle)
-                await Task.Delay(100, _cts.Token);
-            mode = PendingApprovalMode ?? mode;
-            PendingApprovalMode = null;
-            if (mode == ApprovalMode) return;
-            await _session.SetApprovalModeAsync(mode, _cts.Token);
-            Apply(_session.Snapshot());
+            if (_approvalModeApplying) return; // the loop already waiting picks up the newest choice
+            _approvalModeApplying = true;
+            try { await ApplyApprovalModeAsync(); }
+            finally { _approvalModeApplying = false; }
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested)
         {
             // The window is closing: the request was abandoned on purpose.
+        }
+    }
+
+    /// <summary>
+    /// Restarts each open chat's omp with the chosen mode once the keys paused and that omp is idle. One that is working
+    /// keeps its run and switches when the run ends: in the shown chat the menu says so, and when chats in the background
+    /// are still working a brief note does.
+    /// </summary>
+    private async Task ApplyApprovalModeAsync()
+    {
+        var told = false;
+        while (_opens.Values.Any(o => o.PendingApprovalMode is not null))
+        {
+            await Task.Delay(100, _cts.Token);
+            if (DateTime.UtcNow - _approvalChosenAt < ApprovalSettle) continue;
+            var working = 0;
+            foreach (var open in _opens.Values.Where(o => o.PendingApprovalMode is not null).ToList())
+            {
+                var s = open.Controller.Snapshot();
+                if (s.Phase is SessionPhase.NotStarted or SessionPhase.Starting or SessionPhase.Running or SessionPhase.Aborting or SessionPhase.Stopping)
+                {
+                    if (open != _open) working++;
+                    continue;
+                }
+                var mode = open.PendingApprovalMode!;
+                open.PendingApprovalMode = null;
+                if (open == _open) PendingApprovalMode = null;
+                if (s.ApprovalMode == mode) continue;
+                // An omp that is not running (crashed, stopped) starts with it when the user starts it again. With the
+                // chat's own lifetime: closed meanwhile, its restart ends instead of starting an omp nobody stops.
+                try
+                {
+                    if (s.Phase is SessionPhase.Faulted or SessionPhase.Stopped) await open.Controller.SetNextApprovalModeAsync(mode, open.Lifetime.Token);
+                    else await open.Controller.SetApprovalModeAsync(mode, open.Lifetime.Token);
+                }
+                catch (OperationCanceledException) when (open.Lifetime.IsCancellationRequested && !_cts.IsCancellationRequested)
+                {
+                    continue; // that chat closed; the others still switch
+                }
+                ApplyIfShown(open);
+            }
+            if (working == 0 || told) continue;
+            told = true;
+            ShowBrief(ApprovalModeIcons.IconKey(_chosenApprovalMode), ApprovalLabel,
+                working == 1 ? "A chat that is working (marked in the sidebar) switches when its run ends: omp restarts then."
+                    : $"{working} chats that are working (marked in the sidebar) switch when their runs end: omp restarts then.");
         }
     }
 
@@ -321,6 +487,10 @@ public sealed partial class MainViewModel
     /// <summary>How long the permission mode waits for another Shift+Tab before omp restarts with it.</summary>
     private static readonly TimeSpan ApprovalSettle = TimeSpan.FromMilliseconds(600);
     private DateTime _approvalChosenAt;
+    private bool _approvalModeApplying;
+
+    /// <summary>The mode the user chose in this window (saved too): chats opened from now on start with it.</summary>
+    private string? _chosenApprovalMode;
 
     [RelayCommand]
     private async Task OpenSettingsAsync()
@@ -328,9 +498,8 @@ public sealed partial class MainViewModel
         try
         {
             var o = LoadSettingsOrDefault();
-            SettingsCommand = o.Command ?? "";
-            SettingsPrefixArgs = string.Join("\n", o.PrefixArgs);
-            SettingsProfile = o.Profile ?? "";
+            // Edits not saved yet stay as they were left (Back or Esc must not throw them away); else what is on disk
+            if (!HasUnsavedRuntime) ShowSavedRuntime(o);
             SettingsTheme = o.Theme ?? "system";
             NotificationsEnabled = o.Notifications ?? true;
             SettingsMessage = "";
@@ -350,7 +519,7 @@ public sealed partial class MainViewModel
     private async Task LoadLoginProvidersAsync()
     {
         ProvidersLoading = true;
-        var list = await _session.GetLoginProvidersAsync(_cts.Token);
+        var list = await Session.GetLoginProvidersAsync(_cts.Token);
         LoginProviders.Clear();
         foreach (var p in list.OrderByDescending(p => p.Authenticated).ThenBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase))
             LoginProviders.Add(new LoginProviderViewModel(p));
@@ -360,15 +529,16 @@ public sealed partial class MainViewModel
     [RelayCommand]
     private async Task SignInAsync(LoginProviderViewModel? p)
     {
+        var open = _open;
         try
         {
             if (p is null || p.IsBusy) return;
             p.IsBusy = true;
             IsSettingsOpen = false; // the sign-in link and any code prompt appear above the composer
-            var ok = await _session.LoginAsync(p.Id, _cts.Token);
+            var ok = await open.Controller.LoginAsync(p.Id, _cts.Token);
             p.IsBusy = false;
             p.IsAuthenticated = ok || p.IsAuthenticated;
-            Apply(_session.Snapshot());
+            ApplyIfShown(open);
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested)
         {
@@ -376,17 +546,12 @@ public sealed partial class MainViewModel
         }
     }
 
-    /// <summary>Saves the runtime fields and restarts omp with them on the same session.</summary>
+    /// <summary>Saves the runtime fields and restarts every chat's omp with them (one that is working once its run ends).</summary>
     [RelayCommand]
     private async Task SaveRuntimeAsync()
     {
         try
         {
-            if (Phase is SessionPhase.Running or SessionPhase.Aborting)
-            {
-                SettingsMessage = "Stop the current run first: applying these settings restarts omp.";
-                return;
-            }
             var prefix = SettingsPrefixArgs.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             if (!Persist(o => o with
                 {
@@ -396,11 +561,13 @@ public sealed partial class MainViewModel
                     Theme = SettingsTheme,
                 }))
                 return;
+            ShowSavedRuntime(LoadSettingsOrDefault());
             RefreshRuntimeStatus();
             SettingsMessage = "Saved. Restarting omp…";
-            await _session.RecoverAsync(_cts.Token);
-            Apply(_session.Snapshot());
-            SettingsMessage = Phase == SessionPhase.Ready ? "Saved. omp restarted with the new settings." : "Saved, but omp did not start: see the conversation for the error.";
+            if (!await RestartAllSessionsAsync())
+                SettingsMessage = "Saved. omp is replying: it restarts with the new settings when the reply ends.";
+            else
+                SettingsMessage = Phase == SessionPhase.Ready ? "Saved. omp restarted with the new settings." : "Saved, but omp did not start: see the conversation for the error.";
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested)
         {
@@ -412,11 +579,12 @@ public sealed partial class MainViewModel
     [RelayCommand]
     private async Task CancelSignInAsync()
     {
+        var open = _open;
         try
         {
-            await _session.ForceStopAsync(_cts.Token);
-            PendingUrl = null;
-            Apply(_session.Snapshot());
+            await open.Controller.ForceStopAsync(_cts.Token);
+            if (open == _open) PendingUrl = null;
+            ApplyIfShown(open);
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
     }
@@ -424,10 +592,11 @@ public sealed partial class MainViewModel
     [RelayCommand(CanExecute = nameof(CanRecover))]
     private async Task RecoverAsync()
     {
+        var open = _open;
         try
         {
-            await _session.RecoverAsync(_cts.Token);
-            Apply(_session.Snapshot());
+            await open.Controller.RecoverAsync(_cts.Token);
+            ApplyIfShown(open);
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested)
         {
@@ -496,6 +665,11 @@ public sealed partial class MainViewModel
             _modelsFetchedFor = model;
             _ = FetchModelsForHeaderAsync();
         }
+        // The start-problem page and the recover card follow these alone (the rows and the runtime install notify on
+        // their own): every binding on them is told again only when one changed, not on each streamed token.
+        var recover = (CanRecover, s.StartProblem, s.StartFailed, s.LastError);
+        if (recover == _recoverShown) return;
+        _recoverShown = recover;
         OnPropertyChanged(nameof(CanRecover));
         OnPropertyChanged(nameof(RecoverTitle));
         OnPropertyChanged(nameof(RecoverHint));
@@ -509,6 +683,8 @@ public sealed partial class MainViewModel
         RecoverCommand.NotifyCanExecuteChanged();
         ApplyRuntimeState();
     }
+
+    private (bool, StartProblem, bool, string?)? _recoverShown;
 
     /// <summary>Remembers the project folder for the next start (only when no folder is configured explicitly).</summary>
     private void RememberProject(string? cwd)

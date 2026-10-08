@@ -63,9 +63,76 @@ public static class ImageAttachments
             using var output = new MemoryStream();
             (scaled ?? bitmap).Save(output, new JpegBitmapEncoderOptions { Quality = 82 });
             var bytes = output.ToArray();
+            // The name stays the one the user gave (a dropped "shot.png" read as "shot.jpg" in the viewer); the bytes'
+            // type travels as the MIME type, and SaveToTemp names its copy by the bytes.
             if (bytes.Length <= MaxImageBytes || Math.Max(target.Width, target.Height) <= MinSide)
-                return bytes.Length <= MaxImageBytes ? new ImageAttachment(Path.ChangeExtension(name, ".jpg"), "image/jpeg", bytes) : null;
+                return bytes.Length <= MaxImageBytes ? new ImageAttachment(name, "image/jpeg", bytes) : null;
             scale *= 0.75;
+        }
+    }
+
+    /// <summary>
+    /// Writes the image to the temp folder for another app to open, named by its content (the same image is written
+    /// once) and its type. Returns the path.
+    /// </summary>
+    public static string SaveToTemp(ImageAttachment image)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "OmpGui images");
+        Directory.CreateDirectory(dir);
+        var ext = MimeByExtension.FirstOrDefault(p => p.Value == (MimeOf(image.Data) ?? image.MimeType)).Key ?? ".png";
+        var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(image.Data))[..16];
+        var path = Path.Combine(dir, $"{Path.GetFileNameWithoutExtension(image.Name)}-{hash}{ext}");
+        if (!File.Exists(path)) File.WriteAllBytes(path, image.Data);
+        return path;
+    }
+
+    /// <summary>The largest side the viewer decodes to: a 100 MP image would take 400 MB as a bitmap.</summary>
+    public const int MaxViewerSide = 4096;
+
+    /// <summary>
+    /// A thumbnail whose shorter side is at least <paramref name="minSide"/> pixels (never larger than the image), for
+    /// square previews that crop to fill. Null when the data is not a readable image. Slow on big images: not on the UI thread.
+    /// </summary>
+    public static Bitmap? DecodeThumbnail(byte[] data, int minSide)
+    {
+        if (Dimensions(data) is not { } size) return null;
+        return Decode(data, size, size.Width <= size.Height, Math.Min(minSide, Math.Min(size.Width, size.Height)));
+    }
+
+    /// <summary>
+    /// The image for the viewer, at full size up to <see cref="MaxViewerSide"/> on its longer side, with its real size
+    /// in pixels. Null when the data is not a readable image. Slow on big images: not on the UI thread.
+    /// </summary>
+    public static (Bitmap Bitmap, PixelSize Size)? DecodeFull(byte[] data)
+    {
+        if (Dimensions(data) is not { } size) return null;
+        var byWidth = size.Width >= size.Height;
+        var bitmap = Decode(data, size, byWidth, Math.Min(MaxViewerSide, byWidth ? size.Width : size.Height));
+        return bitmap is null ? null : (bitmap, size);
+    }
+
+    /// <summary>The image's size from its header, without decoding it; null when it is not an image Skia reads.</summary>
+    private static PixelSize? Dimensions(byte[] data)
+    {
+        if (data.Length == 0) return null;
+        using var stream = new SkiaSharp.SKMemoryStream(data);
+        using var codec = SkiaSharp.SKCodec.Create(stream);
+        return codec is { Info: { Width: > 0, Height: > 0 } info } ? new PixelSize(info.Width, info.Height) : null;
+    }
+
+    private static Bitmap? Decode(byte[] data, PixelSize size, bool byWidth, int side)
+    {
+        try
+        {
+            using var stream = new MemoryStream(data);
+            // Decoding at full size skips the scaler (and an image as small as asked stays sharp)
+            if (side == (byWidth ? size.Width : size.Height)) return new Bitmap(stream);
+            return byWidth ? Bitmap.DecodeToWidth(stream, side) : Bitmap.DecodeToHeight(stream, side);
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or IOException or NotSupportedException)
+        {
+            // The header was readable but the pixels are not (a truncated or corrupt file)
+            return null;
         }
     }
 }

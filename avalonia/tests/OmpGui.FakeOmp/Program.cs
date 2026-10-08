@@ -1,7 +1,7 @@
 // Scripted omp stand-in speaking the RPC wire format of omp 18.2.0 (docs/rpc.md), for tests only.
 //   OmpGui.FakeOmp <scenario>
 // Scenarios: normal | nonterminal-end | bad-chunk | crash-before-ready | no-models | exit-on-request | garbage | out-of-order | duplicate | silent |
-//            big-messages | ignore-eof | stderr-flood | slow-stream | approval | approval-timeout | ask | no-prompt-ack | queue-stream[-N] | abort-hangs | approval-chain | reload-fails-once | markdown | todo
+//            big-messages | ignore-eof | stderr-flood | slow-stream | approval | approval-timeout | ask | no-prompt-ack | queue-stream[-N] | abort-hangs | approval-chain | reload-fails-once | markdown | markdown-stream | todo
 //            plan (each prompt moves a two-phase plan on; the third replaces it) | subagents (subagent frames, get_subagents, /jobs)
 //            recorder | recorder-fails (audio recorder stand-ins, not omp) | cli <args> (omp's CLI subcommands, see FAKE_OMP_CLI)
 using System.Collections.Concurrent;
@@ -221,16 +221,27 @@ string? LocalBuiltinOutput(string text) => text switch
     _ => null,
 };
 string sessionFile = "";
+// Like omp (session-manager.ts, its "lazy gate"): a new session's file is written only once the session has an assistant
+// message (or a branch forces it), so a new chat has no file while its first reply streams, nor while it has only a draft.
+var sessionOnDisk = false;
 
 string NewSessionFile()
 {
     var project = Path.Combine(sessionsRoot, "-" + string.Concat(cwd.Select(c => char.IsLetterOrDigit(c) ? c : '-')));
     Directory.CreateDirectory(project);
-    var id = Guid.NewGuid().ToString();
-    var file = Path.Combine(project, $"{DateTime.UtcNow:yyyy-MM-ddTHH-mm-ss-fffZ}_{id}.jsonl");
-    File.WriteAllText(file, JsonSerializer.Serialize(new { type = "title", v = 1, title = "" }) + "\n"
-        + JsonSerializer.Serialize(new { type = "session", version = 3, id, cwd }) + "\n");
-    return file;
+    sessionOnDisk = false;
+    return Path.Combine(project, $"{DateTime.UtcNow:yyyy-MM-ddTHH-mm-ss-fffZ}_{Guid.NewGuid()}.jsonl");
+}
+
+// The whole session at once: the title line, the header (its id is the file name's) and the messages so far.
+void WriteSessionFile()
+{
+    var id = Path.GetFileNameWithoutExtension(sessionFile).Split('_', 2)[1];
+    File.WriteAllLines(sessionFile, [
+        JsonSerializer.Serialize(new { type = "title", v = 1, title = sessionName ?? "" }),
+        JsonSerializer.Serialize(new { type = "session", version = 3, id, cwd }),
+        .. history.Select(message => JsonSerializer.Serialize(new { type = "message", message }))]);
+    sessionOnDisk = true;
 }
 
 // Loads a session file; false when it was recorded in another working directory (omp 18.2.0 declines those).
@@ -247,16 +258,33 @@ bool LoadSession(string file)
     if (history.OfType<JsonNode>().LastOrDefault(m => m["role"]?.GetValue<string>() == "toolResult" && m["toolName"]?.GetValue<string>() == "todo")?["details"]?["phases"] is JsonArray saved)
         todoPhases = [.. saved.Select(p => (object)p!.DeepClone())];
     sessionFile = file;
+    sessionOnDisk = true;
     return true;
 }
 
 void Persist(object message)
 {
     history.Add(message);
-    File.AppendAllText(sessionFile, JsonSerializer.Serialize(new { type = "message", message }) + "\n");
+    if (sessionOnDisk) File.AppendAllText(sessionFile, JsonSerializer.Serialize(new { type = "message", message }) + "\n");
+    else if (JsonSerializer.SerializeToNode(message)?["role"]?.GetValue<string>() == "assistant") WriteSessionFile();
 }
 
-if (resumePath is not null && File.Exists(resumePath) && LoadSession(resumePath)) { }
+// Like omp (session-manager.ts #setSessionFile): a session whose header is missing or malformed (no "session" entry with
+// an id first, after the title line) is refused, at start (stderr, exit 1) and by switch_session (an error), untouched.
+bool HeaderIsValid(string file)
+{
+    try
+    {
+        var first = File.ReadLines(file).Where(l => l.Trim().Length > 0).Select(l => JsonNode.Parse(l))
+            .FirstOrDefault(n => n?["type"]?.GetValue<string>() != "title");
+        return first?["type"]?.GetValue<string>() == "session" && first["id"] is JsonValue id && id.TryGetValue<string>(out _);
+    }
+    catch (JsonException) { return false; }
+}
+string Refusal(string file) => $"Cannot resume session \"{Path.GetFullPath(file)}\": the session header is missing or malformed. The file was not modified.";
+
+var resumeRefused = resumePath is not null && File.Exists(resumePath) && !HeaderIsValid(resumePath);
+if (!resumeRefused && resumePath is not null && File.Exists(resumePath) && LoadSession(resumePath)) { }
 else sessionFile = NewSessionFile();
 
 object Assistant(string text) => new { role = "assistant", content = new[] { new { type = "text", text } }, stopReason = "stop" };
@@ -269,7 +297,8 @@ var queuedCount = 0;
 object UserMessage(string text, JsonArray? images)
 {
     var content = new JsonArray { new JsonObject { ["type"] = "text", ["text"] = text } };
-    foreach (var img in images ?? []) content.Add(new JsonObject { ["type"] = "image", ["mimeType"] = img?["mimeType"]?.GetValue<string>(), ["data"] = "" });
+    // omp echoes the image parts as sent (base64) in events and in get_messages
+    foreach (var img in images ?? []) content.Add(new JsonObject { ["type"] = "image", ["mimeType"] = img?["mimeType"]?.GetValue<string>(), ["data"] = img?["data"]?.GetValue<string>() ?? "" });
     return new JsonObject { ["role"] = "user", ["content"] = content };
 }
 
@@ -285,9 +314,16 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
     // before a loaded machine had typed them), then a second without a new one; 30 s at most.
     var untilQueued = scenario.StartsWith("queue-stream", StringComparison.Ordinal);
     var queuedWanted = scenario.StartsWith("queue-stream-", StringComparison.Ordinal) ? int.Parse(scenario["queue-stream-".Length..], System.Globalization.CultureInfo.InvariantCulture) : 1;
+    // "multi" (several chats at once): what the message asks for decides the turn — "CRASH" exits mid-reply
+    var crash = scenario == "multi" && message.Contains("CRASH", StringComparison.Ordinal);
     for (var i = 0; untilQueued ? i < 1500 && (queuedCount < queuedWanted || lastQueuedAt is not { } q || DateTime.UtcNow - q < TimeSpan.FromSeconds(1)) : i < deltas; i++)
     {
         if (ct.IsCancellationRequested) { aborted = true; break; }
+        if (crash && i == 3)
+        {
+            Console.Error.WriteLine("fatal: the fake omp crashed mid-reply");
+            Environment.Exit(9);
+        }
         var d = $"tok{i} ";
         sb.Append(d);
         Emit(new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = d } });
@@ -381,6 +417,29 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
         Emit(new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = md } });
         Emit(new { type = "tool_execution_start", toolCallId = "e1", toolName = "edit", args = new { path = "hello.py", edits = new[] { new { op = "update" } } } });
         Emit(new { type = "tool_execution_end", toolCallId = "e1", toolName = "edit", result = new { content = new[] { new { type = "text", text = "Updated hello.py" } }, details = new { diff = "--- a/hello.py\n+++ b/hello.py\n@@ -1,2 +1,2 @@\n def greet():\n-    print('Hi')\n+    print('Hello')\n" } } });
+    }
+    else if (!aborted && scenario == "markdown-stream")
+    {
+        // A long Markdown answer (about 2000 words: headings, paragraphs, lists, code fences, tables) streamed a word at a
+        // time, FAKE_OMP_PACE_MS apart (default 15), for the transcript's streaming and scrolling tests.
+        var pace = int.TryParse(Environment.GetEnvironmentVariable("FAKE_OMP_PACE_MS"), out var pm) ? pm : 15;
+        var doc = new StringBuilder();
+        for (var s = 1; s <= 12; s++)
+        {
+            doc.Append($"## Step {s}: the part of the change that touches module {s}\n\n");
+            doc.Append($"The module {s} reads its settings once at start-up and keeps them for the whole run, so a change to the file is only seen after a restart. This step moves the read behind a small cache that is refreshed when the file changes, and keeps the old behaviour behind a flag for the tests that rely on it.\n\n");
+            doc.Append($"- Read `settings_{s}.toml` through the cache\n- Refresh it when the watcher fires\n- Keep `--legacy-settings` for the old path\n\n");
+            doc.Append($"```python\ndef load_settings_{s}(path):\n    with open(path) as f:\n        return parse(f.read())\n\n\ndef settings_{s}():\n    return CACHE.get(\"{s}\", load_settings_{s})\n```\n\n");
+            doc.Append($"| Case | Before | After |\n|---|---|---|\n| file unchanged | read once | read once |\n| file changed | stale until restart | fresh on the next call |\n| file removed | crash | the defaults, with a warning |\n\n");
+        }
+        doc.Append("That is all of it: twelve modules, one cache, and the tests still pass.");
+        foreach (var w in System.Text.RegularExpressions.Regex.Split(doc.ToString(), "(?<= )"))
+        {
+            if (ct.IsCancellationRequested) { aborted = true; break; }
+            sb.Append(w);
+            Emit(new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = w } });
+            try { await Task.Delay(pace, ct); } catch (OperationCanceledException) { aborted = true; break; }
+        }
     }
     else if (!aborted && scenario is "todo" or "todo-state-glitch")
     {
@@ -536,7 +595,7 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
             Emit(new { type = "tool_execution_end", toolCallId = tid, toolName = tool, isError = !ok, result = new { content = new[] { new { type = "text", text = ok ? "ran: " + line : "Tool call denied by user: " + tool } } } });
         }
     }
-    else if (!aborted && scenario is "approval" or "approval-timeout")
+    else if (!aborted && (scenario is "approval" or "approval-timeout" || scenario == "multi" && message.Contains("APPROVE", StringComparison.Ordinal)))
     {
         Emit(new { type = "tool_execution_start", toolCallId = "t1", toolName = "bash", args = new { command = "echo hi" } });
         var did = $"ap{Interlocked.Increment(ref dialogSeq)}";
@@ -583,6 +642,12 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
     Emit(new { type = "agent_end", messages = Array.Empty<object>() });
 }
 
+if (resumeRefused)
+{
+    // Bun prints the uncaught error under a source excerpt, its message on an "error: " line
+    Console.Error.WriteLine("2282 | \t\t\tthrow new Error(\n" + "error: " + Refusal(resumePath!));
+    return 1;
+}
 if (scenario == "crash-before-ready")
 {
     Console.Error.WriteLine("fatal: no model configured (fake)");
@@ -745,7 +810,8 @@ while (true)
             var kept = history.Take(at).ToList();
             history.Clear();
             sessionFile = NewSessionFile();
-            foreach (var m in kept) Persist(m);
+            history.AddRange(kept);
+            WriteSessionFile(); // omp forces a branch's file into existence at once
             Respond(id, type, new { text = chosen, cancelled = false });
             break;
         case "bash":
@@ -806,15 +872,20 @@ while (true)
             break;
         case "switch_session":
             var target = cmd?["sessionPath"]?.GetValue<string>() ?? "";
+            if (File.Exists(target) && !HeaderIsValid(target)) { Respond(id, type, error: Refusal(target)); break; }
             var switched = File.Exists(target) && LoadSession(target);
             if (switched && scenario == "reload-fails-once") failNextMessages = true;
             Respond(id, type, new { cancelled = !switched });
             break;
         case "set_session_name":
             sessionName = cmd?["name"]?.GetValue<string>();
-            var all = File.ReadAllLines(sessionFile);
-            all[0] = JsonSerializer.Serialize(new { type = "title", v = 1, title = sessionName });
-            File.WriteAllLines(sessionFile, all);
+            // Like omp, a name given before the file exists does not create it: it is written with the file
+            if (sessionOnDisk)
+            {
+                var all = File.ReadAllLines(sessionFile);
+                all[0] = JsonSerializer.Serialize(new { type = "title", v = 1, title = sessionName });
+                File.WriteAllLines(sessionFile, all);
+            }
             Respond(id, type);
             break;
         case "prompt":
@@ -898,7 +969,17 @@ while (true)
             Respond(id, type);
             run = new CancellationTokenSource();
             var msg = cmd?["message"]?.GetValue<string>() ?? "";
-            var (n, delay) = scenario switch { "slow-stream" or "abort-hangs" => (100000, 20), _ when scenario.StartsWith("queue-stream", StringComparison.Ordinal) => (60, 20), "markdown" or "session" or "plan" or "subagents" => (0, 0), _ => (50, 0) };
+            // "multi": "FOREVER" streams until stopped, "LONG" for FAKE_OMP_LONG_DELTAS deltas 25 ms apart (default 120: 3 s)
+            var longDeltas = int.TryParse(Environment.GetEnvironmentVariable("FAKE_OMP_LONG_DELTAS"), out var ld) ? ld : 120;
+            var (n, delay) = scenario switch
+            {
+                "slow-stream" or "abort-hangs" => (100000, 20),
+                "multi" when msg.Contains("FOREVER", StringComparison.Ordinal) => (100000, 20),
+                "multi" when msg.Contains("LONG", StringComparison.Ordinal) => (longDeltas, 25),
+                _ when scenario.StartsWith("queue-stream", StringComparison.Ordinal) => (60, 20),
+                "markdown" or "markdown-stream" or "session" or "plan" or "subagents" => (0, 0),
+                _ => (50, 0),
+            };
             var promptImages = cmd?["images"] as JsonArray;
             _ = Task.Run(async () =>
             {

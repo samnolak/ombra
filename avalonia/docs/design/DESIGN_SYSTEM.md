@@ -15,16 +15,18 @@ Files:
 
 ## Foundations
 
-- **Colours**, light and dark: Claude's classic warm palette — ivory / charcoal surfaces, ink text, **one clay accent**
-  (`#C6613F`, hover `#D97757`) for the primary action, switches, checks and selection marks. Blue is only for links
-  and the keyboard focus ring. There is no yellow. Theme switching is Avalonia's `ThemeVariant`; every brush is a
-  `DynamicResource`.
+- **Colours**, light and dark: Claude's classic warm palette — ivory / charcoal surfaces, ink text, **one yellow
+  accent**, the logo's (`#F2B200` light / `#FFC21A` dark, ink `#211A0A` text and marks on it) for the primary action,
+  switches, checks and selection marks. Blue is only for links and the keyboard focus ring. Theme switching is
+  Avalonia's `ThemeVariant`; every brush is a `DynamicResource`.
 - **Radius**: 4 / **8 controls** / **12 cards, menus** / **16 composer** / full (`GuiRadiusControl`,
   `GuiRadiusCard`, `GuiRadiusComposer`).
 - **Type scale**: UI 14 (`GuiFontUi`), messages 16 on 24 (`GuiFontMessage` / `GuiLineMessage`), captions 12
   (`GuiFontCaption`), code 13 (`GuiFontCode`, in `GuiFontMono`: SF Mono / Menlo / Cascadia Mono / Consolas); 17 for
   section titles, 20 for the page title, 24 for the empty-session greeting. The UI font is **Inter** (SIL Open Font
-  License 1.1, bundled through the `Avalonia.Fonts.Inter` package, `.WithInterFont()` in `Program.cs`).
+  License 1.1, bundled through the `Avalonia.Fonts.Inter` package, `.WithInterFont()` in `Program.cs`), with its
+  contextual alternates off (`FontFeatures="-calt"` on every `Window`): they drew "0x1F" as "0×1F" and "->" as an
+  arrow in text the user or omp wrote.
 - **Shadows**: `GuiShadow` and `GuiShadowPopup` in light (two soft layers each); in dark only popups keep a shadow,
   cards rely on a hairline.
 - **Components**: buttons 32 / radius 8 (medium 44 / radius 12), inputs on surface 1 with a hairline, status badges on
@@ -66,8 +68,9 @@ Values are light / dark; contrast is against the window. Only the keys the style
 | `GuiTextSecondary` | #3D3D3A / #C2C0B6 (10:1 / 8:1) | `.muted`, `.caption`, `.label`, `.tertiary`, `.caps`, icon buttons, tool output |
 | `GuiTextTertiary` | #6B6A64 / #9C9A92 (≥ 4.9:1 on window and sidebar / ≥ 4.7:1, AA) | placeholders, hints, meta (times, line numbers), disabled text |
 | `GuiTextLink` / `GuiTextLinkHover` | #1B67B2 / #74ABE2 | `link action`, Markdown links |
-| `GuiTextError` / `Success` / `Warning` | #B53333 · #2F7613 · #875A08 / #FE8181 · #7CC24F · #DA9E25 | error text, diff gutter, warning text (all AA) |
-| `GuiTextOnAccent` | #FFF | text and icons on the clay accent and on danger fills |
+| `GuiTextError` / `Success` / `Warning` | #B53333 · #2F7613 · #8F4F12 / #FE8181 · #7CC24F · #E09A4F | error text, diff gutter, warning text (all AA; warning ≥ 5.6:1 on window, sidebar and surface in both themes) |
+| `GuiTextOnAccent` | #211A0A (ink) in both themes (≥ 7.2:1 on every accent state) | text and icons on the yellow accent |
+| `GuiTextOnDanger` | #FFF | text and icons on danger fills |
 | `GuiTextOnInverse` | #FAF9F5 / #141413 | text on `inverse` buttons and tooltips |
 | `GuiWindow` | #FAF9F5 / #262624 | window, conversation |
 | `GuiPage` / `GuiSidebar` | #F5F4ED / #1F1E1D | settings page, events panel / sidebar, terminal panel |
@@ -77,20 +80,22 @@ Values are light / dark; contrast is against the window. Only the keys the style
 | `GuiFill1OnWindow` | #F0EEE6 / #1F1E1D | command output, tool output |
 | `GuiCodeBlockBg` / `GuiInlineCodeBg` | #F0EEE6 / #1F1E1D · ink 8 % / ivory 10 % | code blocks / inline code chips |
 | `GuiFill2` | ink 10 % / ivory 12 % | tags, selected tab, current menu item, open panel toggle |
-| `GuiAccent` (+`Hover`, `Pressed`) | #C6613F (#D97757, #B1532F) | `accent` buttons (Send, Allow…), switch on, check boxes, menu check marks, page-comment pins |
-| `GuiBrandMark` | #D97757 | logo, spinner, "changed by omp" sparkle, unread dot |
+| `GuiAccent` (+`Hover`, `Pressed`) | #F2B200 (#FFC21A, #D99E00) / #FFC21A (#FFD24D, #E6A800) | `accent` buttons (Send, Allow…) with `GuiTextOnAccent` ink text, switch on, check boxes, menu check marks, page-comment pins |
+| `GuiBrandMark` | #E0A100 / #FFD24D | logo, spinner, "changed by omp" sparkle, unread dot |
+| `GuiStatusUnread` / `GuiStatusUnreadRing` | #E0A100 ring #8A6400 (1.5 px) / #FFD24D no ring | the sidebar's unseen-reply dot; the ring gives the light dot the 3:1 a graphic needs (yellow alone is 2.1:1 on the sidebar) without turning it into the waiting dot's amber |
 | `GuiFocus` / `GuiFocusRing` | #2A78D6 / #4C8FE0 | focused text box border; keyboard-focus ring (2 px, inset) |
 | `GuiInverse` (+`Hover`, `Pressed`) | #141413 / #FAF9F5 | `inverse` buttons (Stop), tooltips (`GuiTooltip`) |
-| `GuiModeManual` / `AcceptEdits` / `Plan` / `Bypass` | #6B6A64 · #8700FF · #006666 · #AB2B3F / #9C9A92 · #AF87FF · #48968C · #FF6B80 | permission-mode pill, composer focus border and Send in that mode |
-| `GuiStatusRunning` / `Waiting` / `Unread` | #2C7A39 · #B77700 · #D97757 / #89D185 · #DA9E25 · #D97757 | session status dots: working (pulsing), needs your input, unseen reply |
+| `GuiModeManual` / `AcceptEdits` / `Plan` / `Bypass` | #6B6A64 · #8700FF · #006666 · #AB2B3F / #9C9A92 · #AF87FF · #48968C · #FF6B80 | the permission-mode pill and the mode marks in its menu (the composer and Send keep the accent in every mode) |
+| `GuiStatusRunning` / `Waiting` / `Unread` | #2C7A39 · #B5661B · #E0A100 / #89D185 · #E09A4F · #FFD24D | session status dots: working (pulsing), needs your input (amber; ≥ 3.9:1 on the sidebar), unseen reply (yellow; in the light theme 2.1:1 on the sidebar, under the 3:1 WCAG asks of graphics — open, see QA_AUDIT 8) |
 | `GuiDiffAddedBg` / `Text`, `GuiDiffRemovedBg` / `Text` | green / red at 16–18 % (dark 14–15 %) with AA text | diff rows, calm in dark |
 | `GuiBorderSoft` / `GuiBorder` / `GuiBorderStrong` | ink or ivory at 10 / 20 / 40 % | dividers, menus, tool rows / text boxes, composer / composer while focused, switch track off |
 | `GuiBorderDarkOnly` | transparent / ivory 10 % | card hairline (dark only) |
 | `GuiStatus*Soft` | pale status fills / deep muted fills | badges, `notice`, `banner error`, `chip danger` |
-| `GuiStatusInfo` / `Success` / `Error` / `Warning` | info = clay #C6613F / #D97757 (never blue) | status dots and marks (3:1 is enough for graphics); info marks what is in progress: the current todo, a running pill, counts |
+| `GuiStatusInfo` / `Success` / `Error` / `Warning` | info = amber #B07A00 / #FFD24D (never blue) | status dots and marks (3:1 is enough for graphics); info marks what is in progress: the current todo, a running pill, counts |
 | `GuiShadow` | `0 1 2 #000 4%, 0 4 14 #000 6%` / none | cards, composer, raised segment |
 | `GuiShadowPopup` | `0 2 6 #000 6%, 0 10 32 #000 12%` / `0 10 32 #000 40%` | menus, drawer sidebar |
 | `GuiBackdrop` | ink 20 % / black 35 % | `Border.scrim` behind a drawer or a sheet |
+| `GuiImageBackdrop` | the page, opaque (#F5F4ED / #1F1E1D) | `Border.image-backdrop` behind the image viewer (nothing of the conversation shows around the image) |
 | `GuiRadius4` / `8` / `12` / `Full`; `GuiRadiusControl` / `Card` / `Composer` | 4 / 8 / 12 / 999; 8 / 12 / 16 | 4: tags · 8: buttons, menu rows, inputs · 12: cards, menus, `md` buttons, tool output · 16: composer · full: chips, badges |
 | `GuiFontUi` / `Message` (+`GuiLineMessage`) / `Caption` / `Code` | 14 / 16 (24) / 12 / 13 | menus and inputs / `.body` / `.tertiary`, `.caption`, tooltips / `.mono` |
 | `GuiFontL` / `M` / `S` / `Xs` / `Xl` / `Xxl` | 17 / 15 / 13 / 12 / 20 / 24 | `.section` / card titles, `md` buttons / buttons, `.muted`, `.label` / `.caps` / `.page-title` / greeting |
@@ -110,22 +115,32 @@ copied); colours, radius, type and components are the client's own (above).
 | Empty session | the app mark and "What should we work on in ‹project ▾›?" (heading 5, 24) centered over the message box, the project an outlined chip that opens the project menu; three starter prompts as outlined pill chips that fill the box; shown while the conversation has only notices | 640 max |
 | Setup | omp cannot start in a new session: the page shows only what to do — the app mark (onboarding) or a warning mark, a title, one sentence, one accent action and the alternatives, the raw error under *Show details*; no message box. Mid-conversation the same content is a card above the message box | 520 max |
 | Questions | one card chrome for approvals, questions, confirmations and inputs (`Border.dialog`): a mark (shield for approvals, sparkle otherwise) and the title in words — "omp wants to run a command", or the question — then the command or details in a mono code box, omp's reason as a muted line, the answers; choices numbered 1–9 (the digit picks, omp's "(Recommended)" as a `status` badge), approvals Allow `1` / Deny `2` (omp offers no "always allow"), close (×) in the card's corner | — |
-| Composer | the message field on a card; above the text: the slash menu, queued messages (grey one-liners with their tag and ×), long pastes ("Pasted text +N lines" chips with ×), page comments (numbered chips), images; in the card under the text, left: "+" (an outlined 32 px circle mirroring Send; a menu: attach images, commands and skills, connectors, plugins, comment on the page); right: thinking effort, model, dictation, then a round send / stop button. Send is the accent (the mode's colour in Accept edits / Bypass) and a grey fill-2 circle with a tertiary arrow while there is nothing to send. The permission mode colours the card's focus border (Ask: `GuiBorderStrong`; Accept edits / Bypass: their mode colour) and its pill (icon shield / pencil / alert). The model menu opens above the card, its right edge on the model chip, so the message stays readable; the thinking menu's rows are a label and a one-line description; the slash menu lists what only omp's terminal runs last, under a `TextBlock.menu-group` heading. Under the card, outside it (as Claude Code and Codex keep session settings out of the box): the project folder (new session only) and the permission mode on the left (its menu opens upward from the pill's left edge), the context gauge on the right, in 28 px quiet pills. Styles: `Styles.Composer.axaml` | radius 16; field min 48; toolbar buttons 32; send and "+" 32 circles, 10 px from the edges; row under the card 28 |
+| Composer | the message field on a card; above the text: the command menu (the slash menu; while an `@name` is typed, the project's files and folders, each with a file / folder icon, the name in mono and its folder muted), queued messages (grey one-liners with their tag and ×), long pastes ("Pasted text +N lines" chips with ×), code comments (comment icon · `app.py:41` in mono secondary · the comment · ×), page comments (numbered chips), images; in the card under the text, left: "+" (an outlined 32 px circle mirroring Send; a menu: attach images, commands and skills, connectors, plugins, comment on the page); right: thinking effort, model, dictation, then a round send / stop button. Send is the accent (the mode's colour in Accept edits / Bypass) and a grey fill-2 circle with a tertiary arrow while there is nothing to send. The permission mode colours the card's focus border (Ask: `GuiBorderStrong`; Accept edits / Bypass: their mode colour) and its pill (icon shield / pencil / alert). The model menu opens above the card, its right edge on the model chip, so the message stays readable; the thinking menu's rows are a label and a one-line description; the slash menu lists what only omp's terminal runs last, under a `TextBlock.menu-group` heading. Under the card, outside it (as Claude Code and Codex keep session settings out of the box): the project folder (new session only) and the permission mode on the left (its menu opens upward from the pill's left edge), the context gauge on the right, in 28 px quiet pills. Styles: `Styles.Composer.axaml` | radius 16; field min 48; toolbar buttons 32; send and "+" 32 circles, 10 px from the edges; row under the card 28 |
 | Shortcut sheet | ⌘/ (Ctrl+/) or `/hotkeys`: a menu card over a scrim, its groups in 300 px columns (two when the window allows), each row the action (a tertiary note under it when it applies only sometimes) and its keys as `Border.keycap` (fill 1, hairline, radius 4, 12 px medium secondary); Esc, × or the scrim closes it | max 660 wide |
+| Image viewer | a click on an image preview (`Controls/ImageViewer`, `Styles.Images.axaml`): the image over `GuiImageBackdrop`, fitted to the window and never enlarged, with name, pixel size and "2 of 3" at the top left and ← · → · **100 %**/**Fit** · copy · open in default app · × at the top right; a click on the image or Space toggles 100 % (scrolling), ←/→ step, Esc or a click on the backdrop closes; Tab cycles inside it | window |
 | Preview | right of the conversation, full height, resizable (`Controls/PreviewPanel`): back · forward · reload · address · open in the browser · close in a 48 px toolbar level with the header; local server addresses from tool output as chips; the native web engine of the OS (WebView2 / WKWebView / WebKitGTK), a card with "Open in browser" when there is none | 520 default, 320 min |
-| Annotate (preview) | Codex's page comments: the 💬 toggle (`icon on` while active) puts the page in annotate mode — drawn by the page script in a closed shadow root: a 2 px blue outline with a dark tag (`button#buy 220×56`), a white comment card (radius 12, textarea, Cancel / clay Comment), numbered **pins** (22 px clay circles, white number, white ring) and a dark hint pill at the bottom; the panel lists the comments under the page (pin number, comment, element in mono tertiary, ×) with Clear and an accent Send; the composer shows "N comments on the page" as an attachment chip | pins 22; list max 200 |
+| Annotate (preview) | Codex's page comments: the 💬 toggle (`icon on` while active) puts the page in annotate mode — drawn by the page script in a closed shadow root: a 2 px blue outline with a dark tag (`button#buy 220×56`), a white comment card (radius 12, textarea, Cancel / yellow Comment with ink text), numbered **pins** (22 px yellow circles, ink number, white ring) and a dark hint pill at the bottom; the panel lists the comments under the page (pin number, comment, element in mono tertiary, ×) with Clear and an accent Send; the composer shows "N comments on the page" as an attachment chip | pins 22; list max 200 |
+| Changes (Files pane) | a file git sees changed: under the viewer header a `segmented` **File · Changes +N −M** and, in Changes, "Revert file…" (`flat danger-text`; "Delete file…" for a file git does not have) that opens a `notice warning` question with a `danger` Revert / Delete and a flat Cancel; the diff in one virtualized list (`Styles.Files.axaml`): per hunk git's `@@ … @@` in 12 px mono tertiary on `GuiFill1OnWindow` with a flat **Revert** at its end, then the lines as the conversation's diffs draw them (`diff-row` fills, number, sign, coloured code, wrapped); a 20 px "+" at a line's start shows on hover or keyboard focus and opens a comment box under the line (surface 1, hairline, radius 8; Cancel / accent "Add comment"; Enter adds, Esc closes) | hunk header 30; rows 20 |
 | Dictation | the mic button or Ctrl/⌘+Shift+Space turns the message field into the dictation bar (`Controls/DictationBar`): cancel · level waveform · time · finish (accent circle); Esc cancels, Enter inserts the text at the caret (never sends) | field height |
 | Cards above the composer | recovery, sign-in link, tasks, the activity line and the approval / question card; while the conversation is shorter than its view they are drawn up to just under its last row (`MainWindow.FollowTranscript`), so a question follows the conversation instead of waiting at the bottom; they scroll when the window is too low for them and the composer, which always stays on screen (a new question scrolls its answer buttons into view) | same 768 column |
 | Activity line | in the column above the composer, in a slot that keeps its 20 px when idle (a run starting or ending moves nothing); while omp works or after an error: pulsing dot · what it does now ("Thinking", "Writing", "Running bash", "Waiting for your approval" in the warning colour) · elapsed time · "Esc to stop"; model, RPC and context in its tooltip | 12 px |
-| Pet | a pixel pet (`Controls/PetPerch`, `Controls/PetView`, data in `Pets/`) on the composer's top edge, 20 px from its right end, its feet on the border; it has a band of its own (the composer's top margin grows by the pet's height), so it never covers the conversation, a card or a question; a click opens a speech bubble to its left (surface 2, radius 12) and never takes focus; hidden on the setup screen, the settings page and in a window under 520 px tall (the band goes with it). Art: 24×24 pet pixels (`PetArt`) with a one-pixel outline, three-step shading, a soft highlight, blush, 2×3 eyes with a glint and a soft contact shadow; a 12-pixel room on its left for effects. Motion (`PetLife`): eased breathing, blinks every 2–6 s, glances, an idle action every 8–20 s, each mood's own motion, eased changes between moods, a look at the pointer, a hop on click, a glance at the composer while typing; drawn nearest-neighbour at screen pixels, and it wakes only when the picture changes, only while shown in the active window; a mood that lasts (asleep, waiting, omp stopped) comes to rest on a still. Previews: `screens/pets-preview-light.gif`, `screens/pets-preview-dark.gif` | 48 (medium, 2 px per pet pixel) / 32 (small, 4/3) tall |
+| Pet | a pixel pet (`Controls/PetPerch`, `Controls/PetStage`, `Controls/PetView`, data in `Pets/`) on the composer's top edge, 20 px from its right end, its feet on the border; it has a band of its own (the composer's top margin grows by the pet's height), so it never covers the conversation, a card or a question; a click opens a speech bubble to its left (surface 2, radius 12) and never takes focus; hidden on the setup screen, the settings page and in a window under 520 px tall (the band goes with it). Dragged, it lifts into a window of its own (`Controls/PetWindow`: borderless, see-through, topmost, no taskbar entry, exactly the sprite's size plus the bubble or message box while they show, so clicks around it reach other apps) anywhere on the monitors' work areas (`Pets/PetDesktop`), or stays in the window with Settings → Pets → Inside the window. Art: 24×24 pet pixels (`PetArt`) with a one-pixel outline, three-step shading, a soft highlight, blush, 2×3 eyes with a glint and a soft contact shadow; a 12-pixel room on its left for effects. Motion (`PetLife`): eased breathing, blinks every 2–6 s, glances, an idle action every 8–20 s, each mood's own motion, eased changes between moods, a look at the pointer, a hop on click, a glance at the composer while typing; drawn nearest-neighbour at screen pixels (again when it moves to a screen of another density), and it wakes only when the picture changes, only while shown in the active window (on the desktop: while the app is in front, or behind other apps while omp is busy, asks or reports); a mood that lasts (asleep, waiting, omp stopped) comes to rest on a still. Previews: `screens/pets-preview-light.gif`, `screens/pets-preview-dark.gif` | 48 (medium, 2 px per pet pixel) / 32 (small, 4/3) tall |
 | Tasks | omp's todo list as one line above the composer: the task in progress, done / total, a chevron; open, the whole list with checkboxes (done: struck through; in progress: an info-coloured box with a dot) | 32 high line; list max 180 |
 | New session | the greeting and the composer together in the middle of the page; with the first message the composer goes to the bottom | — |
 
 **Keeping things in place.** The conversation stays on its latest message through resizes, panels opening (terminal,
 tasks, a question, the preview) and rows growing — re-anchored inside the layout pass, so no frame is drawn at the old
-offset — until the reader scrolls away (wheel, scroll bar, keys); then "Jump to latest" appears. Side panels never take
-the conversation below 420 px: the sidebar gives way first, then the preview narrows to its 320 minimum; a window too
-narrow for both shows the preview over the conversation until it is closed (`MainWindow.FitPanels`).
+offset — until the reader scrolls away (wheel, scroll bar, keys); then "Jump to latest" (a round ↓ centred over the
+conversation's bottom, just above the composer) appears, and the view holds
+still until the reader comes back within 24 px of the bottom (`Views/ChatScrollController`, the one writer of the
+offset). Rows keep their measured height, remembered with each row across chat switches (`Controls/TranscriptPanel`);
+a row not measured yet is placed by an estimate from its own text (`Views/TranscriptRowHeights`), which measuring other
+rows never changes, so a row changing above the view never moves what is on screen and the scroll bar's length holds
+while its thumb is dragged. A streaming reply only re-renders its last Markdown block, and a long reply builds only the
+blocks within half a view of the screen (`Controls/MarkdownView`). Side panels never take
+the conversation below 420 px: the sidebar gives way first, then the docked panels narrow to their minimums (side pane
+280, preview 320, terminal 360, Events 320); one that no longer fits beside the conversation is shown over it until it
+is closed (`MainWindow.FitPanels`).
 
 Model and thinking effort live in the composer, next to the message they apply to; the permission mode and the context
 gauge sit in the row under it. The model list opens upwards from its chip. Each row sheds labels only as far as its
@@ -140,7 +155,7 @@ context without its percentage, the project as its icon. Voice and send always s
 | Classes | Looks like |
 |---|---|
 | *(none)* | secondary: fill 1, primary text, 32 high, radius 8, 13 px medium; hover / pressed step the fill |
-| `accent` | primary: clay (`GuiAccent`) fill, white text, hover `GuiAccentHover`; disabled = the same at 50 % |
+| `accent` | primary: yellow (`GuiAccent`) fill, ink (`GuiTextOnAccent`) text, hover `GuiAccentHover`; disabled = the same at 50 % |
 | `danger` | the one destructive action of a confirmation: error fill, white text (not on `chip`, `menu-item`, `flat`) |
 | `md` | 44 high, radius 12, 15 px (combine: `accent md`) |
 | `inverse` | ink in light, ivory in dark (Stop); disabled = the same at 50 % |
@@ -188,6 +203,11 @@ inside stays bare in every state.
 - `Border.menu` and every `Flyout` / `MenuFlyout` / `ContextMenu`: surface 2, radius 12, soft hairline, popup shadow,
   6 px around the rows. Rows (`Button.menu-item`, `MenuItem`) are 14 px, radius 8, fill 1 on hover, fill 2 when
   `current`. A check mark for the chosen row is `ctl:Icon.menu-check` in the accent, never the link blue.
+- Right-click menus are the same card: a `Flyout` (`Placement="Pointer"`, `ctl:ChoiceMenu.CloseOnChoice`) of
+  `Button.menu-item` rows, each a 16 px icon and its label, separated by `Border.menu-separator`. A menu shared by
+  many rows is one resource set as their `ContextFlyout` (it takes the clicked row as its DataContext); menus made in
+  code use `Controls/ContextMenus.Menu`. Text fields keep the text-editing `MenuFlyout` (Cut, Copy, Paste, Select all;
+  `Styles.axaml`). `MainWindow` maps Control+click to a right click on macOS.
 - `ToolTip`: inverse (`GuiTooltip` with `GuiTextOnInverse`), 12 px, radius 6, padding 8,5, at most 320 wide.
 - Scroll bars: Fluent's overlay bars, thin until hovered; the thumb is `GuiBorder`, `GuiBorderStrong` on hover.
 - `Border.notice`: transcript notices; plain text by default, `notice error` / `notice warning` get a soft status
@@ -203,17 +223,29 @@ inside stays bare in every state.
   12 tertiary) and a copy icon that shows on hover and turns into a check for 1.5 s. Inline code is a
   `GuiInlineCodeBg` chip (radius 4) drawn under the text by `MarkdownView` (mono at 0.875 of the text, still
   selectable with it); list markers are tertiary in an 18 px column; table headers on fill 2. Running dots
-  (`tool-dot running`, `state-dot running`) and the live "Thinking…" pulse; nothing animates while idle.
+  (`tool-dot running`, `state-dot running`, `session-dot running`) and the live "Thinking…" label pulse through
+  `ctl:Pulse` (`Controls/Pulse.cs`: `ctl:Pulse.Low` / `Duration` setters in the style), never a style animation: those
+  tick every vsync, and on macOS every frame redraws the whole window, so one dot kept a core busy at 160 Hz. All
+  pulses step together, in phase, only while shown: in frames the window draws anyway (a reply streaming in), at most
+  30 times a second, and on their own 20 times a second when nothing else draws; nothing animates while idle.
 - `Border.tag` (fill 2, radius 4), `Border.attachment` (fill 1, radius 12), `Border.tab` / `.tab.selected`.
+- Image previews (`Controls/ImageThumb` in a `Button.image-thumb`): a square, cropped to fill, radius 8 (4 in the
+  queue) on fill 1 with a `GuiBorderSoft` hairline (strong on hover); 52 px in a composer chip, 72 px in a sent
+  message (above its text, 6 apart), 24 px in the queue. An image that cannot be shown keeps the square with a
+  tertiary `IconImage`.
 
 ### Sidebar and sessions
 
 `Border.sidebar` is `GuiSidebar` with a pale right border; its styles are in `Styles.Workspace.axaml`. Actions are flat
 `sidebar-action` rows. Session rows are `Button.session` (radius 8, 14 px) under `TextBlock.group-label` headings
-(12 px medium, text 2). The open session is `session current` (fill 2). The list's own `ListBoxItem` hover/selection
+(12 px medium, text 2). The open session is `session current` (fill 2). The hover fill (fill 1 hover) follows the whole
+`Panel.session-row`, so moving onto pin or ⋯ keeps it; a row never turns disabled (a click that cannot switch now says
+why), so a run starting or ending does not grey the list. The list's own `ListBoxItem` hover/selection
 chrome is switched off. Row actions (`session-actions`: pin, ⋯) are hidden and not hit-testable until the row is
 hovered or holds the focus; the age gives way to them. The row menu is `Views/Sidebar/SessionRowMenu` (Rename · Pin ·
-Copy path │ Delete…), used by both the right-click menu and ⋯.
+Copy path │ Delete…), used by both the right-click menu (on the row) and ⋯. Rows and groups are kept across catalog
+rescans (keyed by session file / folder) and only moved, added or removed; never rebuild the lists. The resize grip is a
+fixed 6 px hit strip; only its inner hairline lights up, so what takes the pointer never moves under it.
 
 ### Settings page
 

@@ -1,0 +1,17 @@
+<!-- An attached image as a square thumbnail, cropped to fill (DataContext = ImagePreview). Its size is the parent's:
+     a 52 px composer chip, 72 px in a sent message, 24 px in the queue. While it decodes the square stays empty; an
+     image the app cannot read (or that the session no longer has) shows the image mark instead. Styles: Styles.Images.axaml. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Controls.ImageThumb"
+             x:DataType="vm:ImagePreview">
+  <Border Classes="image-thumb" ClipToBounds="True">
+    <Panel>
+      <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
+      <ctl:Icon Classes="image-missing" Data="{StaticResource IconImage}" Size="18" IsVisible="{Binding Failed}"
+                HorizontalAlignment="Center" VerticalAlignment="Center" />
+    </Panel>
+  </Border>
+</UserControl>

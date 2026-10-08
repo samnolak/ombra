@@ -243,13 +243,16 @@ public sealed class UiTests
         await Until(() => vm.IsRunning, "running");
         var pid = s.ProcessId!.Value;
         w.Close();
+        Dispatcher.UIThread.RunJobs();
+        vm.SessionCard!.Primary!.Command.Execute(null); // "omp is still working": Quit
         await Until(() => !w.IsVisible, "window closed", 15);
         Assert.Throws<ArgumentException>(() => System.Diagnostics.Process.GetProcessById(pid));
     }
 
     [AvaloniaFact]
-    public async Task Closing_while_minimized_stops_omp()
+    public async Task Closing_while_minimized_brings_the_window_back_to_ask_then_stops_omp()
     {
+        // The tray's Quit or ⌘Q with the window minimized: the question must be seen, so the window comes back first
         var (w, vm, s) = await OpenAsync("slow-stream");
         vm.ComposerText = "go";
         vm.SendCommand.Execute(null);
@@ -258,6 +261,10 @@ public sealed class UiTests
         w.WindowState = WindowState.Minimized;
         vm.SetWindowState("Minimized");
         w.Close();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(WindowState.Normal, w.WindowState);
+        Assert.Equal("quit", vm.SessionCard?.Kind);
+        vm.SessionCard!.Primary!.Command.Execute(null);
         await Until(() => !w.IsVisible, "window closed", 15);
         Assert.Throws<ArgumentException>(() => System.Diagnostics.Process.GetProcessById(pid));
     }

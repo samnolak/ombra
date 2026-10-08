@@ -254,7 +254,8 @@ omp's own interface for them.
   (one page at a time; screenshots of the visible area through the web view's own snapshot call —
   `Platform/WebViewSnapshot` — not full-page or element clips, as on a real cmux surface).
 - **Dictation** — speech to text on this computer, into the message box.
-- **Pets** — a pixel companion on the message box that follows what omp does (Settings › Pets).
+- **Pets** — a pixel companion on the message box that follows what omp does; dragged off it, it floats anywhere on
+  the desktop over other apps, like Codex's pet (Settings › Pets).
 - **Plan history** — earlier plans and every change to the todo list, kept for the session (*Panes* area).
 - **Don't ask again / Deny and say why** (Claude Code's approval options) — omp 18.8's approval is a plain
   Approve/Deny select and its own `tools.approval.<tool>: allow` can only allow a whole tool, so the client keeps the

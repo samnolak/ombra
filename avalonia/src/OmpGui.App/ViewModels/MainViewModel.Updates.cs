@@ -223,9 +223,10 @@ public sealed partial class MainViewModel
     [RelayCommand(CanExecute = nameof(CanRestartToUpdate))]
     private void RestartToUpdate()
     {
-        if (Phase is SessionPhase.Running or SessionPhase.Aborting)
+        if (WorkingSessions().Count > 0)
         {
-            UpdateText = "Stop the current run first: restarting ends it.";
+            UpdateText = IsRunning ? "Stop the current run first: restarting ends it."
+                : "omp is working in another chat (marked in the sidebar): restarting ends its run, so stop it first.";
             return;
         }
         if (!ApplyUpdate(relaunch: true)) return;

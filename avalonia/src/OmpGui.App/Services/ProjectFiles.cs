@@ -270,6 +270,7 @@ public sealed class GitSnapshot
     private readonly List<string> _ignoredDirs = [];
     private readonly HashSet<string> _changedDirs = new(ProjectFiles.PathComparer);
     private readonly Dictionary<string, List<string>> _deletedByDir = new(ProjectFiles.PathComparer);
+    private readonly Dictionary<string, string> _renamedFrom = new(ProjectFiles.PathComparer);
 
     public string TopLevel { get; }
 
@@ -291,8 +292,12 @@ public sealed class GitSnapshot
             var x = rec[0];
             var y = rec[1];
             var rel = rec[3..];
-            // A rename or copy is followed by its original path
-            if (x is 'R' or 'C' || y is 'R' or 'C') i++;
+            // A rename or copy is followed by its original path (a rename's is kept: reverting it brings that path back)
+            if (x is 'R' or 'C' || y is 'R' or 'C')
+            {
+                i++;
+                if (x == 'R' && i < parts.Length && parts[i].Length > 0) s._renamedFrom[s.Full(rel)] = parts[i];
+            }
             var full = s.Full(rel.TrimEnd('/'));
             var isDir = rel.EndsWith('/');
             var mark = (x, y) switch
@@ -330,6 +335,9 @@ public sealed class GitSnapshot
         if (Under(_ignoredDirs, fullPath)) return GitMark.Ignored;
         return GitMark.None;
     }
+
+    /// <summary>The path (from the top folder, '/'-separated) a staged rename moved <paramref name="fullPath"/> from.</summary>
+    public string? RenamedFrom(string fullPath) => _renamedFrom.GetValueOrDefault(fullPath);
 
     public bool IsIgnored(string fullPath) => MarkOf(fullPath) == GitMark.Ignored;
 
@@ -375,16 +383,30 @@ public sealed class GitSnapshot
 /// <summary>git as a tool: the Files pane reads status and file lists with it, off the UI thread, never locking.</summary>
 public static class Git
 {
-    public sealed record Result(int ExitCode, string Output);
+    /// <summary>What git printed; <see cref="TooLong"/>: it printed more than the caller takes, and was stopped.</summary>
+    public sealed record Result(int ExitCode, string Output, bool TooLong = false);
 
     /// <summary>git's program name (tests may point it elsewhere).</summary>
     public static string Program { get; set; } = "git";
 
-    /// <summary>The repository's top folder when <paramref name="dir"/> is in one; null otherwise or when git is missing.</summary>
+    /// <summary>
+    /// The repository's top folder when <paramref name="dir"/> is in one; null otherwise or when git is missing. git
+    /// prints it with links resolved (macOS /var is /private/var, a linked projects folder); when <paramref name="dir"/>
+    /// reaches the same folder another way, the top is named the way <paramref name="dir"/> is, so every path of the
+    /// status compares with the tree's.
+    /// </summary>
     public static async Task<string?> TopLevelAsync(string dir, CancellationToken ct)
     {
-        var r = await RunAsync(dir, ["rev-parse", "--show-toplevel"], ct, TimeSpan.FromSeconds(5));
-        return r is { ExitCode: 0 } && r.Output.Trim() is { Length: > 0 } top ? Path.GetFullPath(top) : null;
+        var r = await RunAsync(dir, ["rev-parse", "--show-toplevel", "--show-prefix"], ct, TimeSpan.FromSeconds(5));
+        if (r is not { ExitCode: 0 }) return null;
+        var lines = r.Output.Split('\n');
+        if (lines[0].Trim() is not { Length: > 0 } printed) return null;
+        var top = Path.GetFullPath(printed);
+        // The prefix is dir's place below the top ("src/app/"): that many folders up from dir is the top, as dir names it
+        var depth = lines.Length > 1 ? lines[1].Trim().Split('/', StringSplitOptions.RemoveEmptyEntries).Length : 0;
+        var named = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dir));
+        for (var i = 0; i < depth && Path.GetDirectoryName(named) is { } up; i++) named = up;
+        return SessionCatalog.SamePath(named, top) ? named : top;
     }
 
     /// <summary>The status of the repository around <paramref name="dir"/>; null when it is not one or git is missing.</summary>
@@ -397,9 +419,10 @@ public static class Git
 
     /// <summary>
     /// Runs git in <paramref name="dir"/> and returns its output; null when git cannot start or the time runs out.
-    /// GIT_OPTIONAL_LOCKS=0: reading the status never takes the index lock the agent's own git commands need.
+    /// GIT_OPTIONAL_LOCKS=0: reading the status never takes the index lock the agent's own git commands need. Past
+    /// <paramref name="maxOutput"/> characters git is stopped and the result says so (no output, <c>TooLong</c>).
     /// </summary>
-    public static async Task<Result?> RunAsync(string dir, IReadOnlyList<string> args, CancellationToken ct, TimeSpan timeout)
+    public static async Task<Result?> RunAsync(string dir, IReadOnlyList<string> args, CancellationToken ct, TimeSpan timeout, int maxOutput = int.MaxValue)
     {
         var psi = new ProcessStartInfo(Program)
         {
@@ -425,19 +448,38 @@ public static class Git
         try
         {
             process.StandardInput.Close();
-            var output = process.StandardOutput.ReadToEndAsync(limit.Token);
             var error = process.StandardError.ReadToEndAsync(limit.Token);
+            var text = await ReadUpToAsync(process.StandardOutput, maxOutput, limit.Token);
+            if (text is null) Kill(process);
             await process.WaitForExitAsync(limit.Token);
-            var text = await output;
             await error;
-            return new Result(process.ExitCode, text);
+            return text is null ? new Result(-1, "", TooLong: true) : new Result(process.ExitCode, text);
         }
         catch (OperationCanceledException)
         {
-            try { process.Kill(entireProcessTree: true); }
-            catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            Kill(process);
             ct.ThrowIfCancellationRequested();
             return null;
         }
+    }
+
+    /// <summary>All of <paramref name="reader"/>, or null as soon as it has more than <paramref name="max"/> characters.</summary>
+    private static async Task<string?> ReadUpToAsync(StreamReader reader, int max, CancellationToken ct)
+    {
+        var text = new StringBuilder();
+        var buffer = new char[16 * 1024];
+        int n;
+        while ((n = await reader.ReadAsync(buffer, ct)) > 0)
+        {
+            if (text.Length + n > max) return null;
+            text.Append(buffer, 0, n);
+        }
+        return text.ToString();
+    }
+
+    private static void Kill(Process process)
+    {
+        try { process.Kill(entireProcessTree: true); }
+        catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
     }
 }

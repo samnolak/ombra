@@ -51,9 +51,11 @@ public sealed class QaEdgeCaseTests(ITestOutputHelper log)
     private static object Result(string id, string name, string output, bool error = false, object? details = null) =>
         new { role = "toolResult", toolCallId = id, toolName = name, content = new[] { Text(output) }, isError = error, details };
 
-    /// <summary>A session file as the fake omp writes it (title, header with the project folder, messages).</summary>
+    /// <summary>A session file as the fake omp writes it (title, header with the project folder, messages). omp records
+    /// process.cwd(), which has links resolved (macOS: /var is /private/var); it declines a session from another folder.</summary>
     private static string Session(string root, string cwd, string title, IEnumerable<object> messages)
     {
+        cwd = SessionCatalog.ResolveLinks(cwd);
         var project = Path.Combine(root, "-" + string.Concat(cwd.Select(c => char.IsLetterOrDigit(c) ? c : '-')));
         Directory.CreateDirectory(project);
         var id = Guid.NewGuid().ToString();
@@ -224,6 +226,7 @@ public sealed class ReadmeScreenshotTests
 
     internal static string Write(string root, string cwd, string title, IEnumerable<object> messages, DateTime at)
     {
+        cwd = SessionCatalog.ResolveLinks(cwd); // as omp records it (see Session above)
         var project = Path.Combine(root, "-" + string.Concat(cwd.Select(c => char.IsLetterOrDigit(c) ? c : '-')));
         Directory.CreateDirectory(project);
         var id = Guid.NewGuid().ToString();

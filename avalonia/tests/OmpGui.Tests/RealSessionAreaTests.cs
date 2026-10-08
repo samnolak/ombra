@@ -88,8 +88,11 @@ public sealed class RealSessionAreaTests(ITestOutputHelper log)
         w.Show();
         vm.OnWindowOpened();
         await Until(() => vm.Phase == SessionPhase.Ready, 120);
-        await Until(() => vm.Usage.HasPercent, 30);
-        log.WriteLine($"ring: {vm.Usage.Percent:0.0}% ({vm.Usage.RingLevel})");
+        // omp reports the context's use from the start, but a new chat shows no ring until its first message (no paid
+        // prompt here: the popover is opened directly)
+        await Until(() => vm.Session.Snapshot().ContextPercent is not null, 30);
+        Assert.False(vm.Usage.HasPercent);
+        log.WriteLine($"context before the first message: {vm.Session.Snapshot().ContextPercent:0.0}%");
 
         vm.Usage.IsOpen = true;
         await Until(() => !vm.Usage.IsLoading && (vm.Usage.HasContext || vm.Usage.ContextNote.Length > 0), 60);

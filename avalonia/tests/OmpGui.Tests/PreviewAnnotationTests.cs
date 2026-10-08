@@ -130,7 +130,7 @@ public sealed class PreviewAnnotationTests
     [Fact]
     public void Short_messages_are_not_folded()
     {
-        var row = new UserRowViewModel(new UserItem(1, "short", true, 0));
+        var row = new UserRowViewModel(new UserItem(1, "short", true));
         Assert.False(row.IsLong);
         Assert.Equal("short", row.DisplayText);
     }

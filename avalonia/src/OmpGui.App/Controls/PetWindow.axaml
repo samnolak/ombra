@@ -1,0 +1,14 @@
+<!-- The pet on the desktop (PetWindow): a borderless, see-through window over every app, no bigger than the pet (and
+     its bubble or message box while they show), so clicks around it reach the apps below. -->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:OmpGui.App.ViewModels"
+        xmlns:ctl="using:OmpGui.App.Controls"
+        x:Class="OmpGui.App.Controls.PetWindow"
+        x:DataType="vm:PetsViewModel"
+        Title="{Binding ChosenName}"
+        WindowDecorations="None" TransparencyLevelHint="Transparent" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" CanResize="False" ShowActivated="False"
+        SizeToContent="Manual" WindowStartupLocation="Manual">
+  <ctl:PetStage x:Name="Stage" />
+</Window>

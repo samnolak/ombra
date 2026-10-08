@@ -25,7 +25,10 @@ public sealed partial class FilesViewModel : ObservableObject
     /// <summary>Folders watched at most (one watcher each, only while the pane is shown).</summary>
     private const int MaxWatchers = 32;
     private static readonly TimeSpan RefreshDelay = TimeSpan.FromMilliseconds(300);
-    private static readonly TimeSpan SearchDelay = TimeSpan.FromMilliseconds(120);
+    /// <summary>While omp works it writes into the project all the time: the pane catches up at most once a second.</summary>
+    private static readonly TimeSpan RunningRefreshDelay = TimeSpan.FromSeconds(1);
+    /// <summary>The pause after a key before searching (the "Go to file" box and the message box's "@" menu).</summary>
+    internal static readonly TimeSpan SearchDelay = TimeSpan.FromMilliseconds(120);
 
     /// <summary>Tools whose row names the file they change (with an edit's diff, any tool that has one counts too).</summary>
     internal static readonly IReadOnlySet<string> FileChangingTools = new HashSet<string>(StringComparer.Ordinal)
@@ -42,6 +45,8 @@ public sealed partial class FilesViewModel : ObservableObject
     private DispatcherTimer? _refreshTimer;
     private CancellationTokenSource? _loadCts, _searchCts, _viewerCts, _refreshCts;
     private int _toolsSeenDone;
+    private int _rowsSeen = -1;
+    private int _diskChangePosted;
     private int _editorScan;
 
     public FilesViewModel(MainViewModel owner)
@@ -49,7 +54,12 @@ public sealed partial class FilesViewModel : ObservableObject
         Owner = owner;
         owner.PropertyChanged += OnOwnerChanged;
         owner.TranscriptChanged += OnTranscriptChanged;
-        owner.Rows.CollectionChanged += (_, e) => { if (e.Action == NotifyCollectionChangedAction.Reset) OnTranscriptChanged(); };
+        owner.Rows.CollectionChanged += (_, e) =>
+        {
+            if (e.Action != NotifyCollectionChangedAction.Reset) return;
+            _rowsSeen = -1; // another conversation: its rows say which files it changed, whatever their count
+            OnTranscriptChanged();
+        };
         owner.SessionGroups.CollectionChanged += (_, _) => RebuildRecentProjects();
         RebuildRecentProjects();
         _ = DetectEditorsAsync();
@@ -133,6 +143,7 @@ public sealed partial class FilesViewModel : ObservableObject
     partial void OnViewerChanged(FileViewerViewModel? value)
     {
         if (value is null) IsViewerExpanded = false;
+        else SyncViewerGit(value);
     }
 
     /// <summary>An action that failed ("Could not start xdg-open"), until dismissed.</summary>
@@ -421,20 +432,25 @@ public sealed partial class FilesViewModel : ObservableObject
         _watchers.Clear();
     }
 
-    /// <summary>A refresh soon (events come in bursts: one refresh after they settle).</summary>
+    /// <summary>
+    /// A refresh soon. Events come in bursts: the first one starts the wait and the rest of the burst joins that
+    /// refresh, so a build writing files for minutes still shows its progress, at most every 300 ms (every second
+    /// while omp works).
+    /// </summary>
     private void ScheduleRefresh()
     {
         if (Owner.IsClosing) return;
         if (_refreshTimer is null)
         {
-            _refreshTimer = new DispatcherTimer { Interval = RefreshDelay };
+            _refreshTimer = new DispatcherTimer();
             _refreshTimer.Tick += (_, _) =>
             {
                 _refreshTimer!.Stop();
                 _ = RefreshAsync();
             };
         }
-        _refreshTimer.Stop();
+        if (_refreshTimer.IsEnabled) return;
+        _refreshTimer.Interval = Owner.IsRunning ? RunningRefreshDelay : RefreshDelay;
         _refreshTimer.Start();
     }
 
@@ -445,6 +461,7 @@ public sealed partial class FilesViewModel : ObservableObject
     public async Task RefreshAsync()
     {
         if (Root is not { } root || _rootNode is null) return;
+        PerfLog.Count("files_refresh");
         _refreshCts?.Cancel();
         var cts = _refreshCts = new CancellationTokenSource();
         var ct = cts.Token;
@@ -466,6 +483,7 @@ public sealed partial class FilesViewModel : ObservableObject
             }, ct);
             if (ct.IsCancellationRequested || !ReferenceEquals(_rootNode, open[0])) return;
             _git = git;
+            if (Viewer is { } shown) SyncViewerGit(shown);
             IsGitRepo = git is not null;
             if (!IsGitRepo && Mode == FilesMode.Changed) Mode = FilesMode.All;
             foreach (var (node, entries) in listings)
@@ -507,9 +525,14 @@ public sealed partial class FilesViewModel : ObservableObject
     internal void OnTranscriptChanged()
     {
         if (!IsActive) return;
+        // A streamed token changes nothing here: only a tool row that came or ended changes which files the
+        // session touched and what may have changed on disk
+        var rows = Owner.Rows.Count;
+        var done = DoneTools();
+        if (rows == _rowsSeen && done == _toolsSeenDone) return;
+        _rowsSeen = rows;
         UpdateSessionChanges();
         // Any tool that ended may have changed files (a write, a command): refresh once they settle
-        var done = DoneTools();
         if (done != _toolsSeenDone)
         {
             _toolsSeenDone = done;
@@ -589,7 +612,16 @@ public sealed partial class FilesViewModel : ObservableObject
         }
     }
 
-    private void OnDiskChange(object sender, FileSystemEventArgs e) => Dispatcher.UIThread.Post(() => { if (IsActive) ScheduleRefresh(); });
+    // A build writes hundreds of files a second: one job on the UI thread per burst, not one per event
+    private void OnDiskChange(object sender, FileSystemEventArgs e)
+    {
+        if (Interlocked.Exchange(ref _diskChangePosted, 1) != 0) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            Volatile.Write(ref _diskChangePosted, 0);
+            if (IsActive) ScheduleRefresh();
+        });
+    }
 
     /// <summary>Number of folders watched now (tests).</summary>
     internal int WatcherCount => _watchers.Count;

@@ -99,10 +99,11 @@ public sealed class FilesPaneUiTests
             var tree = pane.FindControl<ListBox>("Tree")!;
             f.SelectedNode = FileTestRepo.Node(f, "src/app.py");
             await Settle(100);
-            tree.ContextFlyout!.ShowAt(tree);
+            var appRow = (Control)tree.ContainerFromItem(f.SelectedNode)!;
+            appRow.ContextFlyout!.ShowAt(appRow);
             await Settle();
             a.Take(w, $"{tag}-tree-menu");
-            tree.ContextFlyout.Hide();
+            appRow.ContextFlyout.Hide();
 
             await f.OpenFileAsync(Path.Combine(root, "src", "app.py"), line: 12);
             await Settle(400);
@@ -296,9 +297,9 @@ public sealed class FilesPaneUiTests
         await Settle(200);
         Assert.False(moreMenu.IsOpen);
         Assert.Equal(Path.Combine(root, "docs", "guide.md"), copied[^1]);
-        f.SelectedNode = FileTestRepo.Node(f, "src");
-        var treeMenu = (Flyout)tree.ContextFlyout!;
-        treeMenu.ShowAt(tree);
+        var srcRow = (Control)tree.ContainerFromItem(FileTestRepo.Node(f, "src"))!;
+        var treeMenu = (Flyout)srcRow.ContextFlyout!;
+        treeMenu.ShowAt(srcRow);
         await Settle();
         Invoke(((Control)treeMenu.Content!).GetLogicalDescendants().OfType<Button>().First(b => Avalonia.Automation.AutomationProperties.GetName(b) == "Copy relative path"));
         await Settle(200);
@@ -389,9 +390,9 @@ public sealed class FilesPaneUiTests
         Assert.Equal(2, vm.Files.Viewer.TargetLine);
         Assert.Equal(open, edit.IsExpanded);
         Assert.True(a.Count == 0, $"{a.Count} layout findings:\n{a.Report}");
-        // omp changed these files in this session
-        Assert.Contains(Path.Combine(root, "src", "hello.py"), vm.Files.SessionChangedFiles);
-        Assert.Contains(Path.Combine(root, "tests", "test_greet.py"), vm.Files.SessionChangedFiles);
+        // omp changed these files in this session (named from omp's working directory: links resolved, /private/var on macOS)
+        Assert.Contains(vm.Files.SessionChangedFiles, f => SessionCatalog.SamePath(f, Path.Combine(root, "src", "hello.py")));
+        Assert.Contains(vm.Files.SessionChangedFiles, f => SessionCatalog.SamePath(f, Path.Combine(root, "tests", "test_greet.py")));
         w.Close();
         await vm.DisposeAsync();
     }

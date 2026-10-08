@@ -18,7 +18,6 @@ namespace OmpGui.App.ViewModels;
 public sealed partial class MainViewModel
 {
     private static readonly TimeSpan MaintenanceTimeout = TimeSpan.FromMinutes(20);
-    private CancellationTokenSource? _cardWait;
     private DispatcherTimer? _cardTimer;
     private bool _lastCanAct;
 
@@ -29,16 +28,14 @@ public sealed partial class MainViewModel
 
     public bool HasSessionCard => SessionCard is not null;
 
-    private UsageViewModel? _usage;
-    private ModelOptionsViewModel? _modelOptions;
+    /// <summary>The context ring next to the model and its popover (context breakdown, token use and cost); each chat has its own.</summary>
+    public UsageViewModel Usage => _open.Usage ??= new UsageViewModel(this);
 
-    /// <summary>The context ring next to the model and its popover (context breakdown, token use and cost).</summary>
-    public UsageViewModel Usage => _usage ??= new UsageViewModel(this);
+    /// <summary>Fast mode, extended context, advisor, auto-compact and auto-retry in the model menu (read from the chat's omp).</summary>
+    public ModelOptionsViewModel ModelOptions => _open.ModelOptions ??= new ModelOptionsViewModel(this);
 
-    /// <summary>Fast mode, extended context, advisor, auto-compact and auto-retry in the model menu.</summary>
-    public ModelOptionsViewModel ModelOptions => _modelOptions ??= new ModelOptionsViewModel(this);
-
-    internal SessionController Session => _session;
+    /// <summary>The shown chat's omp.</summary>
+    internal SessionController Session => _open.Controller;
     internal CancellationToken Closing => _cts.Token;
 
     /// <summary>This session is pinned in omp's session list (<c>~/.omp/agent/session-pins.json</c>).</summary>
@@ -51,7 +48,7 @@ public sealed partial class MainViewModel
     /// <summary>omp is idle and running, and no other session action is under way.</summary>
     private bool CanActOnSession() => CanRunOmpCommands && Phase == SessionPhase.Ready && !IsSigningIn && SessionCard is not { IsRunning: true };
 
-    private bool HasSessionFile() => _last?.SessionFile is { Length: > 0 };
+    private bool HasSessionFile() => _open.Last?.SessionFile is { Length: > 0 };
 
     private string? _pinsFor;
     /// <summary>omp's pinned session ids, read with each scan of the session list (listed first in the sidebar).</summary>
@@ -81,8 +78,8 @@ public sealed partial class MainViewModel
                      OpenUsageDashboardCommand, ShowMemoryCommand, CopySessionIdCommand, CopySessionFileCommand, DeleteSessionCommand })
             c.NotifyCanExecuteChanged();
         RewindToCommand.NotifyCanExecuteChanged();
-        _usage?.CompactNowCommand.NotifyCanExecuteChanged();
-        _usage?.OpenDashboardCommand.NotifyCanExecuteChanged();
+        _open.Usage?.CompactNowCommand.NotifyCanExecuteChanged();
+        _open.Usage?.OpenDashboardCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnSessionCardChanged(SessionCardViewModel? value)
@@ -197,20 +194,22 @@ public sealed partial class MainViewModel
         card.State = SessionCardState.Running;
         card.Message = running;
         card.Detail = "";
-        _cardWait?.Cancel();
-        var wait = _cardWait = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        // This chat's omp, whichever chat is shown when it answers; the wait ends with the chat
+        var open = _open;
+        var session = open.Controller;
+        using var wait = CancellationTokenSource.CreateLinkedTokenSource(open.Lifetime.Token);
         card.Primary = new SessionCardAction("Stop", new AsyncRelayCommand(async () =>
         {
             wait.Cancel();
-            await _session.StopBackgroundCommandAsync(_cts.Token);
+            await session.StopBackgroundCommandAsync(_cts.Token);
             card.Finish(false, stoppedTitle, "omp stopped it; the conversation is as it was.");
             card.Secondary = new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard));
         }));
         card.Secondary = null;
         try
         {
-            var before = _session.Snapshot();
-            var r = await RunOmpCommandAsync(command, ct: wait.Token);
+            var before = session.Snapshot();
+            var r = await session.RunSlashCommandAsync(command, ct: wait.Token);
             if (!r.Ok)
             {
                 card.Finish(false, describe(new MaintenanceResult(false, r.Error ?? "")).Title, r.Error ?? "omp did not run it.",
@@ -218,7 +217,7 @@ public sealed partial class MainViewModel
                 return;
             }
             var result = parse(r.Output);
-            if (result is null && await _session.WaitForCommandOutputAsync(before, t => parse(t) is not null, MaintenanceTimeout, wait.Token) is { } line)
+            if (result is null && await session.WaitForCommandOutputAsync(before, t => parse(t) is not null, MaintenanceTimeout, wait.Token) is { } line)
                 result = parse(line);
             if (result is null)
             {
@@ -228,17 +227,15 @@ public sealed partial class MainViewModel
             }
             var (title, message) = describe(result);
             card.Finish(result.Ok, title, message, secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
-            _session.RefreshState();
-            _usage?.RefreshIfOpen();
+            session.RefreshState();
+            open.Usage?.RefreshIfOpen();
         }
         catch (OperationCanceledException)
         {
-            // Stopped (the Stop button finished the card) or the window is closing
+            // Stopped (the Stop button finished the card), the chat closed or the window is closing
         }
         finally
         {
-            if (ReferenceEquals(_cardWait, wait)) _cardWait = null;
-            wait.Dispose();
             if (ReferenceEquals(card, SessionCard)) OnSessionCardChanged(card);
         }
     }
@@ -265,7 +262,7 @@ public sealed partial class MainViewModel
     private async Task RetryLastTurnAsync()
     {
         var r = await RunOmpCommandAsync("/retry");
-        Apply(_session.Snapshot());
+        Apply(Session.Snapshot());
         if (r is { Ok: true, AgentInvoked: true })
         {
             CloseSessionCard(); // the run shows like any other
@@ -284,9 +281,12 @@ public sealed partial class MainViewModel
     [RelayCommand(CanExecute = nameof(CanActOnSession))]
     private async Task RewindAsync()
     {
+        // This chat's omp throughout: another chat may be shown while omp reads its messages or rewinds
+        var open = _open;
+        var session = open.Controller;
         var card = new SessionCardViewModel("rewind", "IconRewind", "Rewind to an earlier message", "Reading the conversation…") { State = SessionCardState.Running };
         ShowCard(card);
-        var messages = await _session.GetBranchMessagesAsync(_cts.Token);
+        var messages = await session.GetBranchMessagesAsync(open.Lifetime.Token);
         if (messages.Count == 0)
         {
             card.Finish(true, "Nothing to rewind to", "Rewind starts over from one of your messages; this conversation has none yet.",
@@ -303,16 +303,16 @@ public sealed partial class MainViewModel
             card.Message = "Rewinding…";
             card.Primary = null;
             card.Secondary = null;
-            var text = await _session.RewindAsync(m.EntryId, _cts.Token);
-            AfterSessionChange();
+            var text = await session.RewindAsync(m.EntryId, open.Lifetime.Token);
+            ApplyIfShown(open);
+            RequestCatalogRefresh();
             if (text is null)
             {
                 card.Finish(false, "Not rewound", "omp did not start the new session; the conversation shows why.",
                     secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
                 return;
             }
-            ComposerText = text;
-            CaretToEndRequested?.Invoke();
+            PutInComposer(open, text); // MainViewModel.Transcript.cs
             card.Finish(true, "Rewound", "A new session goes on from before that message; the earlier one is kept in the sessions list. " +
                 "Your message is back in the box.", secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
         }))));
@@ -335,7 +335,7 @@ public sealed partial class MainViewModel
         var r = await RunOmpCommandAsync("/export");
         if (r.Ok && SessionOutputs.ParseExportPath(r.Output) is { } path)
         {
-            var full = Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(ProjectFolder ?? _session.CurrentLaunch.WorkingDirectory ?? "", path));
+            var full = Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(ProjectFolder ?? Session.CurrentLaunch.WorkingDirectory ?? "", path));
             card.Finish(true, "Exported as HTML", "A single page with the whole conversation, tool calls included, to open in a browser.", full,
                 new SessionCardAction("Open", new RelayCommand(() => OpenUrlRequested?.Invoke(new Uri(full).AbsoluteUri))),
                 new SessionCardAction("Show in folder", new RelayCommand(() =>
@@ -423,9 +423,9 @@ public sealed partial class MainViewModel
     [RelayCommand(CanExecute = nameof(HasSessionFile))]
     private async Task CopySessionIdAsync()
     {
-        if (_last?.SessionFile is not { } file) return;
+        if (_open.Last is not { SessionFile: { } file } last) return;
         // The id in the session file's header: what omp --resume and /pin take (get_state's sessionId changes with /fresh)
-        var id = (await SessionCatalog.ReadSummaryAsync(file, _cts.Token))?.Id is { Length: > 0 } header ? header : _last.SessionId;
+        var id = (await SessionCatalog.ReadSummaryAsync(file, _cts.Token))?.Id is { Length: > 0 } header ? header : last.SessionId;
         if (id is null) return;
         CopyTextRequested?.Invoke(id);
         ShowBrief("IconCopy", "Session ID copied", "omp --resume takes it (a unique start of it is enough).", id);
@@ -434,7 +434,7 @@ public sealed partial class MainViewModel
     [RelayCommand(CanExecute = nameof(HasSessionFile))]
     private void CopySessionFile()
     {
-        if (_last?.SessionFile is not { } file) return;
+        if (_open.Last?.SessionFile is not { } file) return;
         CopyTextRequested?.Invoke(file);
         ShowBrief("IconCopy", "Session file path copied", "omp keeps the whole conversation in this file (JSON lines).", file);
     }
@@ -488,17 +488,20 @@ public sealed partial class MainViewModel
         };
         card.Primary = new SessionCardAction("Move", new AsyncRelayCommand(async () =>
         {
+            // The card's chat (shown when its button is clicked), whichever chat is shown when omp answers
+            var open = _open;
             card.State = SessionCardState.Running;
             card.Message = "Moving…";
             card.Primary = null;
             card.Secondary = null;
-            var r = await RunOmpCommandAsync("/move " + folder);
+            var r = await open.Controller.RunSlashCommandAsync("/move " + folder);
             var moved = Regex.Match(r.Output, @"^Moved to (?<dir>.+)\.$", RegexOptions.Multiline);
             if (r.Ok && moved.Success)
             {
                 var dir = moved.Groups["dir"].Value;
-                await _session.FollowMovedSessionAsync(dir, _cts.Token);
-                AfterSessionChange();
+                await open.Controller.FollowMovedSessionAsync(dir, open.Lifetime.Token);
+                ApplyIfShown(open);
+                RequestCatalogRefresh();
                 card.Finish(true, "Session moved", $"omp now works in {dir}.", secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
             }
             else card.Finish(false, "Not moved", Said(r), secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
@@ -535,7 +538,7 @@ public sealed partial class MainViewModel
     private async Task LoadPinStateAsync(string file)
     {
         var (id, pins) = await Task.Run(async () => ((await SessionCatalog.ReadSummaryAsync(file))?.Id, ReadPinnedSessionIds(file)));
-        if (_last?.SessionFile == file) IsSessionPinned = id is not null && pins.Contains(id);
+        if (_open.Last?.SessionFile == file) IsSessionPinned = id is not null && pins.Contains(id);
     }
 
     partial void OnIsModelMenuOpenChanged(bool value)
@@ -554,24 +557,28 @@ public sealed partial class MainViewModel
         var card = new SessionCardViewModel("delete", "IconTrash", "Delete this session?",
             "omp deletes the conversation's file and its artifacts, then a new session starts here. This cannot be undone.")
         {
-            Detail = _last?.SessionFile ?? "",
+            Detail = _open.Last?.SessionFile ?? "",
             State = SessionCardState.Ask,
         };
         card.Primary = new SessionCardAction("Delete session", new AsyncRelayCommand(async () =>
         {
+            // The card's chat, whichever chat is shown when omp answers
+            var open = _open;
             card.State = SessionCardState.Running;
             card.Message = "Deleting…";
             card.Primary = null;
             card.Secondary = null;
-            var r = await RunOmpCommandAsync("/session delete");
+            var r = await open.Controller.RunSlashCommandAsync("/session delete");
             if (!r.Ok || !r.Output.StartsWith("Session deleted", StringComparison.Ordinal))
             {
                 card.Finish(false, "Not deleted", Said(r, "Failed to delete session: "), secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
                 return;
             }
-            await _session.NewSessionAsync(_cts.Token);
-            AfterSessionChange();
-            ShowBrief("IconTrash", "Session deleted", "A new session started in this project.");
+            await open.Controller.NewSessionAsync(open.Lifetime.Token);
+            ApplyIfShown(open);
+            RequestCatalogRefresh();
+            if (open == _open) ShowBrief("IconTrash", "Session deleted", "A new session started in this project.");
+            else if (ReferenceEquals(open.Card, card)) open.Card = null;
         }));
         card.Secondary = new SessionCardAction("Cancel", new RelayCommand(CloseSessionCard));
         ShowCard(card);

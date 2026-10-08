@@ -27,9 +27,15 @@ public sealed class ReviewRegressionTests
     [Fact]
     public async Task R1_a_stop_that_never_finishes_can_be_forced_and_the_session_resumes()
     {
-        await using var s = await StartAsync("abort-hangs");
+        // A saved session: like omp, the fake writes a new chat's file only once its first reply is complete, so a force
+        // stop during a new chat's first run has nothing to resume (omp starts a new session then)
+        var root = TestProcesses.TempDir("rr-sessions");
+        var cwd = SessionCatalog.ResolveLinks(TestProcesses.TempDir("rr-project"));
+        var saved = ChatScrollTests.WriteSession(root, cwd, "Saved", ChatScrollTests.LongConversation(1));
+        await using var s = new SessionController(TestProcesses.FakeFactory("abort-hangs", root), new LaunchRequest(cwd, saved, ApprovalMode: "write"));
+        await s.StartAsync();
         await s.PromptAsync("work");
-        await TestProcesses.Eventually(s.Snapshot, x => x.Items.OfType<AssistantItem>().Any(a => a.Text.Length > 10), Wait, "streaming");
+        await TestProcesses.Eventually(s.Snapshot, x => x.Phase == SessionPhase.Running && x.Items.LastOrDefault() is AssistantItem { Text.Length: > 10 }, Wait, "streaming");
         var file = s.Snapshot().SessionFile;
         var pid = s.ProcessId;
         var abort = s.AbortAsync(); // omp never answers

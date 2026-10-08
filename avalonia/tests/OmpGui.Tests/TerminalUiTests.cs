@@ -67,6 +67,10 @@ public sealed class TerminalUiTests
         await Until(() => term2.IsLive, "second shell started");
         var pid2 = term2.Pid;
         w.Close();
+        Dispatcher.UIThread.RunJobs();
+        // A live shell: the window asks first (a dev server could be running there); Quit ends it
+        Assert.Equal("quit", vm.SessionCard?.Kind);
+        vm.SessionCard!.Primary!.Command.Execute(null);
         await Until(() => !w.IsVisible, "window closed", 15);
         await Until(() => !Alive(pid2), "no shell left after the window closed", 10);
     }
@@ -131,6 +135,11 @@ public sealed class TerminalUiTests
         vm.ToggleTerminalCommand.Execute(null);
         await Until(() => !panel.IsVisible, "hidden");
         w.Close();
+        Dispatcher.UIThread.RunJobs();
+        // The panel is hidden, but its shell still runs: the window asks before ending it
+        Assert.Equal("quit", vm.SessionCard?.Kind);
+        vm.SessionCard!.Primary!.Command.Execute(null);
+        await Until(() => !w.IsVisible, "window closed", 15);
     }
 
     [Fact]

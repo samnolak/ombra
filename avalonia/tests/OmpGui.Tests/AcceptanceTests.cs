@@ -139,8 +139,11 @@ public sealed class AcceptanceTests
                 Assert.DoesNotContain(value!, text);
         }
 
-        // 9. Closing the window ends omp and the shell: nothing is left behind.
+        // 9. Closing the window asks first (the shell still runs), then ends omp and the shell: nothing is left behind.
         w.Close();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal("quit", vm.SessionCard?.Kind);
+        vm.SessionCard!.Primary!.Command.Execute(null);
         await Until(() => !w.IsVisible, "window closed", 30);
         await Until(() => !Alive(omp) && !Alive(shell), "no process left", 30);
     }

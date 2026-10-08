@@ -33,12 +33,6 @@ public sealed class App : Application
                 configError = $"Could not read the settings ({e.Message}); using defaults.";
             }
             MainViewModel.ApplyTheme(options.Theme);
-            // Last line of defence: log a UI-thread exception instead of taking omp and the session down with the app.
-            Avalonia.Threading.Dispatcher.UIThread.UnhandledException += (_, e) =>
-            {
-                Console.Error.WriteLine("Unhandled UI exception: " + e.Exception);
-                e.Handled = true;
-            };
             var platform = OmpGui.App.Platform.RuntimePlatform.Key(out _);
             var installer = new RuntimeInstaller(new HttpClient { Timeout = Timeout.InfiniteTimeSpan }, RuntimePack.DefaultRoot, platform);
             // Every launch reads the settings again, so a restart applies what the user saved. An empty command means
@@ -76,6 +70,15 @@ public sealed class App : Application
                 UpdateInstaller = updater,
                 UpdateInstallUnavailable = noInstall,
             };
+            // Last line of defence: an exception that escapes a UI handler (an async command, a drop, a web view event)
+            // is logged to client.log and said once under the message box, instead of taking omp and the session down
+            // with the app. Before this point a failure ends the start, and ClientLog's process hook records it.
+            Avalonia.Threading.Dispatcher.UIThread.UnhandledException += (_, e) =>
+            {
+                Console.Error.WriteLine("Unhandled UI exception: " + e.Exception);
+                vm.ReportClientError(e.Exception);
+                e.Handled = true;
+            };
             if (agentBrowser is not null)
             {
                 agentBrowser.Page = new PreviewAgentPage(vm);
@@ -83,6 +86,7 @@ public sealed class App : Application
             }
             var window = new MainWindow { DataContext = vm, Notifier = CreateNotifier() };
             desktop.MainWindow = window;
+            OmpGui.App.Services.PerfLog.Attach(window); // OMPGUI_PERF=1: frame-rate and layout graphs, slow applies on stderr
             window.Opened += (_, _) => vm.OnWindowOpened();
             vm.NotificationsEnabled = options.Notifications ?? true;
             vm.SendKey = options.SendKey == "mod-enter" ? "mod-enter" : "enter";
@@ -100,8 +104,9 @@ public sealed class App : Application
         : new OmpGui.App.Platform.NotifySendNotifier();
 
     /// <summary>
-    /// macOS application menu (About, Settings ⌘,, Quit are where Mac users look for them) and a tray / menu-bar icon
-    /// on every platform that has one. Everything in them is also in the window itself.
+    /// macOS application menu (About, Settings ⌘,, Quit are where Mac users look for them), the window's menu bar
+    /// (MainWindow.MenuBar) and a tray / menu-bar icon on every platform that has one. Everything in them is also in
+    /// the window itself.
     /// </summary>
     private void SetUpMenus(IClassicDesktopStyleApplicationLifetime desktop, MainWindow window, MainViewModel vm)
     {
@@ -109,18 +114,7 @@ public sealed class App : Application
         var appMenu = new NativeMenu();
         appMenu.Add(settings);
         NativeMenu.SetMenu(this, appMenu);
-
-        var file = new NativeMenu();
-        file.Add(new NativeMenuItem("New Session") { Command = vm.NewSessionCommand });
-        file.Add(new NativeMenuItem("Open Folder…") { Command = vm.OpenFolderCommand });
-        var view = new NativeMenu();
-        view.Add(new NativeMenuItem("Sessions") { Command = vm.ToggleSidebarCommand });
-        view.Add(new NativeMenuItem("Terminal") { Command = vm.ToggleTerminalCommand });
-        view.Add(new NativeMenuItem("Events") { Command = vm.ToggleDebugCommand });
-        var bar = new NativeMenu();
-        bar.Add(new NativeMenuItem("File") { Menu = file });
-        bar.Add(new NativeMenuItem("View") { Menu = view });
-        NativeMenu.SetMenu(window, bar);
+        NativeMenu.SetMenu(window, window.MenuBar(vm));
 
         try
         {

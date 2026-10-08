@@ -253,7 +253,7 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
             return;
         }
         foreach (var w in WorkspaceParsers.ParseWorktrees(r.Stdout).Where(w => !w.Bare))
-            Worktrees.Add(new WorktreeRowViewModel(this, w, GitProbe.SamePath(w.Path, folder)));
+            Worktrees.Add(new WorktreeRowViewModel(this, w, SessionCatalog.SamePath(w.Path, folder)));
     }
 
     // ── GitHub ──

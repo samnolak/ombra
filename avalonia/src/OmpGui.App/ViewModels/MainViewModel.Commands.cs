@@ -33,6 +33,11 @@ public sealed partial class CommandSuggestionViewModel(string insert, string lab
 
     /// <summary>The first terminal-only entry carries the heading.</summary>
     public bool StartsTerminalGroup { get; init; }
+
+    /// <summary>A file or folder of the project in the "@" menu; <see cref="Insert"/> is its <c>@path</c> reference.</summary>
+    public bool IsMention { get; init; }
+    public bool IsFolder { get; init; }
+    public bool IsFile => IsMention && !IsFolder;
     [ObservableProperty] private bool _isSelected;
 }
 
@@ -59,6 +64,7 @@ public sealed record TodoPhaseViewModel(string Name, IReadOnlyList<TodoTaskViewM
 public sealed partial class MainViewModel
 {
     private IReadOnlyList<SlashCommand> _commands = [];
+    private IReadOnlyList<TodoPhase>? _appliedTodos;
 
     public ObservableCollection<CommandSuggestionViewModel> CommandSuggestions { get; } = [];
     public ObservableCollection<TodoPhaseViewModel> TodoPhases { get; } = [];
@@ -80,8 +86,21 @@ public sealed partial class MainViewModel
     /// <summary>
     /// Updates suggestions while the first word of the message is a slash command. What runs in this window comes
     /// first; what runs only in omp's terminal UI follows under its own heading. The menu scrolls: every match is listed.
+    /// While an "@" reference is being completed the menu lists files instead (MainViewModel.Mentions.cs).
     /// </summary>
     private void UpdateCommandSuggestions()
+    {
+        if (_mention is not null)
+        {
+            // The caret moves after the text does: the "@" menu looks again once the box has settled, and keeps its
+            // entries meanwhile (clearing them on every key made it flicker)
+            PostMentionCheck();
+            return;
+        }
+        UpdateSlashSuggestions();
+    }
+
+    private void UpdateSlashSuggestions()
     {
         var text = ComposerText;
         var list = new List<CommandSuggestionViewModel>();
@@ -124,11 +143,14 @@ public sealed partial class MainViewModel
         _selectedSuggestion = 0;
         if (list.Count > 0) list[0].IsSelected = true;
         ShowNoCommandMatch = noMatch;
+        NoMatchText = "No matching commands";
         IsCommandMenuOpen = list.Count > 0 || noMatch;
     }
 
-    /// <summary>The slash menu's "No matching commands" row.</summary>
+    /// <summary>The menu's "No matching commands" (or files) row.</summary>
     [ObservableProperty] private bool _showNoCommandMatch;
+
+    [ObservableProperty] private string _noMatchText = "No matching commands";
 
     /// <summary>0: name starts with the text; 1: an alias does; 2: the name contains it; -1: no match.</summary>
     private static int Rank(SlashCommand c, string typed)
@@ -148,26 +170,35 @@ public sealed partial class MainViewModel
         return true;
     }
 
-    /// <summary>Puts the selected command into the composer; true when a menu was open.</summary>
     /// <summary>
-    /// Completes the highlighted command (Tab, Enter). With <paramref name="enter"/>, a command that is already typed
-    /// out in full is not completed again: false lets Enter send it (typing "/context" then Enter runs it).
+    /// Completes the highlighted command or file (Tab, Enter). With <paramref name="enter"/>, a command that is already
+    /// typed out in full is not completed again: false lets Enter send it (typing "/context" then Enter runs it).
     /// </summary>
     public bool AcceptSuggestion(bool enter = false)
     {
         if (!IsCommandMenuOpen || CommandSuggestions.Count == 0) return false;
         var chosen = CommandSuggestions[_selectedSuggestion];
-        if (enter && chosen.Insert.TrimEnd() == ComposerText.TrimEnd()) return false;
+        if (enter && !chosen.IsMention && chosen.Insert.TrimEnd() == ComposerText.TrimEnd()) return false;
         ChooseSuggestion(chosen);
         return true;
     }
 
-    public void CloseCommandMenu() => IsCommandMenuOpen = false;
+    /// <summary>Esc: closes the menu only. An "@" reference dismissed this way stays closed while it is typed on.</summary>
+    public void CloseCommandMenu()
+    {
+        DismissMention();
+        IsCommandMenuOpen = false;
+    }
 
     [RelayCommand]
     private void ChooseSuggestion(CommandSuggestionViewModel? s)
     {
         if (s is null) return;
+        if (s.IsMention)
+        {
+            InsertMention(s);
+            return;
+        }
         ComposerText = s.Insert;
         UpdateCommandSuggestions(); // offers subcommands next, if any
         CaretToEndRequested?.Invoke();
@@ -183,6 +214,9 @@ public sealed partial class MainViewModel
             _commands = s.Commands;
             if (IsCommandMenuOpen) UpdateCommandSuggestions();
         }
+        // Core keeps the same list until omp reports another one: nothing to compare on most applies
+        if (ReferenceEquals(s.Todos, _appliedTodos)) return;
+        _appliedTodos = s.Todos;
         var phases = s.Todos.Where(p => p.Tasks.Count > 0).ToList();
         // Done of what is still to do, dropped tasks left out (the Plan pane and the Views menu agree)
         var (done, total) = PlanViewModel.Count(phases.SelectMany(p => p.Tasks));

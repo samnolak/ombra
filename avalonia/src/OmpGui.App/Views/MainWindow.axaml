@@ -6,6 +6,7 @@
         xmlns:panes="using:OmpGui.App.Views.Panes"
         xmlns:session="using:OmpGui.App.Views.Session"
         xmlns:sidebar="using:OmpGui.App.Views.Sidebar"
+        xmlns:views="using:OmpGui.App.Views"
         x:Class="OmpGui.App.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Title="{Binding WindowTitle}"
@@ -13,6 +14,92 @@
         Width="1100" Height="760" MinWidth="480" MinHeight="360"
         Background="{DynamicResource GuiWindow}"
         WindowStartupLocation="CenterScreen">
+
+  <!-- Right-click menus shared by every row they are set on (a flyout takes the row it opens on as its DataContext, so
+       each acts on the clicked row): your message, a reply, an image in the composer or in a sent message. Code blocks
+       and links make theirs in code (Controls/ContextMenus.cs). -->
+  <Window.Resources>
+    <Flyout x:Key="UserMessageMenu" Placement="Pointer" ctl:ChoiceMenu.CloseOnChoice="True">
+      <StackPanel x:DataType="vm:UserRowViewModel" MinWidth="220" Spacing="2">
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).CopyUserMessageCommand}" CommandParameter="{Binding}"
+                AutomationProperties.Name="Copy">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="Copy" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
+        <Border Classes="menu-separator" />
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RewindToCommand}" CommandParameter="{Binding}"
+                ToolTip.Tip="A new session from before this message, which comes back into the box to edit and send"
+                AutomationProperties.Name="Rewind to here">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconRewind}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="Rewind to here" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
+      </StackPanel>
+    </Flyout>
+    <Flyout x:Key="ReplyMenu" Placement="Pointer" ctl:ChoiceMenu.CloseOnChoice="True">
+      <StackPanel x:DataType="vm:AssistantRowViewModel" MinWidth="220" Spacing="2">
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                Command="{Binding CopyTextCommand}" IsEnabled="{Binding HasText}" AutomationProperties.Name="Copy">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="Copy" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                Command="{Binding CopyCommand}" IsEnabled="{Binding HasText}" AutomationProperties.Name="Copy as Markdown">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconCode}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="Copy as Markdown" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
+        <Border Classes="menu-separator" IsVisible="{Binding CanRetry}" />
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsVisible="{Binding CanRetry}"
+                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RetryLastTurnCommand}" AutomationProperties.Name="Retry">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconRetry}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="Retry" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
+      </StackPanel>
+    </Flyout>
+    <Flyout x:Key="AttachmentMenu" Placement="Pointer" ctl:ChoiceMenu.CloseOnChoice="True">
+      <StackPanel x:DataType="vm:AttachmentViewModel" MinWidth="200" Spacing="2">
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageCommand}" CommandParameter="{Binding Preview}"
+                AutomationProperties.Name="Open">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconImage}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="Open" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
+        <Border Classes="menu-separator" />
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                Command="{Binding RemoveCommand}" AutomationProperties.Name="Remove">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconClose}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="Remove" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
+      </StackPanel>
+    </Flyout>
+    <Flyout x:Key="ImageMenu" Placement="Pointer" ctl:ChoiceMenu.CloseOnChoice="True">
+      <StackPanel x:DataType="vm:ImagePreview" MinWidth="200" Spacing="2">
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageCommand}" CommandParameter="{Binding}"
+                AutomationProperties.Name="Open">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconImage}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="Open" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
+      </StackPanel>
+    </Flyout>
+  </Window.Resources>
 
   <Grid ColumnDefinitions="Auto,*">
 
@@ -127,23 +214,25 @@
                 <ItemsControl ItemsSource="{Binding Items}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:SessionItemViewModel">
+                      <!-- The row's right-click menu is on the row, so it opens over the title, the age and the hover actions alike -->
                       <Panel Classes="session-row">
+                        <Panel.ContextFlyout>
+                          <Flyout Placement="Pointer" ctl:ChoiceMenu.CloseOnChoice="True">
+                            <sidebar:SessionRowMenu />
+                          </Flyout>
+                        </Panel.ContextFlyout>
                         <Button AutomationProperties.Name="{Binding Title}" Classes="session" Classes.current="{Binding IsCurrent}"
                                 Command="{Binding OpenCommand}"
                                 CommandParameter="{Binding}" ToolTip.Tip="{Binding Tooltip}"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                          <Button.ContextFlyout>
-                            <Flyout Placement="Pointer" ctl:ChoiceMenu.CloseOnChoice="True">
-                              <sidebar:SessionRowMenu />
-                            </Flyout>
-                          </Button.ContextFlyout>
                           <!-- The title takes the row; on the right its age, or what omp is doing there (a dot: working,
-                               needs input, new reply) -->
+                               needs input, new reply, stopped by an error), in the chat shown or in the background -->
                           <Grid ColumnDefinitions="*,Auto">
                             <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                             <Panel Grid.Column="1" Classes="session-meta" Margin="10,0,0,0">
                               <TextBlock Classes="session-age" Text="{Binding When}" IsVisible="{Binding !HasStatus}" HorizontalAlignment="Right" VerticalAlignment="Center" />
                               <Ellipse Classes="session-dot" Classes.running="{Binding IsActive}" Classes.waiting="{Binding IsWaiting}" Classes.unread="{Binding IsUnread}"
+                                       Classes.error="{Binding IsFailed}"
                                        IsVisible="{Binding HasStatus}" HorizontalAlignment="Right" Margin="0,0,4,0"
                                        ToolTip.Tip="{Binding StatusText}" AutomationProperties.Name="{Binding StatusText}" />
                             </Panel>
@@ -179,9 +268,12 @@
                    VerticalAlignment="Top" TextWrapping="Wrap" />
         </Panel>
       </DockPanel>
-      <!-- The drag handle on the right edge (not in the narrow window's drawer) -->
+      <!-- The drag handle on the right edge (not in the narrow window's drawer): a fixed 6 px strip over the edge; only the
+           hairline inside it lights up, so what takes the pointer never moves while hovered -->
       <Border x:Name="SidebarGrip" Classes="sidebar-grip" Width="6" HorizontalAlignment="Right" Margin="0,0,-3,0" Background="Transparent"
-              Cursor="SizeWestEast" />
+              Cursor="SizeWestEast">
+        <Border Classes="sidebar-grip-line" />
+      </Border>
       </Panel>
     </Border>
 
@@ -269,9 +361,41 @@
     <!-- ── Transcript ── -->
     <Grid x:Name="ConversationArea" Grid.Row="1" Grid.Column="0" ClipToBounds="True">
     <Panel Grid.Row="0">
-      <ListBox x:Name="Transcript" Classes="transcript" ItemsSource="{Binding Rows}"
-               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+      <!-- A notice row: in the conversation, and on the new-session page above the greeting (EmptyState) -->
+      <Panel.DataTemplates>
+        <DataTemplate DataType="vm:NoticeRowViewModel">
+          <Border Classes="notice" Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" Margin="0,4">
+            <Grid ColumnDefinitions="Auto,*">
+              <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,1,8,0" VerticalAlignment="Top" IsVisible="{Binding IsError}" />
+              <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,1,8,0" VerticalAlignment="Top" IsVisible="{Binding IsWarning}" />
+              <SelectableTextBlock Grid.Column="1" Classes="muted" Text="{Binding Text}" TextWrapping="Wrap"
+                                   Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" />
+            </Grid>
+          </Border>
+        </DataTemplate>
+      </Panel.DataTemplates>
+      <!-- Not drawn while the new-session page shows: its notices are listed there, in the greeting's flow (as rows here,
+           under the centred greeting, a long one ran under the logo). Transparent rather than hidden: a hidden list gets
+           no template, and its scrolling is wired once, when the window loads (MainWindow.WireTranscriptScroll). -->
+      <!-- No scrolling to a row that gets the focus (the reader's place is the scroll position's, Views/ChatScrollController):
+           closing a menu gave the focus back to text clicked long before, thousands of pixels away, and the conversation
+           jumped there. Tab and arrow keys still bring the control they reach into view (ChatScrollController). -->
+      <ListBox x:Name="Transcript" Classes="transcript" Classes.behind-greeting="{Binding ShowGreeting}" ItemsSource="{Binding Rows}"
+               ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.BringIntoViewOnFocusChange="False"
+               Focusable="True" IsTabStop="False"
                AutomationProperties.Name="Conversation" Padding="24,8,24,16">
+        <ListBox.Styles>
+          <Style Selector="ListBox.transcript.behind-greeting">
+            <Setter Property="Opacity" Value="0" />
+            <Setter Property="IsHitTestVisible" Value="False" />
+          </Style>
+        </ListBox.Styles>
+        <!-- Virtualized with each row's measured height remembered (Controls/TranscriptPanel.cs): rows keep their place
+             while a reply grows, and the scroll bar matches the conversation's real length -->
+        <ListBox.ItemsPanel>
+          <!-- Rows not laid out yet are placed by an estimate from their own text (Views/TranscriptRowHeights.cs) -->
+          <ItemsPanelTemplate><ctl:TranscriptPanel EstimateHeight="{x:Static views:TranscriptRowHeights.Estimate}" /></ItemsPanelTemplate>
+        </ListBox.ItemsPanel>
         <ListBox.DataTemplates>
           <DataTemplate DataType="vm:UserRowViewModel">
             <!-- Your message: a bubble on the right; on hover its actions beside it (rewind to before it, copy) -->
@@ -287,8 +411,22 @@
                   <ctl:Icon Data="{StaticResource IconCopy}" Size="16" />
                 </Button>
               </StackPanel>
-              <Border Classes="user-bubble" MaxWidth="600">
+              <Border Classes="user-bubble" MaxWidth="600" ContextFlyout="{StaticResource UserMessageMenu}">
                 <StackPanel Spacing="4">
+                  <!-- The images sent with it, above the words (as chat apps show them); each opens the viewer -->
+                  <ItemsControl x:Name="MessageImages" ItemsSource="{Binding Previews}" IsVisible="{Binding HasImages}" Margin="0,3,0,3">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate><WrapPanel ItemSpacing="6" LineSpacing="6" /></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:ImagePreview">
+                        <Button Classes="image-thumb in-message" Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageCommand}" CommandParameter="{Binding}"
+                                ContextFlyout="{StaticResource ImageMenu}" ToolTip.Tip="{Binding Tooltip}" AutomationProperties.Name="{Binding Name, StringFormat='Open {0}'}">
+                          <ctl:ImageThumb />
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
                   <SelectableTextBlock Classes="body" Text="{Binding DisplayText}" IsVisible="{Binding HasOwnText}" />
                   <!-- Page comments sent with the message: a chip, like an attachment (the full text on request) -->
                   <Border Classes="bubble-chip" IsVisible="{Binding HasComments}" HorizontalAlignment="Left">
@@ -299,10 +437,6 @@
                   </Border>
                   <Button Classes="link" Content="{Binding FoldLabel}" Command="{Binding ToggleFoldCommand}" IsVisible="{Binding IsLong}"
                           HorizontalAlignment="Left" Padding="0" MinHeight="0" />
-                  <StackPanel Orientation="Horizontal" Spacing="6" IsVisible="{Binding HasImages}">
-                    <ctl:Icon Data="{StaticResource IconAttach}" Size="14" TextElement.Foreground="{DynamicResource GuiTextSecondary}" VerticalAlignment="Center" />
-                    <TextBlock Classes="muted" Text="{Binding ImagesText}" VerticalAlignment="Center" />
-                  </StackPanel>
                 </StackPanel>
               </Border>
             </DockPanel>
@@ -310,7 +444,8 @@
           <DataTemplate DataType="vm:AssistantRowViewModel">
             <!-- Nothing until there is something to read: a reply that only calls tools takes no room. No "…" line
                  while it streams (it came and went with every message): the activity line above the composer says it. -->
-            <StackPanel Classes="assistant" Margin="0,6,0,6" Spacing="6" IsVisible="{Binding HasContent}">
+            <StackPanel Classes="assistant" Margin="0,6,0,6" Spacing="6" IsVisible="{Binding HasContent}" Background="Transparent"
+                        ContextFlyout="{StaticResource ReplyMenu}">
               <!-- "Thinking… 4s" while it thinks, then "Thought for 4s"; the thoughts stay folded until asked for -->
               <ToggleButton Classes="thinking-toggle" IsChecked="{Binding IsThinkingOpen}" IsVisible="{Binding HasThinking}"
                             AutomationProperties.Name="Show thinking">
@@ -366,7 +501,8 @@
                     <TextBlock Classes="mono diff-added" Text="{Binding AddedText}" VerticalAlignment="Center" />
                     <TextBlock Classes="mono diff-removed" Text="{Binding RemovedText}" VerticalAlignment="Center" />
                   </StackPanel>
-                  <TextBlock Grid.Column="4" Classes="tool-took" Text="{Binding TookText}" Margin="0,0,6,0"
+                  <!-- 3 px down (1.5 once centred): the 12 px time's baseline on the row's -->
+                  <TextBlock Grid.Column="4" Classes="tool-took" Text="{Binding TookText}" Margin="0,3,6,0"
                              IsVisible="{Binding TookText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                   <ctl:Icon Grid.Column="5" Classes="chevron" Data="{StaticResource IconChevronRight}" Size="14" IsVisible="{Binding CanExpand}" />
                 </Grid>
@@ -410,16 +546,6 @@
               </Grid>
             </Panel>
           </DataTemplate>
-          <DataTemplate DataType="vm:NoticeRowViewModel">
-            <Border Classes="notice" Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" Margin="0,4">
-              <Grid ColumnDefinitions="Auto,*">
-                <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,1,8,0" VerticalAlignment="Top" IsVisible="{Binding IsError}" />
-                <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,1,8,0" VerticalAlignment="Top" IsVisible="{Binding IsWarning}" />
-                <SelectableTextBlock Grid.Column="1" Classes="muted" Text="{Binding Text}" TextWrapping="Wrap"
-                                     Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" />
-              </Grid>
-            </Border>
-          </DataTemplate>
         </ListBox.DataTemplates>
       </ListBox>
       <!-- A new session (Claude Code): "What should we work on in <project ▾>?" over the message box (MainWindow.UpdateEmptyLayout
@@ -427,6 +553,9 @@
            the conversation has nothing but notices. A low window drops the logo, then the starters (MainWindow.FitEmptyState). -->
       <StackPanel x:Name="EmptyState" IsVisible="{Binding ShowGreeting}" HorizontalAlignment="Center" VerticalAlignment="Center"
                   Spacing="14" Margin="24,0,24,48" MaxWidth="640">
+        <!-- What omp or the window said before the first message (a failed session change, a warning from omp's start):
+             the page's only rows then (MainViewModel.GreetingNotices: empty while a conversation shows) -->
+        <ItemsControl x:Name="GreetingNotices" ItemsSource="{Binding GreetingNotices}" IsVisible="{Binding !!GreetingNotices.Count}" />
         <Image x:Name="GreetingLogo" Source="/Assets/icon-256.png" Width="40" Height="40" HorizontalAlignment="Center" RenderOptions.BitmapInterpolationMode="HighQuality" />
         <WrapPanel x:Name="Greeting" HorizontalAlignment="Center" ItemsAlignment="Center" ItemSpacing="0" LineSpacing="4">
           <TextBlock Classes="greeting" Text="What should we work on?" IsVisible="{Binding ProjectName, Converter={x:Static StringConverters.IsNullOrEmpty}}" />
@@ -435,8 +564,8 @@
             <Button x:Name="GreetingProjectButton" Classes="greeting-project" ToolTip.Tip="{Binding ShownProjectPath}"
                     AutomationProperties.Name="{Binding ProjectName, StringFormat='Project: {0}'}">
               <StackPanel Orientation="Horizontal" Spacing="4">
-                <TextBlock Text="{Binding ProjectName}" MaxWidth="280" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                <ctl:Icon Data="{StaticResource IconChevronDown}" Size="16" VerticalAlignment="Center" Margin="0,2,0,0" />
+                <TextBlock Classes="greeting-project-name" Text="{Binding ProjectName}" MaxWidth="280" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                <ctl:Icon Classes="greeting-project-chevron" Data="{StaticResource IconChevronDown}" Size="16" VerticalAlignment="Center" Margin="0,2,0,0" />
               </StackPanel>
             </Button>
             <TextBlock Classes="greeting" Text="?" Margin="2,0,0,0" />
@@ -454,8 +583,22 @@
           </ItemsControl.ItemTemplate>
         </ItemsControl>
       </StackPanel>
-      <!-- Shown when the reader scrolled up while new rows came in (MainWindow.OnTranscriptChanged): back to the latest -->
-      <Button x:Name="JumpToLatest" IsVisible="False" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,24,12"
+      <!-- The conversation fades out over its last 16 px instead of ending in a hard cut (Claude): scrolled up, the top
+           pixel or two of the next line, cut by the edge, showed as a stray dash just over the activity line. As tall as
+           the list's bottom padding, so on the latest message it covers only that padding. Clear of the scroll bar. -->
+      <Border x:Name="TranscriptFade" Height="16" VerticalAlignment="Bottom" Margin="0,0,12,0" IsHitTestVisible="False"
+              Background="{DynamicResource GuiWindow}" IsVisible="{Binding !ShowGreeting}">
+        <Border.OpacityMask>
+          <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+            <GradientStop Offset="0" Color="Transparent" />
+            <GradientStop Offset="1" Color="Black" />
+          </LinearGradientBrush>
+        </Border.OpacityMask>
+      </Border>
+      <!-- Shown while the reader has scrolled away from the latest message (Views/ChatScrollController.cs): back to it.
+           Centred over the bottom of the conversation, just above the message box (Claude), not on the right edge where it
+           covered the end of code blocks and tables. -->
+      <Button x:Name="JumpToLatest" IsVisible="False" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,12"
               ToolTip.Tip="Jump to latest" AutomationProperties.Name="Jump to latest">
         <ctl:Icon Data="{StaticResource IconArrowDown}" Size="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
       </Button>
@@ -544,10 +687,21 @@
         </Panel>
       </DockPanel>
     </Border>
-    <GridSplitter Grid.Row="0" Grid.RowSpan="5" Grid.Column="7" Width="1" ResizeDirection="Columns" IsVisible="{Binding IsDebugVisible}" />
-    <Border Grid.Row="0" Grid.RowSpan="5" Grid.Column="8" Width="420" IsVisible="{Binding IsDebugVisible}" Classes="events">
+    <!-- ── Events (View → Events, F12): the last column; docked like the panels above when the conversation keeps its
+         room, else over it until closed (MainWindow.FitPanels) ── -->
+    <GridSplitter x:Name="DebugSplitter" Grid.Row="0" Grid.RowSpan="5" Grid.Column="7" Width="1" ResizeDirection="Columns" IsVisible="False" />
+    <Border x:Name="DebugPanel" Grid.Row="0" Grid.RowSpan="5" Grid.Column="8" IsVisible="{Binding IsDebugVisible}" Classes="events">
       <DockPanel>
-        <TextBlock DockPanel.Dock="Top" Classes="caps" Text="RPC events" Margin="14,14,0,8" />
+        <!-- × closes it like F12: over a narrow conversation it is the visible way back -->
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="14,8,8,4">
+          <TextBlock Classes="caps" Text="RPC events" VerticalAlignment="Center" />
+          <Button x:Name="CloseDebugButton" Grid.Column="1" Classes="icon" Width="28" Height="28" Command="{Binding ToggleDebugCommand}"
+                  ToolTip.Tip="Close (F12)" AutomationProperties.Name="Close RPC events">
+            <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+          </Button>
+        </Grid>
+        <!-- Every open chat runs its own omp: how many, and the memory they hold -->
+        <TextBlock x:Name="OmpProcessesLine" DockPanel.Dock="Top" Classes="muted" Margin="14,0,8,6" Text="{Binding OmpProcessesText}" />
         <ListBox x:Name="DebugList" Classes="events" ItemsSource="{Binding DebugLog}" Background="Transparent"
                  AutomationProperties.Name="Event log">
           <ListBox.ItemTemplate>
@@ -846,7 +1000,6 @@
 
     <!-- ── Composer: the message field on its own card, its tools below it ── -->
     <Border x:Name="ComposerBox" Grid.Row="3" Grid.Column="0" Margin="{Binding Pets.ComposerMargin}" Padding="10,6,10,10" MaxWidth="768" ClipToBounds="True"
-            Classes.mode-write="{Binding IsAcceptEdits}" Classes.mode-yolo="{Binding IsYolo}"
             DragDrop.AllowDrop="True">
       <StackPanel Spacing="6">
         <!-- Dictation needs a local speech model: asked once, downloaded only on consent -->
@@ -864,7 +1017,8 @@
             </StackPanel>
           </StackPanel>
         </Border>
-        <!-- Slash commands: what runs here first, then (under its heading) what only omp's terminal runs -->
+        <!-- Slash commands: what runs here first, then (under its heading) what only omp's terminal runs. While an "@"
+             reference is typed: the project's files and folders, each with the folder it is in -->
         <Border x:Name="CommandMenu" Classes="menu" MaxHeight="260">
           <Border.IsVisible>
             <MultiBinding Converter="{x:Static BoolConverters.And}">
@@ -884,11 +1038,15 @@
                     <Button AutomationProperties.Name="{Binding Label}" Classes="menu-item" Classes.current="{Binding IsSelected}" Classes.tui="{Binding IsTerminalOnly}"
                             HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                             Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ChooseSuggestionCommand}" CommandParameter="{Binding}">
-                      <Grid ColumnDefinitions="Auto,Auto,*,Auto">
-                        <TextBlock Classes="mono command-name" Text="{Binding Label}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="1" Classes="mono tertiary" Text="{Binding Hint}" IsVisible="{Binding HasHint}" Margin="6,0,0,0" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="2" Classes="muted" Text="{Binding Description}" TextTrimming="CharacterEllipsis" Margin="12,0,0,0" VerticalAlignment="Center" />
-                        <TextBlock Grid.Column="3" Classes="tertiary" Text="{Binding Tag}" IsVisible="{Binding HasTag}" FontSize="12" Margin="8,0,0,0" VerticalAlignment="Center" />
+                      <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto">
+                        <Panel IsVisible="{Binding IsMention}" Margin="0,0,8,0" VerticalAlignment="Center">
+                          <ctl:Icon Classes="file-icon" Data="{StaticResource IconFile}" Size="14" IsVisible="{Binding IsFile}" />
+                          <ctl:Icon Classes="file-icon" Data="{StaticResource IconFolder}" Size="14" IsVisible="{Binding IsFolder}" />
+                        </Panel>
+                        <TextBlock Grid.Column="1" Classes="mono command-name" Text="{Binding Label}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Classes="mono tertiary" Text="{Binding Hint}" IsVisible="{Binding HasHint}" Margin="6,0,0,0" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="3" Classes="muted" Text="{Binding Description}" TextTrimming="CharacterEllipsis" Margin="12,0,0,0" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="4" Classes="tertiary" Text="{Binding Tag}" IsVisible="{Binding HasTag}" FontSize="12" Margin="8,0,0,0" VerticalAlignment="Center" />
                       </Grid>
                     </Button>
                   </StackPanel>
@@ -897,7 +1055,7 @@
             </ItemsControl>
           </ScrollViewer>
         </Border>
-        <!-- A slash word that matches nothing: said in the menu's place (Enter still sends it to omp) -->
+        <!-- A slash word or "@" name that matches nothing: said in the menu's place (Enter still sends the message) -->
         <Border x:Name="CommandNoMatch" Classes="menu">
           <Border.IsVisible>
             <MultiBinding Converter="{x:Static BoolConverters.And}">
@@ -905,17 +1063,31 @@
               <Binding Path="ShowNoCommandMatch" />
             </MultiBinding>
           </Border.IsVisible>
-          <TextBlock Classes="muted" Text="No matching commands" Margin="10,6" />
+          <TextBlock Classes="muted" Text="{Binding NoMatchText}" Margin="10,6" />
         </Border>
         <!-- Messages sent while omp works, until omp delivers them: grey, one line each; × takes one back, ↑ in the
              empty box brings the last one back to edit -->
         <ItemsControl x:Name="QueuedList" ItemsSource="{Binding QueuedMessages}" IsVisible="{Binding HasQueued}">
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:QueuedItemViewModel">
-              <Grid ColumnDefinitions="Auto,*,Auto" Margin="2,1" ToolTip.Tip="{Binding Tooltip}">
+              <Grid ColumnDefinitions="Auto,Auto,*,Auto" Margin="2,1" ToolTip.Tip="{Binding Tooltip}">
                 <Border Classes="tag" VerticalAlignment="Center"><TextBlock Text="{Binding Kind}" FontSize="11" FontWeight="Medium" /></Border>
-                <TextBlock Grid.Column="1" Classes="queued-text" Text="{Binding Text}" MaxLines="1" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                <Button Grid.Column="2" Classes="icon" Width="22" Height="22" Margin="6,0,0,0" Command="{Binding RemoveCommand}" ToolTip.Tip="Don't send this"
+                <!-- Its images, small; each opens the viewer -->
+                <ItemsControl Grid.Column="1" ItemsSource="{Binding Previews}" IsVisible="{Binding HasImages}" Margin="8,0,0,0" VerticalAlignment="Center">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ImagePreview">
+                      <Button Classes="image-thumb in-queue" Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageCommand}" CommandParameter="{Binding}"
+                              ContextFlyout="{StaticResource ImageMenu}" ToolTip.Tip="{Binding Tooltip}" AutomationProperties.Name="{Binding Name, StringFormat='Open {0}'}">
+                        <ctl:ImageThumb />
+                      </Button>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Grid.Column="2" Classes="queued-text" Text="{Binding Text}" MaxLines="1" Margin="8,0,0,0" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                <Button Grid.Column="3" Classes="icon" Width="22" Height="22" Margin="6,0,0,0" Command="{Binding RemoveCommand}" ToolTip.Tip="Don't send this"
                         AutomationProperties.Name="Remove queued message" VerticalAlignment="Center">
                   <ctl:Icon Data="{StaticResource IconClose}" Size="13" />
                 </Button>
@@ -936,6 +1108,27 @@
                   <TextBlock Text="{Binding Label}" FontSize="13" VerticalAlignment="Center" />
                   <Button Classes="icon" Width="22" Height="22" Command="{Binding RemoveCommand}" ToolTip.Tip="Remove"
                           AutomationProperties.Name="Remove pasted text" VerticalAlignment="Center">
+                    <ctl:Icon Data="{StaticResource IconClose}" Size="13" />
+                  </Button>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <!-- Comments on lines of the Files pane's Changes, one chip each ("app.py:41" and the comment), sent after the message -->
+        <ItemsControl x:Name="CodeCommentsChip" ItemsSource="{Binding CodeComments}" IsVisible="{Binding HasCodeComments}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><WrapPanel ItemSpacing="6" LineSpacing="6" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:CodeCommentViewModel">
+              <Border Classes="attachment comment-chip" ToolTip.Tip="{Binding Tooltip}">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <ctl:Icon Data="{StaticResource IconComment}" Size="14" VerticalAlignment="Center" TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
+                  <TextBlock Classes="mono" Text="{Binding Where}" FontSize="12" Foreground="{DynamicResource GuiTextSecondary}" VerticalAlignment="Center" />
+                  <TextBlock Text="{Binding Comment}" MaxWidth="220" TextTrimming="CharacterEllipsis" FontSize="13" VerticalAlignment="Center" />
+                  <Button Classes="icon" Width="22" Height="22" Command="{Binding RemoveCommand}" ToolTip.Tip="Remove this comment"
+                          AutomationProperties.Name="Remove code comment" VerticalAlignment="Center">
                     <ctl:Icon Data="{StaticResource IconClose}" Size="13" />
                   </Button>
                 </StackPanel>
@@ -965,21 +1158,22 @@
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
-        <!-- Attached images -->
+        <!-- Attached images: a preview (a click opens it in the viewer), name and size; × removes it -->
         <ItemsControl x:Name="AttachmentList" ItemsSource="{Binding Attachments}" IsVisible="{Binding HasAttachments}">
           <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+            <ItemsPanelTemplate><WrapPanel ItemSpacing="6" LineSpacing="6" /></ItemsPanelTemplate>
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:AttachmentViewModel">
-              <Border Classes="attachment" Margin="0,0,6,6" ToolTip.Tip="{Binding Name}">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <Border CornerRadius="{DynamicResource GuiRadius8}" ClipToBounds="True">
-                    <Image Source="{Binding Thumbnail}" Height="36" MaxWidth="64" Stretch="Uniform" />
-                  </Border>
-                  <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="{Binding Name}" MaxWidth="160" TextTrimming="CharacterEllipsis" FontSize="12" FontWeight="Medium" />
-                    <TextBlock Classes="tertiary" Text="{Binding Size}" FontSize="11" />
+              <Border Classes="attachment" ContextFlyout="{StaticResource AttachmentMenu}">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <Button Classes="image-thumb in-chip" Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenImageCommand}" CommandParameter="{Binding Preview}"
+                          ToolTip.Tip="{Binding Preview.Tooltip}" AutomationProperties.Name="{Binding Name, StringFormat='Open {0}'}">
+                    <ctl:ImageThumb DataContext="{Binding Preview}" />
+                  </Button>
+                  <StackPanel VerticalAlignment="Center" ToolTip.Tip="{Binding Name}">
+                    <TextBlock Text="{Binding Name}" MaxWidth="160" TextTrimming="CharacterEllipsis" FontSize="13" FontWeight="Medium" />
+                    <TextBlock Classes="tertiary" Text="{Binding Size}" FontSize="12" />
                   </StackPanel>
                   <Button Classes="icon" Width="24" Height="24" Command="{Binding RemoveCommand}" ToolTip.Tip="Remove"
                           AutomationProperties.Name="Remove attachment" VerticalAlignment="Center">
@@ -1033,7 +1227,8 @@
                     <Button x:Name="SlashCommandsItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding StartSlashCommandCommand}"
                             AutomationProperties.Name="Commands">
                       <Grid ColumnDefinitions="Auto,*,Auto">
-                        <TextBlock Classes="mono" Text="/" Width="16" TextAlignment="Center" Margin="0,0,10,0" VerticalAlignment="Center" />
+                        <!-- 3 px down (1.5 once centred): the 13 px mono's baseline on the 14 px label's -->
+                        <TextBlock Classes="mono" Text="/" Width="16" TextAlignment="Center" Margin="0,3,10,0" VerticalAlignment="Center" />
                         <TextBlock Grid.Column="1" Text="Commands and skills" VerticalAlignment="Center" />
                         <TextBlock Grid.Column="2" Classes="tertiary" Text="/" VerticalAlignment="Center" />
                       </Grid>
@@ -1136,10 +1331,16 @@
                         <DataTemplate x:DataType="vm:ModelItemViewModel">
                           <Button AutomationProperties.Name="{Binding Name}" Classes="menu-item" Classes.current="{Binding IsCurrent}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                                   Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ChooseModelCommand}" CommandParameter="{Binding}">
-                            <StackPanel Spacing="2">
-                              <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                              <TextBlock Classes="tertiary" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
-                            </StackPanel>
+                            <Grid ColumnDefinitions="Auto,*,Auto">
+                              <ctl:Icon Data="{StaticResource IconChevronRight}" Size="14" Margin="0,0,8,0" VerticalAlignment="Center"
+                                        IsVisible="{Binding IsBack}" RenderTransform="scale(-1,1)" />
+                              <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Classes="tertiary" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
+                              </StackPanel>
+                              <ctl:Icon Grid.Column="2" Data="{StaticResource IconChevronRight}" Size="14" Margin="8,0,0,0" VerticalAlignment="Center"
+                                        IsVisible="{Binding IsFamily}" TextElement.Foreground="{DynamicResource GuiTextTertiary}" />
+                            </Grid>
                           </Button>
                         </DataTemplate>
                       </ListBox.ItemTemplate>
@@ -1391,6 +1592,27 @@
                     </StackPanel>
                   </Border>
                 </Grid>
+                <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
+                    <TextBlock Text="Chats kept running" FontWeight="Medium" />
+                    <TextBlock Classes="muted" TextWrapping="Wrap"
+                               Text="Each open chat runs its own omp. Over this number, the idle chat used longest ago is closed; a working one never is" />
+                  </StackPanel>
+                  <Border Grid.Column="1" Classes="segmented" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="2">
+                      <Button x:Name="MaxOpenSessions2" Classes="segment" Content="2" Command="{Binding SetMaxOpenSessionsCommand}" CommandParameter="2"
+                              Classes.selected="{Binding MaxOpenSessions, Converter={x:Static vm:MainViewModel.IsMaxOpenSessions}, ConverterParameter=2}"
+                              AutomationProperties.Name="Keep 2 chats running" />
+                      <Button x:Name="MaxOpenSessions4" Classes="segment" Content="4" Command="{Binding SetMaxOpenSessionsCommand}" CommandParameter="4"
+                              Classes.selected="{Binding MaxOpenSessions, Converter={x:Static vm:MainViewModel.IsMaxOpenSessions}, ConverterParameter=4}"
+                              AutomationProperties.Name="Keep 4 chats running" />
+                      <Button x:Name="MaxOpenSessions8" Classes="segment" Content="8" Command="{Binding SetMaxOpenSessionsCommand}" CommandParameter="8"
+                              Classes.selected="{Binding MaxOpenSessions, Converter={x:Static vm:MainViewModel.IsMaxOpenSessions}, ConverterParameter=8}"
+                              AutomationProperties.Name="Keep 8 chats running" />
+                    </StackPanel>
+                  </Border>
+                </Grid>
               </StackPanel>
             </Border>
 
@@ -1490,7 +1712,15 @@
                   <TextBlock Classes="label" Text="Profile (OMP_PROFILE)" />
                   <TextBox Text="{Binding SettingsProfile}" PlaceholderText="default profile" AutomationProperties.Name="Profile" />
                 </StackPanel>
-                <Button x:Name="SaveRuntimeButton" Content="Save and restart omp" Classes="md" Command="{Binding SaveRuntimeCommand}" Margin="0,4,0,0" />
+                <!-- Saved only by this button (it restarts omp): edits not saved yet are flagged, and kept until saved or discarded -->
+                <WrapPanel ItemSpacing="8" LineSpacing="8" Margin="0,4,0,0">
+                  <Button x:Name="SaveRuntimeButton" Content="Save and restart omp" Classes="md" Classes.accent="{Binding HasUnsavedRuntime}"
+                          Command="{Binding SaveRuntimeCommand}" />
+                  <Button x:Name="DiscardRuntimeButton" Content="Discard" Classes="md flat" Command="{Binding DiscardRuntimeEditsCommand}"
+                          IsVisible="{Binding HasUnsavedRuntime}" />
+                  <TextBlock x:Name="UnsavedRuntimeText" Classes="muted" Text="Unsaved changes" VerticalAlignment="Center"
+                             IsVisible="{Binding HasUnsavedRuntime}" />
+                </WrapPanel>
                 <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="0,4"
                         IsVisible="{Binding RuntimeStatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                 <TextBlock x:Name="RuntimeStatus" Classes="muted" Text="{Binding RuntimeStatusText}" TextWrapping="Wrap"
@@ -1534,5 +1764,7 @@
   <ctl:PetPerch x:Name="PetPerch" Grid.Column="0" Grid.ColumnSpan="2" Anchor="{Binding #ComposerBox}" Classes.under-menu="{Binding IsModelMenuOpen}" />
   <!-- Keyboard shortcuts (⌘/ or Ctrl+/): over everything, the pet included -->
   <ctl:ShortcutsSheet x:Name="ShortcutsSheet" Grid.Column="0" Grid.ColumnSpan="2" ZIndex="100" IsVisible="{Binding IsShortcutsOpen}" />
+  <!-- An attached image, opened from a message or the message box: over everything (Controls/ImageViewer) -->
+  <ctl:ImageViewer x:Name="ImageViewer" Grid.Column="0" Grid.ColumnSpan="2" ZIndex="101" IsVisible="{Binding IsImageViewerOpen}" />
   </Grid>
 </Window>

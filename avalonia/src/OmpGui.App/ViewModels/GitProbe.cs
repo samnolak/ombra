@@ -41,25 +41,13 @@ public static class GitProbe
             var sha = await run(new ToolCommand("git", ["rev-parse", "--short", "HEAD"], folder, Timeout), ct);
             if (sha.Ok && sha.Stdout.Trim() is { Length: > 0 } s) commit = s;
         }
-        return (GitProbeState.Ok, new GitHead(top, branch, commit, !SamePath(gitDir, common), common), null);
+        return (GitProbeState.Ok, new GitHead(top, branch, commit, !SessionCatalog.SamePath(gitDir, common), common), null);
     }
 
     private static string Full(string folder, string path)
     {
         try { return Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(folder, path)); }
         catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return path; }
-    }
-
-    public static bool SamePath(string? a, string? b)
-    {
-        if (a is null || b is null) return false;
-        static string N(string p)
-        {
-            try { p = Path.GetFullPath(p); }
-            catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { }
-            return p.TrimEnd('/', '\\');
-        }
-        return string.Equals(N(a), N(b), OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>A path for reading: the home folder as ~.</summary>

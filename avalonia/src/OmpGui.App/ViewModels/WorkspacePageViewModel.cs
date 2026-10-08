@@ -94,7 +94,7 @@ public abstract partial class WorkspacePageViewModel : ObservableObject
     {
         if (!await Main.RestartOmpToApplyAsync())
         {
-            Say("omp is replying. Restart it when the reply ends (or the change applies the next time omp starts).");
+            Say("omp is replying: it restarts with the new settings when the reply ends.");
             return;
         }
         NeedsRestart = false;

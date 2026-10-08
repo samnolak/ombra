@@ -1,13 +1,18 @@
 <!-- Component styles on the client's tokens (Tokens.axaml). Sizes: buttons 32 / radius 8 (medium 44 / radius 12),
      inputs on surface 1 with a hairline that turns focus blue, cards and menus radius 12, the composer 16, pills full.
-     One accent (clay) for the primary action, switches, checks and selection marks; blue only for links and focus. -->
+     One yellow accent (the logo's) for the primary action, switches, checks and selection marks; blue only for links
+     and focus. -->
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ctl="using:OmpGui.App.Controls">
 
   <!-- ─────────────── Type ─────────────── -->
+  <!-- No contextual alternates (inherited by everything in the window, popups included): Inter's turn an "x" between
+       digits into "×" and "->" into an arrow, so a hash, size or path the user or omp wrote ("0x1F", "1920x1080") read
+       differently from what it is and from what Copy gives -->
   <Style Selector="Window">
     <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+    <Setter Property="FontFeatures" Value="-calt" />
   </Style>
   <Style Selector="TextBlock.muted, SelectableTextBlock.muted">
     <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
@@ -123,17 +128,17 @@
     <Setter Property="Background" Value="{DynamicResource GuiInversePressed}" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextOnInverse}" />
   </Style>
-  <!-- Primary (Fluent's "accent" class): clay fill, white text (AccentButton* keys in Tokens). Danger: the error colour
-       filled, for the one destructive action of a confirmation. Disabled primary, danger and inverse buttons keep their
-       colour at 50 % (Claude's disabled opacity; at 40 % the white label all but vanished on clay) instead of turning
-       into a grey secondary button. -->
+  <!-- Primary (Fluent's "accent" class): the yellow accent filled, ink text (AccentButton* keys in Tokens). Danger: the
+       error colour filled with white text, for the one destructive action of a confirmation. Disabled primary, danger
+       and inverse buttons keep their colour at 50 % (Claude's disabled opacity) instead of turning into a grey
+       secondary button. -->
   <Style Selector="Button.danger:not(.chip):not(.menu-item):not(.flat)">
     <Setter Property="Background" Value="{DynamicResource GuiStatusError}" />
-    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnAccent}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnDanger}" />
   </Style>
   <Style Selector="Button.danger:not(.chip):not(.menu-item):not(.flat):pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.danger:not(.chip):not(.menu-item):not(.flat):pressed /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource GuiStatusError}" />
-    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnAccent}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnDanger}" />
     <Setter Property="Opacity" Value="0.9" />
   </Style>
   <Style Selector="Button.accent:disabled, Button.danger:not(.chip):not(.menu-item):not(.flat):disabled, Button.inverse:disabled">
@@ -141,7 +146,7 @@
   </Style>
   <Style Selector="Button.danger:not(.chip):not(.menu-item):not(.flat):disabled /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource GuiStatusError}" />
-    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnAccent}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnDanger}" />
   </Style>
   <Style Selector="Button.inverse:disabled /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource GuiInverse}" />
@@ -317,7 +322,7 @@
   <Style Selector="Border.attachment.comment-chip">
     <Setter Property="Padding" Value="6,4,4,4" />
   </Style>
-  <!-- The number of a page comment, as on its pin on the page (the clay accent, white number) -->
+  <!-- The number of a page comment, as on its pin on the page (the yellow accent, ink number) -->
   <Style Selector="Border.pin">
     <Setter Property="Width" Value="20" />
     <Setter Property="Height" Value="20" />
@@ -447,6 +452,19 @@
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusControl}" />
     <Setter Property="Padding" Value="10,7" />
     <Setter Property="FontSize" Value="{DynamicResource GuiFontUi}" />
+  </Style>
+  <!-- A text field's right-click menu: Fluent's Cut, Copy, Paste and, as in every Mac text field, Select all. One menu for
+       all fields (it acts on the one it opens on); the message box's Paste still attaches images and files. -->
+  <Style Selector="TextBox">
+    <Setter Property="ContextFlyout">
+      <MenuFlyout Placement="Pointer">
+        <MenuItem Header="Cut" Command="{Binding $parent[TextBox].Cut}" IsEnabled="{Binding $parent[TextBox].CanCut}" InputGesture="{x:Static TextBox.CutGesture}" />
+        <MenuItem Header="Copy" Command="{Binding $parent[TextBox].Copy}" IsEnabled="{Binding $parent[TextBox].CanCopy}" InputGesture="{x:Static TextBox.CopyGesture}" />
+        <MenuItem Header="Paste" Command="{Binding $parent[TextBox].Paste}" IsEnabled="{Binding $parent[TextBox].CanPaste}" InputGesture="{x:Static TextBox.PasteGesture}" />
+        <Separator />
+        <MenuItem Header="Select all" Command="{Binding $parent[TextBox].SelectAll}" InputGesture="{x:Static ctl:ContextMenus.SelectAllGesture}" />
+      </MenuFlyout>
+    </Setter>
   </Style>
   <!-- Tooltips: inverse (ink on light, ivory on dark), 12 px, radius 6, a short line wide -->
   <Style Selector="ToolTip">
@@ -666,14 +684,10 @@
     <Setter Property="Fill" Value="{DynamicResource GuiStatusSuccess}" />
   </Style>
   <Style Selector="Ellipse.state-dot.running">
-    <!-- Claude Code's spinner colour: the brand clay (blue is for links and focus only) -->
+    <!-- The spinner: the brand mark, the logo's yellow (blue is for links and focus only), pulsing (ctl:Pulse, not a
+         style animation: that would redraw the window every vsync) -->
     <Setter Property="Fill" Value="{DynamicResource GuiBrandMark}" />
-    <Style.Animations>
-      <Animation Duration="0:0:1.1" IterationCount="INFINITE" PlaybackDirection="Alternate" Easing="SineEaseInOut">
-        <KeyFrame Cue="0%"><Setter Property="Opacity" Value="1" /></KeyFrame>
-        <KeyFrame Cue="100%"><Setter Property="Opacity" Value="0.3" /></KeyFrame>
-      </Animation>
-    </Style.Animations>
+    <Setter Property="ctl:Pulse.Low" Value="0.3" />
   </Style>
   <Style Selector="Ellipse.state-dot.running.waiting">
     <Setter Property="Fill" Value="{DynamicResource GuiStatusWarning}" />

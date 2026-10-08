@@ -118,7 +118,7 @@ public sealed class RealWorkspaceTests(ITestOutputHelper log)
         try
         {
             // The window follows omp into the worktree: the project folder, the branch chip, the page
-            await WorkspaceFixture.Until(() => vm.ProjectFolder is { } p && !GitProbe.SamePath(p, repo), "moved", 30);
+            await WorkspaceFixture.Until(() => vm.ProjectFolder is { } p && !SessionCatalog.SamePath(p, repo), "moved", 30);
             log.WriteLine("now in " + vm.ProjectFolder);
             await vm.BranchChip.RefreshNowAsync();
             Assert.Equal(branch, vm.BranchChip.Branch);
@@ -129,7 +129,7 @@ public sealed class RealWorkspaceTests(ITestOutputHelper log)
         }
         finally
         {
-            if (vm.ProjectFolder is { } wt && !GitProbe.SamePath(wt, repo))
+            if (vm.ProjectFolder is { } wt && !SessionCatalog.SamePath(wt, repo))
             {
                 await vm.DisposeAsync();
                 WorkspaceFixture.Git(repo, "worktree", "remove", "--force", wt);

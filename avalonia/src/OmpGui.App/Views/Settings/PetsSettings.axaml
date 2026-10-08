@@ -15,7 +15,7 @@
           <StackPanel Spacing="6">
             <TextBlock Classes="section" Text="Pets" />
             <TextBlock Classes="muted" TextWrapping="Wrap"
-                       Text="A little pixel companion on the message box. It thinks and works along with omp, waits with you when omp asks something, cheers when a run is done and winces when something fails. Click it to send omp a message; drag it anywhere in the window." />
+                       Text="A little pixel companion on the message box. It thinks and works along with omp, waits with you when omp asks something, cheers when a run is done and winces when something fails. Click it to send omp a message; drag it anywhere on your screens, over your other apps, to keep an eye on omp from there." />
           </StackPanel>
           <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
           <Grid ColumnDefinitions="*,Auto">
@@ -38,6 +38,21 @@
                         Command="{Binding SetSizeCommand}" CommandParameter="small" AutomationProperties.Name="Pet size: small" />
                 <Button x:Name="PetSizeMedium" Classes="segment" Classes.selected="{Binding IsMedium}" Content="Medium"
                         Command="{Binding SetSizeCommand}" CommandParameter="medium" AutomationProperties.Name="Pet size: medium" />
+              </StackPanel>
+            </Border>
+          </Grid>
+          <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
+              <TextBlock Text="Roams" FontWeight="Medium" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="Where you can drag it: anywhere on your screens, staying on top of other apps, or only inside this window" />
+            </StackPanel>
+            <Border Grid.Column="1" Classes="segmented" VerticalAlignment="Center">
+              <StackPanel Orientation="Horizontal" Spacing="2">
+                <Button x:Name="PetRoamDesktop" Classes="segment" Classes.selected="{Binding IsRoamDesktop}" Content="Whole desktop"
+                        Command="{Binding SetRoamCommand}" CommandParameter="desktop" AutomationProperties.Name="Pet roams the whole desktop" />
+                <Button x:Name="PetRoamWindow" Classes="segment" Classes.selected="{Binding IsRoamWindow}" Content="Inside the window"
+                        Command="{Binding SetRoamCommand}" CommandParameter="window" AutomationProperties.Name="Pet stays inside the window" />
               </StackPanel>
             </Border>
           </Grid>

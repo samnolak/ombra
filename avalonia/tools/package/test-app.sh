@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # macOS: builds this checkout as "OMP GUI Test.app" in /Applications, beside the installed "OMP GUI.app".
-# The test app has its own bundle id and its own data folder (~/Library/Application Support/OmpGui-Test), so it never
-# touches the installed app's settings, runtimes or updates. The first build copies the installed app's settings and
-# clones its omp runtime (APFS clone: no extra space); later builds keep the test app's own settings.
-# omp's own sessions and config (~/.omp) are shared with the installed app: the same chats show in both.
+# The test app has its own bundle id, omp runtime and updates (~/Library/Application Support/OmpGui-Test), so it never
+# installs updates over the installed app. Settings are shared: both read and write the installed app's
+# omp-gui.local.json (a change in one shows in the other at its next start), as are the downloaded speech models.
+# omp's sessions and config (~/.omp) are shared too: the same chats show in both. The first build clones the
+# installed app's omp runtime (APFS clone: no extra space).
 #   tools/package/test-app.sh [version]
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/../.." && pwd)          # avalonia/
@@ -27,20 +28,21 @@ PLIST="$APP/Contents/Info.plist"
   -c "Set :CFBundleName OMP GUI Test" \
   -c "Set :CFBundleDisplayName OMP GUI Test" \
   -c "Add :LSEnvironment dict" \
-  -c "Add :LSEnvironment:OMPGUI_CONFIG string $DATA/omp-gui.local.json" \
+  -c "Add :LSEnvironment:OMPGUI_CONFIG string $PROD/omp-gui.local.json" \
   -c "Add :LSEnvironment:OMPGUI_RUNTIME_DIR string $DATA/runtimes" \
   -c "Add :LSEnvironment:OMPGUI_UPDATES_DIR string $DATA/updates" \
-  -c "Add :LSEnvironment:OMPGUI_STT_DIR string $DATA/speech-models" \
+  -c "Add :LSEnvironment:OMPGUI_STT_DIR string $PROD/speech-models" \
   "$PLIST"
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1
 
+mkdir -p "$PROD"
 if [ ! -d "$DATA" ]; then
   mkdir -p "$DATA"
-  [ -f "$PROD/omp-gui.local.json" ] && cp "$PROD/omp-gui.local.json" "$DATA/"
   [ -d "$PROD/runtimes" ] && cp -Rc "$PROD/runtimes" "$DATA/runtimes"
-  [ -d "$PROD/speech-models" ] && cp -Rc "$PROD/speech-models" "$DATA/speech-models"
-  echo "settings copied from $PROD"
+  echo "runtime copied from $PROD"
 fi
+# Earlier builds kept their own settings copy: the shared file replaces it (kept aside, not deleted)
+if [ -f "$DATA/omp-gui.local.json" ]; then mv "$DATA/omp-gui.local.json" "$DATA/omp-gui.local.json.unshared"; fi
 
 # Quit a running copy without Apple Events (no automation permission needed): a plain signal to its process
 pkill -x -f "$DEST/Contents/MacOS/OmpGui" 2>/dev/null || true

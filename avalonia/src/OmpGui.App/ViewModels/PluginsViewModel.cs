@@ -589,11 +589,6 @@ public sealed partial class PluginsViewModel : ObservableObject
     private async Task RestartOmpAsync()
     {
         var where = Areas.FirstOrDefault(f => f.ShowRestart) ?? PluginsFeedback;
-        if (_owner.IsRunning)
-        {
-            where.RestartText = "omp is replying. Restart it once the reply finishes; the change waits until then.";
-            return;
-        }
         where.IsRestarting = true;
         try
         {
@@ -605,6 +600,8 @@ public sealed partial class PluginsViewModel : ObservableObject
                 await WaitForCatalogAsync();
                 RefreshSkills();
             }
+            // The shown chat is replying: its omp restarts when the reply ends (the other chats' already did, or do then)
+            else where.RestartText = "omp is replying: it restarts with the change when the reply ends.";
         }
         finally
         {

@@ -219,7 +219,7 @@ public sealed class PreviewTests
         Assert.Equal("http://localhost:5173", vm.Preview.Address);
         // Another tool, and text that is not a tool's (a user message) is not scanned.
         vm.Apply(Snap(3, running with { Output = running.Output + "  ➜  Local:   http://localhost:5173/\n" },
-            new UserItem(2, "try http://localhost:1111", true, 0),
+            new UserItem(2, "try http://localhost:1111", true),
             new ToolItem(3, "call-2", "bash", "python3 -m http.server", ToolStatus.Succeeded, "Serving HTTP on 0.0.0.0 port 8000 (http://0.0.0.0:8000/) ...")));
         Assert.Equal(["http://localhost:8000", "http://localhost:5173"], vm.Preview.Suggestions);
         await vm.DisposeAsync();

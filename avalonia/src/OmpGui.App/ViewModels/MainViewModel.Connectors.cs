@@ -19,7 +19,7 @@ public partial class MainViewModel
     [RelayCommand] private Task OpenPluginsPage() => OpenSettingsAtAsync("plugins");
 
     /// <summary>omp's current command catalog (builtins, skills, MCP prompts…) as the session last reported it.</summary>
-    internal IReadOnlyList<SlashCommand> OmpCommandCatalog => _session.Snapshot().Commands;
+    internal IReadOnlyList<SlashCommand> OmpCommandCatalog => Session.Snapshot().Commands;
 
     /// <summary>Puts a command at the start of the message box and returns to the conversation ("Use" on a skill).</summary>
     internal void UseInComposer(string command)

@@ -64,11 +64,11 @@ public sealed partial class MainViewModel
     private void OfferPreviewUrls(TranscriptItem item)
     {
         if (item is not ToolItem { Output: { Length: > 0 } output }) return;
-        if (_rowsByKey.TryGetValue(item.Key, out var row) && ReferenceEquals(row.Model, item)) return;
-        if (_previewEpoch != _transcriptEpoch)
+        if (_open.RowsByKey.TryGetValue(item.Key, out var row) && ReferenceEquals(row.Model, item)) return;
+        if (_previewEpoch != _open.TranscriptEpoch)
         {
             _previewScanned.Clear();
-            _previewEpoch = _transcriptEpoch;
+            _previewEpoch = _open.TranscriptEpoch;
         }
         var from = _previewScanned.TryGetValue(item.Key, out var done) && done <= output.Length ? Math.Max(0, done - PreviewRescan) : 0;
         _previewScanned[item.Key] = output.Length;

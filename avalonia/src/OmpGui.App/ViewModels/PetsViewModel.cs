@@ -110,7 +110,10 @@ public sealed partial class PetsViewModel : ObservableObject
         _loading = true;
         ShowPet = saved?.Show ?? true;
         Size = saved?.Size is "small" ? "small" : "medium";
+        Roam = saved?.Roam is "window" ? "window" : "desktop";
+        // With the desktop roam this is a file from before it existed: PetPerch moves the pet to the same spot on the desktop
         if (saved is { X: { } px, Y: { } py } && double.IsFinite(px) && double.IsFinite(py)) Position = new Point(Math.Clamp(px, 0, 1), Math.Clamp(py, 0, 1));
+        if (IsRoamDesktop && Position is null) DesktopPlace = saved?.Desktop;
         foreach (var c in saved?.Custom ?? []) if (c.Id.Length > 0 && !_custom.Any(x => x.Id == c.Id)) _custom.Add(c);
         RebuildGallery(saved?.Chosen);
         _loading = false;
@@ -125,7 +128,7 @@ public sealed partial class PetsViewModel : ObservableObject
     /// <summary>Show the pet above the message box. On by default: it was asked for, it is how people find it, and at
     /// rest it costs nothing (it falls asleep and stops drawing); one switch in Settings → Pets turns it off.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsOnScreen), nameof(ComposerMargin))]
+    [NotifyPropertyChangedFor(nameof(IsOnScreen), nameof(IsOnDesktop), nameof(ComposerMargin))]
     private bool _showPet;
 
     /// <summary>small | medium.</summary>
@@ -159,26 +162,71 @@ public sealed partial class PetsViewModel : ObservableObject
     partial void OnWindowHeightChanged(double value) => CloseIfHidden();
 
     /// <summary>
-    /// Where the user dragged the pet: its top-left corner as fractions (0–1) of the room the window leaves it (the
-    /// window's size less the pet's), so a resize keeps it in the same place and inside the window. Null: on its perch,
-    /// the message box's top edge.
+    /// Where a dragged pet may go: <c>desktop</c> (the default: anywhere on the user's screens, over other apps, in a
+    /// window of its own) or <c>window</c> (inside the app's window). Its home is the message box either way.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsRoamDesktop), nameof(IsRoamWindow), nameof(PlaceText))]
+    private string _roam = "desktop";
+
+    public bool IsRoamDesktop => Roam == "desktop";
+    public bool IsRoamWindow => !IsRoamDesktop;
+
+    /// <summary>The other choice puts the pet back on the message box: a place kept for one would mean nothing to the other.</summary>
+    partial void OnRoamChanged(string value)
+    {
+        if (_loading) return;
+        Position = null;
+        DesktopPlace = null;
+        Save();
+    }
+
+    [RelayCommand]
+    private void SetRoam(string? roam)
+    {
+        if (roam is "desktop" or "window") Roam = roam;
+    }
+
+    /// <summary>
+    /// Where the user dragged the pet in the window (<see cref="Roam"/> <c>window</c>): its top-left corner as fractions
+    /// (0–1) of the room the window leaves it (the window's size less the pet's), so a resize keeps it in the same place
+    /// and inside the window. Null: on its perch, the message box's top edge.
     /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsRoaming), nameof(IsOnScreen), nameof(ComposerMargin), nameof(PlaceText))]
     [NotifyCanExecuteChangedFor(nameof(ReturnToPerchCommand))]
     private Point? _position;
 
+    /// <summary>Where the user left the pet on the desktop (<see cref="Roam"/> <c>desktop</c>). Null: on its perch.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsRoaming), nameof(IsOnScreen), nameof(IsOnDesktop), nameof(ComposerMargin), nameof(PlaceText))]
+    [NotifyCanExecuteChangedFor(nameof(ReturnToPerchCommand))]
+    private PetDesktopPlace? _desktopPlace;
+
     /// <summary>The user put the pet somewhere else than on the message box.</summary>
-    public bool IsRoaming => Position is not null;
+    public bool IsRoaming => Position is not null || DesktopPlace is not null;
 
-    public string PlaceText => IsRoaming
-        ? "Where you dropped it. Drag it anywhere in the window."
-        : "On the top edge of the message box. Drag it anywhere in the window.";
+    public string PlaceText => (IsRoaming, IsRoamDesktop) switch
+    {
+        (true, true) => "Where you dropped it, over your other apps. Drag it anywhere on your screens.",
+        (true, false) => "Where you dropped it. Drag it anywhere in the window.",
+        (false, true) => "On the top edge of the message box. Drag it anywhere on your screens.",
+        (false, false) => "On the top edge of the message box. Drag it anywhere in the window.",
+    };
 
-    /// <summary>The pet was dropped: <paramref name="fraction"/> as in <see cref="Position"/>.</summary>
+    /// <summary>The pet was dropped in the window: <paramref name="fraction"/> as in <see cref="Position"/>.</summary>
     internal void MoveTo(Point fraction)
     {
         Position = new Point(Math.Clamp(fraction.X, 0, 1), Math.Clamp(fraction.Y, 0, 1));
+        DesktopPlace = null;
+        Save();
+    }
+
+    /// <summary>The pet was dropped on the desktop.</summary>
+    internal void MoveOnDesktop(PetDesktopPlace place)
+    {
+        DesktopPlace = place;
+        Position = null;
         Save();
     }
 
@@ -186,16 +234,24 @@ public sealed partial class PetsViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(IsRoaming))]
     private void ReturnToPerch()
     {
-        if (Position is null) return;
+        if (!IsRoaming) return;
         Position = null;
+        DesktopPlace = null;
         Save();
     }
 
     partial void OnPositionChanged(Point? value) => CloseIfHidden();
 
-    /// <summary>The pet is drawn: switched on, on its perch only in a window tall enough for its band (dragged
-    /// elsewhere it needs no band), and neither the setup screen nor the settings page covers the conversation.</summary>
-    public bool IsOnScreen => ShowPet && (HasRoom || IsRoaming) && !_host.ShowSetupScreen && !_host.IsSettingsOpen;
+    partial void OnDesktopPlaceChanged(PetDesktopPlace? value) => CloseIfHidden();
+
+    /// <summary>The pet is drawn in the window: switched on, not on the desktop, on its perch only in a window tall
+    /// enough for its band (dragged elsewhere it needs no band), and neither the setup screen nor the settings page
+    /// covers the conversation.</summary>
+    public bool IsOnScreen => ShowPet && DesktopPlace is null && (HasRoom || Position is not null) && !_host.ShowSetupScreen && !_host.IsSettingsOpen;
+
+    /// <summary>The pet is on the desktop, in a window of its own (<c>PetWindow</c>): it stays while the settings page
+    /// is open and while the app's window is minimised; only the setup screen (no omp to follow yet) puts it away.</summary>
+    public bool IsOnDesktop => ShowPet && DesktopPlace is not null && !_host.ShowSetupScreen;
 
     /// <summary>
     /// The message box's margin: with the pet on its perch, a band as tall as the pet above the box (its feet on the
@@ -204,10 +260,10 @@ public sealed partial class PetsViewModel : ObservableObject
     /// </summary>
     public Thickness ComposerMargin => ShowPet && HasRoom && !IsRoaming && !_host.ShowSetupScreen ? new Thickness(24, PerchHeight - 1, 24, 16) : new Thickness(24, 6, 24, 16);
 
-    /// <summary>Off screen, the pet says nothing and its message box closes (what was typed in it is kept).</summary>
+    /// <summary>Out of sight, the pet says nothing and its message box closes (what was typed in it is kept).</summary>
     private void CloseIfHidden()
     {
-        if (IsOnScreen) return;
+        if (IsOnScreen || IsOnDesktop) return;
         IsBubbleOpen = false;
         IsChatOpen = false;
     }
@@ -354,7 +410,11 @@ public sealed partial class PetsViewModel : ObservableObject
     private string Say()
     {
         if (Mood == PetMood.Waiting || _host.HasDialog)
-            return _host.CurrentDialog?.IsApproval == true ? "omp needs your approval, just above." : "omp is asking you something, just above.";
+        {
+            // On the desktop the question is in the app's window, not just above the pet
+            var where = IsOnDesktop ? "in its window" : "just above";
+            return _host.CurrentDialog?.IsApproval == true ? $"omp needs your approval, {where}." : $"omp is asking you something, {where}.";
+        }
         if (_host.HasError) return Activity();
         if (Mood == PetMood.Error && _lastFailedTool is { } tool) return $"Oops, {tool} failed. omp is on it.";
         if (_host.IsRunning) return Activity();
@@ -394,7 +454,7 @@ public sealed partial class PetsViewModel : ObservableObject
     /// <summary>A click on the pet: its message box opens, and the pet says what omp is doing (or a word of its own).</summary>
     internal void OpenChat()
     {
-        if (!IsOnScreen) return;
+        if (!IsOnScreen && !IsOnDesktop) return;
         IsChatOpen = true;
         if (!IsBubbleOpen) Talk();
     }
@@ -442,6 +502,7 @@ public sealed partial class PetsViewModel : ObservableObject
                 break;
             case nameof(MainViewModel.ShowSetupScreen):
                 OnPropertyChanged(nameof(IsOnScreen));
+                OnPropertyChanged(nameof(IsOnDesktop));
                 OnPropertyChanged(nameof(ComposerMargin));
                 CloseIfHidden();
                 break;
@@ -511,8 +572,10 @@ public sealed partial class PetsViewModel : ObservableObject
             Chosen = Chosen?.Id ?? DefaultPet,
             Size = Size,
             Custom = _custom.Count > 0 ? [.. _custom] : null,
+            Roam = Roam,
             X = Position?.X,
             Y = Position?.Y,
+            Desktop = DesktopPlace,
         };
         _host.PersistPet(options);
     }

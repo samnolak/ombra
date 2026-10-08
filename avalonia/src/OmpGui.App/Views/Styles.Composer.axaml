@@ -1,23 +1,9 @@
 <!-- The composer (MainWindow's ComposerBox, the row under it, their menus) and the shortcut sheet, on the design
-     system's tokens (Tokens.axaml), as in Styles.axaml. The permission mode colours the box: its focus border, the Send
-     button and the mode pill (Ask: neutral; Accept edits: violet; Bypass: red). -->
+     system's tokens (Tokens.axaml), as in Styles.axaml. The box and Send keep the accent in every permission mode; the
+     mode pill under the box says the mode in its colour (Ask: neutral; Accept edits: violet; Bypass: red). -->
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ctl="using:OmpGui.App.Controls">
-  <Styles.Resources>
-    <ResourceDictionary>
-      <ResourceDictionary.ThemeDictionaries>
-        <!-- Text and icons on a mode colour: white on light's deep violet and red; near black on dark's light ones
-             (white on #AF87FF is under 3:1) -->
-        <ResourceDictionary x:Key="Light">
-          <SolidColorBrush x:Key="GuiTextOnMode" Color="#FFFFFFFF" />
-        </ResourceDictionary>
-        <ResourceDictionary x:Key="Dark">
-          <SolidColorBrush x:Key="GuiTextOnMode" Color="#FF1F1E1D" />
-        </ResourceDictionary>
-      </ResourceDictionary.ThemeDictionaries>
-    </ResourceDictionary>
-  </Styles.Resources>
 
   <!-- ─────────────── The box ─────────────── -->
   <Style Selector="Border#ComposerBox">
@@ -29,12 +15,6 @@
   </Style>
   <Style Selector="Border#ComposerBox:focus-within">
     <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderStrong}" />
-  </Style>
-  <Style Selector="Border#ComposerBox.mode-write:focus-within">
-    <Setter Property="BorderBrush" Value="{DynamicResource GuiModeAcceptEdits}" />
-  </Style>
-  <Style Selector="Border#ComposerBox.mode-yolo:focus-within">
-    <Setter Property="BorderBrush" Value="{DynamicResource GuiModeBypass}" />
   </Style>
   <Style Selector="Border#ComposerBox.dragover">
     <Setter Property="BorderBrush" Value="{DynamicResource GuiFocus}" />
@@ -88,7 +68,7 @@
   </Style>
 
   <!-- ─────────────── Send / Stop ─────────────── -->
-  <!-- A 32 px circle: the accent for Send (the mode's colour in Accept edits and Bypass), inverse for Stop -->
+  <!-- A 32 px circle: the accent for Send in every mode (the mode shows in its pill under the box), inverse for Stop -->
   <Style Selector="Button.send">
     <Setter Property="Width" Value="32" />
     <Setter Property="Height" Value="32" />
@@ -105,17 +85,6 @@
   <Style Selector="Button.send.accent:disabled /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
-  </Style>
-  <Style Selector="Border#ComposerBox.mode-write Button.send.accent:not(:disabled) /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource GuiModeAcceptEdits}" />
-    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnMode}" />
-  </Style>
-  <Style Selector="Border#ComposerBox.mode-yolo Button.send.accent:not(:disabled) /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource GuiModeBypass}" />
-    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnMode}" />
-  </Style>
-  <Style Selector="Border#ComposerBox.mode-write Button.send.accent:pointerover, Border#ComposerBox.mode-yolo Button.send.accent:pointerover">
-    <Setter Property="Opacity" Value="0.88" />
   </Style>
 
   <!-- ─────────────── Permission mode ─────────────── -->

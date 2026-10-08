@@ -1007,11 +1007,6 @@ public sealed partial class ConnectorsViewModel : ObservableObject
     private async Task RestartOmpAsync()
     {
         var where = Feedback.ShowRestart ? Feedback : OptionsFeedback;
-        if (_owner.IsRunning)
-        {
-            where.RestartText = "omp is replying. Restart it once the reply finishes; the change waits until then.";
-            return;
-        }
         where.IsRestarting = true;
         try
         {
@@ -1022,6 +1017,8 @@ public sealed partial class ConnectorsViewModel : ObservableObject
                 where.Notice = "omp restarted and read the connectors again.";
                 await RefreshAsync();
             }
+            // The shown chat is replying: its omp restarts when the reply ends (the other chats' already did, or do then)
+            else where.RestartText = "omp is replying: it restarts and reads the connectors when the reply ends.";
         }
         finally
         {

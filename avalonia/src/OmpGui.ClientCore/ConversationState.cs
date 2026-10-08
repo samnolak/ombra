@@ -40,8 +40,13 @@ public sealed partial class ConversationState
     /// <summary>omp's working directory (the session header's <c>cwd</c>).</summary>
     public string? Cwd { get; set; }
     public string? ThinkingLevel { get; set; }
-    /// <summary>Bumped whenever the transcript is replaced (other session, new session, omp restarted).</summary>
+    /// <summary>Changes whenever the transcript is replaced (other session, new session, omp restarted). Unique across
+    /// every conversation of the app, not only this one: the window shows several omp processes' conversations in turn,
+    /// and a number two of them shared would make one look like the other.</summary>
     public long TranscriptEpoch { get; private set; }
+
+    private static long s_epochs;
+
     public long FramesReceived { get; private set; }
     public long BytesReceived { get; private set; }
     public DateTimeOffset? LastFrameAt { get; private set; }
@@ -173,7 +178,7 @@ public sealed partial class ConversationState
         }
         AwaitingSettle = false;
         LastError = null;
-        TranscriptEpoch++;
+        TranscriptEpoch = Interlocked.Increment(ref s_epochs);
         Touch();
     }
 
@@ -219,9 +224,9 @@ public sealed partial class ConversationState
             if (r.Item is UserItem { Confirmed: false } u) Set(r, u with { Confirmed = true });
     }
 
-    public void AddUserPrompt(string text, int imageCount = 0)
+    public void AddUserPrompt(string text, IReadOnlyList<ImageAttachment>? images = null)
     {
-        Add(new UserItem(0, text, Confirmed: false, imageCount));
+        Add(new UserItem(0, text, Confirmed: false) { Images = images is { Count: > 0 } ? images : [] });
     }
 
     /// <summary>
@@ -244,9 +249,9 @@ public sealed partial class ConversationState
     public IReadOnlyList<QueuedMessage> Queued => _queued;
 
     /// <summary>A steer / follow-up omp accepted while a run was active; shown apart until omp delivers it.</summary>
-    public QueuedMessage Enqueue(QueueKind kind, string text, int imageCount)
+    public QueuedMessage Enqueue(QueueKind kind, string text, IReadOnlyList<ImageAttachment> images)
     {
-        var q = new QueuedMessage(++_queueSeq, kind, text, imageCount);
+        var q = new QueuedMessage(++_queueSeq, kind, text, images);
         _queued.Add(q);
         Touch();
         return q;
@@ -452,7 +457,7 @@ public sealed partial class ConversationState
             switch (Str(m, "role"))
             {
                 case "user":
-                    Add(new UserItem(0, ContentText(m, "text"), Confirmed: true, ContentCount(m, "image")));
+                    Add(new UserItem(0, ContentText(m, "text"), Confirmed: true) { Images = ContentImages(m) });
                     break;
                 case "assistant":
                     var text = ContentText(m, "text");
@@ -536,9 +541,10 @@ public sealed partial class ConversationState
                 var text = ContentText(m, "text");
                 // The first user message after our prompt is its echo (possibly expanded by a template or skill):
                 // it confirms the optimistic row and supplies the text omp actually used. Later ones are new rows.
-                var images = ContentCount(m, "image");
+                // The images the client sent stay: the echo carries the same ones, and they need no decoding.
                 var pending = _rows.FirstOrDefault(r => r.Item is UserItem { Confirmed: false });
-                if (pending?.Item is UserItem u) Set(pending, u with { Text = text, Confirmed = true });
+                if (pending?.Item is UserItem u)
+                    Set(pending, u with { Text = text, Confirmed = true, Images = u.Images.Count > 0 ? u.Images : ContentImages(m) });
                 else
                 {
                     // A queued steer / follow-up being delivered: same text first; otherwise the oldest (omp may have
@@ -548,7 +554,7 @@ public sealed partial class ConversationState
                         ?? (lastUser?.Text == text ? null : _queued.FirstOrDefault());
                     if (q is null && lastUser?.Text == text && lastUser.Confirmed) break; // duplicate echo: nothing new
                     if (q is not null) _queued.Remove(q);
-                    Add(new UserItem(0, text, Confirmed: true, Math.Max(images, q?.ImageCount ?? 0)));
+                    Add(new UserItem(0, text, Confirmed: true) { Images = q is { Images.Count: > 0 } ? q.Images : ContentImages(m) });
                 }
                 break;
             case "assistant":
@@ -936,10 +942,30 @@ public sealed partial class ConversationState
         return sb.ToString();
     }
 
-    private static int ContentCount(JsonElement message, string kind) =>
-        message.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.Array
-            ? c.EnumerateArray().Count(p => Str(p, "type") == kind)
-            : 0;
+    /// <summary>
+    /// The image parts of a message (<c>{type:"image", data, mimeType}</c>, base64). omp sends the bytes in events and
+    /// in get_messages (it resolves the blobs it stores sessions with); a part whose data is not base64 (a stored
+    /// image that is gone, left as its <c>blob:sha256:</c> reference) keeps its place with no bytes.
+    /// </summary>
+    private static IReadOnlyList<ImageAttachment> ContentImages(JsonElement message)
+    {
+        if (!message.TryGetProperty("content", out var c) || c.ValueKind != JsonValueKind.Array) return [];
+        List<ImageAttachment>? images = null;
+        foreach (var part in c.EnumerateArray())
+        {
+            if (Str(part, "type") != "image") continue;
+            images ??= [];
+            images.Add(new ImageAttachment($"image {images.Count + 1}", Str(part, "mimeType") ?? "image/png", Base64Bytes(Str(part, "data"))));
+        }
+        return images ?? (IReadOnlyList<ImageAttachment>)[];
+    }
+
+    private static byte[] Base64Bytes(string? data)
+    {
+        if (string.IsNullOrEmpty(data)) return [];
+        try { return Convert.FromBase64String(data); }
+        catch (FormatException) { return []; }
+    }
 
     private static string ResultText(JsonElement result)
     {

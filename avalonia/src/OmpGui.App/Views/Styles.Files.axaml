@@ -105,7 +105,7 @@
     <Setter Property="TextAlignment" Value="Center" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
   </Style>
-  <!-- Changed by omp in this session: its sparkle, in the brand clay -->
+  <!-- Changed by omp in this session: its sparkle, in the brand yellow -->
   <Style Selector="ctl|Icon.session-mark">
     <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiBrandMark}" />
   </Style>
@@ -175,6 +175,68 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
     <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+
+  <!-- ─────────────── The viewer's Changes (diff review) ─────────────── -->
+  <!-- File | Changes and "Revert file…", under the header -->
+  <Style Selector="Border.viewer-review">
+    <Setter Property="Padding" Value="12,6,8,6" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+  </Style>
+  <Style Selector="Border.viewer-review Button.flat.danger-text">
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="Padding" Value="10,0" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+  </Style>
+  <!-- Hovered, it stays the error colour (the flat hover had turned it into an ordinary button) -->
+  <Style Selector="Border.viewer-review Button.flat.danger-text:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextError}" />
+  </Style>
+  <Style Selector="Border.viewer-confirm">
+    <Setter Property="Margin" Value="12,8" />
+  </Style>
+  <!-- A hunk's header: git's "@@ … @@" quiet on the soft fill, its Revert at the end -->
+  <Style Selector="Grid.diff-hunk">
+    <Setter Property="MinHeight" Value="30" />
+    <Setter Property="Margin" Value="0,8,0,0" />
+    <Setter Property="Background" Value="{DynamicResource GuiFill1OnWindow}" />
+  </Style>
+  <Style Selector="TextBlock.diff-hunk-text">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Margin" Value="12,0,8,0" />
+  </Style>
+  <Style Selector="Button.flat.diff-revert">
+    <Setter Property="MinHeight" Value="24" />
+    <Setter Property="Padding" Value="10,0" />
+    <Setter Property="Margin" Value="0,0,6,0" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+  <Style Selector="Grid.diff-row.review">
+    <Setter Property="MinHeight" Value="20" />
+  </Style>
+  <Style Selector="Grid.diff-row.review TextBlock.diff-number, Grid.diff-row.review TextBlock.diff-sign, Grid.diff-row.review SelectableTextBlock.diff-code">
+    <Setter Property="LineHeight" Value="20" />
+  </Style>
+  <!-- "+" (comment on this line) shows on the row under the pointer, and when the keyboard reaches it -->
+  <Style Selector="Button.icon.diff-comment">
+    <Setter Property="Width" Value="20" />
+    <Setter Property="Height" Value="20" />
+    <Setter Property="Margin" Value="2,0,2,0" />
+    <Setter Property="VerticalAlignment" Value="Top" />
+    <Setter Property="Opacity" Value="0" />
+  </Style>
+  <Style Selector="Grid.diff-row.review:pointerover Button.icon.diff-comment, Button.icon.diff-comment:focus-visible">
+    <Setter Property="Opacity" Value="1" />
+  </Style>
+  <Style Selector="Border.diff-comment-box">
+    <Setter Property="Margin" Value="24,6,12,8" />
+    <Setter Property="Padding" Value="10" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Background" Value="{DynamicResource GuiSurface1}" />
   </Style>
 
   <!-- ─────────────── The project in the header ─────────────── -->

@@ -16,15 +16,14 @@ namespace OmpGui.App.Views;
 /// <summary>View-only concerns: keys, focus, auto-scroll and the close sequence.</summary>
 public sealed partial class MainWindow : Window
 {
-    private const double BottomSlack = 48;
     private const double NarrowWidth = 760;
 
     /// <summary>OS notifications (chosen per platform by the composition root).</summary>
     public OmpGui.App.Platform.INotifier Notifier { get; set; } = new OmpGui.App.Platform.NoNotifier();
-    private ScrollViewer? _scroll;
-    private bool _stickToBottom = true;
-    private DateTime _readerScrolledAt;
-    private bool _closeConfirmed;
+
+    /// <summary>Opens the chat of the last notification while the window was in the background (where activating the
+    /// window is the notification's click).</summary>
+    private Action? _notificationClick;
 
     public MainWindow()
     {
@@ -37,6 +36,8 @@ public sealed partial class MainWindow : Window
         AddHandler(KeyDownEvent, OnDigitForDialog, RoutingStrategies.Tunnel);
         AddHandler(TextInputEvent, (_, e) => { if (_swallowText) { _swallowText = false; e.Handled = true; } }, RoutingStrategies.Tunnel);
         Composer.AddHandler(KeyDownEvent, OnComposerKeyDown, RoutingStrategies.Tunnel);
+        // After the box took the typed text (its own handler marks it handled): "@" and a name open the files menu
+        Composer.AddHandler(TextInputEvent, (_, _) => Vm?.OnComposerTyped(), RoutingStrategies.Bubble, handledEventsToo: true);
         // Every paste into the message box (keys, its context menu) goes through PasteAsync: files and images attach,
         // a long text becomes a chip
         Composer.AddHandler(TextBox.PastingFromClipboardEvent, (_, e) =>
@@ -66,7 +67,7 @@ public sealed partial class MainWindow : Window
         // Ctrl+Tab / Ctrl+Shift+Tab: the next / previous session in the sidebar (before Tab moves the focus)
         AddHandler(KeyDownEvent, (_, e) =>
         {
-            if (e.Key != Key.Tab || (e.KeyModifiers & ~KeyModifiers.Shift) != KeyModifiers.Control || Vm is not { IsSettingsOpen: false } vm) return;
+            if (e.Key != Key.Tab || (e.KeyModifiers & ~KeyModifiers.Shift) != KeyModifiers.Control || Vm is not { IsSettingsOpen: false, IsImageViewerOpen: false } vm) return;
             vm.CycleSession(e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? -1 : 1);
             e.Handled = true;
         }, RoutingStrategies.Tunnel);
@@ -125,6 +126,8 @@ public sealed partial class MainWindow : Window
         {
             ResumeCaret();
             Vm?.SetWindowActive(true);
+            // Where the notification is the flashing window itself, bringing it to the front is its click
+            if (Notifier.ClickActivatesWindow && Interlocked.Exchange(ref _notificationClick, null) is { } open) open();
         };
         Deactivated += (_, _) =>
         {
@@ -142,11 +145,12 @@ public sealed partial class MainWindow : Window
         ComposerToolbar.SizeChanged += (_, _) => QueueComposerFit();
         ComposerFooter.SizeChanged += (_, _) => QueueComposerFit();
         ComposerBox.PropertyChanged += (_, e) => { if (e.Property == BoundsProperty && e.OldValue is Rect o && e.NewValue is Rect n && o.Height != n.Height || e.Property == MarginProperty) FitPanels(); };
-        // A dragged side pane, preview or terminal width is kept for the next time it opens (a splitter between two
+        // A dragged side pane, preview, terminal or Events width is kept for the next time it opens (a splitter between two
         // docked panels resizes both)
         PreviewSplitter.DragCompleted += (_, _) => KeepDraggedWidths();
         SidePaneSplitter.DragCompleted += (_, _) => KeepDraggedWidths();
         TerminalSplitter.DragCompleted += (_, _) => KeepDraggedWidths();
+        DebugSplitter.DragCompleted += (_, _) => KeepDraggedWidths();
     }
 
     private bool _composerFitQueued;
@@ -168,8 +172,8 @@ public sealed partial class MainWindow : Window
 
     private MainViewModel? Vm => DataContext as MainViewModel;
 
-    private const double ChatMinWidth = 420, PreviewMinWidth = 320, SidePaneMinWidth = 280, TerminalMinWidth = 360;
-    private double _previewWidth = 520, _sidePaneWidth = 340, _terminalWidth = 520;
+    private const double ChatMinWidth = 420, PreviewMinWidth = 320, SidePaneMinWidth = 280, TerminalMinWidth = 360, DebugMinWidth = 320;
+    private double _previewWidth = 520, _sidePaneWidth = 340, _terminalWidth = 520, _debugWidth = 420;
 
     private void KeepDraggedWidths()
     {
@@ -177,16 +181,17 @@ public sealed partial class MainWindow : Window
         if (SidePaneSplitter.IsVisible) _sidePaneWidth = col[Grid.GetColumn(SidePanePanel)].ActualWidth;
         if (PreviewSplitter.IsVisible) _previewWidth = col[Grid.GetColumn(PreviewPanel)].ActualWidth;
         if (TerminalSplitter.IsVisible) _terminalWidth = col[Grid.GetColumn(TerminalPanel)].ActualWidth;
+        if (DebugSplitter.IsVisible) _debugWidth = col[Grid.GetColumn(DebugPanel)].ActualWidth;
     }
     /// <summary>Both laid over a narrow conversation: the one opened last is on top.</summary>
     private bool _sidePaneOnTop;
 
     /// <summary>
-    /// Sidebar, conversation, side pane (Views menu), preview and terminal share the window: the side panels count when
-    /// deciding that the sidebar has to give way. The side pane docks first (the narrower), then the preview, then the
-    /// terminal, each beside the conversation; each gets what the conversation (at least 420) leaves, up to its
-    /// preferred width, never less than its minimum. One that does not fit is shown over the conversation until it is
-    /// closed.
+    /// Sidebar, conversation, side pane (Views menu), preview, terminal and the Events panel share the window: the side
+    /// panels count when deciding that the sidebar has to give way. The side pane docks first (the narrower), then the
+    /// preview, the terminal and Events, each beside the conversation; each gets what the conversation (at least 420)
+    /// leaves, up to its preferred width, never less than its minimum. One that does not fit is shown over the
+    /// conversation until it is closed.
     /// </summary>
     private void FitPanels()
     {
@@ -194,18 +199,20 @@ public sealed partial class MainWindow : Window
         var preview = vm.IsPreviewOpen;
         var pane = vm.IsSidePaneOpen;
         var terminal = vm.IsTerminalOpen;
+        var debug = vm.IsDebugVisible;
         // A sidebar dragged wider than its default leaves the conversation as much room before it gives way
         vm.IsNarrow = Bounds.Width < NarrowWidth + Math.Max(0, vm.SidebarWidth - MainViewModel.SidebarDefaultWidth)
-            + (preview ? PreviewMinWidth : 0) + (pane ? SidePaneMinWidth : 0) + (terminal ? TerminalMinWidth : 0) + (vm.IsDebugVisible ? 420 : 0);
+            + (preview ? PreviewMinWidth : 0) + (pane ? SidePaneMinWidth : 0) + (terminal ? TerminalMinWidth : 0) + (debug ? DebugMinWidth : 0);
         FitSidebar(vm);
-        var main = Bounds.Width - (vm.ShowSidebar && !vm.IsNarrow ? vm.SidebarWidth : 0) - (vm.IsDebugVisible ? 421 : 0);
+        var main = Bounds.Width - (vm.ShowSidebar && !vm.IsNarrow ? vm.SidebarWidth : 0);
         var room = main - ChatMinWidth; // for the docked panels and their 1 px splitters
-        // Dock in this order while each still fits at its minimum: side pane, preview, terminal
+        // Dock in this order while each still fits at its minimum: side pane, preview, terminal, Events
         var panels = new (Control Panel, GridSplitter Splitter, bool Open, double Min, double Preferred)[]
         {
             (SidePanePanel, SidePaneSplitter, pane, SidePaneMinWidth, _sidePaneWidth),
             (PreviewPanel, PreviewSplitter, preview, PreviewMinWidth, _previewWidth),
             (TerminalPanel, TerminalSplitter, terminal, TerminalMinWidth, _terminalWidth),
+            (DebugPanel, DebugSplitter, debug, DebugMinWidth, _debugWidth),
         };
         var docked = new bool[panels.Length];
         var reserved = 0.0;
@@ -225,12 +232,12 @@ public sealed partial class MainWindow : Window
             widths[i] = Math.Clamp(panels[i].Preferred, panels[i].Min, Math.Max(panels[i].Min, room - used - 1 - others));
             used += 1 + widths[i];
         }
-        // Columns: the conversation, then each docked panel after its splitter, in slots 2, 4, 6 (a splitter resizes
+        // Columns: the conversation, then each docked panel after its splitter, in slots 2, 4, 6, 8 (a splitter resizes
         // its two neighbours, so docked panels take the slots in order with no empty column between them)
         var col = MainColumn.ColumnDefinitions;
         col[0].Width = new GridLength(1, GridUnitType.Star);
         col[0].MinWidth = docked.Any(d => d) ? ChatMinWidth : 0;
-        for (var c = 2; c <= 6; c += 2) col[c].Width = GridLength.Auto;
+        for (var c = 2; c <= 8; c += 2) col[c].Width = GridLength.Auto;
         var slot = 2;
         for (var i = 0; i < panels.Length; i++)
         {
@@ -249,7 +256,7 @@ public sealed partial class MainWindow : Window
             // Not docked: over the conversation's part (the whole column when nothing is docked), until it is closed
             Grid.SetColumn(panel, 0);
             Grid.SetColumnSpan(panel, 1);
-            panel.ZIndex = !open ? 0 : panel == TerminalPanel ? 12 : panel == SidePanePanel ? (_sidePaneOnTop ? 11 : 9) : (_sidePaneOnTop ? 9 : 10);
+            panel.ZIndex = !open ? 0 : panel == DebugPanel ? 13 : panel == TerminalPanel ? 12 : panel == SidePanePanel ? (_sidePaneOnTop ? 11 : 9) : (_sidePaneOnTop ? 9 : 10);
         }
         // Cards (an approval, setup, todos) never push the composer off a low window: they scroll instead
         // (40 = the message box's margins and some air; its top margin grows by the pet's band when a pet is shown)
@@ -261,7 +268,7 @@ public sealed partial class MainWindow : Window
 
     /// <summary>
     /// A low window has no room for the whole greeting above the centred composer: the logo goes first, then the
-    /// starter prompts; the question itself always stays (nothing is cut off at the top).
+    /// starter prompts; the question itself (and the notices above it) always stays (nothing is cut off at the top).
     /// </summary>
     private void FitEmptyState()
     {
@@ -273,7 +280,7 @@ public sealed partial class MainWindow : Window
         // A hidden control measures as 0: show both before measuring, then decide (layout runs once, afterwards)
         StarterPrompts.IsVisible = true;
         GreetingLogo.IsVisible = true;
-        var greeting = Need(Greeting);
+        var greeting = Need(Greeting) + (GreetingNotices.IsVisible ? Need(GreetingNotices) + EmptyState.Spacing : 0);
         var starters = StarterPrompts.ItemCount > 0 ? Need(StarterPrompts) + EmptyState.Spacing : 0;
         var logo = GreetingLogo.Height + EmptyState.Spacing;
         StarterPrompts.IsVisible = greeting + starters <= room;
@@ -293,6 +300,7 @@ public sealed partial class MainWindow : Window
         // omp cannot start in a new session: the setup screen alone, in the middle (rows 1 and 4 share the height)
         ComposerBox.IsVisible = !vm.ShowSetupScreen;
         ComposerFooter.IsVisible = !vm.ShowSetupScreen;
+        FitEmptyState(); // a notice listed above the greeting takes room from the logo and the starters
     }
 
     /// <summary>
@@ -528,8 +536,8 @@ public sealed partial class MainWindow : Window
             // measured at its full size when placed.
             foreach (var b in new[] { ThinkingBox, AttachButton, ProjectButton, ApprovalButton })
                 if (b.Flyout is Flyout { Content: Control content }) content.DataContext = vm;
-            vm.TranscriptChanged += OnTranscriptChanged;
             vm.ScrollToLatestRequested += FollowLatest;
+            vm.ModelRowsNavigated += FocusModelRow;
             vm.FocusComposerRequested += () => Dispatcher.UIThread.Post(() =>
             {
                 if (!Composer.IsEffectivelyVisible) return;
@@ -544,13 +552,28 @@ public sealed partial class MainWindow : Window
                     QueueHeaderFold();
             };
             vm.OpenUrlRequested += url => _ = Launcher.LaunchUriAsync(new Uri(url));
-            vm.QuitRequested += () => Dispatcher.UIThread.Post(Close);
+            // "Restart now" is the user's own choice to quit (it refuses during a run), and the update script already
+            // waits for this process: asking again could leave it waiting for a quit that comes much later.
+            vm.QuitRequested += () => Dispatcher.UIThread.Post(QuitWithoutAsking);
             vm.PickFolderRequested += PickFolderAsync;
             vm.PickImagesRequested += PickImagesAsync;
             vm.SaveFileRequested += SaveFileAsync;
             vm.CaretToEndRequested += () => Dispatcher.UIThread.Post(() => Composer.CaretIndex = Composer.Text?.Length ?? 0);
             vm.Terminals.CollectionChanged += (_, e) => SyncTerminals(vm);
-            vm.AttentionRequested += (title, message) => Notifier.Notify(title, message, TryGetPlatformHandle()?.Handle ?? 0);
+            vm.AttentionRequested += (title, message, open) =>
+            {
+                void Clicked() => Dispatcher.UIThread.Post(() =>
+                {
+                    if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+                    Activate();
+                    open();
+                });
+                if (!IsActive) _notificationClick = open;
+                Notifier.Notify(title, message, TryGetPlatformHandle()?.Handle ?? 0, Clicked);
+            };
+            // Each chat keeps where its reader was while another one is shown (MainWindow.ChatScroll.cs)
+            vm.SaveScrollRequested += SaveChatScroll;
+            vm.RestoreScrollRequested += RestoreChatScroll;
             vm.CopyTextRequested += text => { if (Clipboard is { } c) _ = c.SetTextAsync(text); };
             // The event list follows the newest entry while it is open (once per UI apply, not per entry).
             vm.DebugLogAppended += () =>
@@ -644,58 +667,7 @@ public sealed partial class MainWindow : Window
         CloseOnChoice(ApprovalButton, () => Vm?.ConfirmYolo == true);
         if (ApprovalButton.Flyout is { } approvals)
             approvals.Closed += (_, _) => { if (Vm is { ConfirmYolo: true } vm) vm.CancelYoloCommand.Execute(null); };
-        _scroll = Transcript.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault();
-        if (_scroll is not null)
-        {
-            // Only the reader unsticks the conversation from its latest message: by the wheel, the scroll bar or the keys.
-            // A resize, a panel opening (terminal, todos, a dialog, the preview) or a row growing moves the viewport
-            // or the extent — sometimes over several layout passes — and the latest message has to stay in view.
-            void Reader(object? _, RoutedEventArgs __) => _readerScrolledAt = DateTime.UtcNow;
-            _scroll.AddHandler(PointerWheelChangedEvent, (s, e) =>
-            {
-                Reader(s, e);
-                // Up is away from the latest message, at once: rows realised on the way up change the extent, and the
-                // anchor must not pull the reader back down before ScrollChanged (a frame later) says where they are.
-                if (e.Delta.Y > 0) _stickToBottom = false;
-            }, RoutingStrategies.Tunnel, handledEventsToo: true);
-            _scroll.AddHandler(PointerPressedEvent, Reader, RoutingStrategies.Tunnel, handledEventsToo: true);
-            _scroll.AddHandler(PointerMovedEvent, (s, e) => { if (e.GetCurrentPoint(_scroll).Properties.IsLeftButtonPressed) Reader(s, e); },
-                RoutingStrategies.Tunnel, handledEventsToo: true);
-            Transcript.AddHandler(KeyDownEvent, Reader, RoutingStrategies.Tunnel, handledEventsToo: true);
-            _scroll.ScrollChanged += (_, _) =>
-            {
-                var atBottom = _scroll.Offset.Y >= _scroll.Extent.Height - _scroll.Viewport.Height - BottomSlack;
-                if (atBottom) { _stickToBottom = true; JumpToLatest.IsVisible = false; return; }
-                // Away from the latest message: the way back is the ↓ button (and the next message sent)
-                if (DateTime.UtcNow - _readerScrolledAt < TimeSpan.FromMilliseconds(600)) _stickToBottom = false;
-                if (_stickToBottom) PinToBottom();
-                else JumpToLatest.IsVisible = true;
-            };
-            // ScrollChanged comes a frame late: re-anchor when the extent or the viewport changes, inside the layout
-            // pass, so no frame is drawn at the old offset (a resize or a panel opening flickered).
-            _scroll.PropertyChanged += (_, e) =>
-            {
-                if (_stickToBottom && (e.Property == ScrollViewer.ExtentProperty || e.Property == ScrollViewer.ViewportProperty)
-                    && DateTime.UtcNow - _readerScrolledAt > TimeSpan.FromMilliseconds(600)) PinToBottom();
-            };
-            // After each layout pass: the rows' height decides where the cards go (FollowTranscript)
-            Transcript.LayoutUpdated += (_, _) => FollowTranscript();
-        }
-    }
-
-    /// <summary>
-    /// The cards under the conversation (an approval, a question, the activity line) follow it, as in Claude Code, instead
-    /// of waiting at the bottom of the page: while the conversation is shorter than its view, they are drawn up to just
-    /// under its last row (a new session's page keeps them where they are).
-    /// </summary>
-    private void FollowTranscript()
-    {
-        if (_scroll is null || Vm is not { } vm || Transcript.ItemsPanelRoot is not { } rows) return;
-        // The rows' own height (the extent is never less than the view) and the list's padding around them
-        var content = rows.DesiredSize.Height + Math.Max(0, _scroll.Extent.Height - rows.Bounds.Height);
-        var gap = vm.IsConversationEmpty ? 0 : Math.Floor(Math.Max(0, _scroll.Viewport.Height - content));
-        if (Math.Abs(((CardsScroll.RenderTransform as TranslateTransform)?.Y ?? 0) + gap) < 0.5) return;
-        CardsScroll.RenderTransform = gap > 0 ? new TranslateTransform(0, -gap) : null;
+        WireTranscriptScroll();
     }
 
     private readonly Dictionary<TerminalViewModel, Iciclecreek.Terminal.TerminalControl> _terminals = [];
@@ -830,8 +802,18 @@ public sealed partial class MainWindow : Window
                 e.Handled = true;
                 break;
             case Key.Down when !inList && vm.Models.Count > 0:
-                ModelList.SelectedIndex = 0;
-                (ModelList.ContainerFromIndex(0) as InputElement ?? ModelList).Focus(NavigationMethod.Directional);
+                FocusModelRow(0);
+                e.Handled = true;
+                break;
+            // A family opens with →, closes with ← (or Esc, before Esc closes the menu)
+            case Key.Right when inList && ModelList.SelectedItem is ModelItemViewModel { IsFamily: true } family:
+                vm.OpenModelFamily(family);
+                e.Handled = true;
+                break;
+            case Key.Left when inList && vm.CloseModelFamily():
+                e.Handled = true;
+                break;
+            case Key.Escape when vm.CloseModelFamily():
                 e.Handled = true;
                 break;
             case Key.Escape:
@@ -840,6 +822,16 @@ public sealed partial class MainWindow : Window
                 e.Handled = true;
                 break;
         }
+    }
+
+    /// <summary>Selects and focuses a row of the model menu once its container exists (after a family opens or closes).</summary>
+    private void FocusModelRow(int index)
+    {
+        if (index < 0 || Vm is not { } vm || index >= vm.Models.Count) return;
+        ModelList.SelectedIndex = index;
+        ModelList.ScrollIntoView(index);
+        Dispatcher.UIThread.Post(() => (ModelList.ContainerFromIndex(index) as InputElement ?? ModelList).Focus(NavigationMethod.Directional),
+            DispatcherPriority.Loaded);
     }
 
     private void OnRenameKeyDown(object? sender, KeyEventArgs e)
@@ -886,7 +878,7 @@ public sealed partial class MainWindow : Window
         if (Vm is not { } vm) return;
         if (vm.IsCommandMenuOpen)
         {
-            // The slash-command menu takes the navigation keys while it is open.
+            // The menu (slash commands, or the "@" files) takes the navigation keys while it is open.
             var handled = e.Key switch
             {
                 Key.Down => vm.MoveSuggestion(1),
@@ -903,6 +895,12 @@ public sealed partial class MainWindow : Window
                 if (e.Key is Key.Down or Key.Up or Key.Tab) ShowSelectedSuggestion(vm);
                 return;
             }
+        }
+        // Esc while an "@" search has not shown its list yet: it closes that, it does not stop omp
+        if (e.Key == Key.Escape && vm.DismissMention())
+        {
+            e.Handled = true;
+            return;
         }
         var command = this.GetPlatformSettings()?.HotkeyConfiguration.CommandModifiers ?? KeyModifiers.Control;
         if (e.Key == Key.Tab && e.KeyModifiers == KeyModifiers.Shift)
@@ -1014,7 +1012,8 @@ public sealed partial class MainWindow : Window
 
     private void OnDigitForDialog(object? sender, KeyEventArgs e)
     {
-        if (Vm?.CurrentDialog is not { } dialog || e.KeyModifiers != KeyModifiers.None) return;
+        // Not while the image viewer holds the keyboard: the card behind it is out of sight
+        if (Vm?.CurrentDialog is not { } dialog || Vm.IsImageViewerOpen || e.KeyModifiers != KeyModifiers.None) return;
         var digit = e.Key is >= Key.D1 and <= Key.D9 ? e.Key - Key.D0 : e.Key is >= Key.NumPad1 and <= Key.NumPad9 ? e.Key - Key.NumPad0 : 0;
         if (digit == 0) return;
         var focused = FocusManager?.GetFocusedElement();
@@ -1027,7 +1026,21 @@ public sealed partial class MainWindow : Window
 
     protected override void OnKeyDown(KeyEventArgs e)
     {
-        // Esc closes what is on top first: the shortcut sheet, then a request, the settings page; only then does it stop omp
+        // Esc closes what is on top first: a right-click menu, the image viewer, the shortcut sheet, then a request, the
+        // settings page; only then does it stop omp
+        if (e.Key == Key.Escape && Controls.ContextMenus.CloseOpen())
+        {
+            e.Handled = true;
+            base.OnKeyDown(e);
+            return;
+        }
+        if (e.Key == Key.Escape && Vm is { IsImageViewerOpen: true } viewer)
+        {
+            viewer.CloseImageViewerCommand.Execute(null);
+            e.Handled = true;
+            base.OnKeyDown(e);
+            return;
+        }
         if (e.Key == Key.Escape && Vm is { IsShortcutsOpen: true } sheet)
         {
             sheet.CloseShortcutsCommand.Execute(null);
@@ -1049,6 +1062,11 @@ public sealed partial class MainWindow : Window
             settingsOpen.CloseSettingsCommand.Execute(null);
             e.Handled = true;
         }
+        else if (e.Key == Key.Escape && EscapeStaysLocal())
+        {
+            // Esc in a search box, the preview, a terminal or the session card means "leave this", never "stop omp"
+            e.Handled = true;
+        }
         else if (e.Key == Key.Escape && Vm is { Phase: OmpGui.ClientCore.SessionPhase.Running } && Vm.AbortCommand.CanExecute(null))
         {
             Vm.AbortCommand.Execute(null);
@@ -1060,77 +1078,5 @@ public sealed partial class MainWindow : Window
             e.Handled = true;
         }
         base.OnKeyDown(e);
-    }
-
-    /// <summary>Streaming and new rows: followed while the reader is at (or within <see cref="BottomSlack"/> of) the
-    /// latest message; a reader who scrolled up stays where they are and gets "Jump to latest".</summary>
-    private void OnTranscriptChanged()
-    {
-        // Checked again when the job runs: a wheel turn up in between means the reader left, and stays left
-        if (_stickToBottom) Dispatcher.UIThread.Post(() => { if (_stickToBottom) ScrollToEnd(); }, DispatcherPriority.Background);
-        else JumpToLatest.IsVisible = true;
-    }
-
-    /// <summary>The user sent a message or opened another conversation: to the latest message, whatever the reader was
-    /// looking at, and following it again.</summary>
-    private void FollowLatest()
-    {
-        _stickToBottom = true;
-        _readerScrolledAt = default; // the reader's last scroll must not hold the anchor off while the new rows come in
-        JumpToLatest.IsVisible = false;
-        Dispatcher.UIThread.Post(ScrollToEnd, DispatcherPriority.Background);
-    }
-
-    private void PinToBottom()
-    {
-        if (_scroll is null) return;
-        var bottom = Math.Max(0, _scroll.Extent.Height - _scroll.Viewport.Height);
-        if (Math.Abs(_scroll.Offset.Y - bottom) > 0.5) _scroll.Offset = new Vector(_scroll.Offset.X, bottom);
-    }
-
-    /// <summary>
-    /// To the very end (posted at Background priority: after the layout of the new rows). The virtualised list only
-    /// estimates the height of rows it has not measured, so the end moves once they are realised: pinned again after the
-    /// next layout pass, and after that by the extent watch in <see cref="OnLoaded"/> while the conversation follows.
-    /// </summary>
-    private void ScrollToEnd()
-    {
-        _stickToBottom = true;
-        JumpToLatest.IsVisible = false;
-        if (Vm is { Rows.Count: > 0 } vm) Transcript.ScrollIntoView(vm.Rows.Count - 1);
-        if (_scroll is not { } scroll) return;
-        scroll.ScrollToEnd();
-        void Settled(object? sender, EventArgs e)
-        {
-            scroll.LayoutUpdated -= Settled;
-            if (_stickToBottom) PinToBottom();
-        }
-        scroll.LayoutUpdated += Settled;
-    }
-
-    /// <summary>Closing stops omp gracefully first (stdin EOF, then tree kill after a grace period).</summary>
-    protected override async void OnClosing(WindowClosingEventArgs e)
-    {
-        if (_closeConfirmed || Vm is not { } vm)
-        {
-            base.OnClosing(e);
-            return;
-        }
-        e.Cancel = true;
-        KillAllTerminals();
-        if (IsEnabled)
-        {
-            IsEnabled = false;
-            Title += " — closing";
-        }
-        try
-        {
-            await vm.DisposeAsync();
-        }
-        finally
-        {
-            _closeConfirmed = true;
-            Close();
-        }
     }
 }

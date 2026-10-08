@@ -26,11 +26,7 @@ public partial class FilesPane : UserControl
         Tree.AddHandler(KeyDownEvent, OnTreeKeyDown, RoutingStrategies.Tunnel);
         Results.AddHandler(KeyDownEvent, OnResultsKeyDown, RoutingStrategies.Tunnel);
         FilterBox.AddHandler(KeyDownEvent, OnFilterKeyDown, RoutingStrategies.Tunnel);
-        // A right click picks the row the menu is for
-        Tree.AddHandler(PointerPressedEvent, (_, e) =>
-        {
-            if (e.GetCurrentPoint(Tree).Properties.IsRightButtonPressed && NodeAt(e.Source) is { } n && _vm is { } vm) vm.SelectedNode = n;
-        }, RoutingStrategies.Tunnel);
+        ViewerHost.AddHandler(KeyDownEvent, OnCommentKeyDown, RoutingStrategies.Tunnel);
     }
 
     protected override void OnDataContextChanged(EventArgs e)
@@ -154,4 +150,23 @@ public partial class FilesPane : UserControl
     private static void FocusSelected(ListBox list) =>
         Dispatcher.UIThread.Post(() => (list.ContainerFromIndex(Math.Max(0, list.SelectedIndex)) as InputElement ?? list).Focus(NavigationMethod.Directional),
             DispatcherPriority.Background);
+
+    /// <summary>
+    /// A line's comment box (Claude Code's diff review): Enter adds the comment to the message, Shift+Enter starts a new
+    /// line, Esc closes the box (and stops there: it never reaches the window, where Esc stops omp).
+    /// </summary>
+    private static void OnCommentKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Source is not TextBox { DataContext: DiffRowViewModel row } box || !box.Classes.Contains("diff-comment-input")) return;
+        if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.None)
+        {
+            e.Handled = true;
+            row.SubmitCommentCommand.Execute(null);
+        }
+        else if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            row.CancelCommentCommand.Execute(null);
+        }
+    }
 }

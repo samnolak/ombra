@@ -74,7 +74,10 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
     /// <summary>From each applied snapshot: the ring, and a refresh of the open popover once a turn ended.</summary>
     internal void Apply(SessionSnapshot s)
     {
-        if (Percent != s.ContextPercent) Percent = s.ContextPercent;
+        // Like Claude: no ring on a new chat. Before the first message omp's percentage is its system prompt and tools
+        // alone (5% of an empty chat read as something already used); it shows once there is a conversation.
+        var percent = s.Items.Any(i => i is not NoticeItem) ? s.ContextPercent : null;
+        if (Percent != percent) Percent = percent;
         if (s.RunsEnded != _runsEnded)
         {
             var first = _runsEnded < 0;

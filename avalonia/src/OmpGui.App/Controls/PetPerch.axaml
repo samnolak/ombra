@@ -1,8 +1,8 @@
-<!-- The pet, its speech bubble and its message box, on a layer over the whole window (only they take the pointer).
-     By default the pet sits on the message box's top edge, at its right end, in a band above the box
-     (PetsViewModel.ComposerMargin) as tall as the pet, so it never covers the conversation, a card or a question. Dragged,
-     it stays where it is dropped (PetsViewModel.Position). Placed in code (PetPerch.Place): the bubble beside the pet at
-     the height of its head, the message box above it (below near the window's top). -->
+<!-- The pet in the app's window, on a layer over the whole window (only the pet, its bubble and its message box take
+     the pointer). By default the pet sits on the message box's top edge, at its right end, in a band above the box
+     (PetsViewModel.ComposerMargin) as tall as the pet, so it never covers the conversation, a card or a question.
+     Dragged, it stays where it is dropped: on the desktop, in a window of its own (PetWindow), or, with Settings → Pets
+     → "Inside the window", in this layer (PetsViewModel.Position). Placed in code (PetPerch.Place, PetStage). -->
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
@@ -10,29 +10,5 @@
              x:Class="OmpGui.App.Controls.PetPerch"
              x:DataType="vm:MainViewModel"
              IsVisible="{Binding Pets.IsOnScreen}">
-  <Canvas x:Name="Stage">
-    <StackPanel x:Name="PetBubble" Orientation="Horizontal" IsVisible="{Binding Pets.IsBubbleOpen}" IsHitTestVisible="False">
-      <Path x:Name="PetBubbleTailLeft" Classes="pet-bubble-tail" Data="M6,0 L0,5 L6,10" Margin="0,9,-1,0" VerticalAlignment="Top" IsVisible="False" />
-      <Border Classes="pet-bubble">
-        <TextBlock x:Name="PetBubbleText" Text="{Binding Pets.BubbleText}" TextTrimming="CharacterEllipsis" MaxWidth="300" />
-      </Border>
-      <Path x:Name="PetBubbleTailRight" Classes="pet-bubble-tail" Data="M0,0 L6,5 L0,10" Margin="-1,9,0,0" VerticalAlignment="Top" />
-    </StackPanel>
-    <Border x:Name="PetChat" Classes="pet-chat" IsVisible="{Binding Pets.IsChatOpen}">
-      <TextBox x:Name="PetChatBox" Classes="sm pet-chat" Text="{Binding Pets.ChatText}" PlaceholderText="{Binding Pets.ChatPlaceholder}"
-               AcceptsReturn="False" TextWrapping="NoWrap" AutomationProperties.Name="Message to omp from your pet">
-        <!-- The card around it is the field, as for the message box -->
-        <TextBox.Resources>
-          <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
-          <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
-          <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
-          <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
-          <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
-        </TextBox.Resources>
-      </TextBox>
-    </Border>
-    <ctl:PetView x:Name="Pet" Classes="perched" Look="{Binding Pets.ChosenLook}" Mood="{Binding Pets.Mood}" PixelScale="{Binding Pets.PixelScale}"
-                 Attention="{Binding Pets.Attention}" ToolTip.Tip="{Binding Pets.PetTip}"
-                 AutomationProperties.Name="{Binding Pets.AccessibleName}" />
-  </Canvas>
+  <ctl:PetStage x:Name="Stage" DataContext="{Binding Pets}" />
 </UserControl>

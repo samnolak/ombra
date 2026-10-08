@@ -11,7 +11,8 @@ namespace OmpGui.App.Services;
 /// <summary>
 /// A zip the user can attach to a bug report: versions, platform, the client settings with every environment value
 /// and API-key argument removed, the omp runtime record and install log, the state of the omp session, event types
-/// with timestamps and the last error. No conversation text, no event contents. Every entry passes through
+/// with timestamps and the last error, and the app's own exceptions (<see cref="Services.ClientLog"/>). No conversation
+/// text, no event contents. Every entry passes through
 /// <see cref="SecretRedactor"/> (known values from the settings + credential patterns; the home folder becomes ~).
 /// </summary>
 public sealed class DiagnosticsBundle
@@ -20,9 +21,11 @@ public sealed class DiagnosticsBundle
     public SessionSnapshot? Session { get; init; }
     public RuntimeInstaller? Installer { get; init; }
     public string? StartupLogPath { get; init; }
+    /// <summary>The app's own errors (unhandled exceptions), both rotated files.</summary>
+    public ClientLog? ClientLog { get; init; }
     public string Home { get; init; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify);
 
-    public static readonly IReadOnlyList<string> Entries = ["about.txt", "settings.json", "runtime.txt", "session.txt", "install.log", "startup.log"];
+    public static readonly IReadOnlyList<string> Entries = ["about.txt", "settings.json", "runtime.txt", "session.txt", "install.log", "startup.log", "client.log"];
 
     public async Task WriteAsync(Stream output, CancellationToken ct = default)
     {
@@ -44,6 +47,7 @@ public sealed class DiagnosticsBundle
         await Add("session.txt", SessionText()).ConfigureAwait(false);
         if (Installer?.FindInstalled() is { } rt) await Add("install.log", ReadTail(Path.Combine(rt.Directory, "install.log"), 200_000)).ConfigureAwait(false);
         if (StartupLogPath is not null) await Add("startup.log", ReadTail(StartupLogPath, 200_000)).ConfigureAwait(false);
+        if (ClientLog is not null) await Add("client.log", ClientLog.ReadTail(400_000) ?? "(no errors logged)").ConfigureAwait(false);
     }
 
     private string About()

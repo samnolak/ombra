@@ -74,7 +74,8 @@ public sealed class ProviderUsageTests
     {
         var e = await OpenAsync(model: Claude);
         var vm = e.Vm;
-        await Until(() => vm.Usage.HasPercent, "context ring");
+        await Send(e, "Look at the parser"); // a new chat has no ring: it shows with the conversation
+        await Until(() => vm.Usage.HasPercent && vm.Phase == SessionPhase.Ready && vm.Rows.OfType<AssistantRowViewModel>().Any(), "context ring");
         Assert.Equal(0, UsageReads(e)); // nothing read before it is looked at
 
         vm.Usage.IsOpen = true;
@@ -130,7 +131,8 @@ public sealed class ProviderUsageTests
         // The session's provider reports nothing: the popover has no plan section (no made-up numbers)
         var e = await OpenAsync();
         var vm = e.Vm;
-        await Until(() => vm.Usage.HasPercent, "context ring");
+        await Send(e, "Look at the parser"); // a new chat has no ring: it shows with the conversation
+        await Until(() => vm.Usage.HasPercent && vm.Phase == SessionPhase.Ready && vm.Rows.OfType<AssistantRowViewModel>().Any(), "context ring");
         vm.Usage.IsOpen = true;
         await Until(() => !vm.Usage.IsLoading && vm.Usage.HasContext && UsageReads(e) == 1, "popover loaded");
         Assert.False(vm.Usage.HasLimits);

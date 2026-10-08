@@ -288,9 +288,12 @@ public sealed partial class TasksViewModel : ObservableObject
         if (_owner is not { CanRunOmpCommands: true, OmpListsJobs: true } owner || _readingJobs) return;
         _readingJobs = true;
         _jobsReadAt = DateTimeOffset.UtcNow;
+        // The chat asked: another one may be shown by the time omp answers, and its jobs are not these
+        var session = owner.Session;
         try
         {
             var r = await owner.RunOmpCommandAsync("/jobs", TimeSpan.FromSeconds(20));
+            if (owner.Session != session) return;
             _jobsReadAt = DateTimeOffset.UtcNow;
             if (!r.Ok)
             {
@@ -306,6 +309,19 @@ public sealed partial class TasksViewModel : ObservableObject
         {
             _readingJobs = false;
         }
+    }
+
+    /// <summary>Another chat is shown: the jobs listed were the other chat's omp's; this one's are read again.</summary>
+    internal void OnSessionShown()
+    {
+        _parsedJobs = null;
+        JobsText = "";
+        HasJobsText = false;
+        JobsError = "";
+        HasJobsError = false;
+        ShowJobs();
+        _readingJobs = false; // a read still under way was for the other chat; its answer is dropped
+        _ = RefreshJobsAsync();
     }
 
     /// <summary>What <c>/jobs</c> printed: rows when it is omp's usual listing, else the text as it is.</summary>

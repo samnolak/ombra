@@ -99,7 +99,8 @@ public sealed class InteractionStatesTests
                 // Released away from it: no click, no flyout
                 w.MouseUp(new Point(w.Bounds.Width - 2, w.Bounds.Height - 2), MouseButton.Left, RawInputModifiers.None);
                 w.MouseMove(new Point(w.Bounds.Width - 2, w.Bounds.Height - 2), RawInputModifiers.None);
-                await Settle(30);
+                // Fluent eases the press feedback back to full size (a 75 ms transition): measured once it has ended
+                await Settle(200);
                 var after = Box(w, b);
                 // Fluent's press feedback scales a button to 98 % about its centre: that is the press, not a jump
                 var scaled = pressed.Width / before.Width;

@@ -36,7 +36,7 @@ public sealed partial class MainViewModel
     /// <summary>The user set their own omp command: installing the pinned runtime would not change what starts.</summary>
     private bool _customCommand;
 
-    private StartProblem StartProblem => CanRecover ? _last?.StartProblem ?? StartProblem.None : StartProblem.None;
+    private StartProblem StartProblem => CanRecover ? _open.Last?.StartProblem ?? StartProblem.None : StartProblem.None;
 
     /// <summary>omp was not found and the client can install the pinned runtime for it.</summary>
     public bool ShowInstallRuntime => StartProblem == StartProblem.NotFound && RuntimeInstaller is { Supported: true } && !_customCommand && !IsInstallingRuntime;
@@ -103,9 +103,10 @@ public sealed partial class MainViewModel
     {
         if (RuntimeInstaller is not { } installer) return;
         var previous = transition ? installer.FindPrevious() : null;
-        if (!transition && Phase is SessionPhase.Running or SessionPhase.Aborting)
+        if (!transition && WorkingSessions().Count > 0)
         {
-            SettingsMessage = "Stop the current run first: installing the runtime restarts omp.";
+            SettingsMessage = IsRunning ? "Stop the current run first: installing the runtime restarts omp."
+                : "omp is working in another chat (marked in the sidebar): installing the runtime restarts omp, so stop that run first.";
             return;
         }
         _ompTransition = previous is not null ? RuntimePack.OmpVersion : null;
@@ -127,20 +128,19 @@ public sealed partial class MainViewModel
         {
             // omp may be running from the install being replaced (Windows keeps running files locked). An earlier
             // pack is another folder: omp keeps working from it meanwhile.
-            if (previous is null && Phase == SessionPhase.Ready) await _session.ForceStopAsync(_installCts.Token);
+            if (previous is null) await ForceStopReadySessionsAsync(_installCts.Token); // MainViewModel.OpenSessions.cs
             await installer.InstallAsync(progress, _installCts.Token);
             RuntimeInstallText = "";
             IsInstallingRuntime = false;
             RefreshRuntimeStatus();
             if (previous is not null)
             {
-                // Never cut a run short: switch once omp is idle.
+                // Never cut a run short: switch once no chat's omp is working.
                 SettingsMessage = $"omp {RuntimePack.OmpVersion} installed. It takes over from omp {previous.Omp} when the current run ends.";
-                while (Phase is SessionPhase.Running or SessionPhase.Aborting) await Task.Delay(500, _cts.Token);
+                while (WorkingSessions().Count > 0) await Task.Delay(500, _cts.Token);
             }
             SettingsMessage = $"omp {RuntimePack.OmpVersion} installed. Starting it…";
-            await _session.RecoverAsync(_cts.Token);
-            Apply(_session.Snapshot());
+            await RestartAllSessionsAsync();
             SettingsMessage = Phase == SessionPhase.Ready ? $"omp {RuntimePack.OmpVersion} installed and running." : "omp is installed but did not start: see the conversation.";
             if (previous is not null && Phase == SessionPhase.Ready)
             {
@@ -173,7 +173,7 @@ public sealed partial class MainViewModel
             RefreshRuntimeStatus();
             OnPropertyChanged(nameof(UpdatePill));
             OnPropertyChanged(nameof(ShowUpdatePill));
-            if (Phase is SessionPhase.Stopped or SessionPhase.Faulted) Apply(_session.Snapshot());
+            if (Phase is SessionPhase.Stopped or SessionPhase.Faulted) Apply(Session.Snapshot());
         }
     }
 

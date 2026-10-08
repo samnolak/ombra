@@ -18,14 +18,17 @@ public partial class MainViewModel
     public PermissionRulesViewModel Permissions => _permissions ??= new PermissionRulesViewModel(this);
 
     /// <summary>The project folder and session a rule given now would be for.</summary>
-    internal (string? Cwd, string? Session) RuleContext => (_last?.Cwd ?? _session.Snapshot().Cwd, _session.RuleSessionKey);
+    internal (string? Cwd, string? Session) RuleContext => (_open.Last?.Cwd ?? Session.Snapshot().Cwd, Session.RuleSessionKey);
 
     private async Task AllowWithRuleAsync(string id, ApprovalRule rule, ApprovalScope scope)
     {
+        var open = _open;
         try
         {
-            await _session.AllowWithRuleAsync(id, rule, scope, _cts.Token);
-            Apply(_session.Snapshot());
+            await open.Controller.AllowWithRuleAsync(id, rule, scope, _cts.Token);
+            ApplyIfShown(open);
+            // The new rule may cover what another chat is waiting for, too
+            foreach (var other in _opens.Values.Where(o => o != open).ToList()) await other.Controller.AllowCoveredPendingAsync();
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested)
         {
@@ -35,10 +38,11 @@ public partial class MainViewModel
 
     private async Task DenyWithFeedbackAsync(string id, string feedback)
     {
+        var open = _open;
         try
         {
-            await _session.DenyWithFeedbackAsync(id, feedback, _cts.Token);
-            Apply(_session.Snapshot());
+            await open.Controller.DenyWithFeedbackAsync(id, feedback, _cts.Token);
+            ApplyIfShown(open);
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested)
         {

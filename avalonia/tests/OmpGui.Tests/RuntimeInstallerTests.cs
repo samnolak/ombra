@@ -190,6 +190,68 @@ public sealed class RuntimeInstallerTests
         Assert.Empty(Entries(root));
     }
 
+    /// <summary>A response body that sends <paramref name="chunk"/> bytes every <paramref name="every"/>, and after
+    /// <paramref name="stallAfter"/> chunks nothing more while the connection stays open.</summary>
+    private sealed class TrickleStream(byte[] body, int chunk, TimeSpan every, int stallAfter = int.MaxValue) : Stream
+    {
+        private int _pos, _reads;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => body.Length;
+        public override long Position { get => _pos; set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException("async only");
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
+        {
+            if (_pos >= body.Length) return 0;
+            await Task.Delay(_reads++ >= stallAfter ? Timeout.InfiniteTimeSpan : every, ct);
+            var n = Math.Min(Math.Min(chunk, buffer.Length), body.Length - _pos);
+            body.AsMemory(_pos, n).CopyTo(buffer);
+            _pos += n;
+            return n;
+        }
+    }
+
+    private sealed class TrickleRegistry(Func<Stream> body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body()) });
+    }
+
+    private static RuntimeInstaller Trickling(string root, byte[] tgz, Func<Stream> body, TimeSpan stall) =>
+        new(new HttpClient(new TrickleRegistry(body)) { Timeout = Timeout.InfiniteTimeSpan }, root, Key, "https://registry.test",
+            new Dictionary<string, BunBuild> { [Key] = new(Key, Integrity(tgz), "bin/bun") })
+        { Run = new FakeBun().Run, StallTimeout = stall };
+
+    [Fact]
+    public async Task A_download_that_stops_sending_fails_as_stalled_and_leaves_nothing()
+    {
+        // Regression (QA audit 12): an open connection that sent nothing more kept the last progress on screen forever,
+        // and --self-test --install-runtime (no Cancel) hung.
+        var root = TestProcesses.TempDir("rt-stall");
+        var tgz = Tarball();
+        var installer = Trickling(root, tgz, () => new TrickleStream(tgz, 16, TimeSpan.Zero, stallAfter: 2), TimeSpan.FromMilliseconds(300));
+        var e = await Assert.ThrowsAsync<TimeoutException>(() => installer.InstallAsync(null, CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Contains("stalled", e.Message);
+        Assert.Empty(Entries(root));
+    }
+
+    [Fact]
+    public async Task A_slow_download_that_keeps_sending_is_not_cut_off()
+    {
+        // The stall timeout is per read, not for the whole download: here it takes several timeouts' worth in total.
+        var root = TestProcesses.TempDir("rt-slow");
+        var tgz = Tarball();
+        var installer = Trickling(root, tgz, () => new TrickleStream(tgz, Math.Max(1, tgz.Length / 8), TimeSpan.FromMilliseconds(100)), TimeSpan.FromMilliseconds(300));
+        var rt = await installer.InstallAsync(null, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.True(File.Exists(rt.Bun));
+    }
+
     [Fact]
     public async Task Reinstalling_replaces_the_install_and_cleans_up_stale_attempts()
     {

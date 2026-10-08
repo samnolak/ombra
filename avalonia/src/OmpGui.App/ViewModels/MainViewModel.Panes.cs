@@ -88,6 +88,8 @@ public partial class MainViewModel
 
     private static string CommandShortcut(string key) => OperatingSystem.IsMacOS() ? "⇧⌘" + key : "Ctrl+Shift+" + key;
 
+    /// <summary>The shown chat's count of ended runs at the last apply (-1 after another chat is shown: its own count
+    /// is no news).</summary>
     private long _paneRunsEnded = -1;
 
     /// <summary>Called from <see cref="Apply"/> for every snapshot: the plan and the background tasks follow it.</summary>
@@ -107,13 +109,13 @@ public partial class MainViewModel
 
     internal async Task<bool> RefreshSubagentsAsync()
     {
-        try { return !IsClosing && await _session.RefreshSubagentsAsync(_cts.Token); }
+        try { return !IsClosing && await Session.RefreshSubagentsAsync(_cts.Token); }
         catch (ObjectDisposedException) { return false; }
     }
 
     internal async Task<(IReadOnlyList<SubagentMessage> Messages, string? Error)> GetSubagentMessagesAsync(string id)
     {
-        try { return IsClosing ? ([], "the window is closing") : await _session.GetSubagentMessagesAsync(id, _cts.Token); }
+        try { return IsClosing ? ([], "the window is closing") : await Session.GetSubagentMessagesAsync(id, _cts.Token); }
         catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException) { return ([], "the window is closing"); }
     }
 }

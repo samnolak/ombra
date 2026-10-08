@@ -9,6 +9,64 @@
              x:DataType="vm:FilesViewModel"
              Background="{DynamicResource GuiWindow}"
              AutomationProperties.Name="Files">
+  <!-- A row's right-click menu, for the tree and the "Go to file" results alike: set on each row (the flyout takes the
+       row's file as its DataContext), so it acts on the row clicked, and empty space under the rows has none -->
+  <UserControl.Resources>
+    <Flyout x:Key="FileMenu" Placement="Pointer" ctl:ChoiceMenu.CloseOnChoice="True">
+      <StackPanel x:DataType="vm:FileNodeViewModel" Width="250" Spacing="2">
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                Command="{Binding $parent[ListBox].((vm:FilesViewModel)DataContext).ActivateCommand}" CommandParameter="{Binding}" AutomationProperties.Name="Open">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconFile}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="Open" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                Command="{Binding $parent[ListBox].((vm:FilesViewModel)DataContext).AddToMessageCommand}" CommandParameter="{Binding}" AutomationProperties.Name="Add to message">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconAt}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="Add to message" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
+        <Border Classes="menu-separator" />
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                Command="{Binding $parent[ListBox].((vm:FilesViewModel)DataContext).OpenInDefaultAppCommand}" CommandParameter="{Binding}" AutomationProperties.Name="Open in default app">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconExternal}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="Open in default app" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                Command="{Binding $parent[ListBox].((vm:FilesViewModel)DataContext).RevealInFileManagerCommand}" CommandParameter="{Binding}"
+                AutomationProperties.Name="{Binding $parent[ListBox].((vm:FilesViewModel)DataContext).RevealLabel}">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconFolder}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="{Binding $parent[ListBox].((vm:FilesViewModel)DataContext).RevealLabel}" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
+        <Border Classes="menu-separator" />
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                Command="{Binding $parent[ListBox].((vm:FilesViewModel)DataContext).CopyPathCommand}" CommandParameter="{Binding}" AutomationProperties.Name="Copy path">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="Copy path" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                Command="{Binding $parent[ListBox].((vm:FilesViewModel)DataContext).CopyRelativePathCommand}" CommandParameter="{Binding}" AutomationProperties.Name="Copy relative path">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="Copy relative path" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
+      </StackPanel>
+    </Flyout>
+  </UserControl.Resources>
+  <UserControl.Styles>
+    <Style Selector="ListBox.file-list ListBoxItem">
+      <Setter Property="ContextFlyout" Value="{StaticResource FileMenu}" />
+    </Style>
+  </UserControl.Styles>
   <Grid x:Name="Layout" RowDefinitions="Auto,Auto,*,Auto,0">
 
     <!-- ── Toolbar, level with the window header ── -->
@@ -87,56 +145,6 @@
             </Grid>
           </DataTemplate>
         </ListBox.ItemTemplate>
-        <ListBox.ContextFlyout>
-          <Flyout Placement="Pointer" ctl:ChoiceMenu.CloseOnChoice="True">
-            <StackPanel Width="250" Spacing="2">
-              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                      Command="{Binding ActivateCommand}" CommandParameter="{Binding SelectedNode}" AutomationProperties.Name="Open">
-                <Grid ColumnDefinitions="Auto,*">
-                  <ctl:Icon Data="{StaticResource IconFile}" Size="16" Margin="0,0,10,0" />
-                  <TextBlock Grid.Column="1" Text="Open" VerticalAlignment="Center" />
-                </Grid>
-              </Button>
-              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                      Command="{Binding AddToMessageCommand}" CommandParameter="{Binding SelectedNode}" AutomationProperties.Name="Add to message">
-                <Grid ColumnDefinitions="Auto,*">
-                  <ctl:Icon Data="{StaticResource IconAt}" Size="16" Margin="0,0,10,0" />
-                  <TextBlock Grid.Column="1" Text="Add to message" VerticalAlignment="Center" />
-                </Grid>
-              </Button>
-              <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="6,4" />
-              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                      Command="{Binding OpenInDefaultAppCommand}" CommandParameter="{Binding SelectedNode}" AutomationProperties.Name="Open in default app">
-                <Grid ColumnDefinitions="Auto,*">
-                  <ctl:Icon Data="{StaticResource IconExternal}" Size="16" Margin="0,0,10,0" />
-                  <TextBlock Grid.Column="1" Text="Open in default app" VerticalAlignment="Center" />
-                </Grid>
-              </Button>
-              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                      Command="{Binding RevealInFileManagerCommand}" CommandParameter="{Binding SelectedNode}" AutomationProperties.Name="{Binding RevealLabel}">
-                <Grid ColumnDefinitions="Auto,*">
-                  <ctl:Icon Data="{StaticResource IconFolder}" Size="16" Margin="0,0,10,0" />
-                  <TextBlock Grid.Column="1" Text="{Binding RevealLabel}" VerticalAlignment="Center" />
-                </Grid>
-              </Button>
-              <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="6,4" />
-              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                      Command="{Binding CopyPathCommand}" CommandParameter="{Binding SelectedNode}" AutomationProperties.Name="Copy path">
-                <Grid ColumnDefinitions="Auto,*">
-                  <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
-                  <TextBlock Grid.Column="1" Text="Copy path" VerticalAlignment="Center" />
-                </Grid>
-              </Button>
-              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                      Command="{Binding CopyRelativePathCommand}" CommandParameter="{Binding SelectedNode}" AutomationProperties.Name="Copy relative path">
-                <Grid ColumnDefinitions="Auto,*">
-                  <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
-                  <TextBlock Grid.Column="1" Text="Copy relative path" VerticalAlignment="Center" />
-                </Grid>
-              </Button>
-            </StackPanel>
-          </Flyout>
-        </ListBox.ContextFlyout>
       </ListBox>
 
       <DockPanel IsVisible="{Binding ShowResults}">
@@ -283,34 +291,120 @@
                 </StackPanel>
               </Grid>
             </Border>
-            <Border DockPanel.Dock="Top" Classes="viewer-notice" IsVisible="{Binding HasNotice}">
+            <!-- A file git sees changed: the file or its Changes since the last commit (Codex's and Claude Code's review),
+                 and there "Revert file…", which asks first -->
+            <Border x:Name="ViewerReviewBar" DockPanel.Dock="Top" Classes="viewer-review" IsVisible="{Binding HasChanges}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <Border Classes="segmented" HorizontalAlignment="Left">
+                  <StackPanel Orientation="Horizontal" Spacing="2">
+                    <Button x:Name="ViewerFileButton" Classes="segment" Classes.selected="{Binding !ShowChanges}" Content="File" Command="{Binding ShowFileCommand}"
+                            ToolTip.Tip="The file as it is now" AutomationProperties.Name="Show the file" />
+                    <Button x:Name="ViewerChangesButton" Classes="segment" Classes.selected="{Binding ShowChanges}" Command="{Binding ShowDiffCommand}"
+                            ToolTip.Tip="What changed since the last commit" AutomationProperties.Name="Show the changes">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="Changes" VerticalAlignment="Center" />
+                        <TextBlock Classes="mono tertiary" Text="{Binding DiffStats}" FontSize="12" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Button>
+                  </StackPanel>
+                </Border>
+                <Button x:Name="RevertFileButton" Grid.Column="2" Classes="flat danger-text" Content="{Binding RevertLabel}" Command="{Binding AskRevertFileCommand}"
+                        IsVisible="{Binding ShowChanges}" IsEnabled="{Binding !IsReverting}"
+                        ToolTip.Tip="Put the whole file back as the last commit has it" AutomationProperties.Name="Revert file" />
+              </Grid>
+            </Border>
+            <Border x:Name="RevertConfirm" DockPanel.Dock="Top" Classes="notice warning viewer-confirm" IsVisible="{Binding IsConfirmingRevert}">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="{Binding RevertQuestion}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" Margin="0,0,12,0" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                  <Button x:Name="ConfirmRevertButton" Classes="danger" Content="{Binding ConfirmRevertLabel}" Command="{Binding ConfirmRevertFileCommand}" IsEnabled="{Binding !IsReverting}" />
+                  <Button Classes="flat" Content="Cancel" Command="{Binding CancelRevertFileCommand}" />
+                </StackPanel>
+              </Grid>
+            </Border>
+            <Border DockPanel.Dock="Top" Classes="viewer-notice">
+              <Border.IsVisible>
+                <MultiBinding Converter="{x:Static BoolConverters.And}">
+                  <Binding Path="HasNotice" />
+                  <Binding Path="!ShowChanges" />
+                </MultiBinding>
+              </Border.IsVisible>
               <TextBlock Classes="tertiary" Text="{Binding Notice}" TextWrapping="Wrap" />
             </Border>
+            <!-- The changes: per hunk its header and Revert, then the lines; "+" at a line's start (on hover or Tab)
+                 writes a comment for omp, Enter adds it to the message as a chip -->
             <Panel>
-              <ctl:CodeView x:Name="Code" Text="{Binding Text}" FileName="{Binding Name}" TargetLine="{Binding TargetLine}" IsVisible="{Binding ShowCode}" />
-              <ScrollViewer IsVisible="{Binding ShowMarkdown}" HorizontalScrollBarVisibility="Disabled">
-                <ctl:MarkdownView Markdown="{Binding MarkdownText}" Margin="16,12,16,24" />
-              </ScrollViewer>
-              <ScrollViewer IsVisible="{Binding ShowImage}" HorizontalScrollBarVisibility="Auto">
-                <Border Classes="image-frame" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="16">
-                  <Image Source="{Binding Image}" Stretch="Uniform" StretchDirection="DownOnly" RenderOptions.BitmapInterpolationMode="HighQuality" />
+              <DockPanel x:Name="DiffPanel" IsVisible="{Binding ShowChanges}">
+                <Border DockPanel.Dock="Top" Classes="viewer-notice" IsVisible="{Binding HasDiffMessage}">
+                  <TextBlock Classes="tertiary" Text="{Binding DiffMessage}" TextWrapping="Wrap" />
                 </Border>
-              </ScrollViewer>
-              <!-- Scrolls in a short viewer (a 360 px window had cut its buttons) -->
-              <ScrollViewer IsVisible="{Binding ShowState}" HorizontalScrollBarVisibility="Disabled" VerticalContentAlignment="Center">
-              <StackPanel Classes="files-state">
-                <Border Classes="files-disc">
-                  <ctl:Icon Data="{StaticResource IconFile}" Size="20" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                </Border>
-                <TextBlock Classes="files-state-title" Text="{Binding StateTitle}" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" />
-                <TextBlock Classes="muted" Text="{Binding StateDetail}" TextWrapping="Wrap" TextAlignment="Center" />
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8" Margin="0,4,0,0">
-                  <Button Content="Show the start" Command="{Binding ShowHeadCommand}" IsVisible="{Binding CanShowHead}" />
-                  <Button Content="Open in default app" Command="{Binding Owner.OpenInDefaultAppCommand}" CommandParameter="{Binding}" IsVisible="{Binding !IsMissing}" />
+                <ScrollViewer x:Name="DiffScroll" HorizontalScrollBarVisibility="Disabled">
+                  <ItemsControl x:Name="DiffList" ItemsSource="{Binding DiffRows}" Margin="0,4,0,12">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate><VirtualizingStackPanel /></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:DiffRowViewModel">
+                        <StackPanel>
+                          <Grid Classes="diff-hunk" ColumnDefinitions="*,Auto" IsVisible="{Binding IsHunk}">
+                            <TextBlock Classes="mono diff-hunk-text" Text="{Binding Text}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" Classes="flat diff-revert" Content="Revert" Command="{Binding Owner.RevertHunkCommand}" CommandParameter="{Binding}"
+                                    IsVisible="{Binding Owner.CanRevertHunks}" IsEnabled="{Binding !Owner.IsReverting}"
+                                    ToolTip.Tip="Put this part back as the last commit has it" AutomationProperties.Name="Revert this hunk" />
+                          </Grid>
+                          <Grid Classes="diff-row review" Classes.added="{Binding IsAdded}" Classes.removed="{Binding IsRemoved}" ColumnDefinitions="24,Auto,18,*"
+                                IsVisible="{Binding IsLine}">
+                            <Button Classes="icon diff-comment" Command="{Binding CommentCommand}" ToolTip.Tip="{Binding CommentTip}" AutomationProperties.Name="{Binding CommentTip}">
+                              <ctl:Icon Data="{StaticResource IconPlus}" Size="12" />
+                            </Button>
+                            <TextBlock Grid.Column="1" Classes="mono diff-number" Text="{Binding NumberText}" MinWidth="32" TextAlignment="Right" Padding="0,0,8,0" VerticalAlignment="Top" />
+                            <TextBlock Grid.Column="2" Classes="mono diff-sign" Text="{Binding Sign}" VerticalAlignment="Top" />
+                            <ctl:DiffLineText Grid.Column="3" Classes="mono diff-code" Line="{Binding Text}" FileName="{Binding Owner.Name}" StartsInBlock="{Binding StartsInBlock}"
+                                              TextWrapping="Wrap" Padding="0,0,12,0" VerticalAlignment="Top" />
+                          </Grid>
+                          <Border Classes="diff-comment-box" IsVisible="{Binding IsCommenting}">
+                            <StackPanel Spacing="8">
+                              <TextBox Classes="diff-comment-input" Text="{Binding CommentText}" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="120"
+                                       PlaceholderText="Comment for omp — Enter adds it to your message" ctl:FocusOnShow.When="{Binding IsCommenting}"
+                                       AutomationProperties.Name="Comment on this line" />
+                              <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                                <Button Classes="flat" Content="Cancel" Command="{Binding CancelCommentCommand}" />
+                                <Button Classes="accent" Content="Add comment" Command="{Binding SubmitCommentCommand}" />
+                              </StackPanel>
+                            </StackPanel>
+                          </Border>
+                        </StackPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </DockPanel>
+              <Panel IsVisible="{Binding !ShowChanges}">
+                <ctl:CodeView x:Name="Code" Text="{Binding Text}" FileName="{Binding Name}" TargetLine="{Binding TargetLine}" IsVisible="{Binding ShowCode}" />
+                <ScrollViewer IsVisible="{Binding ShowMarkdown}" HorizontalScrollBarVisibility="Disabled">
+                  <ctl:MarkdownView Markdown="{Binding MarkdownText}" Margin="16,12,16,24" />
+                </ScrollViewer>
+                <ScrollViewer IsVisible="{Binding ShowImage}" HorizontalScrollBarVisibility="Auto">
+                  <Border Classes="image-frame" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="16">
+                    <Image Source="{Binding Image}" Stretch="Uniform" StretchDirection="DownOnly" RenderOptions.BitmapInterpolationMode="HighQuality" />
+                  </Border>
+                </ScrollViewer>
+                <!-- Scrolls in a short viewer (a 360 px window had cut its buttons) -->
+                <ScrollViewer IsVisible="{Binding ShowState}" HorizontalScrollBarVisibility="Disabled" VerticalContentAlignment="Center">
+                <StackPanel Classes="files-state">
+                  <Border Classes="files-disc">
+                    <ctl:Icon Data="{StaticResource IconFile}" Size="20" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </Border>
+                  <TextBlock Classes="files-state-title" Text="{Binding StateTitle}" HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" />
+                  <TextBlock Classes="muted" Text="{Binding StateDetail}" TextWrapping="Wrap" TextAlignment="Center" />
+                  <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="8" Margin="0,4,0,0">
+                    <Button Content="Show the start" Command="{Binding ShowHeadCommand}" IsVisible="{Binding CanShowHead}" />
+                    <Button Content="Open in default app" Command="{Binding Owner.OpenInDefaultAppCommand}" CommandParameter="{Binding}" IsVisible="{Binding !IsMissing}" />
+                  </StackPanel>
                 </StackPanel>
-              </StackPanel>
-              </ScrollViewer>
-              <TextBlock Classes="muted files-message" Text="Opening…" IsVisible="{Binding IsLoading}" />
+                </ScrollViewer>
+                <TextBlock Classes="muted files-message" Text="Opening…" IsVisible="{Binding IsLoading}" />
+              </Panel>
             </Panel>
           </DockPanel>
         </DataTemplate>

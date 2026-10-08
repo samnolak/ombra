@@ -11,10 +11,10 @@ namespace OmpGui.Tests;
 /// <summary>Attention when the window is in the background: title mark, OS notification, cleared on activation.</summary>
 public sealed class AttentionTests
 {
-    private sealed class RecordingNotifier : INotifier
+    internal sealed class RecordingNotifier : INotifier
     {
-        public readonly List<(string Title, string Message)> Calls = [];
-        public void Notify(string title, string message, nint windowHandle) => Calls.Add((title, message));
+        public readonly List<(string Title, string Message, Action Clicked)> Calls = [];
+        public void Notify(string title, string message, nint windowHandle, Action clicked) => Calls.Add((title, message, clicked));
     }
 
     private static async Task Until(Func<bool> condition, string what, int seconds = 20)
@@ -134,8 +134,7 @@ public sealed class AttentionTests
         w.Close();
     }
 
-    private static SessionSnapshot SnapshotOf(MainViewModel vm) =>
-        ((SessionController)typeof(MainViewModel).GetField("_session", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(vm)!).Snapshot();
+    private static SessionSnapshot SnapshotOf(MainViewModel vm) => vm.Session.Snapshot();
 
     [AvaloniaFact]
     public async Task An_approval_in_the_background_notifies_and_nothing_happens_while_active()
@@ -169,13 +168,38 @@ public sealed class AttentionTests
         // options, so no notification appeared (and "-t …" / "-h …" would have changed its behaviour).
         var args = OmpGui.App.Platform.NotifySendNotifier.Arguments("OMP GUI", "- Fixed the bug");
         Assert.Equal(["--app-name=OMP GUI", "--", "OMP GUI", "- Fixed the bug"], args);
+        // The clickable form ends its options the same way
+        Assert.Equal(["--app-name=OMP GUI", "--action=default=Open", "--wait", "--", "OMP GUI", "- Fixed the bug"],
+            OmpGui.App.Platform.NotifySendNotifier.ActionArguments("OMP GUI", "- Fixed the bug"));
     }
 
     [Fact]
     public void Notifiers_never_throw_when_their_tool_is_missing()
     {
-        new NotifySendNotifier().Notify("t", "m", 0);
-        new OsaScriptNotifier().Notify("t", "\" & do shell script \"x", 0);
-        new TaskbarFlashNotifier().Notify("t", "m", 0);
+        new NotifySendNotifier().Notify("t", "m", 0, () => { });
+        new OsaScriptNotifier().Notify("t", "\" & do shell script \"x", 0, () => { });
+        new TaskbarFlashNotifier().Notify("t", "m", 0, () => { });
+    }
+
+    /// <summary>
+    /// Real-app finding: the frame a reply ended in froze for 50–85 ms when "omp finished" was notified (the window in the
+    /// background): .NET's Process.Start forks the app on macOS, stalling the UI thread on the runtime's locks. The helper
+    /// is started without a fork there (posix_spawn): it still gets its arguments (spaces kept, nothing interpreted) and
+    /// the app's environment, and Detached returns at once.
+    /// </summary>
+    [Fact]
+    public async Task A_detached_helper_gets_its_arguments_and_the_environment()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "the notifiers that start helpers are macOS and Linux ones");
+        var dir = TestProcesses.TempDir("detached");
+        var script = Path.Combine(dir, "helper.sh");
+        var output = Path.Combine(dir, "out.txt");
+        await File.WriteAllTextAsync(script, $"printf '%s|%s|%s' \"$1\" \"$2\" \"$HOME\" > '{output}.tmp' && mv '{output}.tmp' '{output}'\n", TestContext.Current.CancellationToken);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        Run.Detached("sh", [script, "one two", "\" & $(rm -rf x)"]);
+        Assert.True(watch.ElapsedMilliseconds < 50, $"starting the helper took {watch.ElapsedMilliseconds} ms");
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!File.Exists(output) && DateTime.UtcNow < deadline) await Task.Delay(20, TestContext.Current.CancellationToken);
+        Assert.Equal($"one two|\" & $(rm -rf x)|{Environment.GetEnvironmentVariable("HOME")}", await File.ReadAllTextAsync(output, TestContext.Current.CancellationToken));
     }
 }

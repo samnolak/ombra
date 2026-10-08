@@ -1,8 +1,6 @@
 using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input;
-using Avalonia.Interactivity;
 using Avalonia.Threading;
 using OmpGui.App.Pets;
 using OmpGui.App.ViewModels;
@@ -10,57 +8,43 @@ using OmpGui.App.ViewModels;
 namespace OmpGui.App.Controls;
 
 /// <summary>
-/// The pet over the window (DataContext = <see cref="MainViewModel"/>): a layer as big as the window where only the
-/// pet, its speech bubble and its message box take the pointer. The pet sits on <see cref="Anchor"/> (the message box)
-/// until it is dragged; dropped, it stays where it is (as a fraction of the window, saved) and inside the window at any
-/// size; dropped back close to its perch, it sits there again. A click (a press that does not move) opens its message
-/// box, focused, beside it: Enter sends to the conversation, Esc closes it, and the keyboard goes back where it was.
-/// The pet itself never takes focus. It tells the view model its window's height, so a short window gives the pet's
-/// band back to the conversation.
+/// The pet's home in the app's window and the owner of the pet on the desktop (DataContext = <see cref="MainViewModel"/>).
+/// In the window it is a layer as big as the window where only the pet, its speech bubble and its message box
+/// (<see cref="PetStage"/>) take the pointer. The pet sits on <see cref="Anchor"/> (the message box) until it is
+/// dragged. With the desktop roam (the default) the drag lifts it at once into a window of its own
+/// (<see cref="PetWindow"/>) that follows the pointer anywhere on the user's monitors; dropped, it stays there (saved
+/// relative to its monitor) above other apps, also while this window is minimised or another app is in front. With
+/// "Inside the window" it stays in this layer (as a fraction of the window, saved) at any window size. Dropped back
+/// close to its perch, it sits there again. It tells the view model its window's height, so a short window gives the
+/// pet's band back to the conversation.
 /// </summary>
 public sealed partial class PetPerch : UserControl
 {
     public static readonly StyledProperty<Control?> AnchorProperty = AvaloniaProperty.Register<PetPerch, Control?>(nameof(Anchor));
 
-    /// <summary>A press that moves less than this (in either direction) is a click, not a drag.</summary>
-    private const double DragThreshold = 4;
     /// <summary>Dropped this close to its perch, the pet goes back on it.</summary>
     private const double SnapDistance = 16;
-    /// <summary>Between the pet and its message box; between the message box and the window's edges.</summary>
-    private const double ChatGap = 6, ChatEdge = 8;
-    /// <summary>A press on the pet right after its message box lost the keyboard (to that press) closes it, not reopens it.</summary>
-    private static readonly TimeSpan ToggleWindow = TimeSpan.FromMilliseconds(250);
 
     private TopLevel? _top;
     private PetsViewModel? _pets;
-    /// <summary>Where the pet is (its top-left, in this control's coordinates).</summary>
+    /// <summary>Where the pet is in the window (its top-left, in this control's coordinates).</summary>
     private Point _at;
-    /// <summary>Where a left press on the pet started, and where the pet was then.</summary>
-    private Point? _press;
+    /// <summary>Dragged inside the window: where the pet was at the press, and where it is now.</summary>
     private Point _pressPet;
-    /// <summary>Where the pet is while dragged (past <see cref="DragThreshold"/>).</summary>
     private Point? _dragAt;
-    /// <summary>The press was on the pet with its message box open: the click closes it.</summary>
-    private bool _toggleOff;
-    private DateTime _chatLostFocusAt;
-    /// <summary>What had the keyboard when the message box opened: it gets it back when the box closes.</summary>
-    private IInputElement? _returnFocus;
+    /// <summary>The pet on the desktop; made the first time it goes there.</summary>
+    private PetWindow? _window;
+    /// <summary>Dragged on the desktop: where the pet was (desktop pixels) when the drag began.</summary>
+    private PixelPoint? _desktopDrag;
+    private IPetScreens? _screens;
+    private bool _migrating;
 
     public PetPerch()
     {
         InitializeComponent();
-        Pet.PointerPressed += OnPetPressed;
-        Pet.PointerMoved += OnPetMoved;
-        Pet.PointerReleased += OnPetReleased;
-        Pet.PointerCaptureLost += (_, _) => EndPress();
-        PetChatBox.AddHandler(KeyDownEvent, OnChatKeyDown, RoutingStrategies.Tunnel);
-        // Clicking elsewhere closes the message box; what was typed stays for the next time
-        PetChatBox.LostFocus += (_, _) =>
-        {
-            if (_pets is not { IsChatOpen: true } pets) return;
-            _chatLostFocusAt = DateTime.UtcNow;
-            pets.CloseChat();
-        };
+        Stage.DragStarted += OnPerchDragStarted;
+        Stage.Dragged += OnPerchDragged;
+        Stage.Dropped += (_, _) => OnPerchDropped();
         // The message box moves (it grows, the sidebar opens): the perch moves with it
         LayoutUpdated += (_, _) => Place(Bounds.Size);
     }
@@ -68,19 +52,42 @@ public sealed partial class PetPerch : UserControl
     /// <summary>The message box: the pet's perch is its top edge, at its right end.</summary>
     public Control? Anchor { get => GetValue(AnchorProperty); set => SetValue(AnchorProperty, value); }
 
+    /// <summary>The monitors the pet may roam: the window's own screens, or a test's.</summary>
+    internal IPetScreens? Screens
+    {
+        get => _screens;
+        set
+        {
+            if (_screens is not null) _screens.Changed -= OnScreensChanged;
+            _screens = value;
+            if (_screens is not null) _screens.Changed += OnScreensChanged;
+            SyncDesktop();
+        }
+    }
+
+    /// <summary>The pet on the desktop (null until it first goes there).</summary>
+    internal PetWindow? DesktopWindow => _window;
+
+    private IReadOnlyList<PetScreen> AllScreens => _screens?.All ?? [];
+
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
         _top = TopLevel.GetTopLevel(this);
         if (_top is not null) _top.PropertyChanged += OnTopChanged;
+        if (_top is Window w) w.Closed += OnTopClosed;
+        if (_screens is null && _top?.Screens is { } screens) Screens = new AvaloniaPetScreens(screens);
         ReportHeight();
+        SyncDesktop();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
         if (_top is not null) _top.PropertyChanged -= OnTopChanged;
+        if (_top is Window w) w.Closed -= OnTopClosed;
         _top = null;
+        CloseDesktopWindow();
     }
 
     protected override void OnDataContextChanged(EventArgs e)
@@ -89,25 +96,25 @@ public sealed partial class PetPerch : UserControl
         if (_pets is not null) _pets.PropertyChanged -= OnPetsChanged;
         _pets = (DataContext as MainViewModel)?.Pets;
         if (_pets is not null) _pets.PropertyChanged += OnPetsChanged;
+        if (_window is not null) _window.DataContext = _pets;
         ReportHeight();
         InvalidateArrange();
+        SyncDesktop();
     }
 
     private void OnPetsChanged(object? sender, PropertyChangedEventArgs e)
     {
         switch (e.PropertyName)
         {
-            case nameof(PetsViewModel.Position) or nameof(PetsViewModel.PixelScale):
+            case nameof(PetsViewModel.Position):
                 InvalidateArrange();
                 break;
-            case nameof(PetsViewModel.IsChatOpen) when _pets?.IsChatOpen == true:
-                // Shown first, then focused (with the caret after what was typed before)
-                Dispatcher.UIThread.Post(() =>
-                {
-                    if (_pets?.IsChatOpen != true) return;
-                    PetChatBox.Focus();
-                    PetChatBox.CaretIndex = PetChatBox.Text?.Length ?? 0;
-                }, DispatcherPriority.Loaded);
+            case nameof(PetsViewModel.PixelScale):
+                InvalidateArrange();
+                SyncDesktop();
+                break;
+            case nameof(PetsViewModel.IsOnDesktop) or nameof(PetsViewModel.DesktopPlace):
+                SyncDesktop();
                 break;
         }
     }
@@ -115,14 +122,17 @@ public sealed partial class PetPerch : UserControl
     private void OnTopChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
         if (e.Property == TopLevel.ClientSizeProperty) ReportHeight();
+        else if (e.Property == WindowBase.IsActiveProperty) SyncForeground();
     }
+
+    private void OnTopClosed(object? sender, EventArgs e) => CloseDesktopWindow();
 
     private void ReportHeight()
     {
         if (_top is { } top && _pets is { } pets && top.ClientSize.Height > 0) pets.WindowHeight = top.ClientSize.Height;
     }
 
-    // ───────────────────────────── Placing ─────────────────────────────
+    // ───────────────────────────── In the window ─────────────────────────────
 
     // The message box is arranged before this layer (an earlier child of the window's grid): the perch is current here
     protected override Size ArrangeOverride(Size finalSize)
@@ -130,8 +140,6 @@ public sealed partial class PetPerch : UserControl
         Place(finalSize);
         return base.ArrangeOverride(finalSize);
     }
-
-    private static Size PetSize(PetsViewModel pets) => new(PetFrames.Width * pets.PixelScale, PetFrames.Height * pets.PixelScale);
 
     /// <summary>Where the pet's top-left can be: the window less the pet.</summary>
     private static Size Room(Size window, Size pet) => new(Math.Max(0, window.Width - pet.Width), Math.Max(0, window.Height - pet.Height));
@@ -141,110 +149,83 @@ public sealed partial class PetPerch : UserControl
     /// <summary>On the message box: its feet on the box's top edge, its right end <see cref="PetsViewModel.PetInset"/> from the box's.</summary>
     private Point? PerchAt(Size pet) =>
         Anchor is { IsEffectivelyVisible: true } a && a.Bounds.Width > 0
-            ? a.TranslatePoint(new Point(a.Bounds.Width - PetsViewModel.PetInset - pet.Width, 1 - pet.Height), this)
+            ? a.TranslatePoint(PerchOn(a, pet), this)
             : null;
+
+    private static Point PerchOn(Control anchor, Size pet) => new(anchor.Bounds.Width - PetsViewModel.PetInset - pet.Width, 1 - pet.Height);
 
     private void Place(Size size)
     {
         if (_pets is not { } pets || !IsVisible || size.Width <= 0 || size.Height <= 0) return;
-        var pet = PetSize(pets);
+        var pet = PetStage.PetSize(pets);
         var room = Room(size, pet);
         var at = _dragAt
                  ?? (pets.Position is { } f ? new Point(f.X * room.Width, f.Y * room.Height) : (Point?)null)
                  ?? PerchAt(pet)
                  ?? new Point(room.Width - PetsViewModel.PetInset, room.Height);
         _at = Clamp(at, room);
-        Put(Pet, _at);
-        PlaceBubble(pets, size, pet);
-        PlaceChat(size, pet);
-    }
-
-    private static void Put(Control c, Point p)
-    {
-        Canvas.SetLeft(c, p.X);
-        Canvas.SetTop(c, p.Y);
-    }
-
-    /// <summary>The bubble: beside the pet at the height of its head, on its left (right when the left has no room), its tail towards the pet.</summary>
-    private void PlaceBubble(PetsViewModel pets, Size size, Size pet)
-    {
-        if (!PetBubble.IsVisible) return;
-        var b = PetBubble.DesiredSize;
-        var left = _at.X - 2 - b.Width;
-        var right = _at.X + pet.Width + 2;
-        var onLeft = left >= 0 || right + b.Width > size.Width && -left < right + b.Width - size.Width;
-        PetBubbleTailRight.IsVisible = onLeft;
-        PetBubbleTailLeft.IsVisible = !onLeft;
-        var x = Math.Clamp(onLeft ? left : right, 0, Math.Max(0, size.Width - b.Width));
-        var y = Math.Clamp(_at.Y + (pets.IsSmall ? 2 : 8), 0, Math.Max(0, size.Height - b.Height));
-        Put(PetBubble, new Point(x, y));
-    }
-
-    /// <summary>The message box: above the pet (below near the window's top), its right end at the pet's.</summary>
-    private void PlaceChat(Size size, Size pet)
-    {
-        if (!PetChat.IsVisible) return;
-        var c = PetChat.DesiredSize;
-        var x = Math.Clamp(_at.X + pet.Width - c.Width, ChatEdge, Math.Max(ChatEdge, size.Width - ChatEdge - c.Width));
-        var above = _at.Y - ChatGap - c.Height;
-        var y = above >= ChatEdge ? above : Math.Clamp(_at.Y + pet.Height + ChatGap, 0, Math.Max(0, size.Height - c.Height));
-        Put(PetChat, new Point(x, y));
-    }
-
-    // ───────────────────────────── Drag and click ─────────────────────────────
-
-    private void OnPetPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (_pets is not { } pets || !e.GetCurrentPoint(Pet).Properties.IsLeftButtonPressed) return;
-        _press = e.GetPosition(this);
-        _pressPet = _at;
-        _dragAt = null;
-        _toggleOff = pets.IsChatOpen || DateTime.UtcNow - _chatLostFocusAt < ToggleWindow;
-        if (!pets.IsChatOpen && !_toggleOff) _returnFocus = _top?.FocusManager?.GetFocusedElement();
-        e.Pointer.Capture(Pet);
-        e.Handled = true;
-    }
-
-    private void OnPetMoved(object? sender, PointerEventArgs e)
-    {
-        if (_press is not { } press || !ReferenceEquals(e.Pointer.Captured, Pet)) return;
-        var d = e.GetPosition(this) - press;
-        if (_dragAt is null)
+        Stage.Apply(Stage.Plan(_at, new Rect(size)), default);
+        // A settings file from before the desktop roam: the pet goes to the same spot on the desktop once it is placed
+        if (pets is { IsRoamDesktop: true, Position: not null } && _dragAt is null && !_migrating)
         {
-            if (Math.Abs(d.X) < DragThreshold && Math.Abs(d.Y) < DragThreshold) return;
-            Pet.Classes.Set("dragging", true);
-            ToolTip.SetIsOpen(Pet, false);
-            ToolTip.SetServiceEnabled(Pet, false);
+            _migrating = true;
+            Dispatcher.UIThread.Post(MoveToDesktop, DispatcherPriority.Background);
         }
-        _dragAt = _pressPet + d;
+    }
+
+    private void MoveToDesktop()
+    {
+        _migrating = false;
+        if (_pets is not { IsRoamDesktop: true, Position: not null } pets || _top is null || !IsEffectivelyVisible) return;
+        var size = PetStage.PetSize(pets);
+        var at = PetDesktop.Clamp(AllScreens, this.PointToScreen(_at), size);
+        pets.MoveOnDesktop(PetDesktop.Place(AllScreens, at, size));
+    }
+
+    private void OnPerchDragStarted(PetPointer press)
+    {
+        if (_pets is not { } pets) return;
+        if (pets.IsRoamWindow)
+        {
+            _pressPet = _at;
+            return;
+        }
+        // Off the message box onto the desktop: the pet moves into its own window at once, where it is now. This
+        // stage keeps the pointer until the drop, unseen; its message box closes (the keyboard stays in this window).
+        pets.CloseChat();
+        var size = PetStage.PetSize(pets);
+        var at = PetDesktop.Clamp(AllScreens, this.PointToScreen(_at), size);
+        _desktopDrag = at;
+        Stage.Opacity = 0;
+        var window = EnsureDesktopWindow(pets);
+        window.MoveTo(at, AllScreens);
+        if (!window.IsVisible) window.Show();
+        SyncForeground();
+    }
+
+    private void OnPerchDragged(PetPointer press, PetPointer now)
+    {
+        if (_desktopDrag is not null)
+        {
+            DragOnDesktop(press, now);
+            return;
+        }
+        _dragAt = _pressPet + (now.Local - press.Local);
         Place(Bounds.Size);
     }
 
-    private void OnPetReleased(object? sender, PointerReleasedEventArgs e)
+    private void OnPerchDropped()
     {
-        if (_press is null || e.InitialPressMouseButton != MouseButton.Left) return;
-        var clicked = _dragAt is null;
-        EndPress();
-        if (clicked) Click();
-        e.Handled = true;
-    }
-
-    /// <summary>The press is over (released, or the pointer taken away): a drag drops the pet where it is.</summary>
-    private void EndPress()
-    {
-        if (_press is null) return;
-        _press = null;
+        if (_desktopDrag is not null)
+        {
+            DropOnDesktop();
+            return;
+        }
         var drop = _dragAt;
         _dragAt = null;
-        Pet.Classes.Set("dragging", false);
-        ToolTip.SetServiceEnabled(Pet, true);
-        if (drop is { } at && _pets is { } pets) Drop(pets, at);
-    }
-
-    private void Drop(PetsViewModel pets, Point at)
-    {
+        if (drop is not { } at || _pets is not { } pets) return;
         var size = Bounds.Size;
-        var pet = PetSize(pets);
+        var pet = PetStage.PetSize(pets);
         var room = Room(size, pet);
         at = Clamp(at, room);
         // Back on the message box when dropped close to it (and the window has room for its band)
@@ -253,50 +234,94 @@ public sealed partial class PetPerch : UserControl
         else
             pets.MoveTo(new Point(room.Width > 0 ? at.X / room.Width : 0, room.Height > 0 ? at.Y / room.Height : 0));
         Place(size);
-        Pet.Cheer();
+        Stage.Pet.Cheer();
     }
 
-    /// <summary>A click: the message box opens (the pet hops and says what omp is doing), or closes if it was open.</summary>
-    private void Click()
+    // ───────────────────────────── On the desktop ─────────────────────────────
+
+    private PetWindow EnsureDesktopWindow(PetsViewModel pets)
     {
-        if (_pets is not { } pets) return;
-        if (_toggleOff)
+        if (_window is not null) return _window;
+        var window = new PetWindow { DataContext = pets };
+        window.Stage.DragStarted += _ => _desktopDrag = window.At;
+        window.Stage.Dragged += DragOnDesktop;
+        window.Stage.Dropped += (_, _) => DropOnDesktop();
+        window.Activated += (_, _) => SyncForeground();
+        window.Deactivated += (_, _) => SyncForeground();
+        // Closed with the app's window (CloseWithApp): a new one is made if the pet goes out again
+        window.Closed += (_, _) =>
         {
-            pets.CloseChat();
-            RestoreFocus();
+            if (ReferenceEquals(_window, window)) _window = null;
+        };
+        _window = window;
+        return window;
+    }
+
+    /// <summary>Shows the pet on the desktop where the view model says, or puts that window away.</summary>
+    private void SyncDesktop()
+    {
+        if (_desktopDrag is not null || _top is null) return; // the drag moves it; the drop says where it stays
+        if (_pets is not { IsOnDesktop: true, DesktopPlace: { } place } pets)
+        {
+            _window?.Hide();
             return;
         }
-        pets.OpenChat();
-        Pet.Cheer();
+        var window = EnsureDesktopWindow(pets);
+        window.MoveTo(PetDesktop.Resolve(AllScreens, place, PetStage.PetSize(pets)), AllScreens);
+        if (!window.IsVisible) window.Show();
+        SyncForeground();
     }
 
-    // ───────────────────────────── The message box ─────────────────────────────
-
-    private void OnChatKeyDown(object? sender, KeyEventArgs e)
+    /// <summary>The pointer moved: the pet follows it, kept on the monitors' work areas.</summary>
+    private void DragOnDesktop(PetPointer press, PetPointer now)
     {
-        if (_pets is not { } pets) return;
-        if (e.Key == Key.Escape)
-        {
-            e.Handled = true;
-            pets.CloseChat();
-            RestoreFocus();
-        }
-        else if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.None)
-        {
-            e.Handled = true;
-            pets.SendChatCommand.Execute(null);
-            if (pets.IsChatOpen) return; // not sent: the pet says why, the text stays
-            RestoreFocus();
-            Pet.Cheer();
-        }
+        if (_desktopDrag is not { } from || _window is null || _pets is not { } pets) return;
+        var to = new PixelPoint(from.X + now.Screen.X - press.Screen.X, from.Y + now.Screen.Y - press.Screen.Y);
+        _window.MoveTo(PetDesktop.Clamp(AllScreens, to, PetStage.PetSize(pets)), AllScreens);
     }
 
-    private void RestoreFocus()
+    /// <summary>Dropped on the desktop: it stays there (saved), or sits on the message box again when dropped close to it.</summary>
+    private void DropOnDesktop()
     {
-        var to = _returnFocus;
-        _returnFocus = null;
-        if (to is InputElement { IsEffectivelyVisible: true, IsEffectivelyEnabled: true, Focusable: true } el && TopLevel.GetTopLevel(el) == _top
-            && !ReferenceEquals(el, PetChatBox))
-            el.Focus();
+        if (_desktopDrag is null || _window is null || _pets is not { } pets) return;
+        _desktopDrag = null;
+        Stage.Opacity = 1;
+        var at = _window.At;
+        if (NearPerch(pets, at))
+        {
+            pets.ReturnToPerchCommand.Execute(null);
+            SyncDesktop();
+            Stage.Pet.Cheer();
+            return;
+        }
+        pets.MoveOnDesktop(PetDesktop.Place(AllScreens, at, PetStage.PetSize(pets)));
+        SyncDesktop();
+        _window.Stage.Pet.Cheer();
+    }
+
+    /// <summary>The pet's top-left at <paramref name="at"/> on the desktop is close to its perch on the message box (seen, with room for the band).</summary>
+    private bool NearPerch(PetsViewModel pets, PixelPoint at)
+    {
+        if (!pets.HasRoom || _top is not Window { IsVisible: true, WindowState: not WindowState.Minimized } top
+            || Anchor is not { IsEffectivelyVisible: true } anchor || anchor.Bounds.Width <= 0)
+            return false;
+        var perch = anchor.PointToScreen(PerchOn(anchor, PetStage.PetSize(pets)));
+        var snap = SnapDistance * top.DesktopScaling;
+        return Math.Abs(at.X - perch.X) <= snap && Math.Abs(at.Y - perch.Y) <= snap;
+    }
+
+    /// <summary>The desktop pet moves while the app is in front (this window or the pet's own has the keyboard).</summary>
+    private void SyncForeground()
+    {
+        if (_window is null) return;
+        _window.Stage.Pet.InForeground = _top is WindowBase { IsActive: true } || _window.IsActive;
+    }
+
+    private void OnScreensChanged(object? sender, EventArgs e) => SyncDesktop();
+
+    private void CloseDesktopWindow()
+    {
+        _window?.CloseWithApp();
+        _window = null;
     }
 }

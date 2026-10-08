@@ -1,0 +1,69 @@
+<!-- The image viewer (MainViewModel.Images.cs): an image from a message or the message box over the dimmed window.
+     Fitted to the window (never enlarged); a click on it, Space or the zoom button (arrows out: actual size; arrows in:
+     fit) shows it pixel for pixel (scrolling), and back.
+     ←/→ go through the images it was sent with; Esc, × or a click on the dimmed window close it. It holds the keyboard
+     while open (Tab cycles inside it). Styles: Styles.Images.axaml. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Controls.ImageViewer"
+             x:DataType="vm:MainViewModel"
+             KeyboardNavigation.TabNavigation="Cycle"
+             AutomationProperties.Name="Image viewer">
+  <Panel>
+    <Border x:Name="Backdrop" Classes="image-backdrop" />
+    <DockPanel>
+      <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="20,12,12,4">
+        <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+          <TextBlock Text="{Binding ViewerTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+          <TextBlock Classes="tertiary" Text="{Binding ViewerDetail}" FontSize="12" IsVisible="{Binding ViewerDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+          <TextBlock Classes="muted" Text="{Binding ViewerNote}" IsVisible="{Binding HasViewerNote}" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0" />
+          <Button x:Name="PreviousButton" Classes="icon" Command="{Binding PreviousImageCommand}" IsVisible="{Binding HasViewerSiblings}"
+                  ToolTip.Tip="Previous image (←)" AutomationProperties.Name="Previous image">
+            <ctl:Icon Data="{StaticResource IconArrowLeft}" Size="18" />
+          </Button>
+          <Button x:Name="NextButton" Classes="icon" Command="{Binding NextImageCommand}" IsVisible="{Binding HasViewerSiblings}"
+                  ToolTip.Tip="Next image (→)" AutomationProperties.Name="Next image">
+            <ctl:Icon Data="{StaticResource IconArrowRight}" Size="18" />
+          </Button>
+          <Button x:Name="ZoomButton" Classes="icon" Command="{Binding ToggleImageZoomCommand}" IsEnabled="{Binding ViewerImage, Converter={x:Static ObjectConverters.IsNotNull}}"
+                  ToolTip.Tip="{Binding ViewerZoomAction, StringFormat='{}{0} (Space)'}" AutomationProperties.Name="{Binding ViewerZoomAction}">
+            <Panel>
+              <ctl:Icon Data="{StaticResource IconExpand}" Size="17" IsVisible="{Binding !IsViewerActualSize}" />
+              <ctl:Icon Data="{StaticResource IconShrink}" Size="17" IsVisible="{Binding IsViewerActualSize}" />
+            </Panel>
+          </Button>
+          <Button x:Name="CopyImageButton" Classes="icon" IsEnabled="{Binding ViewerImage, Converter={x:Static ObjectConverters.IsNotNull}}"
+                  ToolTip.Tip="Copy image" AutomationProperties.Name="Copy image">
+            <ctl:Icon Data="{StaticResource IconCopy}" Size="17" />
+          </Button>
+          <Button x:Name="OpenExternallyButton" Classes="icon" Command="{Binding OpenImageExternallyCommand}" IsEnabled="{Binding !HasViewerProblem}"
+                  ToolTip.Tip="Open in default app" AutomationProperties.Name="Open in default app">
+            <ctl:Icon Data="{StaticResource IconExternal}" Size="17" />
+          </Button>
+          <Button x:Name="CloseButton" Classes="icon" Command="{Binding CloseImageViewerCommand}"
+                  ToolTip.Tip="Close (Esc)" AutomationProperties.Name="Close image viewer">
+            <ctl:Icon Data="{StaticResource IconClose}" Size="18" />
+          </Button>
+        </StackPanel>
+      </Grid>
+      <Panel Margin="24,8,24,24">
+        <Image x:Name="FitImage" Classes="viewer-image" Source="{Binding ViewerImage}" Stretch="Uniform" StretchDirection="DownOnly"
+               HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !IsViewerActualSize}" />
+        <ScrollViewer x:Name="ActualSizeScroll" IsVisible="{Binding IsViewerActualSize}"
+                      HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+          <Image x:Name="ActualImage" Classes="viewer-image" Source="{Binding ViewerImage}" Stretch="None"
+                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </ScrollViewer>
+        <TextBlock Classes="muted" Text="Opening…" IsVisible="{Binding IsViewerLoading}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        <StackPanel x:Name="ProblemView" IsVisible="{Binding HasViewerProblem}" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center">
+          <ctl:Icon Classes="image-missing" Data="{StaticResource IconImage}" Size="40" HorizontalAlignment="Center" />
+          <TextBlock Classes="muted" Text="{Binding ViewerProblem}" TextWrapping="Wrap" MaxWidth="360" TextAlignment="Center" />
+        </StackPanel>
+      </Panel>
+    </DockPanel>
+  </Panel>
+</UserControl>

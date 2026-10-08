@@ -110,7 +110,9 @@ internal sealed class CodeSurface : Control, ILogicalScrollable
         Focusable = true;
         ClipToBounds = true;
         Cursor = new Cursor(StandardCursorType.Ibeam);
-        ContextFlyout = BuildMenu();
+        ContextFlyout = ContextMenus.Menu(
+            new MenuAction("Copy", "IconCopy", _ => Copy(), () => HasSelection),
+            new MenuAction("Select all", "IconSelect", _ => SelectAll()));
     }
 
     public int LineCount => _lines.Length;
@@ -388,21 +390,5 @@ internal sealed class CodeSurface : Control, ILogicalScrollable
         if (e.KeyModifiers != command) return;
         if (e.Key == Key.C) { Copy(); e.Handled = true; }
         else if (e.Key == Key.A) { SelectAll(); e.Handled = true; }
-    }
-
-    private Flyout BuildMenu()
-    {
-        Button Item(string text, Action act)
-        {
-            var b = new Button { Classes = { "menu-item" }, Content = text, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left };
-            Avalonia.Automation.AutomationProperties.SetName(b, text);
-            b.Click += (_, _) => { act(); (ContextFlyout as Flyout)?.Hide(); };
-            return b;
-        }
-        return new Flyout
-        {
-            Placement = PlacementMode.Pointer,
-            Content = new StackPanel { Width = 180, Spacing = 2, Children = { Item("Copy", Copy), Item("Select all", SelectAll) } },
-        };
     }
 }

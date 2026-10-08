@@ -81,6 +81,12 @@
     <Setter Property="FontWeight" Value="Normal" />
     <Setter Property="FontSize" Value="14" />
   </Style>
+  <!-- The hover fill follows the row, not its button: pin and ⋯ sit over the button as its siblings, so moving onto them
+       took the button's :pointerover (and the fill) away and back. Fill 1's hover step (8 % ink / 9 % ivory, as Claude's
+       rows): fill 1 itself (5 / 6 %) was too faint to see which row the pointer is on. -->
+  <Style Selector="Panel.session-row:pointerover Button.session /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1Hover}" />
+  </Style>
   <!-- The open session: the neutral fill -->
   <Style Selector="Button.session.current">
     <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
@@ -93,19 +99,25 @@
     <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
   </Style>
-  <Style Selector="Panel.session-row StackPanel.session-actions">
+  <!-- Not ":focus-within": a clicked pin or menu keeps focus, which left that row's actions showing next to the hovered
+       row's. Shown on hover, to the keyboard (:focus-visible), and while the row's menu is open. -->
+  <Style Selector="Panel.session-row Button.session-action">
     <Setter Property="Opacity" Value="0" />
     <Setter Property="IsHitTestVisible" Value="False" />
   </Style>
-  <Style Selector="Panel.session-row:pointerover StackPanel.session-actions, Panel.session-row:focus-within StackPanel.session-actions">
+  <Style Selector="Panel.session-row:pointerover Button.session-action, Button.session-action:focus-visible, Button.session-action:flyout-open">
     <Setter Property="Opacity" Value="1" />
     <Setter Property="IsHitTestVisible" Value="True" />
   </Style>
   <Style Selector="Panel.session-meta">
     <Setter Property="MinWidth" Value="20" />
   </Style>
-  <!-- The meta keeps the actions' width while they show, so the title trims before them instead of running under -->
-  <Style Selector="Panel.session-row:pointerover Panel.session-meta, Panel.session-row:focus-within Panel.session-meta">
+  <Style Selector="Panel.session-row">
+    <Setter Property="ctl:SessionRowActions.Track" Value="True" />
+  </Style>
+  <!-- The meta keeps the actions' width while they show, so the title trims before them instead of running under; it
+       hides whenever they show (hover, keyboard focus, open menu: the class follows the last two) -->
+  <Style Selector="Panel.session-row:pointerover Panel.session-meta, Panel.session-row.actions-shown Panel.session-meta">
     <Setter Property="Opacity" Value="0" />
     <Setter Property="MinWidth" Value="48" />
   </Style>
@@ -118,32 +130,37 @@
   <Style Selector="Button.session-action.on">
     <Setter Property="Background" Value="Transparent" />
   </Style>
-  <!-- What omp is doing in a session: working (pulsing), needs your input, a reply you have not seen -->
+  <!-- What omp is doing in a session: working (pulsing), needs your input, a reply you have not seen, stopped by an error -->
   <Style Selector="Ellipse.session-dot">
     <Setter Property="Width" Value="8" />
     <Setter Property="Height" Value="8" />
     <Setter Property="VerticalAlignment" Value="Center" />
     <Setter Property="Fill" Value="{DynamicResource GuiStatusRunning}" />
   </Style>
+  <!-- Pulses while omp works (ctl:Pulse, not a style animation: that would redraw the window every vsync) -->
   <Style Selector="Ellipse.session-dot.running">
-    <Style.Animations>
-      <Animation Duration="0:0:1.1" IterationCount="INFINITE" PlaybackDirection="Alternate" Easing="SineEaseInOut">
-        <KeyFrame Cue="0%"><Setter Property="Opacity" Value="1" /></KeyFrame>
-        <KeyFrame Cue="100%"><Setter Property="Opacity" Value="0.3" /></KeyFrame>
-      </Animation>
-    </Style.Animations>
+    <Setter Property="ctl:Pulse.Low" Value="0.3" />
   </Style>
   <Style Selector="Ellipse.session-dot.waiting">
     <Setter Property="Fill" Value="{DynamicResource GuiStatusWaiting}" />
   </Style>
+  <!-- Unread: the brand yellow with a deep amber ring in light (yellow alone is 2.1:1 on the sidebar, under the 3:1 a
+       graphic needs; a darker yellow would match the waiting dot). Dark needs no ring. -->
   <Style Selector="Ellipse.session-dot.unread">
     <Setter Property="Fill" Value="{DynamicResource GuiStatusUnread}" />
+    <Setter Property="Stroke" Value="{DynamicResource GuiStatusUnreadRing}" />
+    <Setter Property="StrokeThickness" Value="1.5" />
   </Style>
-  <!-- The sidebar's right edge: drag to resize (a hairline in the focus colour while hovered or dragged) -->
-  <Style Selector="Border.sidebar-grip:pointerover, Border.sidebar-grip.dragging">
-    <Setter Property="BorderBrush" Value="{DynamicResource GuiFocus}" />
-    <Setter Property="BorderThickness" Value="0,0,2,0" />
-    <Setter Property="Margin" Value="0,0,-1,0" />
+  <Style Selector="Ellipse.session-dot.error">
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusError}" />
+  </Style>
+  <!-- The sidebar's right edge: drag to resize (a hairline in the focus colour, centred on the edge, while hovered or dragged) -->
+  <Style Selector="Border.sidebar-grip-line">
+    <Setter Property="Width" Value="2" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.sidebar-grip:pointerover Border.sidebar-grip-line, Border.sidebar-grip.dragging Border.sidebar-grip-line">
+    <Setter Property="Background" Value="{DynamicResource GuiFocus}" />
   </Style>
   <Style Selector="Border.sidebar.drawer Border.sidebar-grip">
     <Setter Property="IsVisible" Value="False" />

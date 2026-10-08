@@ -19,7 +19,7 @@ public partial class MainViewModel
             // The pet starts with its defaults; the settings page reports the file's problem when it opens.
         }
         var pets = new PetsViewModel(this, saved);
-        if (_last is { } s) pets.OnSnapshot(s);
+        if (_open.Last is { } s) pets.OnSnapshot(s);
         return pets;
     }
 

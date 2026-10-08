@@ -62,14 +62,29 @@ project yet), so the OS warns on first start:
 - **Sessions** — the sidebar lists omp's sessions of all your projects, grouped by project folder. Sessions are
   ordered by their last message (yours or the agent's), newest first, and groups by their newest session; opening a
   session does not reorder the list. Each row shows how long ago its last message was (*now*, *5m*, *3h*, *2d*, then
-  the date), or a dot while omp is busy there: green and pulsing while it works, blue when it waits for your
-  approval or answer, clay for a reply that came while the window was in the background. **Pinned** sessions are listed on their
+  the date), or a dot for a chat that is open: green and pulsing while omp works in it, amber when it waits for your
+  approval or answer, yellow for a reply you have not seen yet, red when its omp stopped with an error. **Pinned** sessions are listed on their
   own at the top (pins are omp's own, so `/pin` and omp's session picker agree). **Search** filters by title or
-  folder. Click a session to continue it; **New session** (Ctrl/⌘+N) starts a fresh one, and a project's **+** starts
-  one in that project. Ctrl+Tab and Ctrl+Shift+Tab go to the next and previous session. Hover a session for **Pin**
+  folder. Click a session to continue it; the list updates in place as omp writes, so a hover, an open row menu and
+  the scroll position stay put.
+  **Several chats at once**: every chat you open runs its own omp, and it keeps working while you read or write in
+  another one — a chat never waits for another's run, and changing chats never stops one. Coming back to a chat shows
+  it as you left it: the whole reply that came meanwhile, your place in the conversation (or its end, if you were
+  following it), what you had typed and attached in its message box, a card or question it showed. A chat in the
+  background that finishes, asks something or stops with an error gets its dot and a notification (see
+  Notifications); a question waits for you in that chat. Chats in different projects run side by side. Up to
+  **Settings → General → Chats kept running** (4 by default) keep their omp; opening one more closes the idle chat
+  you used longest ago (its omp stops; the chat is still in the list and opens again when you click it). A chat that
+  is working, waiting for you or has something typed in its message box is never closed for that.
+  **New session** (Ctrl/⌘+N) starts a fresh one (in a new omp, while the open chats go on), and a project's **+** starts
+  one in that project. A new chat is listed as soon as it is open — omp saves its file only once the first reply is
+  complete, but the row is there before, so a chat you leave while its first reply streams stays one click away. A
+  session omp cannot open (a damaged file) leaves you where you were, with a card saying why.
+  Ctrl+Tab and Ctrl+Shift+Tab go to the next and previous session. Hover a session for **Pin**
   and **⋯** (or right-click it): **Rename** (opens it and edits its name in the header), **Pin / Unpin**, **Copy path**
   (the session file) and **Delete…**, after a confirmation; deleting the open session works like the session menu's
-  Delete (a new session starts). The folder button at the top of the sidebar **adds a project folder** to the list;
+  Delete (a new session starts), and deleting a chat that works in the background says so and stops its omp first.
+  The folder button at the top of the sidebar **adds a project folder** to the list;
   hover a project's header (or right-click it) to **remove it from the sidebar** (⊖) — only the list changes, the
   folder and its sessions stay on disk, **Undo** brings it back, and so does adding the folder again. Drag the
   sidebar's right edge to make it wider or narrower (220–480 px; double-click the edge for the default); Ctrl/⌘+B
@@ -77,15 +92,17 @@ project yet), so the OS warns on first start:
   title opens the session menu (below).
 - **Models and thinking** — in the message box: the *Thinking effort* chip sets omp's reasoning level (*Off*,
   *Minimal*, *Low*, *Medium*, *High*, *Extra high*, *Max* — each with a line on what it does; only the levels the
-  model accepts; hidden for models that don't reason) and the model chip lists the models omp can use (type to
-  search) with the model options below the list. The model menu opens above the message box, so what you are writing
+  model accepts; hidden for models that don't reason) and the model chip lists the models omp can use, one row per
+  family (*Claude Sonnet*, *Claude Haiku*…) that opens to its versions, newest first (→ opens, ← or Esc goes back);
+  two entries under one name show their ids. Typing searches every model. The model options sit below the list. The
+  model menu opens above the message box, so what you are writing
   stays in view.
 - **Permissions** — the mode chip under the message box says when omp asks before running tools: *Ask permissions*
   (edits and commands ask), *Accept edits* (edits run, commands ask; the default) or *Bypass permissions* (nothing
   asks). The mode colours the chip, the box's border while you type and the Send button: grey, violet, red. Shift+Tab
   in the message box steps through the modes; Bypass always asks for a second confirmation first. Changing the mode
-  restarts omp on the same session: once you stop pressing Shift+Tab, and never in the middle of a run (it waits for
-  the run to end). When omp asks, a card in the conversation says what it wants (*omp wants to run a command*) and
+  restarts omp with it, in every open chat: once you stop pressing Shift+Tab, and never in the middle of a run (a chat
+  that works switches when its run ends; a note says so when that chat is in the background). When omp asks, a card in the conversation says what it wants (*omp wants to run a command*) and
   shows the command or file, with **Allow** / **Deny** (keys 1 / 2 or Alt/⌥+A / Alt/⌥+D; 1–9 pick an answer to a
   question, omp's suggestion carries a *Recommended* badge); Esc closes the card without answering.
   *Don't ask again for …* allows the request and keeps a rule for **This session** (until the app quits), **This
@@ -107,11 +124,24 @@ project yet), so the OS warns on first start:
   **+** opens *Attach images* (up to 3 per message; paste or drag & drop works too, other files are inserted as
   paths), *Commands and skills*, *Connectors*, *Plugins* and *Comment on the page*. Type `/` for commands: ↑/↓ or
   Tab/Shift+Tab choose, Tab or Enter completes, Esc closes; what only omp's terminal runs is listed last, under
-  *Terminal only*. Before the first message the chips under the box also pick the project (a new session in another
-  project, or **Open folder…**).
+  *Terminal only*. Type `@` anywhere in a message for a file or folder of the project: the menu lists the project's
+  top level, then narrows as you type a name (letters in order work, as in **Go to file**; what `.gitignore` excludes
+  is left out); ↑/↓ choose, Tab or Enter puts `@path` in place of what you typed — as the Files pane's **@** button
+  writes it, so omp reads the file with your message. A folder ends in `/` and lists what is in it next. Esc closes
+  the menu only (it stays closed for that word; omp keeps working). Before the first message the chips under the box
+  also pick the project (a new session in another project, or **Open folder…**).
+- **Images** — each attached image shows as a chip with its preview, name and size (× removes it, right-click
+  opens or removes it). The sent message shows the same previews above its text, a queued message small ones, and
+  a session reopened from history shows them again (an image omp no longer has shows an image mark instead).
+  Click a preview to open it in the viewer: the image fits the window; a click on it, Space or **100 %** shows it
+  pixel for pixel (scroll to move around), and back. ←/→ go through the message's images; **Copy** puts the image on
+  the clipboard, **Open in default app** opens it in your image app (from a temporary copy). Esc, × or a click
+  around the image closes it. An image that cannot be read (a corrupt file) shows an image mark and says so; an
+  animated GIF shows its first frame.
 - **New session** — the page asks *What should we work on in ‹project›?*; the project opens the same project menu,
   and the starter prompts under it (*Explain how this project is organized*, *Find a bug and fix it*, *Add tests for
-  the code I changed last*) fill the message box to edit and send. Notices from omp's start do not hide it.
+  the code I changed last*) fill the message box to edit and send. Notices from omp's start (or a session that could
+  not be opened) do not hide it: they are listed above it.
 - **Tool calls** — each is one line, as in Claude Code: a dot (grey and blinking while it runs, green when done, red
   when it failed), the tool's name and what it works on, and how long it took (from a tenth of a second). Under it,
   what it gave: *Read 120 lines*, *Found 12 files*, *Added 2 lines, removed 1 line*, or the first three lines of its
@@ -119,7 +149,15 @@ project yet), so the OS warns on first start:
   whole output; a file change shows as it happens. *Thinking…* counts the seconds while the model thinks, then
   reads *Thought for 4s*; click it for the thoughts.
 - **Keyboard shortcuts** — Ctrl/⌘+/ (or `/hotkeys`) shows them all; Esc closes the sheet.
-- **Stop** — the Stop button or Esc stops the current run; if omp does not stop, the button offers Force stop.
+- **Stop** — the Stop button or Esc stops the current run; if omp does not stop, the button offers Force stop. Esc
+  stops the run only from the message box, the conversation or a button: in the sidebar's search and the Files filter
+  the first Esc clears what you typed (as a Mac search field) and the next one hands the keyboard back to the message
+  box, as Esc in the preview's address does; in a terminal tab or the preview it stays there (vim keeps its Esc).
+- **Closing or quitting while omp works** — closing the window (⌘W, ⌘Q, **Quit** in the tray menu) stops every
+  chat's omp and ends every terminal tab. While a run is going in any chat, omp waits for your answer, or a terminal
+  tab still runs something (a dev server), a card above the message box asks first, naming the chat when it is not
+  the one shown (or how many chats work): **Quit** or **Keep working** (the keyboard starts on Keep working; Esc
+  keeps working too).
 - **Terminal** — Ctrl+` (Ctrl on macOS too), the terminal button in the header (or **⋮ → Terminal**) opens a
   terminal beside the conversation (drag its edge to resize it; in a narrow window it covers the conversation until
   it is hidden), in the project folder, with the keyboard in it: **+ Shell** for a shell, **+ omp TUI** for omp's own
@@ -143,7 +181,16 @@ project yet), so the OS warns on first start:
   manager, or copies its path or relative path. Right-click a row to open it, add it to the message, open it in the
   default app, reveal it or copy its path. A file's path in the conversation (a tool's line, the header of a change)
   opens it here, at the changed line. Keys: Enter or Space opens, → / ← open or close a folder, Esc clears the
-  search.
+  search. A file git sees changed shows **File · Changes +N −M** under its name (opened from **Changed** or **This
+  session** it starts on Changes): what changed since the last commit, part by part (hunks); the first 3,000 lines
+  show, and changes over about 4 MB are not shown at all. **Revert** on a part puts just that part back as the last
+  commit has it (also out of git's staging area; a part that was staged and then edited again is left alone, with the
+  reason). A file new since the last commit (not in git yet, added, or renamed) has no **Revert** on its part, since
+  that would delete it: **Revert file…** puts the whole file back after asking — a new file is deleted, a renamed one
+  gets its old name back (for a file git does not have, the button says **Delete file…**). Neither can be undone.
+  The **+** at the start of a line (hover it, or Tab to it) opens a comment box: Enter adds the comment to the
+  message box as a chip (*app.py:41 — your comment*; × removes it), Shift+Enter starts a new line, Esc closes the
+  box. The comments go with your next message, each with its file, line and the line's text — on their own, too.
 - **Preview** — the 🌐 button in the header (Ctrl/⌘+Shift+B) opens the web app you are building beside the
   conversation, with back, forward, reload, an address box and *open in your browser*. Until a page is open, the
   local addresses that appear in omp's tool output (dev servers it starts) are offered as chips. It uses the system's
@@ -184,19 +231,34 @@ project yet), so the OS warns on first start:
     running, as omp's `/jobs` lists them), read again every few seconds while the pane is open.
 - **Dictation** — the 🎤 button (or Ctrl/⌘+Shift+Space) records and transcribes on this computer. The first use asks before
   downloading the speech model (about 670 MB, verified against pinned hashes).
-- **Notifications** — when the window is in the background and a run ends, omp stops or asks something, the title
-  gets a ● mark and the OS is told: Windows flashes the taskbar button, macOS shows a Notification Center banner,
-  Linux a desktop notification through `notify-send` if it is installed. **Settings → General → Notifications**
-  turns that off.
-- **Menus and tray** — on macOS the app menu has **Settings…** (⌘,) and the menu bar *File* (New Session, Open
-  Folder…) and *View* (Sessions, Terminal, Events). Where the desktop has a tray or menu-bar area, an OMP GUI icon
-  there offers **Show OMP GUI**, **New Session** and **Quit**.
+- **Notifications** — when a run ends, omp stops or asks something in a chat you are not looking at (the window is
+  in the background, or another chat is shown), the OS is told, with the chat's name when it is not the one shown,
+  and the window's title gets a ● mark while the window is in the background: Windows flashes the taskbar button
+  (bringing the window back opens that chat), macOS shows a Notification Center banner, Linux a desktop notification
+  through `notify-send` if it is installed (a click opens that chat). **Settings → General → Notifications** turns
+  that off.
+- **Menus and tray** — on macOS the app menu has **Settings…** (⌘,) and the menu bar *File* (New Session ⌘N, Open
+  Folder… ⌘O), *Edit* (Undo, Redo, Cut, Copy, Paste, Select All, on the text that has the keyboard), *View*
+  (Sessions, Terminal, Events) and *Window* (Minimize ⌘M, Zoom, Close ⌘W). Where the desktop has a tray or menu-bar
+  area, an OMP GUI icon there offers **Show OMP GUI**, **New Session** and **Quit** (which asks first while omp works,
+  as closing the window does).
 - **In the conversation** — **Retry** on a failed reply. Point at a reply's end (*Worked for 12s · 3 tools*) for
   **Copy** (as Markdown); point at one of your messages for **Copy** and **Rewind to here** (a new session from
   before it, the message back in the box, like *Rewind…* in the session menu). The conversation
-  follows a streaming reply while you are at (or near) its end; scroll up to read and it stays put, with a round
-  **↓** button at the bottom right to jump back to the latest message. Sending a message, or opening another
-  session, always goes to the end.
+  follows a streaming reply while you are at its end: the reply grows at the bottom and nothing above it moves.
+  Scroll up (wheel, trackpad, scroll bar or keys) and it stays exactly where you are for as long as the reply goes
+  on, with a round **↓** button at the bottom right to jump back to the latest message; scrolling back down to the
+  end follows the reply again. Rows opening or closing above what you are reading do not move it. Sending a
+  message, or opening another session, always goes to the end. Once you click the conversation's text (the keys
+  are then the conversation's, not the message box's), Page Up / Page Down scroll by a screen, ↑/↓ by a little, Home
+  goes to the top and End to the latest message.
+- **Right-click menus** — right-click (two-finger click, or Control+click on macOS) acts on what is under the
+  pointer, not on what is selected: one of your messages offers **Copy** and **Rewind to here**; a reply **Copy**
+  (the text as it reads), **Copy as Markdown** and, when it failed, **Retry**; a code block **Copy code**; a link
+  **Open link** and **Copy link**; with words selected, the text's own **Copy**. Text fields have **Cut**, **Copy**,
+  **Paste** and **Select all**; the code viewer **Copy** and **Select all**; sessions, projects, files (in the tree
+  and in *Go to file*'s results) and images have the menus described with them. Esc or a click elsewhere closes a
+  menu.
 
 | Shortcut | Action |
 |---|---|
@@ -219,8 +281,9 @@ project yet), so the OS warns on first start:
 | Ctrl+Shift+Space (⇧⌘Space) | dictation (Enter finishes, Esc cancels) |
 | Ctrl+V (⌘V) | paste text, images or files (a long text becomes a chip) |
 | 1 / 2 / 3, Alt+A / Alt+D (⌥A / ⌥D) | allow / deny / deny and say why on an approval card; 1–9 pick an answer |
-| Esc | leave Settings, close the shortcut sheet, the *say why* box, or a question card (when it has the focus), or stop the run |
-| F12 | event log (also *Settings → Diagnostics → RPC events*) |
+| Esc | close the image viewer, leave Settings, close the shortcut sheet, the *say why* box, a question card or the session card (when it has the focus), clear a search box (then leave it), or stop the run (from the message box or the conversation) |
+| ← / →, Space | in the image viewer: previous / next image, actual size / fit |
+| F12 | event log beside the conversation, or over it when the window is too narrow for both (also *Settings → Diagnostics → RPC events*) |
 
 ### Session menu
 
@@ -251,7 +314,8 @@ report on a card above the message box:
 ### Context and usage
 
 The ring with a percentage at the right end of the row under the message box shows how full the model's context
-is; it turns orange from 70 % and red from 85 % (omp compacts the conversation on its own near the end, when
+is, from the first message on (a new chat shows none: before it, omp's few percent are its own system prompt and
+tools); it turns orange from 70 % and red from 85 % (omp compacts the conversation on its own near the end, when
 Auto-compact is on). Click it for the breakdown as bars (the parts omp's `/context` reports, the auto-compact buffer,
 free room), this session's tokens (input, output, cache) and cost (when omp prices the model), **Compact now**,
 **Measure again** and a link to omp's **Usage dashboard** across all sessions. When the model's provider reports plan
@@ -295,8 +359,11 @@ troubleshooting, **Advanced** and **Diagnostics**. In a narrow window the pages 
 scrolls sideways (its faded edge shows there are more). The ones without a section of
 their own below:
 
-- **General** — *Appearance* (System, Light or Dark), *Notifications* (see Daily use) and *Send messages with*
-  (Enter, or Ctrl/⌘+Enter).
+- **General** — *Appearance* (System, Light or Dark), *Notifications* (see Daily use), *Send messages with*
+  (Enter, or Ctrl/⌘+Enter) and *Chats kept running* (2, 4 or 8 omp processes; see Sessions). Settings that make omp
+  restart (the runtime under Advanced, connectors, plugins, workspace settings) restart every open chat's omp: the
+  idle ones at once, a working one when its run ends. The event panel (F12) shows how many omp processes run and the
+  memory they hold.
 - **Permissions** — the *Don't ask again* rules given on approval cards: what each covers, as the rule
   (`bash(npm test:*)`), and where (*This session*, *This project* with its folder, *All projects*), each with
   **Remove** — omp asks again from the next request. Project and always rules are kept in the GUI's settings file
@@ -308,7 +375,9 @@ their own below:
 - **Advanced** — *omp runtime*: which omp the app starts. **Command** empty means the omp the app
   installed, otherwise omp from PATH; *Arguments before omp's own* (one per line; for your own Bun setup the command
   is `bun` with `--no-install` and the path to omp's `cli.ts`); *Profile* (`OMP_PROFILE`); **Save and restart omp**,
-  and **Install omp 18.8.0** or **Reinstall**.
+  and **Install omp 18.8.0** or **Reinstall**. Unlike the rest of Settings, these three fields apply only with Save
+  and restart omp: until then the page says *Unsaved changes* (with **Discard**), and the edits stay when you leave
+  Settings and come back.
 
 ## Connectors (MCP servers)
 
@@ -404,12 +473,23 @@ Send does (a new prompt, or queued for after the run while one goes on), without
 **Esc**, a click on the pet or a click elsewhere closes it (the text stays for next time) and the keyboard goes back
 where it was.
 
-**Drag the pet** (press and move it a few pixels; a press that barely moves is a click) to put it anywhere in the
-window; its speech bubble and message box go with it. It stays where you drop it, inside the window when the window
-is resized, and after a restart; while it is off the message box, the box gives its strip back. Drop it close to its
-place on the message box and it sits there again, or use **Reset position** in Settings → Pets.
+**Drag the pet** (press and move it a few pixels; a press that barely moves is a click) to put it anywhere on your
+screens, like a desktop pet: it lifts off the message box into a small window of its own that floats over every app,
+on any monitor, and stays where you drop it (also after a restart). It keeps clear of the menu bar, the Dock and the
+taskbar, and crosses from one monitor to another where they touch; unplug the monitor it is on and it comes over to
+one that is left (plug it back and it returns). Only the pet itself takes clicks: the screen around it works as
+usual. Out there it stays while the settings page is open and while the app's window is minimised; behind other apps
+it moves only while omp works, asks something or has news, and otherwise rests on a still picture. On macOS it shows
+on every Space and over full-screen apps, and Mission Control leaves it where it is. Clicking or dragging it makes
+the app the active one, as a click on any of its windows does. Its speech bubble and message box open beside it
+there too; while it is off the message box, the box gives its strip back. Drop it close to its place on the message
+box and it sits there again, or use **Reset position** in Settings → Pets.
 
-**Settings → Pets** turns the pet on or off (on by default), sets its size (small 32 px or medium 48 px, the default)
+**Roams: Inside the window** (Settings → Pets) keeps it in the app's window instead: dragged, it stays where you drop
+it inside the window, also when the window is resized. Switching between the two puts the pet back on the message box.
+
+**Settings → Pets** turns the pet on or off (on by default), sets its size (small 32 px or medium 48 px, the default),
+where it roams (the whole desktop, the default, or inside the window)
 and picks one of nine: Pi (omp's own), a cat, an owl, a robot, a slime, a cactus, a ghost, a fox and a turtle.
 **Create pet** makes your own (body, color, accessory, name) with a live preview of every mood; **Customize** renames,
 recolors or dresses the chosen one, deletes one you made, or resets a built-in one. Pets belong to the GUI: they are
@@ -448,9 +528,20 @@ be signed with the release key.) The newest published release is offered, alpha 
 
 **Settings → Diagnostics → Save diagnostics…** writes a zip where you choose: app and OS versions, the GUI
 settings with every environment value and API key removed, the omp runtime record and its install log, omp's
-state and last error, and the names (not the contents) of recent events. Known credential formats are masked
-everywhere and your home folder is shown as `~`. No conversation text is included and nothing is uploaded. The page
-also shows where the settings file is, and *RPC events* (F12) shows the raw events omp sends.
+state and last error, the names (not the contents) of recent events, and the app's own errors (`client.log`).
+Known credential formats are masked everywhere and your home folder is shown as `~`. No conversation text is
+included and nothing is uploaded. The page also shows where the settings file is, and *RPC events* (F12) shows the
+raw events omp sends. When something goes wrong inside the app itself, it carries on and says so once under the
+message box; the details go to `client.log` (on macOS in `~/Library/Logs/OMP GUI`, elsewhere in the local app data
+folder under `OmpGui/logs`; two files of up to 1 MB each).
+
+**When the window lags**, start the app from a terminal with `OMPGUI_PERF=1` — on macOS
+`OMPGUI_PERF=1 "/Applications/OMP GUI.app/Contents/MacOS/OmpGui"`, elsewhere `OMPGUI_PERF=1` before the app's
+executable. The window then shows Avalonia's frame rate and its layout and render times in the top-left corner, and
+the terminal gets a line for every update of the window from omp's state that took 4 ms or more (with the part that
+took the time and how many messages it added or changed), and once a second how many such updates ran and how often
+the expensive work (rebuilding a formatted reply, refreshing the Files pane…) happened. Paste those lines into the bug
+report. Without the variable none of this runs.
 
 ## Where things are kept
 
@@ -459,10 +550,12 @@ also shows where the settings file is, and *RPC events* (F12) shows the raw even
 | GUI settings (`omp-gui.local.json`) | `%APPDATA%\OmpGui` | `~/Library/Application Support/OmpGui` | `~/.config/OmpGui` |
 | Installed omp runtime | `%LOCALAPPDATA%\OmpGui\runtimes` | `~/Library/Application Support/OmpGui/runtimes` | `~/.local/share/OmpGui/runtimes` |
 | Dictation model | `%LOCALAPPDATA%\OmpGui\speech-models` | `~/Library/Application Support/OmpGui/speech-models` | `~/.local/share/OmpGui/speech-models` |
+| The app's own errors (`client.log`) | `%LOCALAPPDATA%\OmpGui\logs` | `~/Library/Logs/OMP GUI` | `~/.local/share/OmpGui/logs` |
 | omp's own data (sessions, sign-in, settings) | omp's folder (`~/.omp`), managed by omp | same | same |
 
 On Linux `XDG_CONFIG_HOME` and `XDG_DATA_HOME` move the GUI's folders. `--config <file>` or `OMPGUI_CONFIG` use
-another settings file; `OMPGUI_RUNTIME_DIR` and `OMPGUI_STT_DIR` move the runtime and the speech model.
+another settings file; `OMPGUI_RUNTIME_DIR`, `OMPGUI_STT_DIR` and `OMPGUI_LOG_DIR` move the runtime, the speech model
+and the error log.
 
 The GUI writes its own settings file (atomically, keeping a `.bak` of a version you edited by hand), the folders
 above, and what you save (update packages, diagnostics). It reads omp's session folder to list sessions. Of omp's

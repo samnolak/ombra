@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using OmpGui.App.Services;
@@ -7,42 +6,56 @@ using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
 
-public sealed partial class AttachmentViewModel(ImageAttachment model, MainViewModel owner) : ObservableObject, IDisposable
+/// <summary>An image in the message box: its preview (a click opens it in the viewer), name and size; × removes it.</summary>
+public sealed partial class AttachmentViewModel : ObservableObject, IDisposable
 {
-    public ImageAttachment Model { get; } = model;
-    public string Name => Model.Name;
-    public string Size => Model.Data.Length >= 1024 ? $"{Model.Data.Length / 1024} KB" : $"{Model.Data.Length} B";
-    public Bitmap? Thumbnail { get; } = Decode(model.Data);
+    private readonly MainViewModel _owner;
 
-    [RelayCommand] private void Remove() => owner.RemoveAttachment(this);
-
-    private static Bitmap? Decode(byte[] data)
+    public AttachmentViewModel(ImageAttachment model, MainViewModel owner)
     {
-        try
-        {
-            using var s = new MemoryStream(data);
-            return Bitmap.DecodeToHeight(s, 48);
-        }
-        catch (Exception e) when (e is ArgumentException or InvalidOperationException or IOException or NotSupportedException)
-        {
-            return null;
-        }
+        _owner = owner;
+        Model = model;
+        // ←/→ in the viewer go through the images in the box now
+        Preview = new ImagePreview(model, () => [.. owner.Attachments.Select(a => a.Model)]);
     }
 
-    public void Dispose() => Thumbnail?.Dispose();
+    public ImageAttachment Model { get; }
+    public ImagePreview Preview { get; }
+    public string Name => Model.Name;
+    public string Size => Model.Data.Length >= 1024 ? $"{Model.Data.Length / 1024} KB" : $"{Model.Data.Length} B";
+
+    [RelayCommand] private void Remove() => _owner.RemoveAttachment(this);
+
+    public void Dispose() => Preview.Dispose();
 }
 
 /// <summary>A message sent while omp works, until omp delivers it: × withdraws it, ↑ in an empty box edits it.</summary>
-public sealed partial class QueuedItemViewModel(QueuedMessage model, MainViewModel owner) : ObservableObject
+public sealed partial class QueuedItemViewModel : ObservableObject, IDisposable
 {
-    public QueuedMessage Model { get; } = model;
+    private readonly MainViewModel _owner;
+
+    public QueuedItemViewModel(QueuedMessage model, MainViewModel owner)
+    {
+        _owner = owner;
+        Model = model;
+        Previews = [.. model.Images.Select(i => new ImagePreview(i, () => model.Images))];
+    }
+
+    public QueuedMessage Model { get; }
+    public IReadOnlyList<ImagePreview> Previews { get; }
+    public bool HasImages => Previews.Count > 0;
     public string Text => Model.Text;
     public string Kind => Model.Kind == QueueKind.Steer ? "Steer" : "Queued";
     public string Tooltip => Model.Kind == QueueKind.Steer
         ? "omp reads this at its next step. ↑ in the empty message box edits it."
         : "Sent when omp finishes its current work. ↑ in the empty message box edits it.";
 
-    [RelayCommand] private Task Remove() => owner.WithdrawQueuedAsync(this, edit: false);
+    [RelayCommand] private Task Remove() => _owner.WithdrawQueuedAsync(this, edit: false);
+
+    public void Dispose()
+    {
+        foreach (var p in Previews) p.Dispose();
+    }
 }
 
 /// <summary>A long paste, kept out of the message box as a chip and sent in full with the message.</summary>
@@ -108,9 +121,10 @@ public static class ApprovalModeIcons
 {
     public static readonly Avalonia.Data.Converters.IValueConverter IconConverter =
         new Avalonia.Data.Converters.FuncValueConverter<string?, object?>(mode =>
-            Avalonia.Application.Current is { } app
-            && app.TryGetResource(mode switch { "write" => "IconPencil", "yolo" => "IconAlert", _ => "IconShield" }, app.ActualThemeVariant, out var icon)
-                ? icon : null);
+            Avalonia.Application.Current is { } app && app.TryGetResource(IconKey(mode), app.ActualThemeVariant, out var icon) ? icon : null);
+
+    /// <summary>The icon resource of a mode (a session card names its icon by key).</summary>
+    public static string IconKey(string? mode) => mode switch { "write" => "IconPencil", "yolo" => "IconAlert", _ => "IconShield" };
 }
 
 /// <summary>Composer: attachments, long pastes, file references, messages while omp works, the permission mode
@@ -130,7 +144,7 @@ public sealed partial class MainViewModel
     public bool HasPastedTexts => PastedTexts.Count > 0;
     public bool HasQueued => QueuedMessages.Count > 0;
     public bool CanQueue => IsRunning && Phase == SessionPhase.Running && HasContent;
-    private bool HasContent => !string.IsNullOrWhiteSpace(ComposerText) || Attachments.Count > 0 || PastedTexts.Count > 0 || Preview.HasAnnotations;
+    private bool HasContent => !string.IsNullOrWhiteSpace(ComposerText) || Attachments.Count > 0 || PastedTexts.Count > 0 || Preview.HasAnnotations || CodeComments.Count > 0;
 
     /// <summary>A paste longer than this (characters) or than <see cref="LongPasteLines"/> lines becomes a chip.</summary>
     public const int LongPasteChars = 800;
@@ -278,16 +292,15 @@ public sealed partial class MainViewModel
         await AddFilesAsync(await pick());
     }
 
-    /// <summary>Takes the composer content (text, long pastes, page comments, images) and clears it: the message is
+    /// <summary>Takes the composer content (text, long pastes, code and page comments, images) and clears it: the message is
     /// being sent, so the conversation goes to its latest message (chat apps do, even when the reader had scrolled up).</summary>
     private (string Text, ImageAttachment[] Images) TakeComposer()
     {
         var text = ComposerText.Trim();
         // Long pastes go in full after what was typed (the chips stood for them)
         foreach (var p in PastedTexts) text = text.Length > 0 ? text + "\n\n" + p.Text.TrimEnd() : p.Text.TrimEnd();
-        var comments = TakeAnnotations();
-        // Alone, the comments get a first line that says what to do (it is also what names a new session)
-        if (comments.Length > 0) text = (text.Length > 0 ? text : PreviewViewModel.CommentsOnlyLine) + "\n\n" + comments;
+        // Comments on the code and on the page follow (MainViewModel.CodeComments.cs)
+        text = WithComments(text);
         var images = Attachments.Select(a => a.Model).ToArray();
         ComposerText = "";
         foreach (var a in Attachments) a.Dispose();
@@ -304,21 +317,28 @@ public sealed partial class MainViewModel
     [RelayCommand(CanExecute = nameof(CanSteer))]
     private async Task SteerAsync()
     {
+        var open = _open;
+        (string Text, ImageAttachment[] Images) content = ("", []);
         try
         {
             if (HandleTerminalOnlyCommand(ComposerText)) return;
-            var (text, images) = TakeComposer();
-            await _session.QueueAsync(QueueKind.Steer, text, images, _cts.Token);
-            Apply(_session.Snapshot());
+            content = TakeComposer();
+            await open.Controller.QueueAsync(QueueKind.Steer, content.Text, content.Images, _cts.Token);
+            ApplyIfShown(open);
         }
+        catch (OmpNotRunningException) { if (open == _open) PutBackUnsent(content); }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
     }
 
     private void ApplyQueue(SessionSnapshot s)
     {
         if (QueuedMessages.Select(q => q.Model).SequenceEqual(s.Queued)) return;
+        // Messages still queued keep their rows (and decoded previews); the delivered and withdrawn ones go
+        var kept = QueuedMessages.ToDictionary(q => q.Model.Seq);
         QueuedMessages.Clear();
-        foreach (var q in s.Queued) QueuedMessages.Add(new QueuedItemViewModel(q, this));
+        foreach (var q in s.Queued)
+            QueuedMessages.Add(kept.Remove(q.Seq, out var row) ? row : new QueuedItemViewModel(q, this));
+        foreach (var gone in kept.Values) gone.Dispose();
         OnPropertyChanged(nameof(HasQueued));
     }
 
@@ -342,13 +362,13 @@ public sealed partial class MainViewModel
         try
         {
             IReadOnlyList<ImageAttachment>? images;
-            try { images = await _session.RemoveQueuedAsync(item.Model, _cts.Token); }
+            try { images = await Session.RemoveQueuedAsync(item.Model, _cts.Token); }
             catch (OmpGui.Rpc.RpcCommandException)
             {
                 ComposerMessage = "This omp can't take back queued messages (omp 18.4.4 or later can).";
                 return;
             }
-            Apply(_session.Snapshot());
+            Apply(Session.Snapshot());
             if (images is null)
             {
                 ComposerMessage = "omp already has that message.";

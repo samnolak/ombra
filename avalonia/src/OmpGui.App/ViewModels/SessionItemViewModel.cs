@@ -4,7 +4,7 @@ using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
 
-/// <summary>What the sidebar's dot before a session says. Only the open session runs (one omp at a time).</summary>
+/// <summary>What the sidebar's dot before a session says. Every chat with an omp open has one, shown or in the background.</summary>
 public enum SessionStatus
 {
     None,
@@ -12,14 +12,19 @@ public enum SessionStatus
     Running,
     /// <summary>omp waits for an approval or an answer.</summary>
     Waiting,
-    /// <summary>A run ended while the window was in the background; cleared when the window is back in front.</summary>
+    /// <summary>A run ended while the chat was not shown (or the window was in the background); cleared when it is.</summary>
     Unread,
+    /// <summary>Its omp stopped with an error (crashed, or did not start); opening the chat offers to start it again.</summary>
+    Error,
 }
 
-/// <summary>One saved session in the sidebar.</summary>
+/// <summary>One saved session in the sidebar. The row lives as long as its session is listed: a rescan of the catalog
+/// updates <see cref="Model"/> in place, so the row's control (its hover, focus, open menu) survives the refresh.</summary>
 public sealed partial class SessionItemViewModel(SessionSummary model) : ObservableObject
 {
-    public SessionSummary Model { get; } = model;
+    /// <summary>What omp's file says now; replaced (record equality decides) by each catalog scan.</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(Title), nameof(Project), nameof(Cwd), nameof(When), nameof(Tooltip))]
+    private SessionSummary _model = model;
     /// <summary>The header's title for the open session while the saved list still has the old one (a first run, a rename).</summary>
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(Title), nameof(Tooltip))] private string? _liveTitle;
     public string Title => LiveTitle ?? Model.Title;
@@ -46,19 +51,21 @@ public sealed partial class SessionItemViewModel(SessionSummary model) : Observa
     public string PinTooltip => IsPinned ? "Unpin" : "Pin to the top";
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsActive), nameof(IsWaiting), nameof(IsUnread), nameof(HasStatus), nameof(StatusText))]
+    [NotifyPropertyChangedFor(nameof(IsActive), nameof(IsWaiting), nameof(IsUnread), nameof(IsFailed), nameof(HasStatus), nameof(StatusText))]
     private SessionStatus _status;
 
-    /// <summary>omp is working in this session right now (the open session during a run).</summary>
+    /// <summary>omp is working in this session right now.</summary>
     public bool IsActive => Status == SessionStatus.Running;
     public bool IsWaiting => Status == SessionStatus.Waiting;
     public bool IsUnread => Status == SessionStatus.Unread;
+    public bool IsFailed => Status == SessionStatus.Error;
     public bool HasStatus => Status != SessionStatus.None;
     public string StatusText => Status switch
     {
         SessionStatus.Running => "omp is working",
         SessionStatus.Waiting => "Needs your input",
         SessionStatus.Unread => "New reply",
+        SessionStatus.Error => "omp stopped with an error",
         _ => "",
     };
 

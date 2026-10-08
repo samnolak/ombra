@@ -38,10 +38,13 @@ public partial class MainViewModel
     private async Task RewindToAsync(UserRowViewModel? row)
     {
         if (row is null) return;
+        // This chat's omp throughout: another chat may be shown by the time omp answers
+        var open = _open;
+        var session = open.Controller;
         var occurrence = Rows.OfType<UserRowViewModel>().TakeWhile(r => r != row).Count(r => Same(r.Text, row.Text));
         var card = new SessionCardViewModel("rewind", "IconRewind", "Rewinding…", "") { State = SessionCardState.Running };
         ShowCard(card);
-        var messages = await _session.GetBranchMessagesAsync(_cts.Token);
+        var messages = await session.GetBranchMessagesAsync(open.Lifetime.Token);
         var matches = messages.Where(m => Same(m.Text, row.Text)).ToList();
         if (occurrence >= matches.Count)
         {
@@ -49,20 +52,32 @@ public partial class MainViewModel
                 secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
             return;
         }
-        var text = await _session.RewindAsync(matches[occurrence].EntryId, _cts.Token);
-        AfterSessionChange();
+        var text = await session.RewindAsync(matches[occurrence].EntryId, open.Lifetime.Token);
+        ApplyIfShown(open);
+        RequestCatalogRefresh();
         if (text is null)
         {
             card.Finish(false, "Not rewound", "omp did not start the new session; the conversation shows why.",
                 secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
             return;
         }
-        ComposerText = text;
-        CaretToEndRequested?.Invoke();
+        PutInComposer(open, text);
         card.Finish(true, "Rewound", "A new session goes on from before that message; the earlier one is kept in the sessions list. " +
             "Your message is back in the box.", secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
 
         static bool Same(string a, string b) => string.Equals(a.Trim().ReplaceLineEndings("\n"), b.Trim().ReplaceLineEndings("\n"), StringComparison.Ordinal);
+    }
+
+    /// <summary>Text back into a chat's message box: the box on screen, or the chat's kept draft when another chat is shown.</summary>
+    private void PutInComposer(OpenSession open, string text)
+    {
+        if (open != _open)
+        {
+            open.ComposerText = text;
+            return;
+        }
+        ComposerText = text;
+        CaretToEndRequested?.Invoke();
     }
 
     private bool CanRewindTo(UserRowViewModel? row) => row is { Confirmed: true } && CanActOnSession();

@@ -1,0 +1,36 @@
+<!-- The pet, its speech bubble and its message box (DataContext = PetsViewModel): the same in the window, on the message
+     box (PetPerch), and on the desktop (PetWindow). Placed in code (PetStage.Plan/Apply): the bubble beside the pet at
+     the height of its head, the message box above it (below when there is no room above). Only the three take the
+     pointer: the canvas has no background. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             xmlns:ctl="using:OmpGui.App.Controls"
+             x:Class="OmpGui.App.Controls.PetStage"
+             x:DataType="vm:PetsViewModel">
+  <Canvas>
+    <StackPanel x:Name="PetBubble" Orientation="Horizontal" IsVisible="{Binding IsBubbleOpen}" IsHitTestVisible="False">
+      <Path x:Name="PetBubbleTailLeft" Classes="pet-bubble-tail" Data="M6,0 L0,5 L6,10" Margin="0,9,-1,0" VerticalAlignment="Top" IsVisible="False" />
+      <Border Classes="pet-bubble">
+        <TextBlock x:Name="PetBubbleText" Text="{Binding BubbleText}" TextTrimming="CharacterEllipsis" MaxWidth="300" />
+      </Border>
+      <Path x:Name="PetBubbleTailRight" Classes="pet-bubble-tail" Data="M0,0 L6,5 L0,10" Margin="-1,9,0,0" VerticalAlignment="Top" />
+    </StackPanel>
+    <Border x:Name="PetChat" Classes="pet-chat" IsVisible="{Binding IsChatOpen}">
+      <TextBox x:Name="PetChatBox" Classes="sm pet-chat" Text="{Binding ChatText}" PlaceholderText="{Binding ChatPlaceholder}"
+               AcceptsReturn="False" TextWrapping="NoWrap" AutomationProperties.Name="Message to omp from your pet">
+        <!-- The card around it is the field, as for the message box -->
+        <TextBox.Resources>
+          <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+          <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+          <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+          <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+          <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+        </TextBox.Resources>
+      </TextBox>
+    </Border>
+    <ctl:PetView x:Name="Pet" Classes="perched" Look="{Binding ChosenLook}" Mood="{Binding Mood}" PixelScale="{Binding PixelScale}"
+                 Attention="{Binding Attention}" ToolTip.Tip="{Binding PetTip}"
+                 AutomationProperties.Name="{Binding AccessibleName}" />
+  </Canvas>
+</UserControl>

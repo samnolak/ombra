@@ -36,14 +36,26 @@ public abstract partial class RowViewModel : ObservableObject
     };
 }
 
-public sealed partial class UserRowViewModel(UserItem item) : RowViewModel(item)
+/// <summary>Your message. It owns the previews of the images sent with it: dispose the row when it leaves the list.</summary>
+public sealed partial class UserRowViewModel(UserItem item) : RowViewModel(item), IDisposable
 {
     [ObservableProperty] private string _text = item.Text;
     [ObservableProperty] private bool _confirmed = item.Confirmed;
-    [ObservableProperty] private int _imageCount = item.ImageCount;
 
-    public string ImagesText => ImageCount == 1 ? "1 image" : $"{ImageCount} images";
-    public bool HasImages => ImageCount > 0;
+    /// <summary>The images sent with the message, as thumbnails (each opens the viewer, ←/→ through the rest).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasImages))]
+    private IReadOnlyList<ImagePreview> _previews = PreviewsOf(item.Images);
+
+    public bool HasImages => Previews.Count > 0;
+
+    private static IReadOnlyList<ImagePreview> PreviewsOf(IReadOnlyList<ImageAttachment> images) =>
+        [.. images.Select(i => new ImagePreview(i, () => images))];
+
+    public void Dispose()
+    {
+        foreach (var p in Previews) p.Dispose();
+    }
 
     private const int FoldLines = 8, FoldChars = 600;
 
@@ -52,14 +64,19 @@ public sealed partial class UserRowViewModel(UserItem item) : RowViewModel(item)
     [NotifyPropertyChangedFor(nameof(DisplayText), nameof(FoldLabel), nameof(HasOwnText))]
     private bool _isUnfolded;
 
-    /// <summary>Where the page comments sent with this message begin (-1: none). They show as a chip, not as text.</summary>
+    /// <summary>Where the code or page comments sent with this message begin (-1: none). They show as a chip, not as text.</summary>
     private int CommentsAt
     {
         get
         {
-            if (Text.StartsWith(PreviewViewModel.PromptMarker, StringComparison.Ordinal)) return 0;
-            var i = Text.IndexOf("\n\n" + PreviewViewModel.PromptMarker, StringComparison.Ordinal);
-            return i < 0 ? -1 : i + 2;
+            // Code comments come before the page's (MainViewModel.WithComments)
+            foreach (var marker in (string[])[MainViewModel.CodeCommentsMarker, PreviewViewModel.PromptMarker])
+            {
+                if (Text.StartsWith(marker, StringComparison.Ordinal)) return 0;
+                var i = Text.IndexOf("\n\n" + marker, StringComparison.Ordinal);
+                if (i >= 0) return i + 2;
+            }
+            return -1;
         }
     }
 
@@ -72,7 +89,7 @@ public sealed partial class UserRowViewModel(UserItem item) : RowViewModel(item)
         {
             if (CommentsAt is var at && at < 0) return Text;
             var own = Text[..at].Trim();
-            return own == PreviewViewModel.CommentsOnlyLine ? "" : own;
+            return own is PreviewViewModel.CommentsOnlyLine or MainViewModel.CodeCommentsOnlyLine or MainViewModel.AllCommentsOnlyLine ? "" : own;
         }
     }
 
@@ -87,6 +104,8 @@ public sealed partial class UserRowViewModel(UserItem item) : RowViewModel(item)
                 .Select(l => Uri.TryCreate(l[PreviewViewModel.PromptMarker.Length..].Split(' ')[0].TrimEnd(','), UriKind.Absolute, out var u) ? u.Authority + u.AbsolutePath.TrimEnd('/') : "")
                 .Where(h => h.Length > 0).Distinct().ToList();
             var what = n == 1 ? "1 comment" : $"{n} comments";
+            if (block.StartsWith(MainViewModel.CodeCommentsMarker, StringComparison.Ordinal))
+                return block.Contains("\n\n" + PreviewViewModel.PromptMarker, StringComparison.Ordinal) ? what : what + " on the code";
             return hosts.Count == 1 ? $"{what} on {hosts[0]}" : hosts.Count > 1 ? $"{what} on {hosts.Count} pages" : what + " on the page";
         }
     }
@@ -121,9 +140,12 @@ public sealed partial class UserRowViewModel(UserItem item) : RowViewModel(item)
         var u = (UserItem)Model;
         Text = u.Text;
         Confirmed = u.Confirmed;
-        ImageCount = u.ImageCount;
-        OnPropertyChanged(nameof(ImagesText));
-        OnPropertyChanged(nameof(HasImages));
+        // The same images (the echo of a prompt keeps the ones sent) keep their decoded thumbnails
+        if (!Previews.Select(p => p.Model).SequenceEqual(u.Images))
+        {
+            Dispose();
+            Previews = PreviewsOf(u.Images);
+        }
     }
 }
 
@@ -178,6 +200,10 @@ public sealed partial class AssistantRowViewModel : RowViewModel
 
     [RelayCommand]
     private void Copy() => CopyRequested?.Invoke(Text);
+
+    /// <summary>Copies the reply as it reads, without the Markdown marks (Copy as Markdown is <see cref="CopyCommand"/>).</summary>
+    [RelayCommand]
+    private void CopyText() => CopyRequested?.Invoke(Markdig.Markdown.ToPlainText(Text).TrimEnd());
 
     protected override void OnUpdated()
     {

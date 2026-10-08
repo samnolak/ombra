@@ -255,10 +255,11 @@ public sealed class RealOmpTests
         var user = Assert.Single(done.Items.OfType<UserItem>());
         Assert.True(user.Confirmed);
         Assert.DoesNotContain(done.Items, i => i is NoticeItem { Level: NoticeLevel.Error });
-        Assert.True(user.ImageCount >= 0);
+        Assert.Equal(png, Assert.Single(user.Images).Data);
+        // omp returns the image's bytes with the session's messages (it may re-encode it): history shows it again
         var history = new ConversationState();
         history.Hydrate(await OmpGui.Rpc.OmpCommands.GetMessagesAsync(s.Connection!));
-        Console.WriteLine($"image parts omp kept on the user message: {history.Snapshot().Items.OfType<UserItem>().Single().ImageCount}, echo: {user.ImageCount}");
+        Assert.NotEmpty(Assert.Single(history.Snapshot().Items.OfType<UserItem>().Single().Images).Data);
     }
 
     [Fact]

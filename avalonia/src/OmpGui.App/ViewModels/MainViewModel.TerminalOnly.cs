@@ -60,8 +60,7 @@ public sealed partial class MainViewModel
                     new SessionCardAction("Open Plugins and skills", new RelayCommand(() => { CloseSessionCard(); _ = OpenSettingsAtAsync("plugins"); }))));
                 return true;
             case GuiEquivalent.NewSession:
-                if (NewSessionCommand.CanExecute(null)) _ = NewSessionCommand.ExecuteAsync(null);
-                else ShowCard(ExplainCard(cmd, "Stop the current run first, then start a new session (Ctrl+N or New session in the sidebar)."));
+                _ = NewSessionCommand.ExecuteAsync(null);
                 return true;
             case GuiEquivalent.Sessions:
                 // The sidebar is the GUI's session list; text after /resume filters it
@@ -99,19 +98,29 @@ public sealed partial class MainViewModel
     /// <summary>A !command: a row in the conversation (its output when it ends) and a card with Stop meanwhile.</summary>
     private async Task RunShellAsync(string command)
     {
+        var open = _open;
         var card = new SessionCardViewModel("shell", "IconTerminal", "Running a shell command",
             "omp runs it in the project; its output goes into the conversation and the context.") { Detail = command, State = SessionCardState.Running };
-        card.Primary = new SessionCardAction("Stop", new AsyncRelayCommand(() => _session.StopShellCommandAsync(_cts.Token)));
+        card.Primary = new SessionCardAction("Stop", new AsyncRelayCommand(() => open.Controller.StopShellCommandAsync(_cts.Token)));
         ShowCard(card);
-        await _session.RunShellCommandAsync(command, _cts.Token);
-        Apply(_session.Snapshot());
-        if (ReferenceEquals(SessionCard, card)) CloseSessionCard(); // the row in the conversation has the output
+        await open.Controller.RunShellCommandAsync(command, _cts.Token);
+        ApplyIfShown(open);
+        // The row in the conversation has the output: the card goes, also when it waits with its chat in the background
+        if (ReferenceEquals(SessionCard, card)) CloseSessionCard();
+        else if (ReferenceEquals(open.Card, card)) open.Card = null;
     }
 
+    /// <summary>/restart: this chat's omp starts again on its session (a run is never cut short).</summary>
     private async Task RestartFromCommandAsync(TerminalOnlyCommand cmd)
     {
-        if (!await RestartOmpToApplyAsync())
+        var open = _open;
+        if (IsRunning)
+        {
             ShowCard(ExplainCard(cmd, "omp restarts once the current reply ends: stop it first, or type /restart again then."));
+            return;
+        }
+        await open.Controller.RecoverAsync(_cts.Token);
+        ApplyIfShown(open);
     }
 
     private SessionCardViewModel TerminalCard(TerminalOnlyCommand cmd, string message, SessionCardAction? gui = null)

@@ -61,20 +61,23 @@ public sealed class ComposerTests
     }
 
     [Fact]
-    public async Task Images_are_sent_as_image_content_and_counted_on_the_row()
+    public async Task Images_are_sent_as_image_content_and_kept_on_the_row()
     {
         await using var s = await StartAsync("normal");
         byte[] png = [0x89, 0x50, 0x4E, 0x47, 1, 2, 3];
         await s.PromptAsync("what is in these", [new ImageAttachment("a.png", "image/png", png), new ImageAttachment("b.jpg", "image/jpeg", [0xFF, 0xD8, 9])]);
         var done = await TestProcesses.Eventually(s.Snapshot, x => x.Phase == SessionPhase.Ready && x.MessagesCompleted == 1, Wait, "run end");
         var user = Assert.Single(done.Items.OfType<UserItem>());
-        Assert.Equal(2, user.ImageCount);
+        Assert.Equal(["a.png", "b.jpg"], user.Images.Select(i => i.Name));
+        Assert.Equal(png, user.Images[0].Data);
         Assert.True(user.Confirmed);
 
-        // History restores the count (from omp's stored message).
+        // History restores the images (omp's stored message carries them, base64).
         var rebuilt = new ConversationState();
         rebuilt.Hydrate(await OmpGui.Rpc.OmpCommands.GetMessagesAsync(s.Connection!));
-        Assert.Equal(2, rebuilt.Snapshot().Items.OfType<UserItem>().Single().ImageCount);
+        var restored = rebuilt.Snapshot().Items.OfType<UserItem>().Single().Images;
+        Assert.Equal(["image/png", "image/jpeg"], restored.Select(i => i.MimeType));
+        Assert.Equal(png, restored[0].Data);
     }
 
     [Fact]

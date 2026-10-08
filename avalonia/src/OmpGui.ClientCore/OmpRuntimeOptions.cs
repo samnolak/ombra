@@ -53,6 +53,9 @@ public sealed record OmpRuntimeOptions
     public double? SidebarWidth { get; init; }
     /// <summary>"Don't ask again" rules for omp's approval requests (<see cref="ApprovalRuleSet"/>); session rules are never saved.</summary>
     public SavedApprovalRule[]? ApprovalRules { get; init; }
+    /// <summary>How many chats keep their own omp running at once (default 4): opening one more closes the idle chat used
+    /// longest ago; a working one is never closed.</summary>
+    public int? MaxOpenSessions { get; init; }
 
     public const string ConfigEnvVar = "OMPGUI_CONFIG";
 

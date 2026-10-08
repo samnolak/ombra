@@ -50,6 +50,19 @@ public sealed partial class SessionController : IAsyncDisposable
     /// <summary>What the running omp was started with.</summary>
     public LaunchRequest CurrentLaunch => _request;
 
+    /// <summary>
+    /// Another omp for another chat, started the same way as this one: the same command-line builder, timeouts, clock
+    /// and approval rules (the user's rules answer every chat's requests). Not started: the caller starts it.
+    /// </summary>
+    public SessionController Sibling(LaunchRequest request) =>
+        new(_launch, request, _readyTimeout, _clock) { SettleQuietPeriod = SettleQuietPeriod, ApprovalRules = ApprovalRules };
+
+    /// <summary>The session file omp has open now (null before omp reported it). Cheaper than a whole snapshot.</summary>
+    public string? SessionFile
+    {
+        get { lock (_lock) return _state.SessionFile; }
+    }
+
     /// <summary>Wakes whenever the snapshot may have changed. Read it, then call <see cref="Snapshot"/>.</summary>
     public ChannelReader<bool> Changes => _changes.Reader;
 
@@ -78,6 +91,9 @@ public sealed partial class SessionController : IAsyncDisposable
         {
             var spec = _launch(_request);
             _omp = await OmpProcess.StartAsync(spec, _readyTimeout, ct: ct).ConfigureAwait(false);
+            // Disposed while the process started (its chat closed during a restart): DisposeAsync found no omp to stop,
+            // so this one goes now instead of running on with nobody to stop it
+            if (Volatile.Read(ref _disposed) != 0) throw new OperationCanceledException("The session was closed while omp started.");
             _omp.StderrLine += OnStderr;
             _ = CloseAfterExitAsync(_omp);
             var conn = _omp.Connection;
@@ -365,6 +381,18 @@ public sealed partial class SessionController : IAsyncDisposable
         RestartAsync(_request with { ResumeSessionFile = ExistingSessionFile() }, ct);
 
     /// <summary>
+    /// The approval mode for omp's next start, without starting it now: for an omp that is not running (stopped, or
+    /// crashed and waiting for the user to start it again), which then starts with the mode the user chose since.
+    /// </summary>
+    public async Task SetNextApprovalModeAsync(string mode, CancellationToken ct = default)
+    {
+        await _lifecycle.WaitAsync(ct).ConfigureAwait(false);
+        try { _request = _request with { ApprovalMode = mode }; }
+        finally { _lifecycle.Release(); }
+        _changes.Writer.TryWrite(true);
+    }
+
+    /// <summary>
     /// The run does not stop (a tool ignores the abort, a sign-in waits for a browser): stop omp (stdin EOF, then the
     /// process tree is killed after the grace period) and start it again on the same session.
     /// </summary>
@@ -450,7 +478,7 @@ public sealed partial class SessionController : IAsyncDisposable
         if (RefuseWhileSigningIn()) return;
         Mutate(s =>
         {
-            s.AddUserPrompt(text, images.Count);
+            s.AddUserPrompt(text, images);
             s.BeginRun(Now);
         });
         try
@@ -534,7 +562,7 @@ public sealed partial class SessionController : IAsyncDisposable
     {
         var conn = RequireConnection();
         QueuedMessage? queued = null;
-        Mutate(s => queued = s.Enqueue(kind, text, images.Count));
+        Mutate(s => queued = s.Enqueue(kind, text, images));
         try
         {
             if (kind == QueueKind.Steer) await conn.SteerAsync(text, Wire(images), ct).ConfigureAwait(false);
@@ -741,8 +769,10 @@ public sealed partial class SessionController : IAsyncDisposable
         }
     }
 
+    /// <summary>The live connection; between the stop and the start of a restart there is none, and a command sent
+    /// then fails with <see cref="OmpNotRunningException"/> (a caller can keep what the user typed for the retry).</summary>
     private RpcConnection RequireConnection() =>
-        _omp?.Connection ?? throw new InvalidOperationException("omp is not running");
+        _omp?.Connection ?? throw new OmpNotRunningException();
 
     private async Task PumpAsync(OmpProcess omp)
     {

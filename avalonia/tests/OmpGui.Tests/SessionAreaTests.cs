@@ -258,9 +258,10 @@ public sealed class SessionAreaTests
         vm.OpenUrlRequested += opened.Add;
         await vm.ExportHtmlCommand.ExecuteAsync(null);
         Assert.Equal("Exported as HTML", vm.SessionCard!.Title);
-        Assert.Equal(Path.Combine(e.Project, "omp-session-test.html"), vm.SessionCard.Detail);
+        // omp names the file from its working directory, which has links resolved (macOS: /var is /private/var)
+        Assert.True(SessionCatalog.SamePath(Path.Combine(e.Project, "omp-session-test.html"), vm.SessionCard.Detail), vm.SessionCard.Detail);
         vm.SessionCard.Secondary!.Command.Execute(null); // Show in folder
-        Assert.Equal(new Uri(e.Project).AbsoluteUri, opened.Last());
+        Assert.True(SessionCatalog.SamePath(e.Project, new Uri(opened.Last()).LocalPath), opened.Last());
 
         // Share: says what it uploads and where before anything leaves the machine
         vm.ShareSessionCommand.Execute(null);
@@ -369,7 +370,14 @@ public sealed class SessionAreaTests
     {
         var e = await OpenAsync();
         var vm = e.Vm;
+        // Real-app QA polish, like Claude: a new chat shows no ring (omp's 1–5% then is its own system prompt)
+        await Until(() => vm.Phase == SessionPhase.Ready && vm.Session.Snapshot().ContextPercent is not null, "omp's context usage");
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(vm.Usage.HasPercent);
+        Assert.False(e.W.GetVisualDescendants().OfType<UsageIndicator>().Single().Button.IsVisible);
+        await Send(e, "hello");
         await Until(() => vm.Usage.HasPercent, "context percent");
+        await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.OfType<AssistantRowViewModel>().Any(), "the first reply");
         Assert.Equal(1.25, vm.Usage.Percent);
         Assert.Equal("normal", vm.Usage.RingLevel);
         var ring = e.W.GetVisualDescendants().OfType<UsageIndicator>().Single();
@@ -381,17 +389,17 @@ public sealed class SessionAreaTests
         Assert.Equal(["System prompt", "System tools", "System context", "Skills", "Auto-compact buffer", "Free"], vm.Usage.ContextRows.Select(r => r.Label));
         Assert.Equal("4,518", vm.Usage.ContextRows[0].Tokens);
         Assert.True(vm.Usage.ContextRows[^1].IsFree);
-        // get_session_stats: nothing spent before the first prompt (no cost row while it is zero)
-        Assert.Equal(["Input", "Output"], vm.Usage.Totals.Select(t => t.Label));
-        Assert.Equal("0", vm.Usage.Totals[0].Value);
+        // get_session_stats: the first turn's tokens and cost
+        Assert.Equal(["Input", "Output", "Cache read", "Cost"], vm.Usage.Totals.Select(t => t.Label));
+        Assert.Equal(("18,680", "$0.08"), (vm.Usage.Totals[0].Value, vm.Usage.Totals[^1].Value));
 
         // Refreshes after each turn while open
         var before = Sent(e).Count(l => l == "/context");
         await Send(e, "one more");
         await Until(() => Sent(e).Count(l => l == "/context") > before && !vm.Usage.IsLoading, "refresh after the turn");
-        await Until(() => vm.Usage.Totals.Any(t => t.Label == "Cost"), "the turn's tokens and cost");
+        await Until(() => vm.Usage.Totals.FirstOrDefault()?.Value == "24,880", "the turn's tokens and cost");
         Assert.Equal(["Input", "Output", "Cache read", "Cost"], vm.Usage.Totals.Select(t => t.Label));
-        Assert.Equal(("18,680", "$0.08"), (vm.Usage.Totals[0].Value, vm.Usage.Totals[^1].Value));
+        Assert.Equal("$0.13", vm.Usage.Totals[^1].Value);
         Assert.DoesNotContain("/usage", Sent(e)); // never through the conversation's command channel
 
         // Compact now: straight to the running card, then omp's result
