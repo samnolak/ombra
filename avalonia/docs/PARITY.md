@@ -142,7 +142,7 @@ extension commands that omp lists itself keep going to omp.
 | `/git [revision]` | TUI | **Via omp terminal** (git TUI); branch chip — *Workspace* area |
 | `/hub` | TUI | **Done** — opens Background tasks — *Panes* area |
 | `/login [provider]` | TUI (RPC `login`) | **Done** — Settings › Model providers (RPC sign-in with the browser link / code card) |
-| `/logout [provider]` | TUI | **Via omp terminal**. Plan: none over RPC in 18.2.0 |
+| `/logout [provider]` | TUI (RPC `get_logout_accounts`, `logout`, omp 18.8.0) | **Done** — Settings › Model providers (**Sign out…** on a signed-in provider: pick the stored account to remove) |
 | `/mcp …` | yes | **Done** — Settings › Connectors — *Connectors* area |
 | `/ssh …` | yes | **Done** — Settings › SSH hosts — *Workspace* area |
 | `/btw`, `/tan`, `/omfg`, `/cleanse`, `/debug` | TUI | **Via omp terminal** |
@@ -227,7 +227,7 @@ extension commands that omp lists itself keep going to omp.
 | `set_session_name`, `session_info_update` | **Done** — rename |
 | `handoff` | **Not used on purpose**: blocks the queue like `compact`; `/handoff` runs in the background |
 | `get_messages`, `get_messages_page` | **Done** — history when a session opens |
-| `get_login_providers`, `login` | **Done** — Settings › Model providers |
+| `get_login_providers`, `login`, `get_logout_accounts`, `logout` | **Done** — Settings › Model providers |
 | `extension_ui_request` select / confirm / input / editor / notify / cancel | **Done** — question and approval cards, notices |
 | `extension_ui_request` setStatus / setWidget / set_editor_text / open_url | **Done** — status in the activity tooltip, widgets above the message box, text into the message box, the sign-in link card |
 | `extension_ui_request` setTitle | **Missing** (an extension setting the window title is ignored) |
@@ -238,7 +238,7 @@ extension commands that omp lists itself keep going to omp.
 
 ## 5. What omp 18.2.0 does not offer over RPC (so the GUI cannot, except through the terminal)
 
-Plan / goal / vibe / loop modes, `/clear`, `/fork` (whole-session copy), `/tree`, `/logout`, live collaboration
+Plan / goal / vibe / loop modes, `/clear`, `/fork` (whole-session copy), `/tree`, `/logout` (over RPC since 18.8.0), live collaboration
 (`/collab`, `/join`), realtime voice (`/live`), `/pause`, `/btw`, `/tan`, `/omfg`, `/cleanse`, the agents hub and
 `/advisor configure`, omp's git TUI, MCP OAuth sign-in (TUI-only). The GUI never sends these to omp: they would
 reach the model as a message. Each has the "runs in omp's terminal" card; the terminal panel's **+ omp TUI** starts

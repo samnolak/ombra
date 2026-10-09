@@ -34,6 +34,14 @@ public sealed partial class MainViewModel
         if (Preview.ToggleAnnotateCommand.CanExecute(null)) Preview.ToggleAnnotateCommand.Execute(null);
     }
 
+    /// <summary>Ctrl/⌘+Shift+M: the preview opens if needed and device mode turns on or off (Chrome's device toolbar key).</summary>
+    [RelayCommand]
+    private void ToggleDeviceMode()
+    {
+        IsPreviewOpen = true;
+        Preview.ToggleDeviceCommand.Execute(null);
+    }
+
     /// <summary>The comments on the page, as text after the message; they are cleared once taken.</summary>
     private string TakeAnnotations()
     {
@@ -51,6 +59,7 @@ public sealed partial class MainViewModel
         var p = new PreviewViewModel(new OmpGui.ClientCore.Browser.BrowserSiteSettings(
             string.IsNullOrEmpty(folder) ? null : Path.Combine(folder, "browser-sites.json")));
         p.CloseRequested += () => IsPreviewOpen = false;
+        p.ShowRequested += () => IsPreviewOpen = true;
         // Comments on the page go with the next message: they count as content, and the panel's Send sends it
         p.Annotations.CollectionChanged += (_, _) =>
         {

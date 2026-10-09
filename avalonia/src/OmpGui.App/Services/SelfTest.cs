@@ -79,7 +79,9 @@ public static class SelfTest
             var store = new ClientSettingsStore(args.ConfigPath ?? Environment.GetEnvironmentVariable(OmpRuntimeOptions.ConfigEnvVar) ?? OmpRuntimeOptions.DefaultConfigPath);
             var options = store.Load();
             if (runtime is not null) options = runtime.ApplyTo(options);
-            var session = new SessionController(r => options.ToLaunchSpec(r), new LaunchRequest(options.WorkingDirectory, ApprovalMode: OmpRuntimeOptions.EffectiveApprovalMode(options.ApprovalMode)));
+            await using var privacy = new OmpGui.ClientCore.Network.NetworkPrivacy(OmpGui.ClientCore.Network.NetworkPrivacy.DirectoryFor(store.Path));
+            var session = new SessionController((r, ct) => privacy.ApplyAsync(options.ToLaunchSpec(r), options, ct),
+                new LaunchRequest(options.WorkingDirectory, ApprovalMode: OmpRuntimeOptions.EffectiveApprovalMode(options.ApprovalMode)));
             int? pid = null;
             string outcome;
             try

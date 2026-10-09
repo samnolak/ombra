@@ -180,12 +180,29 @@ public sealed partial class MainViewModel
     [RelayCommand]
     private void CancelRuntimeInstall() => _installCts?.Cancel();
 
-    /// <summary>omp's own setup: its terminal UI, where <c>/login</c> signs in to a provider (or an API key is set).</summary>
+    /// <summary>
+    /// Adding a model provider when omp cannot start without one: <c>omp login</c> in a terminal tab. It lists every
+    /// provider (omp's in-session <c>/login</c> hides the ones turned off for omp, which before the first sign-in are
+    /// all of them: NetworkPrivacy) and afterwards fetches the models of the chosen one only. Strict network privacy
+    /// lets every provider's sign-in and API addresses through while the tab runs: the user is adding one on purpose.
+    /// </summary>
     [RelayCommand]
     private void SetUpProvider()
     {
-        OpenOmpTui();
-        ComposerMessage = "omp's setup is open in the terminal beside the conversation: pick Sign in with the arrow keys and Enter, " +
-                          "choose a provider and finish in the browser (or set an API key), then press Try again.";
+        if (OmpCliLaunch is not { } launch) return;
+        OmpGui.Rpc.OmpLaunchSpec spec;
+        try { spec = launch(["login"], ProjectDirectory()); }
+        catch (OmpGui.ClientCore.Network.NetworkPrivacyException e)
+        {
+            ComposerMessage = "omp's sign-in was not opened: " + e.Message;
+            return;
+        }
+        var env = spec.Environment.ToDictionary(kv => kv.Key, kv => kv.Value ?? "");
+        Add(new TerminalViewModel(TerminalKind.OmpTui, "omp login", spec.FileName, spec.Arguments, spec.WorkingDirectory ?? ProjectDirectory(), env)
+        {
+            Lease = Privacy?.AllowSignIn(OmpGui.ClientCore.Network.NetworkPrivacy.AnyProvider),
+        });
+        ComposerMessage = "Sign in to a model provider in the terminal beside the conversation: choose one with the arrow keys and Enter, " +
+                          "finish in the browser (or paste an API key), then press Try again.";
     }
 }

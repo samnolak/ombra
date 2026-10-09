@@ -11,7 +11,7 @@ namespace OmpGui.ClientCore;
 /// </summary>
 public sealed partial class SessionController : IAsyncDisposable
 {
-    private readonly Func<LaunchRequest, OmpLaunchSpec> _launch;
+    private readonly Func<LaunchRequest, CancellationToken, Task<OmpLaunchSpec>> _launch;
     private LaunchRequest _request;
     private readonly TimeSpan _readyTimeout;
     // Start, restart and session switches never overlap.
@@ -40,6 +40,13 @@ public sealed partial class SessionController : IAsyncDisposable
 
     /// <param name="launch">Builds omp's command line for a launch request (project folder, session to resume, approval mode).</param>
     public SessionController(Func<LaunchRequest, OmpLaunchSpec> launch, LaunchRequest initial, TimeSpan? readyTimeout = null, TimeProvider? clock = null)
+        : this((r, _) => Task.FromResult(launch(r)), initial, readyTimeout, clock)
+    {
+    }
+
+    /// <param name="launch">Builds omp's command line for a launch request, with work before omp starts (the app's
+    /// network privacy asks omp's runtime which providers the user added); a failure fails the start.</param>
+    public SessionController(Func<LaunchRequest, CancellationToken, Task<OmpLaunchSpec>> launch, LaunchRequest initial, TimeSpan? readyTimeout = null, TimeProvider? clock = null)
     {
         _launch = launch;
         _request = initial;
@@ -89,7 +96,7 @@ public sealed partial class SessionController : IAsyncDisposable
         Mutate(s => s.SetPhase(SessionPhase.Starting, Now));
         try
         {
-            var spec = _launch(_request);
+            var spec = await _launch(_request, ct).ConfigureAwait(false);
             _omp = await OmpProcess.StartAsync(spec, _readyTimeout, ct: ct).ConfigureAwait(false);
             // Disposed while the process started (its chat closed during a restart): DisposeAsync found no omp to stop,
             // so this one goes now instead of running on with nobody to stop it
@@ -367,6 +374,25 @@ public sealed partial class SessionController : IAsyncDisposable
         {
             Mutate(s => { if (s.SigningIn == providerId) s.SigningIn = null; });
         }
+    }
+
+    /// <summary>The credentials omp has stored for a provider and can remove, active first.</summary>
+    /// <exception cref="OmpNotRunningException" />
+    /// <exception cref="RpcCommandException">omp refused, or has no such command (before 18.8.0).</exception>
+    public Task<IReadOnlyList<OmpLogoutAccount>> GetLogoutAccountsAsync(string providerId, CancellationToken ct = default) =>
+        RequireConnection().GetLogoutAccountsAsync(providerId, ct);
+
+    /// <summary>
+    /// omp's own sign-out: removes one stored credential and refreshes the provider's models. Returns what still
+    /// signs omp in to the provider (an API key in the environment…), if anything.
+    /// </summary>
+    /// <exception cref="OmpNotRunningException" />
+    /// <exception cref="RpcCommandException">omp refused (the credential is gone already), or has no such command.</exception>
+    public async Task<string?> LogoutAsync(string providerId, OmpLogoutAccount account, CancellationToken ct = default)
+    {
+        var remaining = await RequireConnection().LogoutAsync(providerId, account.CredentialId, ct).ConfigureAwait(false);
+        Mutate(s => s.AddNotice(NoticeLevel.Info, $"Signed out: {providerId} ({account.Label})"));
+        return remaining;
     }
 
     /// <summary>

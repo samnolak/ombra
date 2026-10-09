@@ -10,7 +10,7 @@ using OmpGui.ClientCore;
 
 namespace OmpGui.Tests;
 
-/// <summary>Annotations: comments left on elements of the previewed page, sent to the agent with the next message.</summary>
+/// <summary>Annotations: comments left on points and areas of the previewed page, sent to the agent with the next message.</summary>
 public sealed class PreviewAnnotationTests
 {
     private static PreviewViewModel Opened(string url = "http://localhost:5173/")
@@ -21,15 +21,22 @@ public sealed class PreviewAnnotationTests
     }
 
     private static string Message(PreviewViewModel vm, string comment = "Make it blue", string? token = null, string id = "a1",
-        string selector = "#login > button.btn", string url = "http://localhost:5173/", string source = "src/Login.tsx:42") =>
+        string selector = "#login > button.btn", string url = "http://localhost:5173/", string source = "src/Login.tsx:42",
+        string kind = "point", int width = 0, int height = 0, object[]? inside = null) =>
         JsonSerializer.Serialize(new Dictionary<string, object?>
         {
             ["type"] = "annotation", ["token"] = token ?? vm.AnnotationToken, ["id"] = id, ["comment"] = comment, ["url"] = url, ["title"] = "Shop",
+            ["mark"] = new Dictionary<string, object>
+            {
+                ["kind"] = kind, ["x"] = 452.4, ["y"] = 400, ["width"] = width, ["height"] = height, ["pageX"] = 452, ["pageY"] = 1200,
+                ["offsetX"] = 40, ["offsetY"] = 20, ["viewportWidth"] = 1280, ["viewportHeight"] = 800,
+            },
             ["element"] = new Dictionary<string, object>
             {
                 ["selector"] = selector, ["tag"] = "button", ["html"] = "<button class=\"btn\" type=\"submit\">", ["text"] = "Sign in",
-                ["source"] = source, ["x"] = 412.4, ["y"] = 380, ["width"] = 120, ["height"] = 40, ["viewportWidth"] = 1280, ["viewportHeight"] = 800,
+                ["source"] = source, ["x"] = 412.4, ["y"] = 380, ["width"] = 120, ["height"] = 40,
             },
+            ["inside"] = inside ?? [],
         });
 
     [Fact]
@@ -41,6 +48,8 @@ public sealed class PreviewAnnotationTests
         Assert.Null(vm.OnPageMessage(""));
         Assert.Null(vm.OnPageMessage(Message(vm, comment: "   ")));
         Assert.Null(vm.OnPageMessage(Message(vm, selector: "")));
+        Assert.Null(vm.OnPageMessage(Message(vm, kind: "element")));
+        Assert.Null(vm.OnPageMessage(Message(vm, kind: "area"))); // an area needs a size
         Assert.Null(vm.OnPageMessage(new string('x', 70_000)));
         Assert.Empty(vm.Annotations);
 
@@ -49,8 +58,8 @@ public sealed class PreviewAnnotationTests
         Assert.Equal("annotation", vm.OnPageMessage(Message(vm, comment: "Less padding", id: "a2", selector: "main > p:nth-of-type(2)", source: "")));
         Assert.Equal([1, 2], vm.Annotations.Select(a => a.Number));
         var first = vm.Annotations[0];
-        Assert.Equal(("Make it blue", 412, 1280), (first.Comment, first.Element.X, first.Element.ViewportWidth));
-        Assert.Equal("button — Sign in", first.ElementLabel);
+        Assert.Equal(("Make it blue", 452, 1280, 412), (first.Comment, first.Mark.X, first.Mark.ViewportWidth, first.Element.X));
+        Assert.Equal("Point on button — Sign in", first.TargetLabel);
         Assert.Equal("2 comments", vm.AnnotationsTitle);
 
         first.RemoveCommand.Execute(null);
@@ -87,22 +96,76 @@ public sealed class PreviewAnnotationTests
     }
 
     [Fact]
-    public void Pins_and_the_prompt_say_what_finds_each_element()
+    public void A_comment_can_be_changed_or_removed_from_its_pin_or_its_chip()
+    {
+        var vm = Opened();
+        vm.OnPageMessage(Message(vm));
+        vm.OnPageMessage(Message(vm, comment: "Less padding", id: "a2", url: "http://localhost:5173/about", selector: "main > p"));
+        var edits = 0;
+        vm.AnnotationEdited += () => edits++;
+
+        // From the pin on the page
+        string Page(string type, string id, string? comment = null) =>
+            JsonSerializer.Serialize(new { type, token = vm.AnnotationToken, id, comment });
+        Assert.Equal("annotation-update", vm.OnPageMessage(Page("annotation-update", "a1", "Make it red")));
+        Assert.Equal("Make it red", vm.Annotations[0].Comment);
+        Assert.Null(vm.OnPageMessage(Page("annotation-update", "nope", "x"))); // an unknown comment
+        Assert.Null(vm.OnPageMessage(JsonSerializer.Serialize(new { type = "annotation-update", token = "forged", id = "a1", comment = "x" })));
+        Assert.Equal("annotation-remove", vm.OnPageMessage(Page("annotation-remove", "a1")));
+        Assert.Equal(1, vm.Annotations.Single().Number); // renumbered
+
+        // From the chip: an empty text changes nothing, Cancel keeps it, Save keeps the new text and tells the pins
+        var chip = vm.Annotations[0];
+        chip.BeginEditCommand.Execute(null);
+        Assert.Equal(("Less padding", true), (chip.EditText, chip.IsEditing));
+        chip.EditText = "   ";
+        chip.SaveEditCommand.Execute(null);
+        Assert.Equal("Less padding", chip.Comment);
+        chip.BeginEditCommand.Execute(null);
+        chip.EditText = "No padding";
+        chip.CancelEditCommand.Execute(null);
+        Assert.Equal("Less padding", chip.Comment);
+        chip.BeginEditCommand.Execute(null);
+        chip.EditText = " No padding ";
+        chip.SaveEditCommand.Execute(null);
+        Assert.Equal(("No padding", false), (chip.Comment, chip.IsEditing));
+        Assert.Equal(2, edits);
+        Assert.Contains("1. No padding", PreviewViewModel.BuildPrompt(vm.Annotations)); // the agent gets the new text
+
+        // The chip names its page and opens it
+        Assert.Equal("localhost:5173/about", chip.PageLabel);
+        Assert.StartsWith("Shop — localhost:5173/about\nPoint on button — Sign in", chip.Tooltip);
+        var shown = 0;
+        vm.ShowRequested += () => shown++;
+        chip.ShowCommand.Execute(null);
+        Assert.Equal(1, shown);
+        Assert.Equal("http://localhost:5173/about", vm.Address);
+    }
+
+    [Fact]
+    public void Pins_and_the_prompt_say_where_each_mark_is_and_what_holds_it()
     {
         var vm = Opened();
         vm.OnPageMessage(Message(vm));
         vm.OnPageMessage(Message(vm, comment: "Remove this", id: "a2", url: "http://localhost:5173/about", selector: "footer", source: ""));
+        vm.OnPageMessage(Message(vm, comment: "Tighter cards", id: "a3", selector: "section.cards", kind: "area", width: 240, height: 120,
+            inside: [new { selector = "#buy", tag = "button", text = "Buy" }, new { selector = "main > h2", tag = "h2", text = "" }]));
+        Assert.Equal("Area 240×120 in button — Sign in", vm.Annotations[2].TargetLabel);
         var pins = JsonDocument.Parse(vm.PinsJson(new Uri("http://localhost:5173/#top"))).RootElement;
-        Assert.Equal(1, pins.GetArrayLength()); // only the pins of the page shown (the fragment does not matter)
-        Assert.Equal("#login > button.btn", pins[0].GetProperty("selector").GetString());
+        Assert.Equal(2, pins.GetArrayLength()); // only the pins of the page shown (the fragment does not matter)
+        Assert.Equal(("point", "#login > button.btn", 40, 20, 1200), (pins[0].GetProperty("kind").GetString(), pins[0].GetProperty("selector").GetString(),
+            pins[0].GetProperty("offsetX").GetInt32(), pins[0].GetProperty("offsetY").GetInt32(), pins[0].GetProperty("pageY").GetInt32()));
+        Assert.Equal(("area", 240, 120), (pins[1].GetProperty("kind").GetString(), pins[1].GetProperty("width").GetInt32(), pins[1].GetProperty("height").GetInt32()));
 
         var prompt = PreviewViewModel.BuildPrompt(vm.Annotations);
         Assert.Contains("Comments on the page http://localhost:5173/ (\"Shop\")", prompt);
-        Assert.Contains("1. Make it blue", prompt);
-        Assert.Contains("Element: <button class=\"btn\" type=\"submit\"> with the text \"Sign in\"", prompt);
+        Assert.Contains("1. Make it blue\n   Point: 452,400 in a 1280×800 viewport (452,1200 on the page)\n", prompt);
+        Assert.Contains("   On: <button class=\"btn\" type=\"submit\"> with the text \"Sign in\"", prompt);
         Assert.Contains("Selector: #login > button.btn", prompt);
         Assert.Contains("Source: src/Login.tsx:42", prompt);
-        Assert.Contains("Box: 120×40 at 412,380 in a 1280×800 viewport", prompt);
+        Assert.Contains("Element box: 120×40 at 412,380", prompt);
+        Assert.Contains("3. Tighter cards\n   Area: 240×120 at 452,400 in a 1280×800 viewport (452,1200 on the page)\n   Within: ", prompt);
+        Assert.Contains("Inside the area: button \"Buy\" (#buy); main > h2", prompt);
         Assert.Contains("Comments on the page http://localhost:5173/about", prompt);
         Assert.Contains("2. Remove this", prompt);
         Assert.EndsWith("make the changes the comments ask for.", prompt);

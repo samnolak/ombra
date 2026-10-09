@@ -202,7 +202,7 @@ public sealed class TerminalUiTests
         Assert.True(tui.Environment.ContainsKey("ANTHROPIC_API_KEY") && tui.Environment["ANTHROPIC_API_KEY"] is null);
         Assert.Equal("1", o.ToLaunchSpec().Environment!["NO_COLOR"]); // the RPC process keeps its hints
 
-        var vm = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs()) { OmpTuiLaunch = _ => tui };
+        var vm = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs()) { OmpTuiLaunch = (_, _) => Task.FromResult(tui) };
         vm.OpenOmpTuiCommand.Execute(null);
         Assert.Equal("", Assert.Single(vm.Terminals).Environment["ANTHROPIC_API_KEY"]); // passed empty = unset for omp
     }

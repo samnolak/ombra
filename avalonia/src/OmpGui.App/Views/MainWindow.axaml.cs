@@ -72,16 +72,7 @@ public sealed partial class MainWindow : Window
             e.Handled = true;
         }, RoutingStrategies.Tunnel);
         SettingsScroll.SizeChanged += (_, e) => SettingsColumn.Width = Math.Max(0, Math.Min(SettingsColumn.MaxWidth, e.NewSize.Width - SettingsColumn.Margin.Left - SettingsColumn.Margin.Right));
-        SettingsNavStrip.ScrollChanged += (_, _) => UpdateSettingsStripFade();
-        SettingsNavStrip.SizeChanged += (_, _) => UpdateSettingsStripFade();
-        // A mouse wheel scrolls the strip sideways (it has no vertical scrolling)
-        SettingsNavStrip.AddHandler(PointerWheelChangedEvent, (_, e) =>
-        {
-            if (e.Delta.X != 0 || e.Delta.Y == 0) return;
-            var max = Math.Max(0, SettingsNavStrip.Extent.Width - SettingsNavStrip.Viewport.Width);
-            SettingsNavStrip.Offset = new Vector(Math.Clamp(SettingsNavStrip.Offset.X - e.Delta.Y * 48, 0, max), 0);
-            e.Handled = true;
-        }, RoutingStrategies.Tunnel);
+        OmpGui.App.Controls.SideScrollStrip.Attach(SettingsNavStrip);
         RenameBox.AddHandler(KeyDownEvent, OnRenameKeyDown, RoutingStrategies.Tunnel);
         // Files and images dropped anywhere on the window go to the composer.
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
@@ -482,33 +473,6 @@ public sealed partial class MainWindow : Window
         Vm?.SaveSidebarWidth();
     }
 
-    /// <summary>The narrow settings strip fades at an edge that has more tabs past it: it says the strip scrolls.</summary>
-    private void UpdateSettingsStripFade()
-    {
-        var strip = SettingsNavStrip;
-        var max = strip.Extent.Width - strip.Viewport.Width;
-        var left = strip.Offset.X > 0.5;
-        var right = strip.Offset.X < max - 0.5;
-        if (!left && !right || strip.Bounds.Width <= 0)
-        {
-            strip.OpacityMask = null;
-            return;
-        }
-        var fade = Math.Min(0.4, 40 / strip.Bounds.Width);
-        strip.OpacityMask = new LinearGradientBrush
-        {
-            StartPoint = new RelativePoint(0, 0.5, RelativeUnit.Relative),
-            EndPoint = new RelativePoint(1, 0.5, RelativeUnit.Relative),
-            GradientStops =
-            {
-                new GradientStop(left ? Colors.Transparent : Colors.Black, 0),
-                new GradientStop(Colors.Black, fade),
-                new GradientStop(Colors.Black, 1 - fade),
-                new GradientStop(right ? Colors.Transparent : Colors.Black, 1),
-            },
-        };
-    }
-
     private readonly DispatcherTimer _caretIdle;
 
     /// <summary>Time without input after which the caret stops blinking (tests shorten it).</summary>
@@ -651,6 +615,7 @@ public sealed partial class MainWindow : Window
                 // Claude Code's browser keys: the preview, and selecting an element in it
                 KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.B, command | KeyModifiers.Shift), Command = vm.TogglePreviewCommand });
                 KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.S, command | KeyModifiers.Shift), Command = vm.SelectElementCommand });
+                KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.M, command | KeyModifiers.Shift), Command = vm.ToggleDeviceModeCommand });
                 // The Views menu's panes (MainViewModel.Panes.cs): Files, Plan, Background tasks
                 KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.F, command | KeyModifiers.Shift), Command = vm.TogglePaneCommand, CommandParameter = SidePane.Files });
                 KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.P, command | KeyModifiers.Shift), Command = vm.TogglePaneCommand, CommandParameter = SidePane.Plan });

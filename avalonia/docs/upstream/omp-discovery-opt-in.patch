@@ -1,0 +1,334 @@
+diff --git a/packages/catalog/CHANGELOG.md b/packages/catalog/CHANGELOG.md
+--- a/packages/catalog/CHANGELOG.md
++++ b/packages/catalog/CHANGELOG.md
+@@ -2,6 +2,10 @@
+ 
+ ## [Unreleased]
+ 
++### Added
++
++- Added `setRemoteCatalogEnabled()` / `isRemoteCatalogEnabled()`; while disabled, every models.dev catalog lookup rejects without a network request and callers keep bundled metadata.
++
+ ## [18.8.0] - 2026-10-07
+ 
+ ### Changed
+diff --git a/packages/catalog/src/provider-models/index.ts b/packages/catalog/src/provider-models/index.ts
+--- a/packages/catalog/src/provider-models/index.ts
++++ b/packages/catalog/src/provider-models/index.ts
+@@ -4,4 +4,5 @@
+ export * from "./google";
+ export * from "./ollama";
+ export * from "./openai-compat";
++export * from "./remote-catalog";
+ export * from "./special";
+diff --git a/packages/catalog/src/provider-models/openai-compat.ts b/packages/catalog/src/provider-models/openai-compat.ts
+--- a/packages/catalog/src/provider-models/openai-compat.ts
++++ b/packages/catalog/src/provider-models/openai-compat.ts
+@@ -65,6 +65,7 @@
+ import { getClinePassModelMetadata } from "./cline-pass";
+ import type { ModelManagerConfig } from "./descriptor-types";
+ import { filterModelsDevCatalogRows } from "./models-dev-policies";
++import { isRemoteCatalogEnabled } from "./remote-catalog";
+ 
+ function revisionAtLeast(revision: string | undefined, floor: string): boolean {
+ 	if (revision === undefined) return false;
+@@ -213,6 +214,10 @@
+ 
+ function fetchRevalidatedWellKnownModels(fetchImpl?: FetchImpl, signal?: AbortSignal): Promise<unknown> {
+ 	const session = getCatalogSession(fetchImpl);
++	if (!isRemoteCatalogEnabled()) {
++		// `setRemoteCatalogEnabled(false)`: no request; callers keep bundled metadata.
++		return Promise.reject(new Error("remote models catalog is disabled"));
++	}
+ 	if (!session.inflight) {
+ 		session.inflight = withCatalogDiscoveryTimeout(DEFAULT_OPENAI_COMPATIBLE_DISCOVERY_TIMEOUT_MS, transportSignal =>
+ 			fetchCatalogPayload(fetchImpl ?? discoveryFetch(), session, transportSignal),
+diff --git a/packages/catalog/src/provider-models/remote-catalog.ts b/packages/catalog/src/provider-models/remote-catalog.ts
+new file mode 100644
+--- /dev/null
++++ b/packages/catalog/src/provider-models/remote-catalog.ts
+@@ -0,0 +1,18 @@
++/**
++ * Process-wide switch for the shared models.dev mirror (catalog.stencil.so).
++ *
++ * Every catalog lookup — the additive models.dev fallback layer and the
++ * reference/pricing enrichment some endpoint fetchers perform — goes through
++ * `fetchWellKnownModels`, which consults this switch before any I/O. While it
++ * is off, lookups reject without touching the network and callers keep their
++ * bundled metadata. The coding agent drives it from `providers.remoteCatalog`.
++ */
++let remoteCatalogEnabled = true;
++
++export function setRemoteCatalogEnabled(enabled: boolean): void {
++	remoteCatalogEnabled = enabled;
++}
++
++export function isRemoteCatalogEnabled(): boolean {
++	return remoteCatalogEnabled;
++}
+diff --git a/packages/coding-agent/CHANGELOG.md b/packages/coding-agent/CHANGELOG.md
+--- a/packages/coding-agent/CHANGELOG.md
++++ b/packages/coding-agent/CHANGELOG.md
+@@ -2,6 +2,11 @@
+ 
+ ## [Unreleased]
+ 
++### Added
++
++- Added the `providers.discovery` setting: `all` (default, current behavior) or `configured`, which lists models only from providers that have credentials, an env key, a `models.yml` entry, or an extension, and probes Ollama, llama.cpp, and LM Studio only when their base URL env var is set or they are configured.
++- Added the `providers.remoteCatalog` setting (default `true`); set it to `false` to never fetch the shared models.dev mirror (`catalog.stencil.so`) and use the bundled catalog plus configured provider endpoints only.
++
+ ## [18.8.0] - 2026-10-07
+ 
+ ### Added
+diff --git a/packages/coding-agent/src/config/model-registry.ts b/packages/coding-agent/src/config/model-registry.ts
+--- a/packages/coding-agent/src/config/model-registry.ts
++++ b/packages/coding-agent/src/config/model-registry.ts
+@@ -131,7 +131,7 @@
+ import type { ModelOverride, ModelsConfig, ProviderAuthMode } from "./models-config-schema";
+ import { type Settings, settings } from "./settings";
+ 
+-import { cfgDisabledProviders } from "./model-settings";
++import { cfgDisabledProviders, cfgProvidersDiscovery, cfgProvidersRemoteCatalog } from "./model-settings";
+ import { cfgExtendedContext } from "../session/context-settings";
+ 
+ // DeviceCheck attestation (`x-oai-attestation`) for ChatGPT-OAuth Codex
+@@ -206,6 +206,24 @@
+ 	}
+ }
+ 
++/** `providers.discovery: configured`: only providers the user set up are contacted for model lists. */
++function isConfiguredOnlyDiscovery(settingsInstance?: Settings): boolean {
++	try {
++		return cfgProvidersDiscovery.get(settingsInstance ?? settings) === "configured";
++	} catch {
++		return false;
++	}
++}
++
++/** `providers.remoteCatalog`: whether managers get the shared models.dev layer. */
++function isRemoteCatalogEnabledInSettings(settingsInstance?: Settings): boolean {
++	try {
++		return cfgProvidersRemoteCatalog.get(settingsInstance ?? settings);
++	} catch {
++		return true;
++	}
++}
++
+ /**
+  * Whether extended context windows are enabled: advertised maximum windows
+  * plus premium long-context tiers. Matches the schema default (`false`) when
+@@ -1225,6 +1243,8 @@
+ 	} {
+ 		const modelsByProvider = new Map<string, Model<Api>[]>();
+ 		const authoritativeFreshProviders = new Set<string>();
++		const configuredOnly = isConfiguredOnlyDiscovery(this.#settings);
++		const remoteCatalog = isRemoteCatalogEnabledInSettings(this.#settings);
+ 		for (const providerId of providerIds) {
+ 			const cacheProviderId = this.#resolveStartupModelCacheProviderId(providerId);
+ 			const cache = readModelCache<Api>(cacheProviderId, 24 * 60 * 60 * 1000, Date.now, this.#cacheDbPath);
+@@ -1232,12 +1252,15 @@
+ 			const additiveSharedCatalogProvider = ADDITIVE_MODELS_DEV_CATALOG_PROVIDER_ID_LOOKUP[providerId] === true;
+ 			if (!cache) {
+ 				const descriptor = PROVIDER_DESCRIPTORS.find(candidate => candidate.providerId === providerId);
+-				const discoveryExpected =
+-					sharedCatalogProvider ||
+-					(descriptor !== undefined &&
+-						(this.authStorage.keys.source(providerId) !== undefined ||
+-							descriptor.allowUnauthenticated === true ||
+-							this.#keylessProviders.has(providerId)));
++				// Mirrors the gates in #collectBuiltInModelManagerOptions.
++				const discoveryExpected = configuredOnly
++					? this.#hasProviderConfiguration(providerId) &&
++						(descriptor !== undefined || (sharedCatalogProvider && remoteCatalog))
++					: (sharedCatalogProvider && remoteCatalog) ||
++						(descriptor !== undefined &&
++							(this.authStorage.keys.source(providerId) !== undefined ||
++								descriptor.allowUnauthenticated === true ||
++								this.#keylessProviders.has(providerId)));
+ 				if (discoveryExpected) {
+ 					this.#providerDiscoveryStates.set(providerId, {
+ 						provider: providerId,
+@@ -1507,8 +1530,15 @@
+ 		for (const provider of ["local", "web"]) {
+ 			if (!disabledProviders.has(provider)) this.#keylessProviders.add(provider);
+ 		}
++		// `providers.discovery: configured` probes a local server only when the user pointed OMP at it
++		// (base URL env var) or stored credentials for it. Apple discovery is on-device and never probes.
++		const configuredOnly = isConfiguredOnlyDiscovery(this.#settings);
++		const shouldProbe = (provider: string, hasEndpointOverride: boolean) =>
++			!configuredProviders.has(provider) &&
++			!disabledProviders.has(provider) &&
++			(!configuredOnly || hasEndpointOverride || this.#hasProviderConfiguration(provider));
+ 		const hasOllamaEndpointOverride = Boolean(Bun.env.OLLAMA_BASE_URL?.trim() || Bun.env.OLLAMA_HOST?.trim());
+-		if (!configuredProviders.has("ollama") && !disabledProviders.has("ollama")) {
++		if (shouldProbe("ollama", hasOllamaEndpointOverride)) {
+ 			this.#discoverableProviders.push({
+ 				provider: "ollama",
+ 				api: "openai-responses",
+@@ -1518,7 +1548,7 @@
+ 			});
+ 			this.#keylessProviders.add("ollama");
+ 		}
+-		if (!configuredProviders.has("llama.cpp") && !disabledProviders.has("llama.cpp")) {
++		if (shouldProbe("llama.cpp", Boolean(Bun.env.LLAMA_CPP_BASE_URL))) {
+ 			this.#discoverableProviders.push({
+ 				provider: "llama.cpp",
+ 				api: "openai-responses",
+@@ -1546,7 +1576,7 @@
+ 			});
+ 			this.#keylessProviders.add("apple");
+ 		}
+-		if (!configuredProviders.has("lm-studio") && !disabledProviders.has("lm-studio")) {
++		if (shouldProbe("lm-studio", Boolean(Bun.env.LM_STUDIO_BASE_URL))) {
+ 			this.#discoverableProviders.push({
+ 				provider: "lm-studio",
+ 				api: "openai-completions",
+@@ -1558,6 +1588,20 @@
+ 		}
+ 	}
+ 
++	/**
++	 * Whether the user set `providerId` up: a credential (stored, env, `--api-key`, models.yml key),
++	 * a keyless login, a models.yml entry, or an extension registration.
++	 */
++	#hasProviderConfiguration(providerId: string): boolean {
++		return (
++			this.authStorage.keys.source(providerId) !== undefined ||
++			this.authStorage.keys.keyless(providerId) ||
++			this.#providerOverrides.has(providerId) ||
++			this.#runtimeProviderOverrides.has(providerId) ||
++			this.#keylessProviders.has(providerId)
++		);
++	}
++
+ 	#loadCustomModels(): CustomModelsResult {
+ 		// Gateway mode: serve bundled + broker-discovered catalog metadata only.
+ 		// Local models.yml provider overrides (baseUrl/apiKey/headers/transport),
+@@ -2184,6 +2228,8 @@
+ 			},
+ 		];
+ 		const disabledProviders = getDisabledProviderIdsFromSettings(this.#settings);
++		const configuredOnly = isConfiguredOnlyDiscovery(this.#settings);
++		const remoteCatalog = isRemoteCatalogEnabledInSettings(this.#settings);
+ 		const standardProviderDescriptors = PROVIDER_DESCRIPTORS.filter(descriptor => {
+ 			if (disabledProviders.has(descriptor.providerId)) return false;
+ 			if (configuredDiscoveryProviders.has(descriptor.providerId)) return false;
+@@ -2226,13 +2272,13 @@
+ 					this.#providerOverrides.has(descriptor.providerId) ||
+ 					this.#keylessProviders.has(descriptor.providerId));
+ 			const supportsSharedCatalog = MODELS_DEV_CATALOG_PROVIDER_ID_LOOKUP[descriptor.providerId] === true;
+-			const canUseSharedCatalogWithoutAuth = supportsSharedCatalog && !descriptor.dynamicModelsAuthoritative;
+-			if (
+-				isAuthenticated(apiKey) ||
+-				descriptor.allowUnauthenticated ||
+-				hasExplicitVllmConfig ||
+-				canUseSharedCatalogWithoutAuth
+-			) {
++			const canUseSharedCatalogWithoutAuth =
++				remoteCatalog && supportsSharedCatalog && !descriptor.dynamicModelsAuthoritative;
++			// `providers.discovery: configured` never contacts a provider the user has not set up.
++			const canDiscoverWithoutAuth = configuredOnly
++				? this.#hasProviderConfiguration(descriptor.providerId)
++				: descriptor.allowUnauthenticated || hasExplicitVllmConfig || canUseSharedCatalogWithoutAuth;
++			if (isAuthenticated(apiKey) || canDiscoverWithoutAuth) {
+ 				// Residency belongs to the token selected for discovery, not another
+ 				// stored account that happens to appear first in the pool.
+ 				const identity = getOAuthCredentialsForProvider(this.authStorage, descriptor.providerId).find(
+@@ -2250,6 +2296,13 @@
+ 					getProviderDefinition(descriptor.providerId)?.prepareModelDiscovery?.(discoveryConfig) ??
+ 					discoveryConfig;
+ 				const managerOptions = descriptor.createModelManagerOptions(preparedConfig);
++				if (!remoteCatalog) {
++					// Endpoint discovery only. A models.dev layer would fail on every refresh
++					// and keep the cached snapshot non-authoritative.
++					const { modelsDev: _remoteCatalog, ...endpointOptions } = managerOptions;
++					options.push(endpointOptions);
++					continue;
++				}
+ 				const modelsDev = managerOptions.modelsDev
+ 					? { ...managerOptions.modelsDev, additiveOnly: true }
+ 					: modelsDevCatalogFallback(descriptor.providerId, this.#fetch);
+@@ -2267,15 +2320,17 @@
+ 		}
+ 
+ 		// Catalog-only providers have no endpoint manager. Give their bundled
+-		// slices the same shared remote layer without requiring credentials.
++		// slices the same shared remote layer without requiring credentials
++		// (with `providers.discovery: configured`, only for providers set up).
+ 		const bundledProviderIds: Record<string, true> = Object.create(null);
+ 		for (const providerId of getBundledProviders()) bundledProviderIds[providerId] = true;
+-		for (const providerId of MODELS_DEV_CATALOG_PROVIDER_IDS) {
++		for (const providerId of remoteCatalog ? MODELS_DEV_CATALOG_PROVIDER_IDS : []) {
+ 			if (BUILT_IN_MODEL_MANAGER_PROVIDER_IDS[providerId] === true) continue;
+ 			if (bundledProviderIds[providerId] !== true) continue;
+ 			if (disabledProviders.has(providerId) || configuredDiscoveryProviders.has(providerId)) continue;
+ 			if (providerFilter && !providerFilter.has(providerId)) continue;
+ 			if (this.#runtimeModelManagers.has(providerId)) continue;
++			if (configuredOnly && !this.#hasProviderConfiguration(providerId)) continue;
+ 			const modelsDev = modelsDevCatalogFallback(providerId, this.#fetch);
+ 			if (!modelsDev) continue;
+ 			options.push({
+diff --git a/packages/coding-agent/src/config/model-settings.ts b/packages/coding-agent/src/config/model-settings.ts
+--- a/packages/coding-agent/src/config/model-settings.ts
++++ b/packages/coding-agent/src/config/model-settings.ts
+@@ -2,9 +2,10 @@
+  * Settings declared by this domain (see `config/registry.ts`). Declaration order is the
+  * settings-panel order; `config/all-settings.ts` registers every domain.
+  */
+-import { register, type SettingValueOf } from "./registry";
++import { effect, register, type SettingValueOf } from "./registry";
+ import type { AuthAccountPolicies } from "@oh-my-pi/pi-ai/auth-storage";
+ import type { cfgDefaultThinkingLevel } from "../session/settings";
++import { setRemoteCatalogEnabled } from "@oh-my-pi/pi-catalog/provider-models/remote-catalog";
+ 
+ /** Display metadata for one model tag. */
+ export interface ModelTagDef {
+@@ -81,6 +82,47 @@
+ 	pathScoped: { valuesKey: "providers" },
+ });
+ 
++export const cfgProvidersDiscovery = register({
++	id: "providers.discovery",
++	type: "enum",
++	values: ["all", "configured"] as const,
++	default: "all",
++	ui: {
++		tab: "providers",
++		group: "Privacy",
++		label: "Model Discovery",
++		description: "Which providers OMP may contact to list models",
++		options: [
++			{
++				value: "all",
++				label: "All",
++				description:
++					"Probe local servers and query public model lists of providers without credentials (current behavior)",
++			},
++			{
++				value: "configured",
++				label: "Configured only",
++				description:
++					"Only providers with credentials, an env key, a models.yml entry, or an extension; local servers only when their base URL env var is set",
++			},
++		],
++	},
++});
++
++export const cfgProvidersRemoteCatalog = register({
++	id: "providers.remoteCatalog",
++	type: "boolean",
++	default: true,
++	ui: {
++		tab: "providers",
++		group: "Privacy",
++		label: "Remote Model Catalog",
++		description:
++			"Refresh model metadata from the shared models.dev mirror (catalog.stencil.so). Off uses the bundled catalog and provider endpoints only",
++	},
++});
++effect(cfgProvidersRemoteCatalog, setRemoteCatalogEnabled);
++
+ export const cfgModelRoleStorage = register({
+ 	id: "modelRoleStorage",
+ 	type: "enum",

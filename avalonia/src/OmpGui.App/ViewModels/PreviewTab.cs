@@ -69,11 +69,11 @@ public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableO
     }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Header))]
+    [NotifyPropertyChangedFor(nameof(Header), nameof(ToolTip))]
     private Uri? _url;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Header))]
+    [NotifyPropertyChangedFor(nameof(Header), nameof(ToolTip))]
     private string _title = "";
 
     [ObservableProperty] private bool _isLoading;
@@ -86,8 +86,8 @@ public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableO
         : Url is { } u ? (u.IsDefaultPort ? u.Host : u.Host + ":" + u.Port)
         : "New tab";
 
-    /// <summary>What the tab's tooltip says.</summary>
-    public string ToolTip => IsPopup ? $"Pop-up from {Opener?.Header ?? "a page"}" : IsAgentTab ? "Opened by omp" : "Preview";
+    /// <summary>What the tab's tooltip says: the whole title (the strip may trim it), then whose tab it is.</summary>
+    public string ToolTip => Header + "\n" + (IsPopup ? $"Pop-up from {Opener?.Header ?? "a page"}" : IsAgentTab ? "Opened by omp" : "Preview");
 
     // The rest of the page state, kept while another tab is active (the toolbar shows the active one's)
     internal string Address { get; set; } = "";

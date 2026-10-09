@@ -70,7 +70,7 @@ public static class TerminalOnlyCommands
         new("rewind", "Rewind to a previous message, keeping the old path as a branch", GuiEquivalent.Rewind),
         new("fork", "Create a new fork from a previous message", GuiEquivalent.Terminal),
         new("tree", "Navigate session tree (switch branches)", GuiEquivalent.Terminal),
-        new("logout", "Logout from OAuth provider", GuiEquivalent.Terminal),
+        new("logout", "Logout from OAuth provider", GuiEquivalent.Providers),
         new("clear", "Clear the conversation context in place, keeping the session", GuiEquivalent.Terminal),
         new("drop", "Delete the current session and start a new one", GuiEquivalent.DeleteSession),
         new("btw", "Ask a side question, or browse this session's BTW history", GuiEquivalent.Terminal),

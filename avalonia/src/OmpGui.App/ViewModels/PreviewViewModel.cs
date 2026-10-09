@@ -175,8 +175,16 @@ public sealed partial class PreviewViewModel : ObservableObject
         : "Start a dev server and its address shows up here";
     public bool ShowSuggestionRow => IsEmpty && HasSuggestions;
     public bool ShowFallback => HasPage && IsEngineUnavailable;
-    /// <summary>The native web view shows; hidden while a card, the crash page or the error page covers the page (it would draw over them).</summary>
-    public bool ShowWebView => HasPage && !IsEngineUnavailable && !Dialogs.CoversPage && !IsCrashed && LoadError is null;
+    /// <summary>
+    /// A pop-up of the window (a tooltip, a menu) lies over the page: the page shows as this picture, taken when it
+    /// opened, until it closes (the native web view would draw over the pop-up). Set by the view; null otherwise.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowWebView))]
+    private Avalonia.Media.Imaging.Bitmap? _pageUnderPopup;
+
+    /// <summary>The native web view shows; hidden while a card, the crash page, the error page or a pop-up's picture covers the page (it would draw over them).</summary>
+    public bool ShowWebView => HasPage && !IsEngineUnavailable && !Dialogs.CoversPage && !IsCrashed && LoadError is null && PageUnderPopup is null;
     public bool ShowCrashPage => HasPage && !IsEngineUnavailable && IsCrashed;
     public bool ShowErrorPage => HasPage && !IsEngineUnavailable && !IsCrashed && LoadError is not null;
     public string FallbackText => $"The embedded browser needs {EngineName} on this system";

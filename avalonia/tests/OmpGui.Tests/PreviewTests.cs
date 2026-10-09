@@ -1,5 +1,7 @@
+using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
@@ -297,6 +299,91 @@ public sealed class PreviewTests
         Assert.Equal(2, vm.Tabs.Count);
         using var frame = w.CaptureRenderedFrame();
         Assert.NotNull(frame);
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public void Device_mode_sets_the_pages_size_and_platform_and_comes_back_as_it_was()
+    {
+        var (w, panel, vm) = Show();
+        Assert.False(Named<Border>(panel, "DeviceBar").IsVisible);
+        Assert.Null(vm.DeviceViewport);
+        Assert.Null(vm.DeviceUserAgent);
+
+        // The toolbar button: a phone the first time, its user agent, the bar with its controls
+        vm.ToggleDeviceCommand.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(Named<Border>(panel, "DeviceBar").IsEffectivelyVisible);
+        Assert.Equal(new PixelSize(393, 852), vm.DeviceViewport);
+        Assert.Contains("iPhone", vm.DeviceUserAgent);
+        Assert.Equal("393×852 · iPhone", vm.DeviceLabel);
+
+        // Turned, then another preset (upright again, its platform), then a size typed in (the platform stays)
+        vm.RotateDeviceCommand.Execute(null);
+        Assert.Equal(new PixelSize(852, 393), vm.DeviceViewport);
+        vm.ChooseDeviceCommand.Execute(PreviewViewModel.DevicePresets.Single(p => p.Name == "Pixel 8"));
+        Assert.Equal((new PixelSize(412, 915), DevicePlatform.Android), (vm.DeviceViewport!.Value, vm.DevicePlatform));
+        Assert.Contains("Android", vm.DeviceUserAgent);
+        (vm.CustomWidth, vm.CustomHeight) = ("100", "800");
+        vm.ApplyCustomSizeCommand.Execute(null);
+        Assert.Equal(new PixelSize(412, 915), vm.DeviceViewport); // out of range: refused, said why
+        Assert.Contains("200", vm.Message);
+        (vm.CustomWidth, vm.CustomHeight) = ("600", "800");
+        vm.ApplyCustomSizeCommand.Execute(null);
+        Assert.Equal((new PixelSize(600, 800), DevicePlatform.Android, (DevicePreset?)null), (vm.DeviceViewport!.Value, vm.DevicePlatform, vm.DevicePreset));
+        vm.ChoosePlatformCommand.Execute(DevicePlatform.Desktop);
+        Assert.Null(vm.DeviceUserAgent); // desktop: the engine's own
+        vm.RotateDeviceCommand.Execute(null);
+
+        // Off fits the pane again; on again brings back the same device
+        vm.ToggleDeviceCommand.Execute(null);
+        Assert.Equal((null, DevicePlatform.Desktop), (vm.DeviceViewport, vm.DevicePlatform));
+        vm.ToggleDeviceCommand.Execute(null);
+        Assert.Equal(new PixelSize(800, 600), vm.DeviceViewport);
+        w.Close();
+    }
+
+    /// <summary>
+    /// Regression: with many tabs the strip was wider than the pane, so most close buttons lay out of sight, and its
+    /// scroll bar was drawn over the tabs. Now long titles shrink to share the width, every tab keeps its close button,
+    /// and past the narrowest the strip scrolls without a bar, keeping the active tab in view.
+    /// </summary>
+    [AvaloniaFact]
+    public void Many_tabs_share_the_strip_and_keep_their_close_buttons()
+    {
+        var (w, panel, vm) = Show(); // 520 wide
+        for (var i = 0; i < 3; i++) vm.OpenAgentTab("t" + i).Title = i == 1 ? "Short" : "Merchant Dashboard — Orders and refunds";
+        Dispatcher.UIThread.RunJobs();
+        var scroller = Named<ScrollViewer>(panel, "TabScroller");
+        Assert.Equal(ScrollBarVisibility.Hidden, scroller.HorizontalScrollBarVisibility);
+        List<Border> Tabs() => [.. Named<ItemsControl>(panel, "TabItems").GetVisualDescendants().OfType<Border>().Where(x => x.Classes.Contains("preview-tab"))];
+        Button? CloseOf(Border tab) => tab.GetVisualDescendants().OfType<Button>().FirstOrDefault(c => c.IsVisible && AutomationProperties.GetName(c) == "Close tab");
+        double Left(Visual v) => v.TranslatePoint(default, scroller)!.Value.X;
+
+        // They fit: the long titles shrink alike (but no further than needed), the short one keeps its width, nothing scrolls
+        Assert.True(scroller.Extent.Width <= scroller.Viewport.Width + 0.5);
+        var tabs = Tabs();
+        Assert.Equal(tabs[1].Bounds.Width, tabs[3].Bounds.Width);
+        Assert.InRange(tabs[1].Bounds.Width, 120, 190); // under their own 200
+        Assert.True(tabs[2].Bounds.Width < tabs[1].Bounds.Width);
+        foreach (var tab in tabs.Skip(1))
+        {
+            var close = CloseOf(tab)!;
+            Assert.True(Left(close) + close.Bounds.Width <= Left(tab) + tab.Bounds.Width + 0.5); // inside its own tab
+            Assert.True(Left(close) + close.Bounds.Width <= scroller.Viewport.Width + 0.5); // and in sight
+        }
+
+        // Too many for even their narrowest: the strip scrolls, the active (newest) tab in view, close button and all
+        for (var i = 3; i < 12; i++) vm.OpenAgentTab("t" + i).Title = "Merchant Dashboard — Orders and refunds";
+        Dispatcher.UIThread.RunJobs();
+        tabs = Tabs();
+        Assert.True(scroller.Extent.Width > scroller.Viewport.Width);
+        var activeClose = CloseOf(tabs[^1])!;
+        Assert.InRange(Left(activeClose), 0, scroller.Viewport.Width - activeClose.Bounds.Width);
+        vm.SelectTabCommand.Execute(vm.Tabs[0]);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(0, scroller.Offset.X);
+        Assert.Equal("Merchant Dashboard — Orders and refunds\nOpened by omp", vm.Tabs[^1].ToolTip); // the whole title, trimmed in the strip
         w.Close();
     }
 

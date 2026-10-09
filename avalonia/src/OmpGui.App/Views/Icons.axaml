@@ -35,6 +35,9 @@
   <StreamGeometry x:Key="IconSelect">M4 8.5 V5.5 A1.5 1.5 0 0 1 5.5 4 H8.5 M12 4 H13.5 M4 12 V13.5 M17.5 4 H18.5 A1.5 1.5 0 0 1 20 5.5 V7.5 M8.5 20 H5.5 A1.5 1.5 0 0 1 4 18.5 V17.5 M11 11 L20.5 14.2 L16.4 16.4 L14.2 20.5 Z</StreamGeometry>
   <StreamGeometry x:Key="IconComment">M6 5 H18 A2 2 0 0 1 20 7 V15 A2 2 0 0 1 18 17 H11 L7 20.5 V17 H6 A2 2 0 0 1 4 15 V7 A2 2 0 0 1 6 5 Z M8.5 9.5 H15.5 M8.5 12.5 H13</StreamGeometry>
   <StreamGeometry x:Key="IconGlobe">M12 3.5 A8.5 8.5 0 1 1 12 20.5 A8.5 8.5 0 1 1 12 3.5 Z M3.5 12 H20.5 M12 3.5 C9.3 6.2 9.3 17.8 12 20.5 M12 3.5 C14.7 6.2 14.7 17.8 12 20.5</StreamGeometry>
+  <!-- Device size and platform (a screen and a phone); rotate (portrait ⇄ landscape) -->
+  <StreamGeometry x:Key="IconDevices">M17.5 8 V6.5 A1 1 0 0 0 16.5 5.5 H3.5 A1 1 0 0 0 2.5 6.5 V14.5 A1 1 0 0 0 3.5 15.5 H11 M6 19 H11 M8.5 15.5 V19 M15 10 H20 A1 1 0 0 1 21 11 V19 A1 1 0 0 1 20 20 H15 A1 1 0 0 1 14 19 V11 A1 1 0 0 1 15 10 Z M17.4 17.5 H17.6</StreamGeometry>
+  <StreamGeometry x:Key="IconRotate">M8 4.5 H11 A1 1 0 0 1 12 5.5 V18.5 A1 1 0 0 1 11 19.5 H5 A1 1 0 0 1 4 18.5 V5.5 A1 1 0 0 1 5 4.5 H8 M15 6.5 A5 5 0 0 1 20 11.5 M20 11.5 L18 9.8 M20 11.5 L21.5 9.3 M14.5 14.5 H19.5 A1 1 0 0 1 20.5 15.5 V18.5 A1 1 0 0 1 19.5 19.5 H14.5</StreamGeometry>
   <!-- Settings categories and panes -->
   <StreamGeometry x:Key="IconKey">M8 11 A4 4 0 1 1 8 19 A4 4 0 1 1 8 11 Z M10.9 12.2 L19 4 M16 7 L18.5 9.5 M13.8 9.3 L16 11.5</StreamGeometry>
   <StreamGeometry x:Key="IconPlug">M9 3.5 V7.5 M15 3.5 V7.5 M6.5 7.5 H17.5 V11 A5.5 5.5 0 0 1 6.5 11 Z M12 16.5 V20.5</StreamGeometry>

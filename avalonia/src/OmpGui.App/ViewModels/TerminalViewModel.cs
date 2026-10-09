@@ -25,9 +25,13 @@ public sealed partial class TerminalViewModel(TerminalKind kind, string title, s
     /// <summary>The process was launched once; a tab is never relaunched behind the user's back.</summary>
     public bool Started { get; set; }
 
+    /// <summary>Held while the tab's process runs (strict network privacy's sign-in allowance for <c>omp login</c>).</summary>
+    public IDisposable? Lease { get; init; }
+
     public void OnExited(int code)
     {
         HasExited = true;
         Status = $"exited ({code})";
+        Lease?.Dispose();
     }
 }

@@ -245,6 +245,7 @@ public sealed class LayoutAuditTests
             vm.Preview.OnPageMessage(System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object>
             {
                 ["type"] = "annotation", ["token"] = vm.Preview.AnnotationToken, ["id"] = "a1", ["comment"] = "Make the button bigger", ["url"] = "http://localhost:5173/",
+                ["mark"] = new Dictionary<string, object> { ["kind"] = "point", ["x"] = 120, ["y"] = 160, ["viewportWidth"] = 1280, ["viewportHeight"] = 800 },
                 ["element"] = new Dictionary<string, object> { ["selector"] = "#buy", ["tag"] = "button", ["html"] = "<button id=\"buy\">", ["text"] = "Buy" },
             }));
             await Settle();

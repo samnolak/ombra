@@ -82,7 +82,7 @@ public sealed class AgentBrowserDefaultsTests
         var defaults = new AgentBrowserDefaults(bridge, Path.Combine(dir, "agent-browser"),
             inherited: k => k == AgentBrowserDefaults.ConfigFilesVariable ? "/home/me/team.yml" : null);
         var options = new OmpRuntimeOptions { Command = "omp" };
-        var vm = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs()) { OmpTuiLaunch = d => defaults.ForTui(options, d) };
+        var vm = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs()) { OmpTuiLaunch = (d, _) => Task.FromResult(defaults.ForTui(options, d)) };
         vm.OpenOmpTuiCommand.Execute(null);
         var tui = Assert.Single(vm.Terminals);
         Assert.Equal(bridge.Endpoint, tui.Environment[AgentBrowserBridge.SocketVariable]);

@@ -1,13 +1,21 @@
 using OmpGui.ClientCore;
+using OmpGui.ClientCore.Network;
 
 namespace OmpGui.App.ViewModels;
 
-/// <summary>Settings › Advanced › Corporate network certificates (<see cref="NetworkTrustViewModel"/>): what it needs from the window.</summary>
+/// <summary>Settings › Advanced › Network: corporate certificates (<see cref="NetworkTrustViewModel"/>) and network
+/// privacy (<see cref="NetworkPrivacyViewModel"/>): what they need from the window.</summary>
 public sealed partial class MainViewModel
 {
     private NetworkTrustViewModel? _networkTrust;
+    private NetworkPrivacyViewModel? _privacySettings;
 
     public NetworkTrustViewModel NetworkTrust => _networkTrust ??= new NetworkTrustViewModel(this);
+
+    public NetworkPrivacyViewModel PrivacySettings => _privacySettings ??= new NetworkPrivacyViewModel(this);
+
+    /// <summary>The provider gate and strict network privacy every omp start goes through (null in tests that start omp directly).</summary>
+    public NetworkPrivacy? Privacy { get; init; }
 
     internal ClientSettingsStore? SettingsStore => _settings;
 

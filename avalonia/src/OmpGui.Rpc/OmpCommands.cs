@@ -58,6 +58,15 @@ public sealed record OmpModel(string Provider, string Id, string Name, bool Reas
 /// <summary>A provider omp can sign in to (<c>get_login_providers</c>).</summary>
 public sealed record OmpLoginProvider(string Id, string Name, bool Available, bool Authenticated);
 
+/// <summary>
+/// A credential omp has stored for a provider and can remove (<c>get_logout_accounts</c>, omp 18.8.0).
+/// </summary>
+/// <param name="Label">The account as omp names it (email, account or project id, "API key #3").</param>
+/// <param name="Detail">More of the same (email, ids, "oauth #3").</param>
+/// <param name="Type"><c>oauth</c> or <c>api_key</c>.</param>
+/// <param name="Active">This session may be using it.</param>
+public sealed record OmpLogoutAccount(long CredentialId, string Label, string Detail, string Type, bool Active);
+
 /// <summary>The omp RPC commands the client uses (docs/rpc.md "Command Schema").</summary>
 public static class OmpCommands
 {
@@ -223,6 +232,31 @@ public static class OmpCommands
     /// </summary>
     public static async Task LoginAsync(this RpcConnection c, string providerId, CancellationToken ct = default) =>
         Ok(await c.RequestAsync("login", w => w.WriteString("providerId", providerId), timeout: TimeSpan.FromMinutes(15), ct: ct).ConfigureAwait(false));
+
+    /// <summary>The credentials <see cref="LogoutAsync"/> can remove for a provider, active first (omp 18.8.0).</summary>
+    public static async Task<IReadOnlyList<OmpLogoutAccount>> GetLogoutAccountsAsync(this RpcConnection c, string providerId, CancellationToken ct = default)
+    {
+        var r = Ok(await c.RequestAsync("get_logout_accounts", w => w.WriteString("providerId", providerId), ct: ct).ConfigureAwait(false));
+        if (r.Data is not { ValueKind: JsonValueKind.Object } d || !d.TryGetProperty("accounts", out var list) || list.ValueKind != JsonValueKind.Array) return [];
+        var accounts = new List<OmpLogoutAccount>();
+        foreach (var a in list.EnumerateArray())
+        {
+            if (!a.TryGetProperty("credentialId", out var id) || id.ValueKind != JsonValueKind.Number || !id.TryGetInt64(out var credentialId)) continue;
+            accounts.Add(new OmpLogoutAccount(credentialId, Str(a, "label") ?? $"#{credentialId}", Str(a, "detail") ?? "", Str(a, "type") ?? "",
+                a.TryGetProperty("active", out var active) && active.ValueKind == JsonValueKind.True));
+        }
+        return accounts;
+    }
+
+    /// <summary>
+    /// Removes one stored credential (omp 18.8.0 <c>logout</c>); fails when it is no longer stored. Returns the source
+    /// that still signs omp in to the provider (an environment variable, another stored credential…), if any.
+    /// </summary>
+    public static async Task<string?> LogoutAsync(this RpcConnection c, string providerId, long credentialId, CancellationToken ct = default)
+    {
+        var r = Ok(await c.RequestAsync("logout", w => { w.WriteString("providerId", providerId); w.WriteNumber("credentialId", credentialId); }, ct: ct).ConfigureAwait(false));
+        return r.Data is { ValueKind: JsonValueKind.Object } d ? Str(d, "remainingSource") : null;
+    }
 
     private static string? Str(JsonElement e, string n) => e.TryGetProperty(n, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
 

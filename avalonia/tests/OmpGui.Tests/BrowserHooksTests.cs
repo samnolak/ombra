@@ -84,7 +84,7 @@ public sealed class BrowserHooksTests
         Assert.Same(tab, vm.ActiveTab); // the opener was on screen: the pop-up shows at once
         Assert.True(tab.CanClose);
         Assert.Equal("accounts.example.com", tab.Header);
-        Assert.Equal("Pop-up from app.example.com", tab.ToolTip);
+        Assert.Equal("accounts.example.com\nPop-up from app.example.com", tab.ToolTip);
         Assert.True(vm.ShowTabStrip);
         Assert.Contains("Pop-up", Texts(panel));
         // The engine's own view is hosted in the page area; omp's browser drives it like any tab

@@ -16,8 +16,9 @@ public sealed partial class MainViewModel
     /// <summary>The panel has no tab: it shows how to start one.</summary>
     public bool HasNoTerminals => Terminals.Count == 0;
 
-    /// <summary>How to start omp's own UI in a terminal (from the client settings); null when unknown (tests).</summary>
-    public Func<string?, OmpGui.Rpc.OmpLaunchSpec>? OmpTuiLaunch { get; init; }
+    /// <summary>How to start omp's own UI in a terminal (from the client settings, through the network privacy checks);
+    /// null when unknown (tests).</summary>
+    public Func<string?, CancellationToken, Task<OmpGui.Rpc.OmpLaunchSpec>>? OmpTuiLaunch { get; init; }
 
     partial void OnSelectedTerminalChanged(TerminalViewModel? oldValue, TerminalViewModel? newValue)
     {
@@ -40,10 +41,17 @@ public sealed partial class MainViewModel
     }
 
     [RelayCommand]
-    private void OpenOmpTui()
+    private async Task OpenOmpTuiAsync()
     {
         if (OmpTuiLaunch is not { } launch) return;
-        var spec = launch(ProjectDirectory());
+        OmpGui.Rpc.OmpLaunchSpec spec;
+        try { spec = await launch(ProjectDirectory(), Lifetime); }
+        catch (OmpGui.ClientCore.Network.NetworkPrivacyException e)
+        {
+            ComposerMessage = "omp's terminal was not opened: " + e.Message;
+            return;
+        }
+        catch (OperationCanceledException) when (Lifetime.IsCancellationRequested) { return; }
         // A variable the settings remove for omp (null) is passed empty: the terminal library can only add variables,
         // and an empty value reads as unset to omp (so a key hidden from omp is not inherited by its TUI either).
         var env = spec.Environment?.ToDictionary(kv => kv.Key, kv => kv.Value ?? "") ?? [];
@@ -56,6 +64,7 @@ public sealed partial class MainViewModel
         if (t is null) return;
         var i = Terminals.IndexOf(t);
         Terminals.Remove(t); // the view kills its process
+        t.Lease?.Dispose();
         OnPropertyChanged(nameof(HasNoTerminals));
         if (SelectedTerminal == t) SelectedTerminal = Terminals.Count == 0 ? null : Terminals[Math.Min(i, Terminals.Count - 1)];
         if (Terminals.Count == 0) IsTerminalOpen = false;

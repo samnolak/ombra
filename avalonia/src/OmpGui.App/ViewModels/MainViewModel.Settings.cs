@@ -80,6 +80,24 @@ public sealed partial class LoginProviderViewModel(OmpLoginProvider provider) : 
     [ObservableProperty] private bool _isAuthenticated = provider.Authenticated;
     [ObservableProperty] private bool _isBusy;
     public bool CanSignIn => Provider.Available;
+
+    /// <summary>The sign-out panel under the row: the stored accounts to choose from, or why there are none.</summary>
+    [ObservableProperty] private bool _isSignOutOpen;
+    [ObservableProperty] private IReadOnlyList<LogoutAccountViewModel> _accounts = [];
+    /// <summary>Shown in the panel instead of the accounts (none stored, omp refused…).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSignOutNote))]
+    private string _signOutNote = "";
+    public bool HasSignOutNote => SignOutNote.Length > 0;
+}
+
+/// <summary>A credential omp stored for a provider, as a row of the sign-out panel.</summary>
+public sealed class LogoutAccountViewModel(LoginProviderViewModel owner, OmpLogoutAccount account)
+{
+    public LoginProviderViewModel Owner { get; } = owner;
+    public OmpLogoutAccount Account { get; } = account;
+    public string Label => Account.Label;
+    public string Detail => !Account.Active ? Account.Detail : Account.Detail.Length > 0 ? $"In use · {Account.Detail}" : "In use";
 }
 
 /// <summary>Model and thinking level, approval mode, settings page, recovery.</summary>
@@ -174,6 +192,11 @@ public sealed partial class MainViewModel
     [ObservableProperty] private string _settingsTheme = "system";
     [ObservableProperty] private string _settingsMessage = "";
     [ObservableProperty] private bool _providersLoading;
+    /// <summary>What the last sign-out did (under the provider list); empty when there is nothing to say.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasProvidersMessage))]
+    private string _providersMessage = "";
+    public bool HasProvidersMessage => ProvidersMessage.Length > 0;
 
     public string SettingsPath => _settings?.Path ?? "(not saved: settings file unavailable)";
     public static IReadOnlyList<string> Themes => ["system", "light", "dark"];
@@ -513,6 +536,7 @@ public sealed partial class MainViewModel
             NotificationsEnabled = o.Notifications ?? true;
             AgentUsesGuiBrowser = o.AgentUsesGuiBrowser ?? true;
             SettingsMessage = "";
+            ProvidersMessage = "";
             RefreshRuntimeStatus();
             IsSettingsOpen = true;
             await LoadLoginProvidersAsync();
@@ -545,16 +569,89 @@ public sealed partial class MainViewModel
             if (p is null || p.IsBusy) return;
             p.IsBusy = true;
             IsSettingsOpen = false; // the sign-in link and any code prompt appear above the composer
-            var ok = await open.Controller.LoginAsync(p.Id, _cts.Token);
+            bool ok;
+            // Strict network privacy lets this provider's sign-in and API addresses through while the user signs in
+            using (Privacy?.AllowSignIn(p.Id))
+                ok = await open.Controller.LoginAsync(p.Id, _cts.Token);
             p.IsBusy = false;
             p.IsAuthenticated = ok || p.IsAuthenticated;
             ApplyIfShown(open);
+            // omp contacts a provider only once it is added (NetworkPrivacy): its models come with the next start
+            if (ok && Privacy?.LastGate?.Added.Contains(p.Id) != true) _ = RestartOmpToApplyAsync();
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested)
         {
             // The window is closing: the request was abandoned on purpose.
         }
     }
+
+    /// <summary>Opens (or closes) the sign-out panel under a provider: the accounts omp stored for it.</summary>
+    [RelayCommand]
+    private async Task AskSignOutAsync(LoginProviderViewModel? p)
+    {
+        if (p is null || p.IsBusy) return;
+        if (p.IsSignOutOpen) { p.IsSignOutOpen = false; return; }
+        p.IsBusy = true;
+        ProvidersMessage = "";
+        try
+        {
+            var accounts = await Session.GetLogoutAccountsAsync(p.Id, _cts.Token);
+            p.Accounts = [.. accounts.Select(a => new LogoutAccountViewModel(p, a))];
+            p.SignOutNote = accounts.Count > 0 ? ""
+                : $"omp has no stored sign-in for {p.Name}: it comes from an API key in the environment or omp's settings. Remove that key to sign out.";
+        }
+        catch (Exception e) when (e is RpcCommandException or TimeoutException or RpcConnectionClosedException or OmpNotRunningException)
+        {
+            p.Accounts = [];
+            p.SignOutNote = SignOutFailure(e);
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { return; }
+        finally { p.IsBusy = false; }
+        p.IsSignOutOpen = true;
+    }
+
+    [RelayCommand]
+    private void CancelSignOut(LoginProviderViewModel? p)
+    {
+        if (p is not null) p.IsSignOutOpen = false;
+    }
+
+    /// <summary>Removes one stored account (omp's <c>logout</c>), then lists the providers again.</summary>
+    [RelayCommand]
+    private async Task SignOutAsync(LogoutAccountViewModel? a)
+    {
+        if (a is null || a.Owner.IsBusy) return;
+        var p = a.Owner;
+        var open = _open;
+        p.IsBusy = true;
+        try
+        {
+            var remaining = await open.Controller.LogoutAsync(p.Id, a.Account, _cts.Token);
+            ApplyIfShown(open);
+            await LoadLoginProvidersAsync();
+            ProvidersMessage = remaining is null
+                ? $"Signed out of {p.Name} ({a.Label})."
+                : $"Signed out of {p.Name} ({a.Label}). omp still signs in to it with {remaining}.";
+            _ = ProviderUsage.LoadAsync(force: true);
+            // Without any sign-in left the provider is no longer added: omp stops contacting it from its next start
+            if (remaining is null) _ = RestartOmpToApplyAsync();
+        }
+        catch (Exception e) when (e is RpcCommandException or TimeoutException or RpcConnectionClosedException or OmpNotRunningException)
+        {
+            p.IsBusy = false;
+            p.SignOutNote = SignOutFailure(e);
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested)
+        {
+            // The window is closing: the request was abandoned on purpose.
+        }
+    }
+
+    /// <summary>An omp without sign-out over RPC (18.2.0 had none): its terminal's <c>/logout</c> still works.</summary>
+    private static string SignOutFailure(Exception e) =>
+        e is RpcCommandException { Error: var error } && error.StartsWith("Unknown command", StringComparison.Ordinal)
+            ? "This omp can't sign out from here. Use /logout in omp's terminal."
+            : e is RpcCommandException r ? "Could not sign out: " + r.Error : "Could not sign out: " + e.Message;
 
     /// <summary>Saves the runtime fields and restarts every chat's omp with them (one that is working once its run ends).</summary>
     [RelayCommand]

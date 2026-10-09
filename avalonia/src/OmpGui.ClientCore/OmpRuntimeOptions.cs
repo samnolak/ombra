@@ -64,6 +64,11 @@ public sealed record OmpRuntimeOptions
     public string? CorporateTrust { get; init; }
     /// <summary>The app's own copy of the user's CA file (mode <c>pem</c>), in its settings folder.</summary>
     public string? CorporateTrustBundle { get; init; }
+    /// <summary>Settings › Advanced › Network privacy (<see cref="Network.NetworkPrivacy"/>): omp and its tools reach only
+    /// the added providers and <see cref="StrictNetworkAllowedHosts"/>, through the app's filter. Default off.</summary>
+    public bool? StrictNetworkPrivacy { get; init; }
+    /// <summary>Addresses the user lets through in strict mode besides the added providers (<c>host</c> or <c>*.domain</c>).</summary>
+    public string[]? StrictNetworkAllowedHosts { get; init; }
 
     /// <summary>The environment omp inherits from the app, as launches see it (null: this process's; tests replace it).</summary>
     [JsonIgnore]

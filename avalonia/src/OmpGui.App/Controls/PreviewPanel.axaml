@@ -65,7 +65,7 @@
     <!-- ── Toolbar ── -->
     <Panel DockPanel.Dock="Top">
       <Border Classes="preview-toolbar">
-        <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto" VerticalAlignment="Center">
+        <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto,Auto" VerticalAlignment="Center">
           <Button x:Name="BackButton" Grid.Column="0" Classes="icon" Command="{Binding BackCommand}"
                   ToolTip.Tip="Back" AutomationProperties.Name="Back">
             <ctl:Icon Data="{StaticResource IconArrowLeft}" Size="18" />
@@ -100,12 +100,17 @@
               <TextBlock Text="omp" FontSize="{DynamicResource GuiFontS}" VerticalAlignment="Center" />
             </StackPanel>
           </Border>
-          <!-- Select element (Claude Code's name; Codex's page comments): click an element, write what to change -->
-          <Button x:Name="AnnotateButton" Grid.Column="5" Classes="icon" Classes.on="{Binding IsAnnotating}" Command="{Binding ToggleAnnotateCommand}"
-                  ToolTip.Tip="Select an element to comment on (Ctrl/⌘+Shift+S)" AutomationProperties.Name="Select element">
+          <!-- Device mode (the browsers' device toolbar): the page at a phone's, a tablet's or a desktop's size and platform -->
+          <Button x:Name="DeviceButton" Grid.Column="5" Classes="icon" Classes.on="{Binding HasDevice}" Command="{Binding ToggleDeviceCommand}"
+                  ToolTip.Tip="{Binding DeviceTip}" AutomationProperties.Name="Device size">
+            <ctl:Icon Data="{StaticResource IconDevices}" Size="18" />
+          </Button>
+          <!-- Annotate (Codex's page comments): click a point or drag over an area, write what to change -->
+          <Button x:Name="AnnotateButton" Grid.Column="6" Classes="icon" Classes.on="{Binding IsAnnotating}" Command="{Binding ToggleAnnotateCommand}"
+                  ToolTip.Tip="Annotate: mark a point or an area (Ctrl/⌘+Shift+S)" AutomationProperties.Name="Annotate">
             <ctl:Icon Data="{StaticResource IconSelect}" Size="18" />
           </Button>
-          <Button x:Name="ClosePreviewButton" Grid.Column="6" Classes="icon" Command="{Binding CloseCommand}"
+          <Button x:Name="ClosePreviewButton" Grid.Column="7" Classes="icon" Command="{Binding CloseCommand}"
                   ToolTip.Tip="Close preview" AutomationProperties.Name="Close preview">
             <ctl:Icon Data="{StaticResource IconClose}" Size="18" />
           </Button>
@@ -115,13 +120,59 @@
                    IsVisible="{Binding IsLoading}" />
     </Panel>
 
-    <!-- ── Tabs (omp's pages, each with its own web view) ── -->
+    <!-- ── Device bar (while device mode is on): a preset, or a size typed in; turn it; the platform the page sees ── -->
+    <Border x:Name="DeviceBar" DockPanel.Dock="Top" Classes="preview-tabs" IsVisible="{Binding HasDevice}">
+      <WrapPanel ItemSpacing="8" LineSpacing="6" VerticalAlignment="Center">
+        <ComboBox x:Name="DevicePresetBox" ItemsSource="{x:Static vm:PreviewViewModel.DevicePresets}" SelectedItem="{Binding DevicePreset}"
+                  PlaceholderText="Custom size" MinWidth="170" VerticalAlignment="Center" AutomationProperties.Name="Device">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:DevicePreset">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                <TextBlock Classes="tertiary" Text="{Binding SizeText}" VerticalAlignment="Center" FontSize="{DynamicResource GuiFontS}" />
+              </StackPanel>
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+          <TextBox x:Name="DeviceWidthBox" Classes="sm" Width="64" Text="{Binding CustomWidth}" AutomationProperties.Name="Width" ToolTip.Tip="Width (Enter applies)">
+            <TextBox.KeyBindings><KeyBinding Gesture="Enter" Command="{Binding ApplyCustomSizeCommand}" /></TextBox.KeyBindings>
+          </TextBox>
+          <TextBlock Classes="muted" Text="×" VerticalAlignment="Center" />
+          <TextBox x:Name="DeviceHeightBox" Classes="sm" Width="64" Text="{Binding CustomHeight}" AutomationProperties.Name="Height" ToolTip.Tip="Height (Enter applies)">
+            <TextBox.KeyBindings><KeyBinding Gesture="Enter" Command="{Binding ApplyCustomSizeCommand}" /></TextBox.KeyBindings>
+          </TextBox>
+        </StackPanel>
+        <Button x:Name="RotateDeviceButton" Classes="icon" Classes.on="{Binding IsLandscape}" Command="{Binding RotateDeviceCommand}"
+                ToolTip.Tip="Portrait / landscape" AutomationProperties.Name="Rotate" VerticalAlignment="Center">
+          <ctl:Icon Data="{StaticResource IconRotate}" Size="18" />
+        </Button>
+        <ComboBox x:Name="DevicePlatformBox" ItemsSource="{x:Static vm:PreviewViewModel.DevicePlatforms}" SelectedItem="{Binding DevicePlatform}"
+                  IsEnabled="{x:Static vm:PreviewViewModel.CanSetUserAgent}" MinWidth="110" VerticalAlignment="Center"
+                  ToolTip.Tip="The platform the page sees (its user agent). Only the size changes where the engine can't set one."
+                  AutomationProperties.Name="Platform">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:DevicePlatform">
+              <TextBlock Text="{Binding Converter={x:Static vm:PreviewViewModel.PlatformNameConverter}}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <Button x:Name="CloseDeviceButton" Classes="icon" Command="{Binding ClearDeviceCommand}" VerticalAlignment="Center"
+                ToolTip.Tip="Fit the pane again (Ctrl/⌘+Shift+M)" AutomationProperties.Name="Leave device mode">
+          <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+        </Button>
+      </WrapPanel>
+    </Border>
+
+    <!-- ── Tabs (omp's pages, each with its own web view) ──
+         They share the width (TabStripPanel: long titles shrink, close buttons stay); past their narrowest the row
+         scrolls sideways without a bar (a bar would lie over the tabs): wheel or swipe, faded edges, the active tab in view. -->
     <Border x:Name="TabStrip" DockPanel.Dock="Top" Classes="preview-tabs" IsVisible="{Binding ShowTabStrip}">
-      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+      <ScrollViewer x:Name="TabScroller" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
         <ItemsControl x:Name="TabItems" ItemsSource="{Binding Tabs}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
-              <StackPanel Orientation="Horizontal" Spacing="4" />
+              <ctl:TabStripPanel Spacing="4" MinItemWidth="120" />
             </ItemsPanelTemplate>
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
@@ -135,14 +186,14 @@
                   </Button>
                   <Button Classes="flat" Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).SelectTabCommand}" CommandParameter="{Binding}"
                           ToolTip.Tip="{Binding ToolTip}" AutomationProperties.Name="{Binding Header}">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                      <Ellipse Classes="state-dot running" IsVisible="{Binding IsLoading}" />
+                    <DockPanel>
+                      <Ellipse DockPanel.Dock="Left" Classes="state-dot running" IsVisible="{Binding IsLoading}" Margin="0,0,6,0" />
+                      <!-- A window the page opened (sign-in pop-ups): it closes itself when done -->
+                      <TextBlock DockPanel.Dock="Right" Classes="tertiary" Text="Pop-up" IsVisible="{Binding IsPopup}" VerticalAlignment="Center"
+                                 FontSize="{DynamicResource GuiFontXs}" Margin="6,0,0,0" />
                       <TextBlock Text="{Binding Header}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
                                  FontSize="{DynamicResource GuiFontS}" />
-                      <!-- A window the page opened (sign-in pop-ups): it closes itself when done -->
-                      <TextBlock Classes="tertiary" Text="Pop-up" IsVisible="{Binding IsPopup}" VerticalAlignment="Center"
-                                 FontSize="{DynamicResource GuiFontXs}" />
-                    </StackPanel>
+                    </DockPanel>
                   </Button>
                 </DockPanel>
               </Border>
@@ -219,7 +270,7 @@
       </DockPanel>
     </Border>
 
-    <Panel>
+    <Panel x:Name="PageArea">
       <!-- Empty: nothing opened yet -->
       <StackPanel x:Name="EmptyState" IsVisible="{Binding ShowEmptyState}" HorizontalAlignment="Center" VerticalAlignment="Center"
                   Spacing="10" Margin="24" MaxWidth="360">
@@ -276,6 +327,10 @@
 
       <!-- The pages: PreviewPanel.axaml.cs puts one NativeWebView per tab here (the active tab's shows), and pop-ups' own views -->
       <Panel x:Name="WebHost" IsVisible="{Binding ShowWebView}" />
+      <!-- A pop-up of the window (a tooltip, a menu) over the page: macOS draws it inside the window, under the native web
+           view, so until it closes the page shows as the picture taken when it opened (PreviewPanel.axaml.cs) -->
+      <Image x:Name="PageUnderPopup" Source="{Binding PageUnderPopup}" IsVisible="{Binding PageUnderPopup, Converter={x:Static ObjectConverters.IsNotNull}}"
+             Stretch="Fill" HorizontalAlignment="Left" VerticalAlignment="Top" />
 
       <!-- ── A question from the page (sign-in, alert, file, download, permission, popup): BrowserDialogsViewModel ──
            The native web view draws over anything here, so while a card is open it is hidden and the page shows as the

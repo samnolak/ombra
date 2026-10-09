@@ -53,7 +53,14 @@ public sealed class App : Application
                 ? OmpGui.ClientCore.Browser.TernHost.TryStart() : null;
             var browserDefaults = agentBrowser is null ? null
                 : new OmpGui.ClientCore.Browser.AgentBrowserDefaults(agentBrowser, Path.Combine(Path.GetDirectoryName(Path.GetFullPath(store.Path))!, "agent-browser"), tern);
-            OmpLaunchSpec Launch(LaunchRequest request) => browserDefaults?.ForSession(Current(), request) ?? Current().ToLaunchSpec(request);
+            // Network privacy (Settings › Advanced): every omp start first turns off the providers the user has not added,
+            // and in strict mode goes through the app's filtering proxy
+            var privacy = new OmpGui.ClientCore.Network.NetworkPrivacy(OmpGui.ClientCore.Network.NetworkPrivacy.DirectoryFor(store.Path));
+            async Task<OmpLaunchSpec> Launch(LaunchRequest request, CancellationToken ct)
+            {
+                var o = Current();
+                return await privacy.ApplyAsync(browserDefaults?.ForSession(o, request) ?? o.ToLaunchSpec(request), o, ct);
+            }
             configError ??= options.ApprovalModeWarning;
             var initial = new LaunchRequest(options.WorkingDirectory ?? ExistingDirectory(options.LastWorkingDirectory),
                 ApprovalMode: OmpRuntimeOptions.EffectiveApprovalMode(options.ApprovalMode));
@@ -65,8 +72,17 @@ public sealed class App : Application
             var updater = OmpGui.App.Services.UpdateInstaller.ForThisApp(out var noInstall);
             var vm = new MainViewModel(session, args, configError, store)
             {
-                OmpTuiLaunch = dir => browserDefaults?.ForTui(Current(), dir) ?? Current().ToTuiLaunchSpec(dir),
-                OmpCliLaunch = (cliArgs, dir) => Current().ToCliLaunchSpec(cliArgs, dir),
+                Privacy = privacy,
+                OmpTuiLaunch = async (dir, ct) =>
+                {
+                    var o = Current();
+                    return await privacy.ApplyAsync(browserDefaults?.ForTui(o, dir) ?? o.ToTuiLaunchSpec(dir), o, ct);
+                },
+                OmpCliLaunch = (cliArgs, dir) =>
+                {
+                    var o = Current();
+                    return privacy.ApplyStrict(o.ToCliLaunchSpec(cliArgs, dir), o);
+                },
                 RuntimeInstaller = installer,
                 Updates = new OmpGui.App.Services.UpdateChecker(new HttpClient { Timeout = TimeSpan.FromMinutes(30) },
                     options.UpdateFeed ?? OmpGui.App.Services.UpdateChecker.DefaultFeed,
@@ -89,6 +105,7 @@ public sealed class App : Application
                 agentBrowser.Host = new PreviewAgentHost(vm);
                 desktop.Exit += (_, _) => agentBrowser.Dispose();
             }
+            desktop.Exit += (_, _) => privacy.DisposeAsync().AsTask().GetAwaiter().GetResult();
             if (tern is not null)
             {
                 tern.Browser = new TernPreviewHost(vm);

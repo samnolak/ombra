@@ -311,4 +311,31 @@ public sealed class SettingsUiTests
         await vm.DisposeAsync();
         w.Close();
     }
+
+    [AvaloniaFact]
+    public async Task A_signed_in_provider_can_be_signed_out_from_settings()
+    {
+        var (w, vm, s, _) = await OpenAsync();
+        var login = s.LoginAsync("fakeauth");
+        await Until(() => s.Snapshot().Dialogs.Count == 1, "code prompt");
+        await s.AnswerDialogAsync(s.Snapshot().Dialogs[0].Id, new DialogAnswer.Value("1234"));
+        await Until(() => login.IsCompleted, "signed in");
+        Assert.True(login.Result);
+
+        await vm.OpenSettingsAtAsync("providers");
+        await Until(() => vm.LoginProviders.Count == 1 && vm.LoginProviders[0].IsAuthenticated, "signed-in provider listed");
+        var p = vm.LoginProviders[0];
+        await vm.AskSignOutCommand.ExecuteAsync(p);
+        Assert.True(p.IsSignOutOpen);
+        var account = Assert.Single(p.Accounts);
+        Assert.Equal(("me@example.com", "In use · oauth #1"), (account.Label, account.Detail));
+        Shot(w, "ui-providers-sign-out");
+
+        await vm.SignOutCommand.ExecuteAsync(account);
+        Assert.False(Assert.Single(vm.LoginProviders).IsAuthenticated);
+        Assert.Equal("Signed out of Fake Provider (me@example.com).", vm.ProvidersMessage);
+        Shot(w, "ui-providers-signed-out");
+        await vm.DisposeAsync();
+        w.Close();
+    }
 }

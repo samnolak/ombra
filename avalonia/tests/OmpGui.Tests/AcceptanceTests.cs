@@ -66,7 +66,7 @@ public sealed class AcceptanceTests
         var store = new ClientSettingsStore(Path.Combine(TestProcesses.TempDir("acceptance-settings"), "omp-gui.local.json"));
         store.Update(_ => options);
         var session = new SessionController(r => options.ToLaunchSpec(r), new LaunchRequest(options.WorkingDirectory, ApprovalMode: "write"), TimeSpan.FromSeconds(90));
-        var vm = new MainViewModel(session, new AppArgs(), settings: store) { OmpTuiLaunch = dir => options.ToTuiLaunchSpec(dir) };
+        var vm = new MainViewModel(session, new AppArgs(), settings: store) { OmpTuiLaunch = (dir, _) => Task.FromResult(options.ToTuiLaunchSpec(dir)) };
         var w = new MainWindow { DataContext = vm, Width = 1200, Height = 820 };
         w.Show();
         vm.OnWindowOpened();

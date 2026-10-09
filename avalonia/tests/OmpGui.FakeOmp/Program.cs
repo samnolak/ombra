@@ -875,6 +875,20 @@ while (true)
                 else Respond(loginId, "login", error: "Login cancelled");
             });
             break;
+        case "get_logout_accounts":
+            // Like omp's logout helper: the stored credentials for the provider, active first.
+            Respond(id, type, new
+            {
+                accounts = signedIn
+                    ? new object[] { new { credentialId = 1, provider = "fakeauth", label = "me@example.com", detail = "oauth #1", type = "oauth", active = true } }
+                    : [],
+            });
+            break;
+        case "logout":
+            var credentialId = cmd?["credentialId"]?.GetValue<int>();
+            if (signedIn && credentialId == 1) { signedIn = false; Respond(id, type, new { }); }
+            else Respond(id, type, error: $"Credential {credentialId} is not stored for {cmd?["providerId"]?.GetValue<string>()}");
+            break;
         case "new_session":
             history.Clear();
             sessionName = null;

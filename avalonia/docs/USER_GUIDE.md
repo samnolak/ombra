@@ -50,10 +50,10 @@ project yet), so the OS warns on first start:
    releases than 18.8.0 may exist on npm, but this client is verified only with 18.8.0 — another version may work or
    may miss features.
 2. **No model provider.** omp needs a model. If it has none, the window says *Connect a model provider*.
-   **Open omp setup** opens omp's own setup in the terminal beside the conversation, with the keyboard already in
-   it: on *Set up your providers* choose **Sign in** (arrow keys, Enter), pick a provider and finish in the browser
-   (or set an API key the way omp describes), then press **Try again**. API keys stay in omp's configuration; the GUI
-   never stores them.
+   **Open omp setup** runs `omp login` in the terminal beside the conversation, with the keyboard already in it:
+   pick a provider (arrow keys, Enter) and finish in the browser (or paste an API key the way omp describes), then
+   press **Try again**. `omp login` lists every provider and afterwards fetches the models of the one you chose only
+   (see [Network privacy](#network-privacy)). API keys stay in omp's configuration; the GUI never stores them.
 3. Pick a project folder — the folder chip under the message box (*Choose a folder*) or **Open folder…** in the
    project menu — and write your first message.
 
@@ -162,7 +162,8 @@ project yet), so the OS warns on first start:
   terminal beside the conversation (drag its edge to resize it; in a narrow window it covers the conversation until
   it is hidden), in the project folder, with the keyboard in it: **+ Shell** for a shell, **+ omp TUI** for omp's own
   terminal UI, for features omp offers only there (plan, goal, vibe…). With no terminal open the panel offers
-  **New shell** and **omp TUI**.
+  **New shell** and **omp TUI**. In omp's terminal UI `/login` lists only the providers you have added (the others
+  are off for omp: [Network privacy](#network-privacy)); add a new one under **Settings → Model providers**.
 - **Project menu** — click the project's name next to the session title: **Browse files** (the Files pane),
   **Show in Finder** / **Show in Explorer** / **Open in file manager**, **Open in VS Code** (or Cursor, Windsurf,
   Zed, Sublime Text — only the editors whose command is on your PATH), **Open terminal here**, **Copy path**, a new
@@ -200,8 +201,11 @@ project yet), so the OS warns on first start:
   than in a hidden browser: the preview opens by itself and you watch each step; a pulsing **omp** pill in its
   toolbar shows while omp reads, clicks or types on the page. Each page omp opens gets a tab of its own (a strip of
   tabs appears above the page): the preview shows omp's newest tab, your own page stays in the first tab, and tabs of
-  different chats don't push each other out. Pick another tab and the preview stays on it while omp works in the
-  background (picking omp's latest tab follows omp again); × closes one of omp's tabs (omp is told it is gone). If a
+  different chats don't push each other out. With many tabs their titles shrink to share the strip (the tooltip has
+  the whole title) and each keeps its ×; when even that is too wide, the strip scrolls sideways (wheel or swipe; a
+  faded edge means more tabs past it) and keeps the tab shown in view. Pick another tab and the preview stays on it
+  while omp works in the background (picking omp's latest tab follows omp again); × closes one of omp's tabs (omp is
+  told it is gone). If a
   page shows an alert or *OK / Cancel* question, omp is told what it says instead of waiting, and answers it with
   Enter or Esc like you would; an alert omp's own click causes is simply accepted, and a question omp caused but
   hasn't answered within 10 seconds comes to you as a card. omp reads pages as text (their elements and content) and can take screenshots of what the preview
@@ -239,15 +243,28 @@ project yet), so the OS warns on first start:
   **Reload**. Downloads ask first: **Save** puts the file in the folder you chose last time (the save panel asks the
   first time, so nothing lands in a folder you didn't pick), **Save as…** always asks; they are listed under the page
   with their progress, **Stop** and **Show in Finder**. Logins (cookies) are kept between runs. Sites see Safari's own
-  user agent.
-- **Comments on the page** — **Select element** in the preview's toolbar (or **+ → Comment on the page**, or
-  Ctrl/⌘+Shift+S) turns on the mode: point at an element (it is outlined), click it, write what to change and press
-  **Comment** (or Enter). A numbered pin marks the element on the page and the comment becomes a chip in the message
-  box (× removes it). The page's own links and buttons do nothing until you leave the mode (Esc, or Select element
-  again). The comments go with your next message — with no text, Send asks omp to make the changes they ask for —
-  each with what finds the element in the code: its selector, opening tag, text, position and size and — for
-  React ≤ 18, Vue and Svelte dev builds — the source file. Comments on several pages can go together, up to 20 at a
-  time.
+  user agent. While a tooltip or a menu of the window lies over the page, the page shows as a still picture until it
+  closes (on macOS the page would otherwise cover it).
+- **Comments on the page** — **Annotate** in the preview's toolbar (or **+ → Comment on the page**, or
+  Ctrl/⌘+Shift+S) turns on the mode: click to mark a point, or drag to select an area, write what to change and press
+  **Comment** (or Enter). Nothing is outlined while you move the pointer. A numbered pin (and, for an area, its dashed
+  outline) stays on the page, following the element it was left on as the page scrolls, and the comment becomes a
+  chip in the message box with its page's address (× removes it). To change a comment, click its pin on the page
+  (**Save** or **Delete**, in or out of the mode) or the chip's text (an editor with **Save** and **Show on the page**,
+  which opens that page — its tab if one shows it). The page's own links and buttons do nothing until you leave the
+  mode (Esc, or Annotate again). The comments go with your next message — with no text, Send asks omp to make the
+  changes they ask for — grouped by page (each group starts with the page's address and title, so omp knows which
+  page a comment is on), each with where the mark is (in the viewport and on the page) and what finds the element
+  holding it in the code: its selector, opening tag, text, position and size and — for React ≤ 18, Vue and Svelte dev
+  builds — the source file; an area also lists the elements it shows. Comments on several pages can go together, up
+  to 20 at a time.
+- **Device size** — the device button in the preview's toolbar (Ctrl/⌘+Shift+M) lays the page out at a device's size,
+  centred in the pane, with a bar under the toolbar: a preset (iPhone SE, iPhone 15 Pro, Pixel 8, iPad mini, iPad Pro,
+  Laptop, Desktop) or a size typed in (Enter applies, 200–4000 each side), turn it (portrait / landscape), and the
+  platform the page sees: Desktop, iPhone, iPad or Android — its user agent, set on macOS (elsewhere only the size
+  changes, and the platform list is off); a page already open loads again with it. × or the button again fits the
+  pane; the button brings back the device used last. It applies to every tab except pop-ups; a size omp set for its
+  own tab wins there. A pane smaller than the device limits it.
 - **Panes** — the buttons at the right of the header open **Files** (Ctrl/⌘+Shift+F), **Plan** (Ctrl/⌘+Shift+P),
   **Background tasks** (Ctrl/⌘+Shift+T), the **Terminal** (Ctrl+`) and the **Browser** preview (Ctrl/⌘+Shift+B); a
   lit button means its pane is open, and its tooltip names its shortcut. When the header has too little room for
@@ -312,7 +329,8 @@ project yet), so the OS warns on first start:
 | Ctrl+Shift+T (⇧⌘T) | Background tasks pane |
 | Ctrl+Shift+F (⇧⌘F) | Files pane |
 | Ctrl+Shift+B (⇧⌘B) | browser preview |
-| Ctrl+Shift+S (⇧⌘S) | select an element in the preview to comment on |
+| Ctrl+Shift+S (⇧⌘S) | annotate the preview: mark a point or an area to comment on |
+| Ctrl+Shift+M (⇧⌘M) | device size in the preview (on: the device used last; off: fit the pane) |
 | Ctrl+Shift+Space (⇧⌘Space) | dictation (Enter finishes, Esc cancels) |
 | Ctrl+V (⌘V) | paste text, images or files (a long text becomes a chip) |
 | 1 / 2 / 3, Alt+A / Alt+D (⌥A / ⌥D) | allow / deny / deny and say why on an approval card; 1–9 pick an answer |
@@ -374,7 +392,7 @@ omp's settings and apply to every session.
 
 Some omp commands exist only in its terminal UI (for example `/plan`, `/goal`, `/loop`, `/fork`, `/tree`, `/collab`).
 Typed in the message box they are never sent to omp as a message: where the window has its own way it uses it —
-`/settings` → Settings, `/login` (`/setup`, `/providers`) → Model providers, `/new` → a new session, `/resume` → the
+`/settings` → Settings, `/login` (`/setup`, `/providers`) and `/logout` → Model providers, `/new` → a new session, `/resume` → the
 sessions list (text after it filters the list), `/model` without arguments → the model picker, `/hub` → Background
 tasks, `/branch` or `/rewind` → Rewind, `/drop` → Delete session, `/restart` → restarts omp, `/extensions` and
 `/status` → a card that opens Plugins and skills, `/hotkeys` → the keyboard shortcuts. `/quit`, `/exit`, `/copy`,
@@ -404,7 +422,10 @@ their own below:
   **Remove** — omp asks again from the next request. Project and always rules are kept in the GUI's settings file
   (`approvalRules`), session rules only until the app quits.
 - **Model providers** — the providers omp can use, each with **Sign in** or *Signed in*; the browser link and any
-  code appear above the message box. The list appears while omp is running. API keys stay in omp's configuration.
+  code appear above the message box. **Sign out…** next to *Signed in* lists the accounts omp stored for that provider
+  (the one in use marked *In use*); **Sign out** on one makes omp forget it. A provider signed in only by an API key
+  in the environment or omp's settings has nothing stored to remove: the panel says so. The list appears while omp is
+  running. API keys stay in omp's configuration.
   Below it, *Plan usage* shows every signed-in account whose provider reports limits (subscription windows, spend),
   as meters with the share used and the time to reset, with a refresh button. Hidden when no provider reports usage.
 - **Advanced** — *omp runtime*: which omp the app starts. **Command** empty means the omp the app
@@ -412,7 +433,8 @@ their own below:
   is `bun` with `--no-install` and the path to omp's `cli.ts`); *Profile* (`OMP_PROFILE`); **Save and restart omp**,
   and **Install omp 18.8.0** or **Reinstall**. Unlike the rest of Settings, these three fields apply only with Save
   and restart omp: until then the page says *Unsaved changes* (with **Discard**), and the edits stay when you leave
-  Settings and come back. *Network*: corporate network certificates and a connection check (next section).
+  Settings and come back. *Network*: corporate network certificates and a connection check (next section); *Network
+  privacy*: which providers omp may contact, and strict network privacy (see [Network privacy](#network-privacy)).
 
 ## Corporate network certificates
 
@@ -454,6 +476,40 @@ own runtime with the same settings as omp. It says whether HTTPS works (any answ
 no key was sent, so it does not show the model works), or why not: an untrusted certificate (with its code), a name
 that does not resolve, a refused or cut connection, a proxy asking for sign-in (407), or no answer within 10 seconds.
 It works only when omp runs on the Bun runtime (the one the app installs, or your own `bun` command).
+
+## Network privacy
+
+**omp contacts only the model providers you added.** On its own, omp 18.8.0 asks every provider it knows for its
+model list — signed in or not — and probes local model servers (Ollama, llama.cpp, LM Studio). Each time the app
+starts omp (every chat, restarts, omp terminal tabs), it first asks omp's own runtime which providers you added — a
+sign-in, an API key in the environment or omp's settings, or an entry in `models.yml` — and starts omp with every
+other provider in `disabledProviders`, passed with omp's `--config` option. Your `config.yml` is not changed, and
+your own `disabledProviders` stay in effect. Local model servers count as providers: add one in `models.yml` to use
+it. omp's built-ins that fetch no model list — web search engines, on-device models — stay on. Signing in to a
+provider under **Settings → Model providers** adds it, and signing out of its last account
+removes it; open chats restart omp so the change applies. If the check fails, omp is not started and the start card
+says why. With your own omp command (**Settings → Advanced → omp runtime**, not the Bun runtime) the check cannot
+run: omp starts unchanged, and **Settings → Advanced → Network privacy** says so.
+
+**Known limitation:** omp downloads its public model catalog from `catalog.stencil.so` (a copy of models.dev) in
+the background. The request carries no keys and no chat content, and omp has no setting that turns it off (reported
+upstream: `docs/upstream/omp-discovery-opt-in.md`). Strict network privacy blocks it.
+
+**Strict network privacy** (off by default; **Settings → Advanced → Network privacy → Turn on**) sends omp and the
+tools it runs through a filter in the app: every omp gets `PI_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY`
+pointing at it (per-provider `PI_PROXY_<PROVIDER>` variables are removed), and it lets through only:
+
+- the API and sign-in addresses of the providers you added (listed on the page);
+- while you sign in to a provider from **Model providers**, that provider's addresses;
+- the addresses you allow (`pypi.org`, or `*.example.com` for its subdomains).
+
+Everything else is refused and listed under **Refused recently**, with **Allow** next to it — for example the
+package index a connector starts from, or a site a web tool fetches. Allowing an address applies to the next
+connection; no restart. Your own proxy (a company one in `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`, with its
+`NO_PROXY`) is still used behind the filter. What it does not cover: programs that ignore proxy settings (an `ssh`
+connection, for example), and addresses on this computer or in private network ranges (10.x, 172.16–31.x,
+192.168.x), which omp always reaches directly. Turning it on or off restarts omp in open chats; omp terminal tabs
+already open keep the setting they started with.
 
 ## Connectors (MCP servers)
 

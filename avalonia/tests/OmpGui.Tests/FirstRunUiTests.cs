@@ -126,14 +126,19 @@ public sealed class FirstRunUiTests
     [AvaloniaTheory]
     [InlineData(1100, 720)]
     [InlineData(480, 400)]
-    public async Task Omp_without_a_model_opens_its_own_setup_in_the_terminal(double width, double height)
+    public async Task Omp_without_a_model_opens_omp_login_in_the_terminal(double width, double height)
     {
         var s = new SessionController(TestProcesses.Fake("no-models"));
         var (shell, args) = MainViewModel.DefaultShell();
+        IReadOnlyList<string>? launched = null;
         var vm = new MainViewModel(s, new AppArgs())
         {
-            // Stands in for omp's terminal UI: the test checks the tab is opened with the launch the settings give.
-            OmpTuiLaunch = dir => new OmpLaunchSpec { FileName = shell, Arguments = args, WorkingDirectory = dir },
+            // Stands in for `omp login`: the test checks the tab is opened with the CLI launch the settings give.
+            OmpCliLaunch = (cliArgs, dir) =>
+            {
+                launched = cliArgs;
+                return new OmpLaunchSpec { FileName = shell, Arguments = args, WorkingDirectory = dir };
+            },
         };
         (var w, vm) = Open(vm, width, height);
         await Until(() => vm.CanRecover, "start failed");
@@ -147,10 +152,11 @@ public sealed class FirstRunUiTests
         setUp.Command!.Execute(null);
         Dispatcher.UIThread.RunJobs();
         var tab = Assert.Single(vm.Terminals);
+        Assert.Equal(["login"], launched); // lists every provider, even those turned off for omp (NetworkPrivacy)
         Assert.Equal(TerminalKind.OmpTui, tab.Kind);
         Assert.True(vm.IsTerminalOpen);
         Assert.Contains("Sign in", vm.ComposerMessage);
-        Assert.DoesNotContain("/login", vm.ComposerMessage); // omp opens on its setup wizard, not its prompt
+        Assert.DoesNotContain("/login", vm.ComposerMessage);
         vm.CloseTerminalCommand.Execute(tab);
         await vm.DisposeAsync();
         w.Close();

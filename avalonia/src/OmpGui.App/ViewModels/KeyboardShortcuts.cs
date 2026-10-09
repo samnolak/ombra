@@ -92,6 +92,7 @@ public static class KeyboardShortcuts
                 S("Plan", Mod.Command | Mod.Shift, "P"),
                 S("Browser preview", Mod.Command | Mod.Shift, "B"),
                 S("Comment on the page", Mod.Command | Mod.Shift, "S"),
+                S("Device size in the preview", Mod.Command | Mod.Shift, "M"),
             ]),
         ];
     }

@@ -1136,23 +1136,52 @@
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
-        <!-- Comments on the previewed page, attached to this message like files (Codex): one chip each, with its pin's number -->
+        <!-- Comments on the previewed page, attached to this message like files (Codex): one chip each, with its pin's
+             number and its page; a click on the text opens an editor (change it, or go to its page), × removes it -->
         <ItemsControl x:Name="PageCommentsChip" ItemsSource="{Binding Preview.Annotations}" IsVisible="{Binding Preview.HasAnnotations}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate><WrapPanel ItemSpacing="6" LineSpacing="6" /></ItemsPanelTemplate>
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:AnnotationViewModel">
-              <Border Classes="attachment comment-chip" ToolTip.Tip="{Binding ElementLabel}">
+              <Border Classes="attachment comment-chip" ToolTip.Tip="{Binding Tooltip}">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                   <Border Classes="pin" VerticalAlignment="Center">
                     <TextBlock Text="{Binding Number}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
                   </Border>
-                  <TextBlock Text="{Binding Comment}" MaxWidth="220" TextTrimming="CharacterEllipsis" FontSize="13" VerticalAlignment="Center" />
+                  <Button Classes="flat comment-chip-text" Command="{Binding BeginEditCommand}" Padding="0" MinHeight="0" VerticalAlignment="Center"
+                          HorizontalContentAlignment="Left" AutomationProperties.Name="Edit page comment">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <TextBlock Text="{Binding Comment}" MaxWidth="200" TextTrimming="CharacterEllipsis" FontSize="13" VerticalAlignment="Center" />
+                      <TextBlock Classes="tertiary" Text="{Binding PageLabel}" MaxWidth="140" TextTrimming="CharacterEllipsis" FontSize="11" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Button>
                   <Button Classes="icon" Width="22" Height="22" Command="{Binding RemoveCommand}" ToolTip.Tip="Remove this comment"
                           AutomationProperties.Name="Remove page comment" VerticalAlignment="Center">
                     <ctl:Icon Data="{StaticResource IconClose}" Size="13" />
                   </Button>
+                  <Popup IsOpen="{Binding IsEditing, Mode=TwoWay}" Placement="TopEdgeAlignedLeft" IsLightDismissEnabled="True">
+                    <Border Classes="menu" Width="340" Margin="12" Padding="12">
+                      <StackPanel Spacing="8">
+                        <StackPanel Spacing="1">
+                          <TextBlock Text="{Binding PageLabel, StringFormat='On {0}'}" FontWeight="Medium" FontSize="12" TextTrimming="CharacterEllipsis" />
+                          <TextBlock Classes="tertiary" Text="{Binding TargetLabel}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                        <TextBox Text="{Binding EditText}" AcceptsReturn="False" TextWrapping="Wrap" MinHeight="64" MaxHeight="180"
+                                 ctl:FocusOnShow.When="{Binding IsEditing}" AutomationProperties.Name="Comment">
+                          <TextBox.KeyBindings>
+                            <KeyBinding Gesture="Enter" Command="{Binding SaveEditCommand}" />
+                            <KeyBinding Gesture="Escape" Command="{Binding CancelEditCommand}" />
+                          </TextBox.KeyBindings>
+                        </TextBox>
+                        <Grid ColumnDefinitions="*,Auto,Auto">
+                          <Button Classes="flat" Content="Show on the page" Command="{Binding ShowCommand}" HorizontalAlignment="Left" />
+                          <Button Grid.Column="1" Classes="flat" Content="Cancel" Command="{Binding CancelEditCommand}" Margin="0,0,6,0" />
+                          <Button Grid.Column="2" Classes="accent" Content="Save" Command="{Binding SaveEditCommand}" />
+                        </Grid>
+                      </StackPanel>
+                    </Border>
+                  </Popup>
                 </StackPanel>
               </Border>
             </DataTemplate>
@@ -1248,7 +1277,7 @@
                       </Grid>
                     </Button>
                     <Button x:Name="SelectElementItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding SelectElementCommand}"
-                            AutomationProperties.Name="Select an element on the page">
+                            AutomationProperties.Name="Mark a point or an area on the page">
                       <Grid ColumnDefinitions="Auto,*,Auto">
                         <ctl:Icon Data="{StaticResource IconSelect}" Size="16" Margin="0,0,10,0" />
                         <TextBlock Grid.Column="1" Text="Comment on the page" VerticalAlignment="Center" />
@@ -1478,7 +1507,7 @@
     </Grid>
     <!-- ── Settings page: the whole window, its page list in the sidebar's place (the sidebar hides meanwhile); "Back to
          app" or Esc leaves it. In a narrow window the list is a strip across the top that scrolls, its edges fading
-         (MainWindow.UpdateSettingsStripFade). ── -->
+         (Controls/SideScrollStrip). ── -->
     <Border x:Name="SettingsPage" Grid.Row="0" Grid.RowSpan="5" Grid.Column="0" Grid.ColumnSpan="9" Classes="page"
             IsVisible="{Binding IsSettingsOpen}">
       <DockPanel>
@@ -1630,28 +1659,63 @@
             <Border Classes="section-card" IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=providers}">
               <StackPanel Spacing="10">
                 <TextBlock Classes="section" Text="Model providers" />
-                <TextBlock Classes="muted" TextWrapping="Wrap" Text="Sign in to the providers omp can use. The browser link and any code appear above the message box. API keys stay in omp's own configuration; this app never stores them." />
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="Sign in to the providers omp can use, or sign out of them. The browser link and any code appear above the message box. API keys stay in omp's own configuration; this app never stores them." />
                 <TextBlock Classes="muted" Text="The list appears while omp is running." IsVisible="{Binding !LoginProviders.Count}" FontStyle="Italic" />
                 <TextBlock Classes="muted" Text="Loading…" IsVisible="{Binding ProvidersLoading}" />
                 <ScrollViewer MaxHeight="300" HorizontalScrollBarVisibility="Disabled">
                   <ItemsControl ItemsSource="{Binding LoginProviders}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="vm:LoginProviderViewModel">
-                        <Grid ColumnDefinitions="*,Auto" Margin="0,3,12,3">
-                          <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" FontSize="14" />
-                          <Border Grid.Column="1" Classes="status done" IsVisible="{Binding IsAuthenticated}">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                              <Ellipse />
-                              <TextBlock Text="Signed in" />
+                        <StackPanel Margin="0,3,12,3" Spacing="8">
+                          <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" FontSize="14" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsAuthenticated}">
+                              <Border Classes="status done" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                  <Ellipse />
+                                  <TextBlock Text="Signed in" />
+                                </StackPanel>
+                              </Border>
+                              <Button Classes="flat" Content="Sign out…" IsEnabled="{Binding !IsBusy}"
+                                      Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).AskSignOutCommand}" CommandParameter="{Binding}"
+                                      AutomationProperties.Name="{Binding Name, StringFormat='Sign out of {0}'}" />
+                            </StackPanel>
+                            <Button Grid.Column="1" Content="Sign in" IsVisible="{Binding !IsAuthenticated}" IsEnabled="{Binding CanSignIn}"
+                                    Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SignInCommand}" CommandParameter="{Binding}" />
+                          </Grid>
+                          <Border Classes="conn-inset" IsVisible="{Binding IsSignOutOpen}">
+                            <StackPanel Spacing="10">
+                              <TextBlock TextWrapping="Wrap" FontSize="13" IsVisible="{Binding !HasSignOutNote}"
+                                         Text="{Binding Name, StringFormat='Choose the account omp should forget at {0}. You can sign in again any time.'}" />
+                              <SelectableTextBlock Text="{Binding SignOutNote}" TextWrapping="Wrap" FontSize="13" IsVisible="{Binding HasSignOutNote}" />
+                              <ItemsControl ItemsSource="{Binding Accounts}">
+                                <ItemsControl.ItemsPanel>
+                                  <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                  <DataTemplate x:DataType="vm:LogoutAccountViewModel">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                      <StackPanel Spacing="1" VerticalAlignment="Center" Margin="0,0,12,0">
+                                        <TextBlock Text="{Binding Label}" FontWeight="Medium" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Classes="muted" Text="{Binding Detail}" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Detail}" />
+                                      </StackPanel>
+                                      <Button Grid.Column="1" Classes="danger" Content="Sign out" IsEnabled="{Binding !Owner.IsBusy}" VerticalAlignment="Center"
+                                              Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SignOutCommand}" CommandParameter="{Binding}"
+                                              AutomationProperties.Name="{Binding Label, StringFormat='Sign out {0}'}" />
+                                    </Grid>
+                                  </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                              </ItemsControl>
+                              <Button Classes="flat" Content="Cancel" HorizontalAlignment="Left"
+                                      Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).CancelSignOutCommand}" CommandParameter="{Binding}" />
                             </StackPanel>
                           </Border>
-                          <Button Grid.Column="1" Content="Sign in" IsVisible="{Binding !IsAuthenticated}" IsEnabled="{Binding CanSignIn}"
-                                  Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SignInCommand}" CommandParameter="{Binding}" />
-                        </Grid>
+                        </StackPanel>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
                 </ScrollViewer>
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding ProvidersMessage}" IsVisible="{Binding HasProvidersMessage}" />
               </StackPanel>
             </Border>
 
@@ -1745,6 +1809,8 @@
             </Border>
             <!-- Advanced › Network: corporate network certificates and the connection check (Views/Settings/NetworkSettings) -->
             <settings:NetworkSettings x:Name="NetworkSettingsPage" IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=advanced}" />
+            <!-- Advanced › Network privacy: providers omp may contact, strict network privacy (Views/Settings/NetworkPrivacySettings) -->
+            <settings:NetworkPrivacySettings x:Name="NetworkPrivacyPage" IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=advanced}" />
 
             <!-- Diagnostics and files -->
             <Border Classes="section-card" IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=diagnostics}">

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Markup.Xaml;
 using Avalonia.Platform;
 using Avalonia.Platform.Storage;
@@ -30,7 +31,11 @@ public partial class PreviewPanel : UserControl
     /// <summary>Pop-up tabs: the engine's own web view of each, hosted as it is.</summary>
     private readonly Dictionary<PreviewTab, PopupViewHost> _popups = [];
 
-    public PreviewPanel() => InitializeComponent();
+    public PreviewPanel()
+    {
+        InitializeComponent();
+        SideScrollStrip.Attach(this.FindControl<ScrollViewer>("TabScroller")!);
+    }
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
 
@@ -42,6 +47,7 @@ public partial class PreviewPanel : UserControl
         base.OnDataContextChanged(e);
         if (_vm is { } old)
         {
+            Uncover(old);
             old.NavigationRequested -= OnNavigationRequested;
             old.TabNavigationRequested -= NavigateTab;
             old.TabClosed -= OnTabClosed;
@@ -51,6 +57,7 @@ public partial class PreviewPanel : UserControl
             old.OpenExternallyRequested -= OnOpenExternallyRequested;
             old.PropertyChanged -= OnVmPropertyChanged;
             old.Annotations.CollectionChanged -= OnAnnotationsChanged;
+            old.AnnotationEdited -= OnAnnotationEdited;
             foreach (var t in old.Tabs)
             {
                 t.RunScript = null;
@@ -75,6 +82,7 @@ public partial class PreviewPanel : UserControl
             vm.OpenExternallyRequested += OnOpenExternallyRequested;
             vm.PropertyChanged += OnVmPropertyChanged;
             vm.Annotations.CollectionChanged += OnAnnotationsChanged;
+            vm.AnnotationEdited += OnAnnotationEdited;
             vm.Dialogs.PropertyChanged += OnDialogsPropertyChanged;
             vm.Dialogs.PickFiles = PickFilesAsync;
             vm.Dialogs.CaptureSnapshot = CaptureDialogSnapshotAsync; // the page behind a card (null while no web view)
@@ -96,7 +104,18 @@ public partial class PreviewPanel : UserControl
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        _popupWatch ??= Popup.IsOpenProperty.Changed.AddClassHandler<Popup>(OnPopupIsOpenChanged);
         Realize();
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        _popupWatch?.Dispose();
+        _popupWatch = null;
+        _openPopups.Clear();
+        LayoutUpdated -= OnLayoutWithPopups;
+        Uncover(_vm);
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
@@ -227,13 +246,27 @@ public partial class PreviewPanel : UserControl
         tab.CaptureScreenshot = ct => CaptureScreenshotAsync(web, ct);
     }
 
-    private static void ApplyViewport(PreviewTab tab, NativeWebView web)
+    /// <summary>
+    /// The page's size: the one omp asked for its tab (top-left, Tern), else the device chosen in the toolbar (centred,
+    /// a little below the toolbar), else the pane's. A pane smaller than either limits it.
+    /// </summary>
+    private void ApplyViewport(PreviewTab tab, NativeWebView web)
     {
-        var size = tab.Viewport;
+        var omp = tab.Viewport;
+        var size = omp ?? _vm?.DeviceViewport;
         web.MaxWidth = size?.Width ?? double.PositiveInfinity;
         web.MaxHeight = size?.Height ?? double.PositiveInfinity;
-        web.HorizontalAlignment = size is null ? Avalonia.Layout.HorizontalAlignment.Stretch : Avalonia.Layout.HorizontalAlignment.Left;
+        web.HorizontalAlignment = size is null ? Avalonia.Layout.HorizontalAlignment.Stretch
+            : omp is null ? Avalonia.Layout.HorizontalAlignment.Center : Avalonia.Layout.HorizontalAlignment.Left;
         web.VerticalAlignment = size is null ? Avalonia.Layout.VerticalAlignment.Stretch : Avalonia.Layout.VerticalAlignment.Top;
+        web.Margin = size is not null && omp is null ? new Thickness(0, 12, 0, 0) : default;
+    }
+
+    /// <summary>The device's user agent on a web view (where the engine takes one); a page already shown loads again with it.</summary>
+    private void ApplyUserAgent(PreviewTab tab, NativeWebView web)
+    {
+        if (_vm is not { } vm || !Platform.PageUserAgent.Set(web.TryGetPlatformHandle(), vm.DeviceUserAgent)) return;
+        if (tab.Url is not null) Avalonia.Threading.Dispatcher.UIThread.Post(() => web.Refresh(), Avalonia.Threading.DispatcherPriority.Background);
     }
 
     /// <summary>The active tab's web view shows (the others stay alive, hidden); the toolbar and the cards follow it.</summary>
@@ -244,7 +277,17 @@ public partial class PreviewPanel : UserControl
         foreach (var (tab, web) in _webs) web.IsVisible = tab == vm.ActiveTab;
         foreach (var (tab, host) in _popups) host.IsVisible = tab == vm.ActiveTab;
         _ = SyncAnnotationsAsync();
+        RevealActiveTab();
     }
+
+    /// <summary>The active tab's place in the strip is shown (it can be scrolled out of view when there are many).</summary>
+    private void RevealActiveTab() =>
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            if (_vm?.ActiveTab is not { } active) return;
+            var items = this.FindControl<ItemsControl>("TabItems")!;
+            if (items.ContainerFromItem(active) is { } container) container.BringIntoView();
+        }, Avalonia.Threading.DispatcherPriority.Loaded);
 
     private void OnLayoutUpdatedWhilePending(object? sender, EventArgs e)
     {
@@ -339,6 +382,7 @@ public partial class PreviewPanel : UserControl
         _nativeHooks[web] = Platform.BrowserHooks.AttachAsync(handle, tab.Page);
         var (input, isolated) = Platform.NativeInputs.For(handle); // the agent's input and helper world (B4)
         tab.SetNative(handle, input, isolated);
+        ApplyUserAgent(tab, web);
     }
 
     private void OnWebAdapterDestroyed(object? sender, WebViewAdapterEventArgs e)
@@ -449,25 +493,36 @@ public partial class PreviewPanel : UserControl
         var body = e.Body;
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            // "ready": a page (re)loaded the script on its own; an annotation: renumber its pin from the list
+            // "ready": a page (re)loaded the script on its own; an annotation: renumber its pin from the list (a change or
+            // a removal syncs through AnnotationEdited / the list)
             if (_vm?.OnPageMessage(body) is "ready" or "annotation") _ = SyncAnnotationsAsync();
         });
     }
 
     private void OnVmPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(PreviewViewModel.ActiveTab))
+        switch (e.PropertyName)
         {
-            ShowActiveTab();
-            return;
+            case nameof(PreviewViewModel.ActiveTab):
+                ShowActiveTab();
+                return;
+            case nameof(PreviewViewModel.DeviceViewport):
+                foreach (var (t, w) in _webs) ApplyViewport(t, w);
+                return;
+            case nameof(PreviewViewModel.DeviceUserAgent):
+                foreach (var (t, w) in _webs) ApplyUserAgent(t, w);
+                return;
+            case not nameof(PreviewViewModel.IsAnnotating):
+                return;
         }
-        if (e.PropertyName != nameof(PreviewViewModel.IsAnnotating)) return;
         _ = SyncAnnotationsAsync();
         // Keys go to the page while commenting (Esc there leaves the mode)
         if (_vm?.IsAnnotating == true && _web is { } web) web.Focus();
     }
 
     private void OnAnnotationsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) => _ = SyncAnnotationsAsync();
+
+    private void OnAnnotationEdited() => _ = SyncAnnotationsAsync();
 
     /// <summary>
     /// target="_blank" links. With the engine hooks (macOS), http(s) links go on to the engine, which opens them as a
@@ -498,6 +553,82 @@ public partial class PreviewPanel : UserControl
         var shot = await Platform.WebViewSnapshot.CaptureAsync(handle, ct);
         using var png = new MemoryStream(shot.Png, writable: false);
         return new Avalonia.Media.Imaging.Bitmap(png);
+    }
+
+    // ── Pop-ups of the window over the page (tooltips, menus, flyouts) ──
+    // macOS draws pop-ups inside the window (OverlayPopups, Program.cs), and the native web view draws over everything
+    // Avalonia draws there: a toolbar button's tooltip would show cut off by the page. While a pop-up lies over the
+    // page, the page shows as the engine's snapshot taken when it opened (as behind the browser cards), then comes back.
+
+    /// <summary>How long the page's picture may take; slower, the pop-up stays partly under the page.</summary>
+    private static readonly TimeSpan PopupSnapshotTimeout = TimeSpan.FromMilliseconds(400);
+    private IDisposable? _popupWatch;
+    private readonly HashSet<Popup> _openPopups = [];
+    /// <summary>The picture being taken or shown for the pop-ups now over the page; null while the page is live.</summary>
+    private CancellationTokenSource? _cover;
+
+    private void OnPopupIsOpenChanged(Popup popup, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (popup.IsOpen) _openPopups.Add(popup);
+        else _openPopups.Remove(popup);
+        // Where a pop-up lands is known after layout (and it can move with its target): look after each pass while any is open
+        LayoutUpdated -= OnLayoutWithPopups;
+        if (_openPopups.Count > 0) LayoutUpdated += OnLayoutWithPopups;
+        CheckPopupsOverPage();
+    }
+
+    private void OnLayoutWithPopups(object? sender, EventArgs e) => CheckPopupsOverPage();
+
+    private void CheckPopupsOverPage()
+    {
+        if (_vm is not { } vm) return;
+        var top = TopLevel.GetTopLevel(this);
+        var page = top is not null && this.FindControl<Panel>("PageArea") is { } area ? BoundsIn(area, top) : null;
+        var over = page is { } p && _openPopups.Any(x => x.IsOpen && x.IsUsingOverlayLayer && x.Child is { IsEffectivelyVisible: true } c
+            && TopLevel.GetTopLevel(c) == top && BoundsIn(c, top!) is { } r && r.Intersects(p));
+        if (over) Cover(vm);
+        else Uncover(vm);
+    }
+
+    private static Rect? BoundsIn(Visual v, Visual root) => v.TranslatePoint(default, root) is { } at ? new Rect(at, v.Bounds.Size) : null;
+
+    private void Cover(PreviewViewModel vm)
+    {
+        if (_cover is not null || !vm.ShowWebView) return;
+        var view = vm.ActiveTab is { } active && _popups.TryGetValue(active, out var host) ? (Control)host : _web;
+        if (view is null) return;
+        var cts = _cover = new CancellationTokenSource(PopupSnapshotTimeout);
+        _ = CoverAsync(vm, view, cts);
+    }
+
+    private async Task CoverAsync(PreviewViewModel vm, Control view, CancellationTokenSource cts)
+    {
+        Avalonia.Media.Imaging.Bitmap? picture = null;
+        try { picture = await CaptureDialogSnapshotAsync(cts.Token); }
+        catch (Exception)
+        {
+            // No picture (engine busy, too slow): the page stays live and the pop-up partly under it.
+        }
+        if (_cover != cts || _vm != vm || picture is null)
+        {
+            picture?.Dispose();
+            return;
+        }
+        // The picture where the view is: its size (omp's viewport can make it smaller than the pane), top-left
+        var image = this.FindControl<Image>("PageUnderPopup")!;
+        image.Width = view.Bounds.Width;
+        image.Height = view.Bounds.Height;
+        image.Margin = new Thickness(view.Bounds.X, view.Bounds.Y, 0, 0); // a device's page is centred
+        vm.PageUnderPopup = picture;
+    }
+
+    private void Uncover(PreviewViewModel? vm)
+    {
+        _cover?.Cancel();
+        _cover = null;
+        if (vm?.PageUnderPopup is not { } old) return;
+        vm.PageUnderPopup = null;
+        old.Dispose();
     }
 
     /// <summary>A download card's "Save" (no folder chosen yet) or "Save as…": the system's save panel, which asks before replacing a file.</summary>

@@ -97,6 +97,24 @@ public sealed class ModelSettingsTests
     }
 
     [Fact]
+    public async Task Sign_out_removes_the_stored_account_once()
+    {
+        await using var s = await StartAsync();
+        Assert.Empty(await s.GetLogoutAccountsAsync("fakeauth"));
+        var login = s.LoginAsync("fakeauth");
+        var snap = await TestProcesses.Eventually(s.Snapshot, x => x.Dialogs.Count == 1, Wait, "code prompt");
+        await s.AnswerDialogAsync(snap.Dialogs[0].Id, new DialogAnswer.Value("1234"));
+        Assert.True(await login.WaitAsync(Wait));
+
+        var account = Assert.Single(await s.GetLogoutAccountsAsync("fakeauth"));
+        Assert.Equal((1L, "me@example.com", true), (account.CredentialId, account.Label, account.Active));
+        Assert.Null(await s.LogoutAsync("fakeauth", account));
+        Assert.False(Assert.Single(await s.GetLoginProvidersAsync()).Authenticated);
+        var again = await Assert.ThrowsAsync<RpcCommandException>(() => s.LogoutAsync("fakeauth", account));
+        Assert.Equal("Credential 1 is not stored for fakeauth", again.Error);
+    }
+
+    [Fact]
     public async Task A_cancelled_sign_in_is_reported_not_thrown()
     {
         await using var s = await StartAsync();

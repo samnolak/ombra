@@ -1,0 +1,104 @@
+<!-- Settings › Advanced › Network privacy (NetworkPrivacyViewModel, ClientCore/Network/NetworkPrivacy): what omp may contact,
+     the known limitation omp leaves, and strict network privacy with its allowed and refused addresses. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:OmpGui.App.ViewModels"
+             x:Class="OmpGui.App.Views.Settings.NetworkPrivacySettings"
+             x:DataType="vm:MainViewModel">
+  <Border x:Name="PrivacyCard" Classes="section-card" DataContext="{Binding PrivacySettings}" x:DataType="vm:NetworkPrivacyViewModel">
+    <StackPanel Spacing="12">
+      <TextBlock Classes="section" Text="Network privacy" />
+
+      <!-- Always on: providers the user has not added are off for omp -->
+      <StackPanel Spacing="2">
+        <TextBlock Classes="ws-title" Text="Model providers" />
+        <SelectableTextBlock x:Name="PrivacyGate" Text="{Binding GateText}" TextWrapping="Wrap" FontSize="13" />
+      </StackPanel>
+      <Border Classes="ws-note warning" IsVisible="{Binding HasGateWarning}">
+        <TextBlock x:Name="PrivacyGateWarning" Text="{Binding GateWarning}" TextWrapping="Wrap" FontSize="13" />
+      </Border>
+      <TextBlock x:Name="PrivacyLimitation" Classes="muted" TextWrapping="Wrap" Text="{x:Static vm:NetworkPrivacyViewModel.CatalogLimitation}" />
+
+      <Border Classes="ws-sep" />
+
+      <!-- Strict network privacy -->
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Spacing="2" Margin="0,0,16,0" VerticalAlignment="Center">
+          <TextBlock Classes="ws-title" Text="Strict network privacy" />
+          <TextBlock Classes="muted" TextWrapping="Wrap"
+                     Text="omp and the tools it runs go through the app's filter, which lets through only the providers you added, sign-in while you add one, and the addresses you allow. Not covered: programs that ignore proxy settings, and addresses on this computer or in private network ranges (10.x, 172.16–31.x, 192.168.x), which omp always reaches directly." />
+        </StackPanel>
+        <Button x:Name="PrivacyStrictToggle" Grid.Column="1" Classes="md" Classes.accent="{Binding !IsStrict}" Classes.flat="{Binding IsStrict}"
+                Content="{Binding StrictButtonLabel}" Command="{Binding ToggleStrictCommand}" VerticalAlignment="Center" />
+      </Grid>
+      <SelectableTextBlock x:Name="PrivacyStrictStatus" Text="{Binding StrictStatus}" TextWrapping="Wrap" FontSize="13" />
+
+      <StackPanel Spacing="10" IsVisible="{Binding IsStrict}">
+        <!-- Added providers: API and sign-in addresses -->
+        <ItemsControl x:Name="PrivacyProviders" ItemsSource="{Binding Providers}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Spacing="6" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:PrivacyProviderRow">
+              <StackPanel Spacing="1">
+                <TextBlock Text="{Binding Provider}" FontSize="13" FontWeight="SemiBold" />
+                <TextBlock Classes="tertiary" Text="{Binding Api, StringFormat='API: {0}'}" TextWrapping="Wrap" />
+                <TextBlock Classes="tertiary" Text="{Binding SignIn, StringFormat='Sign-in: {0}'}" TextWrapping="Wrap" IsVisible="{Binding HasSignIn}" />
+              </StackPanel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!-- The user's own addresses -->
+        <TextBlock Classes="ws-title" Text="Also allowed" />
+        <ItemsControl x:Name="PrivacyUserHosts" ItemsSource="{Binding UserHosts}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel ItemSpacing="8" LineSpacing="8" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="x:String">
+              <Button Classes="md flat" Content="{Binding StringFormat='{}{0}  ✕'}" CommandParameter="{Binding}"
+                      ToolTip.Tip="No longer allow"
+                      Command="{Binding $parent[ItemsControl].((vm:NetworkPrivacyViewModel)DataContext).RemoveHostCommand}" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBox x:Name="PrivacyNewHost" Classes="sm" Text="{Binding NewHost}" PlaceholderText="pypi.org or *.example.com"
+                   AutomationProperties.Name="Address to allow" Margin="0,0,8,0" />
+          <Button x:Name="PrivacyAddHost" Grid.Column="1" Classes="md" Content="Allow" Command="{Binding AddHostCommand}" />
+        </Grid>
+
+        <!-- Refused destinations, newest first -->
+        <StackPanel Spacing="6" IsVisible="{Binding HasBlocked}">
+          <TextBlock Classes="ws-title" Text="Refused recently" />
+          <ItemsControl x:Name="PrivacyBlocked" ItemsSource="{Binding Blocked}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Spacing="4" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:PrivacyBlockedRow">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="{Binding Detail}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <Button Grid.Column="1" Classes="md flat" Content="Allow" CommandParameter="{Binding}"
+                          Command="{Binding $parent[ItemsControl].((vm:NetworkPrivacyViewModel)DataContext).AllowBlockedCommand}" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </StackPanel>
+
+      <Border x:Name="PrivacyMessage" Classes="ws-note" Classes.ok="{Binding !MessageIsError}" Classes.error="{Binding MessageIsError}" IsVisible="{Binding HasMessage}">
+        <TextBlock Text="{Binding Message}" TextWrapping="Wrap" FontSize="13" />
+      </Border>
+    </StackPanel>
+  </Border>
+</UserControl>

@@ -23,10 +23,14 @@ public partial class MainViewModel
         Session.RunSlashCommandAsync(command, timeout, ct);
 
     /// <summary>Runs <c>omp &lt;args&gt;</c> (e.g. "plugin", "list", "--json") in the project folder.</summary>
-    public Task<OmpCliResult> RunOmpCliAsync(IReadOnlyList<string> args, TimeSpan? timeout = null, CancellationToken ct = default) =>
-        OmpCliLaunch is { } launch
-            ? OmpCli.RunAsync(launch(args, ProjectFolder), timeout, ct)
-            : Task.FromResult(new OmpCliResult(-1, "", "The app couldn't start omp's command-line tool."));
+    public Task<OmpCliResult> RunOmpCliAsync(IReadOnlyList<string> args, TimeSpan? timeout = null, CancellationToken ct = default)
+    {
+        if (OmpCliLaunch is not { } launch) return Task.FromResult(new OmpCliResult(-1, "", "The app couldn't start omp's command-line tool."));
+        OmpLaunchSpec spec;
+        try { spec = launch(args, ProjectFolder); }
+        catch (OmpGui.ClientCore.Network.NetworkPrivacyException e) { return Task.FromResult(new OmpCliResult(-1, "", e.Message)); }
+        return OmpCli.RunAsync(spec, timeout, ct);
+    }
 
     /// <summary>
     /// Starts every chat's omp again so it reads changed settings files (omp reads config.yml, mcp.json and plugins

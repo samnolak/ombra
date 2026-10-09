@@ -62,7 +62,7 @@ public sealed class CorporateTrustTests
                 Assert.False(s.Environment.ContainsKey(variable == CorporateTrust.ExtraCaVariable ? CorporateTrust.SystemCaVariable : CorporateTrust.ExtraCaVariable));
             }
             // The terminal tab with omp's own UI (the terminal can only add variables)
-            var vm = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs()) { OmpTuiLaunch = d => defaults.ForTui(o, d) };
+            var vm = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs()) { OmpTuiLaunch = (d, _) => Task.FromResult(defaults.ForTui(o, d)) };
             vm.OpenOmpTuiCommand.Execute(null);
             Assert.Equal(value, Assert.Single(vm.Terminals).Environment.GetValueOrDefault(variable));
             await vm.DisposeAsync();
