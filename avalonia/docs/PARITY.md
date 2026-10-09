@@ -38,7 +38,7 @@ project folder. `extraArgs` (and `environment`) in the GUI's settings file (`omp
 | `--alias` | Create a shell shortcut for a profile | **Not applicable** (a shell alias) |
 | `--cwd` | Start directory | **Done** — Open folder… / the project chip; the sidebar's project groups |
 | `--mode` | text / json / rpc / rpc-ui | **Not applicable** (the GUI is the rpc-ui client) |
-| `--config` | Extra config overlay | **Missing** (settings file only) |
+| `--config` | Extra config overlay | **Used by the app**: every omp it starts gets an overlay with `disabledProviders` (Network privacy); your own overlay: settings file only |
 | `--add-dir` | Extra workspace directory | **Done** for the open session: session menu › Workspace folders (`/add-dir`, `/remove-dir`); as a launch flag: settings file only |
 | `-p`, `--print`, `--print-thoughts` | Non-interactive run | **Not applicable** (one-shot CLI mode) |
 | `-c`, `--continue` | Continue the previous session | **Done** — the sidebar lists the project's sessions newest first; the GUI reopens the last project |
@@ -294,6 +294,12 @@ omp's own interface for them.
   (`NODE_USE_SYSTEM_CA=1`, Bun 1.4.2) or an app-validated copy of a CA file (`NODE_EXTRA_CA_CERTS`); the user's own
   variables always win (`ClientCore/Network/CorporateTrust`). A connection check makes one keyless request with the
   engine's Bun and environment and classifies TLS / DNS / refused / proxy / timeout. omp has no setting for this.
+- **Network privacy** — Settings › Advanced › Network privacy: every omp the app starts (chats, siblings, restarts,
+  the omp terminal tab, the self-test) gets the providers the user has not added in `disabledProviders` through a
+  `--config` overlay, found by a script on omp's own runtime (`ClientCore/Network/ProviderGate`); first-run setup runs
+  `omp login`, since in-session `/login` hides disabled providers. Opt-in strict mode points omp's `PI_PROXY` and the
+  usual proxy variables at an allowlist proxy in the app (`ClientCore/Network/PrivacyProxy`, `NetworkPrivacy`).
+  omp has no setting for either; proposal in [`upstream/omp-discovery-opt-in.md`](upstream/omp-discovery-opt-in.md).
 - **Dictation** — speech to text on this computer, into the message box.
 - **Pets** — a pixel companion on the message box that follows what omp does; dragged off it, it floats anywhere on
   the desktop over other apps, like Codex's pet (Settings › Pets).

@@ -31,3 +31,21 @@ Known open issues:
 | Project extensions, hooks, tools | omp loads the folder's `.omp/extensions`, `.omp/hooks` and `.omp/tools` at session start | trusted folders only |
 | git clean filters | a repository's `.gitattributes` with a `filter.<name>.clean` command in its `.git/config` runs when git re-reads a changed file | trusted folders only |
 | NuGet restore | no source mapping or lock files yet | build from a clean machine with nuget.org only |
+
+## What leaves your computer
+
+- **Your conversations** go to the model provider of the model you chose, as omp sends them.
+- **Providers you have not added** get nothing: every omp the client starts gets them in `disabledProviders` (a
+  `--config` overlay), and if the client cannot tell which providers are added, omp is not started.
+- **omp's background requests**: model lists from the providers you added, usage limits of signed-in accounts, and
+  omp's public model catalog from `catalog.stencil.so` (no keys, no chat content; omp 18.8.0 has no switch for it).
+- **Tools and connectors** reach whatever they are made for (web search, package indexes, MCP servers' own
+  services). Connectors can send their own telemetry: `mcp-for-blender`, for example, reports usage to a Supabase
+  project.
+- **The client itself** checks GitHub for updates (Settings → Updates) and downloads the omp runtime from the npm
+  registry and the dictation model from Hugging Face when you ask for them.
+
+**Strict network privacy** (Settings → Advanced → Network privacy) limits omp and the tools it runs to the added
+providers, sign-in while you add one, and the addresses you allow, through a filter in the client; refused
+destinations are listed. It relies on proxy settings: programs that ignore them, and addresses on this computer or
+in private network ranges (which omp always reaches directly), are not covered. It is not a firewall.

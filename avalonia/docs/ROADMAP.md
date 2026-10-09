@@ -62,6 +62,10 @@ Started before M2's exit: side panes (Plan, Background tasks, Files), settings p
 ring and model options, page comments, dictation and self-update are on `main` (parity in [`PARITY.md`](PARITY.md)),
 checked on Linux only ([`PROJECT_STATE.md`](PROJECT_STATE.md)). A release still needs M2's exit.
 
+On the [`next`](https://github.com/samnolak/omp-gui/tree/next) branch for the next version (not released): network
+privacy (omp contacts only added providers; opt-in strict network privacy), sign-out per stored account, and in the
+preview device sizes, area comments and a shrinking, scrolling tab strip.
+
 ## M1 scope: the 15 features (fixed 2026-09-25)
 
 "Finished" = a daily-usable OMP desktop client on Windows, macOS and Linux. The list below is the release
@@ -95,7 +99,9 @@ Several omp processes at once (background sessions, pool/LRU) · GUI flows for p
 (via an omp extension or future upstream RPC) · skills manager page · MCP OAuth manager · models.yml editor · git panel
 (stage/commit) · subagent hub · CLI operations panel · collab / live voice · harness updater · Claude/Codex
 session import · session tree navigation / branch · controlled omp upgrade to a release with `session_settled`
-and `set_event_filter` (removes the settle probe and the quadratic streaming cost).
+and `set_event_filter` (removes the settle probe and the quadratic streaming cost) · opt-in model discovery and remote
+catalog upstream ([`upstream/omp-discovery-opt-in.md`](upstream/omp-discovery-opt-in.md)): once omp ships it, its
+settings replace the provider-gate script and close the `catalog.stencil.so` limitation.
 
 ---
 

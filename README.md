@@ -45,12 +45,23 @@ layout details follow the Codex desktop app.
   delete); add and remove projects; Ctrl+Tab cycles. The session title's menu adds compact, hand off, fresh provider
   session, retry, rewind, export, share, workspace folders, move and memory.
 - **Panes** — Files (project tree with git marks, code viewer), Plan (omp's todo list and its history), Background
-  tasks (subagents and jobs), a terminal (a shell, or omp's own terminal UI) and a browser preview with page comments.
+  tasks (subagents and jobs), a terminal (a shell, or omp's own terminal UI) and a browser preview. The preview has
+  tabs (omp's and yours, shrinking to share the strip, then scrolling), device sizes (phone, tablet and desktop presets
+  or a typed size, with the platform's user agent on macOS) and page comments: mark a point or drag an area, and the
+  comments go to omp with the selector, the element and — for React, Vue and Svelte dev builds — the source file.
   omp's browser tool works in that preview: it opens pages, reads them, clicks, types and takes screenshots.
 - **Pet** — an optional pixel pet that reacts to what omp does; drag it anywhere, click it to send a quick message.
-- **Settings** — a full-window page: General, Permissions, Model providers, Connectors (MCP servers, Smithery
-  search), Plugins and skills, Computer use, Git and worktrees, SSH hosts, Pets, Updates, Advanced (which omp to run)
-  and Diagnostics. What belongs to omp is changed through omp's own commands and settings.
+- **Settings** — a full-window page: General, Permissions, Model providers (sign in and sign out, plan usage),
+  Connectors (MCP servers, Smithery search), Plugins and skills, Computer use, Git and worktrees, SSH hosts, Pets,
+  Updates, Advanced (which omp to run, corporate network certificates, network privacy) and Diagnostics. What belongs
+  to omp is changed through omp's own commands and settings.
+- **Network privacy** — omp contacts only the model providers you added: on its own, omp asks every provider it
+  knows for its model list and probes local model servers, so each time the app starts omp it turns the others off
+  for it (omp's `disabledProviders`, passed as a `--config` overlay; your `config.yml` is not changed). Optional
+  **strict network privacy** sends omp and the tools it runs through a filter in the app that lets through only the
+  added providers, sign-in while you add one, and addresses you allow; everything else is refused and listed. Known
+  limitation: omp's background download of its model catalog (`catalog.stencil.so`) has no off switch in omp itself;
+  strict mode blocks it ([upstream proposal](avalonia/docs/upstream/omp-discovery-opt-in.md)).
 - **Keyboard** — ⌘/Ctrl+/ shows every shortcut.
 
 The [user guide](avalonia/docs/USER_GUIDE.md) describes all of it; [PARITY.md](avalonia/docs/PARITY.md) lists every
@@ -124,8 +135,12 @@ UI changes the layout audit screenshots (`OMPGUI_REVIEW_DIR`) and `tools/verify/
 | [`harness/`](harness) | The `harness` omp profile template, used by the client's real-omp tests ([docs/harness.md](docs/harness.md)) |
 
 Documentation for contributors: [PROJECT_STATE.md](avalonia/docs/PROJECT_STATE.md) (state, architecture, decisions,
-how to run every environment), [ROADMAP.md](avalonia/docs/ROADMAP.md), [PARITY.md](avalonia/docs/PARITY.md) and
-[DESIGN_SYSTEM.md](avalonia/docs/design/DESIGN_SYSTEM.md).
+how to run every environment), [ROADMAP.md](avalonia/docs/ROADMAP.md), [PARITY.md](avalonia/docs/PARITY.md),
+[DESIGN_SYSTEM.md](avalonia/docs/design/DESIGN_SYSTEM.md) and [`docs/upstream/`](avalonia/docs/upstream) (proposals
+prepared for omp, not applied here).
+
+Work for the next version collects on the [`next`](https://github.com/samnolak/omp-gui/tree/next) branch; `main` is
+what the latest release was built from.
 
 ## License
 
