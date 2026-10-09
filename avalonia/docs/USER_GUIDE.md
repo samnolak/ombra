@@ -690,6 +690,7 @@ report. Without the variable none of this runs.
 | What | Windows | macOS | Linux |
 |---|---|---|---|
 | GUI settings (`omp-gui.local.json`) | `%APPDATA%\OmpGui` | `~/Library/Application Support/OmpGui` | `~/.config/OmpGui` |
+| Providers turned off for omp (`network-privacy/providers-*.yml`, one per project, rewritten at every start) | `%APPDATA%\OmpGui\network-privacy` | `~/Library/Application Support/OmpGui/network-privacy` | `~/.config/OmpGui/network-privacy` |
 | Installed omp runtime | `%LOCALAPPDATA%\OmpGui\runtimes` | `~/Library/Application Support/OmpGui/runtimes` | `~/.local/share/OmpGui/runtimes` |
 | Dictation model | `%LOCALAPPDATA%\OmpGui\speech-models` | `~/Library/Application Support/OmpGui/speech-models` | `~/.local/share/OmpGui/speech-models` |
 | The app's own errors (`client.log`) | `%LOCALAPPDATA%\OmpGui\logs` | `~/Library/Logs/OMP GUI` | `~/.local/share/OmpGui/logs` |
