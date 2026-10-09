@@ -56,10 +56,12 @@ public sealed class App : Application
             // Network privacy (Settings › Advanced): every omp start first turns off the providers the user has not added,
             // and in strict mode goes through the app's filtering proxy
             var privacy = new OmpGui.ClientCore.Network.NetworkPrivacy(OmpGui.ClientCore.Network.NetworkPrivacy.DirectoryFor(store.Path));
+            // Chats get names from omp's own title generator, as in omp's terminal (SessionTitles)
+            var titles = new SessionTitles(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(store.Path))!, "session-titles"));
             async Task<OmpLaunchSpec> Launch(LaunchRequest request, CancellationToken ct)
             {
                 var o = Current();
-                return await privacy.ApplyAsync(browserDefaults?.ForSession(o, request) ?? o.ToLaunchSpec(request), o, ct);
+                return await privacy.ApplyAsync(titles.Apply(browserDefaults?.ForSession(o, request) ?? o.ToLaunchSpec(request)), o, ct);
             }
             configError ??= options.ApprovalModeWarning;
             var initial = new LaunchRequest(options.WorkingDirectory ?? ExistingDirectory(options.LastWorkingDirectory),

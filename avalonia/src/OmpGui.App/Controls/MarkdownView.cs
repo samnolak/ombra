@@ -555,6 +555,116 @@ public sealed class MarkdownView : ContentControl
             Span span => span.Inlines.Any(IsCode),
             _ => false,
         };
+
+        // ── Paths (PathRun): the pointer resting on one previews it, a click (not a drag) opens it ──
+
+        private static Avalonia.Input.Cursor? HandCursor;
+        private PathRun? _hovered;
+        private PathTarget? _target;
+        private Point? _pressedAt;
+
+        protected override void OnPointerMoved(Avalonia.Input.PointerEventArgs e)
+        {
+            base.OnPointerMoved(e);
+            if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return; // selecting
+            Hover(PathAt(e.GetPosition(this)));
+        }
+
+        protected override void OnPointerExited(Avalonia.Input.PointerEventArgs e)
+        {
+            base.OnPointerExited(e);
+            Hover(null);
+        }
+
+        protected override void OnPointerPressed(Avalonia.Input.PointerPressedEventArgs e)
+        {
+            _pressedAt = _target is not null && e.GetCurrentPoint(this).Properties.IsLeftButtonPressed ? e.GetPosition(this) : null;
+            base.OnPointerPressed(e);
+        }
+
+        protected override void OnPointerReleased(Avalonia.Input.PointerReleasedEventArgs e)
+        {
+            base.OnPointerReleased(e);
+            var at = e.GetPosition(this);
+            // A click: released where it was pressed, nothing selected (a drag over the path selects it instead)
+            if (_pressedAt is { } from && _target is { } target && Math.Abs(at.X - from.X) < 4 && Math.Abs(at.Y - from.Y) < 4
+                && SelectionStart == SelectionEnd && PathLinks.GetHandler(this) is { } handler)
+            {
+                ToolTip.SetIsOpen(this, false);
+                handler.OpenPath(target);
+                e.Handled = true;
+            }
+            _pressedAt = null;
+        }
+
+        private void Hover(PathRun? run)
+        {
+            if (ReferenceEquals(run, _hovered)) return;
+            if (_hovered is { IsLink: false }) _hovered.TextDecorations = null;
+            _hovered = run;
+            var handler = PathLinks.GetHandler(this);
+            _target = run is null || handler is null ? null : handler.ResolvePath(run.Path);
+            if (_target is null)
+            {
+                ToolTip.SetTip(this, null);
+                Cursor = null;
+                return;
+            }
+            run!.TextDecorations = Avalonia.Media.TextDecorations.Underline;
+            Cursor = HandCursor ??= new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand);
+            ToolTip.SetTip(this, new ToolTip { Classes = { "path-peek" }, Content = PathLinks.Preview(_target, handler!.ProjectRoot) });
+            ToolTip.SetPlacement(this, PlacementMode.Pointer);
+        }
+
+        /// <summary>The path run under <paramref name="point"/>, by the layout's hit test and the runs' text offsets.</summary>
+        private PathRun? PathAt(Point point)
+        {
+            if (Inlines is not { Count: > 0 } inlines || !inlines.Any(HasPath)) return null;
+            var hit = TextLayout.HitTestPoint(point - new Point(Padding.Left, Padding.Top));
+            if (!hit.IsInside) return null;
+            var offset = 0;
+            return Find(inlines, hit.TextPosition, ref offset);
+        }
+
+        private static bool HasPath(Avalonia.Controls.Documents.Inline inline) => inline switch
+        {
+            PathRun => true,
+            Span s => s.Inlines.Any(HasPath),
+            _ => false,
+        };
+
+        /// <summary>Walks the inlines in text order: a run counts its text, a line break and an embedded control one character each.</summary>
+        private static PathRun? Find(InlineCollection inlines, int position, ref int offset)
+        {
+            foreach (var inline in inlines)
+            {
+                switch (inline)
+                {
+                    case PathRun p:
+                        if (position >= offset && position < offset + (p.Text?.Length ?? 0)) return p;
+                        offset += p.Text?.Length ?? 0;
+                        break;
+                    case Run r:
+                        offset += r.Text?.Length ?? 0;
+                        break;
+                    case Span s:
+                        if (Find(s.Inlines, position, ref offset) is { } found) return found;
+                        break;
+                    default:
+                        offset += 1; // LineBreak "\n", InlineUIContainer U+FFFC
+                        break;
+                }
+            }
+            return null;
+        }
+    }
+
+    /// <summary>Text that names a path (inline code, a local link's label); <see cref="Path"/> is what is looked up.</summary>
+    private sealed class PathRun(string text, string path) : Run(text)
+    {
+        public string Path { get; } = path;
+        /// <summary>A link's label is underlined always; inline code only while the pointer is on it.</summary>
+        public bool IsLink { get; init; }
     }
 
     private static void AddInlines(InlineCollection target, ContainerInline container, double codeSize)
@@ -583,9 +693,15 @@ public sealed class MarkdownView : ContentControl
                 return span;
             }
             case CodeInline code:
+            {
                 // Inline code: mono at 0.875 of the text around it; MdText draws its chip. A narrow no-break space on
                 // each side keeps the chip's padding clear of the words around it (a plain space alone is eaten by it).
-                return new Span { Inlines = { new Run("\u202F"), new Run(code.Content) { FontFamily = Mono, FontSize = codeSize }, new Run("\u202F") } };
+                // One that looks like a path is looked up when the pointer rests on it (MdText, PathLinks).
+                var run = PathLinks.LooksLikePath(code.Content) ? new PathRun(code.Content, code.Content) : new Run(code.Content);
+                run.FontFamily = Mono;
+                run.FontSize = codeSize;
+                return new Span { Inlines = { new Run("\u202F"), run, new Run("\u202F") } };
+            }
             case LineBreakInline br:
                 return br.IsHard ? new LineBreak() : new Run(" ");
             case LinkInline link when !link.IsImage:
@@ -594,6 +710,9 @@ public sealed class MarkdownView : ContentControl
                 if (label.Length == 0) label = link.Url ?? "";
                 if (Uri.TryCreate(link.Url, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http")
                     return new InlineUIContainer(Link(label, uri)) { BaselineAlignment = BaselineAlignment.Baseline };
+                // A link to a local file or folder ("[app.ts](src/app.ts#L12)"): previewed and opened like a path in code
+                if (link.Url is { } url && PathLinks.LooksLikePath(Uri.UnescapeDataString(url)))
+                    return new PathRun(label, Uri.UnescapeDataString(url)) { IsLink = true, TextDecorations = TextDecorations.Underline };
                 return new Run(label) { TextDecorations = TextDecorations.Underline };
             }
             case LinkInline image:

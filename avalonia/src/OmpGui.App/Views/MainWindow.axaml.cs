@@ -493,6 +493,8 @@ public sealed partial class MainWindow : Window
     protected override void OnDataContextChanged(EventArgs e)
     {
         base.OnDataContextChanged(e);
+        // Paths in the conversation preview on hover and open on click (Controls/PathLinks), in this window's chat
+        OmpGui.App.Controls.PathLinks.SetHandler(this, Vm);
         if (Vm is { } vm)
         {
             // A flyout's content gets the window's data only once it opens, after its popup was placed: the menu then

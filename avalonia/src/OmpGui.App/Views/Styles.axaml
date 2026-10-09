@@ -474,6 +474,18 @@
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="MaxWidth" Value="320" />
   </Style>
+  <!-- A path's preview in the conversation (Controls/PathLinks): a card like the menus, not the inverse tooltip, so the
+       code and folder listings read as they do in the app; wide enough for a few lines of code -->
+  <Style Selector="ToolTip.path-peek">
+    <Setter Property="Background" Value="{DynamicResource GuiSurface2}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+    <Setter Property="Padding" Value="12,10" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="MaxWidth" Value="460" />
+  </Style>
 
   <!-- Transcript, Markdown and dialog cards: Styles.Session.axaml -->
   <Style Selector="TextBlock.activity">

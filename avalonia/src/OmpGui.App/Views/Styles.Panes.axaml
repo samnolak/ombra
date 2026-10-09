@@ -225,6 +225,12 @@
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
     <Setter Property="Padding" Value="10,6" />
   </Style>
+  <!-- The lines or entries a path in the conversation shows on hover (Controls/PathLinks) -->
+  <Style Selector="Border.path-peek-code">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1OnWindow}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="Padding" Value="8,6" />
+  </Style>
   <Style Selector="TextBlock.task-message-role">
     <Setter Property="FontSize" Value="11" />
     <Setter Property="FontWeight" Value="SemiBold" />

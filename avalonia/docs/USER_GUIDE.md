@@ -304,6 +304,12 @@ project yet), so the OS warns on first start:
   message, or opening another session, always goes to the end. Once you click the conversation's text (the keys
   are then the conversation's, not the message box's), Page Up / Page Down scroll by a screen, ↑/↓ by a little, Home
   goes to the top and End to the latest message.
+- **Paths in replies** — a path omp writes as code (`src/app.ts`, `src/app.ts:42`, `assets/logo.png`, `docs/`) or as
+  a link to a local file is looked up in the chat's project when the pointer rests on it. If it exists it is
+  underlined and shows a preview: a file's first lines (around the line when it names one, that line marked), an
+  image's thumbnail, a folder's first entries, with the size. A click opens it — an image in the image viewer, a
+  file in the Files pane at its line, a folder in the Files tree; dragging over it selects the text as usual. Code
+  that names nothing on disk stays plain.
 - **Right-click menus** — right-click (two-finger click, or Control+click on macOS) acts on what is under the
   pointer, not on what is selected: one of your messages offers **Copy** and **Rewind to here**; a reply **Copy**
   (the text as it reads), **Copy as Markdown** and, when it failed, **Retry**; a code block **Copy code**; a link
@@ -344,7 +350,10 @@ Click the session's title in the header. Most items run omp's own command — sh
 report on a card above the message box:
 
 - **Rename** (edit the title in place) · **Copy session ID** (what `omp --resume` takes) · **Copy session file
-  path**.
+  path**. A chat without a name gets one from omp's own title generator (the model omp uses for titles, as in its
+  terminal) a moment after you send a message that says what it is about — "hi" or "ok" are skipped until one does;
+  an old unnamed chat is named the next time you write in it, from its first message. The name shows when the reply
+  ends. A name you gave is never replaced.
 - **Compact conversation…** — omp summarizes the conversation so far and goes on from the summary, freeing context;
   you can say what the summary should keep. The card shows it running (**Stop** cancels) and then how many tokens
   the context went from and to. **Hand off…** is the same with a written handoff document; both stay in this session.
