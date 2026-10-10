@@ -64,7 +64,10 @@ public sealed class App : Application
                 return await privacy.ApplyAsync(titles.Apply(browserDefaults?.ForSession(o, request) ?? o.ToLaunchSpec(request)), o, ct);
             }
             configError ??= options.ApprovalModeWarning;
-            var initial = new LaunchRequest(options.WorkingDirectory ?? ExistingDirectory(options.LastWorkingDirectory),
+            // Without a saved folder that still exists, the home folder: an app opened from Finder runs in "/", and omp
+            // started there listed its chats as a project named "/"
+            var initial = new LaunchRequest(options.WorkingDirectory ?? ExistingDirectory(options.LastWorkingDirectory)
+                    ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 ApprovalMode: OmpRuntimeOptions.EffectiveApprovalMode(options.ApprovalMode));
             // "Bypass permissions" was chosen explicitly before; say so at every start, not only in the chip.
             if (initial.ApprovalMode == "yolo")

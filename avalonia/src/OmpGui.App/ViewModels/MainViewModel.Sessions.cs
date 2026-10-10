@@ -136,6 +136,9 @@ public sealed partial class MainViewModel
     private async Task OpenFolderAsync()
     {
         if (PickFolderRequested is not { } pick || await pick() is not { } folder) return;
+        // A folder opened on purpose is listed again if it had been removed from the sidebar
+        var (_, hidden) = ProjectPrefs();
+        if (hidden.Remove(Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)))) SaveProjectPrefs();
         await OpenProjectAsync(folder);
     }
 
@@ -416,8 +419,8 @@ public sealed partial class MainViewModel
         var pinned = new List<SessionItemViewModel>();
         foreach (var item in Sessions)
         {
-            // A removed project stays out of the list, except while omp works in it.
-            if (hidden.Contains(item.Cwd) && !SessionCatalog.PathComparer.Equals(item.Cwd, project)) continue;
+            // A removed project stays out of the list, the open chat's too (it had stayed until the app restarted)
+            if (hidden.Contains(item.Cwd)) continue;
             var i = groups.FindIndex(x => SessionCatalog.PathComparer.Equals(x.Group.Cwd, item.Cwd));
             if (i < 0) groups.Add((GroupFor(item.Cwd), [], item.Model.LastMessageAt));
             else if (item.Model.LastMessageAt > groups[i].Newest) groups[i] = groups[i] with { Newest = item.Model.LastMessageAt };
@@ -429,7 +432,7 @@ public sealed partial class MainViewModel
         // By the newest message in each; a project whose sessions are all pinned keeps its header only while it is open
         // or was added from the sidebar (its "+" stays in reach). Folders added from the sidebar that have no session
         // yet go first, as just added.
-        var ordered = groups.Where(g => g.Items.Count > 0 || g.Group.IsCurrentProject || added.Contains(g.Group.Cwd, SessionCatalog.PathComparer))
+        var ordered = groups.Where(g => g.Items.Count > 0 || (g.Group.IsCurrentProject && !hidden.Contains(g.Group.Cwd)) || added.Contains(g.Group.Cwd, SessionCatalog.PathComparer))
             .OrderByDescending(g => g.Newest).Select(g => g.Group).ToList();
         if (SessionFilter.Trim().Length == 0)
             foreach (var p in added)
@@ -510,7 +513,7 @@ public sealed partial class MainViewModel
         hidden.Add(group.Cwd);
         SaveProjectPrefs();
         var card = new SessionCardViewModel("brief", "IconFolder", $"“{group.Name}” removed from the sidebar",
-            group.IsCurrentProject ? "It stays listed while omp works in it. Nothing was deleted." : "Nothing was deleted: add the folder again to list its sessions.");
+            "Nothing was deleted: add the folder again to list its sessions.");
         card.Primary = new SessionCardAction("Undo", new RelayCommand(() =>
         {
             var (a, h) = ProjectPrefs();
