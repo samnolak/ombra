@@ -85,9 +85,10 @@ project yet), so the OS warns on first start:
   (the session file) and **Delete…**, after a confirmation; deleting the open session works like the session menu's
   Delete (a new session starts), and deleting a chat that works in the background says so and stops its omp first.
   The folder button at the top of the sidebar **adds a project folder** to the list;
-  hover a project's header (or right-click it) to **remove it from the sidebar** (⊖) — only the list changes, the
-  folder and its sessions stay on disk, **Undo** brings it back, and so does adding (or opening) the folder again. The
-  open chat's project goes too; its chat stays open. Drag the
+  hover a project's header (or right-click it) to **remove it from the sidebar** (⊖). A project without chats goes at
+  once (**Undo** brings it back). One with chats asks first: **Remove from sidebar** keeps its chats on disk (adding or
+  opening the folder again lists them), **Delete N chats too** deletes their files as well (cannot be undone; an open
+  chat is closed first). The folder itself is never deleted. The open chat's project goes too. Drag the
   sidebar's right edge to make it wider or narrower (220–480 px; double-click the edge for the default); Ctrl/⌘+B
   hides and shows it. Added and removed projects and the width are remembered in the client's settings file. The
   title opens the session menu (below).

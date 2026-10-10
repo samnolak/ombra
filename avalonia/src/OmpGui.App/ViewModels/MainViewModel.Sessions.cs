@@ -501,17 +501,71 @@ public sealed partial class MainViewModel
         SaveProjectPrefs();
     }
 
-    /// <summary>Group header: take a project off the sidebar. Only the client's list changes (nothing on disk), so it
-    /// is done at once, with Undo on the card that says so.</summary>
+    /// <summary>
+    /// Group header: take a project off the sidebar. A project without chats goes at once (Undo on the card); one with
+    /// chats asks first: keep its chats on disk (only the list changes), or delete them too.
+    /// </summary>
     [RelayCommand]
     private void RemoveProject(SessionGroupViewModel? group)
     {
         if (group is not { IsProject: true }) return;
+        var chats = Sessions.Where(s => SessionCatalog.PathComparer.Equals(s.Cwd, group.Cwd)).ToList();
+        if (chats.Count == 0)
+        {
+            HideProject(group);
+            return;
+        }
+        var card = new SessionCardViewModel("delete", "IconFolder", $"Remove “{group.Name}”?",
+            (chats.Count == 1 ? "It has 1 chat." : $"It has {chats.Count} chats.")
+            + " Remove it from the sidebar and keep the chats on disk, or delete the chats too (their files and artifacts; this cannot be undone). The folder itself is never deleted.")
+        {
+            Detail = group.Cwd,
+            State = SessionCardState.Ask,
+        };
+        card.Primary = new SessionCardAction("Remove from sidebar", new RelayCommand(() =>
+        {
+            CloseSessionCard();
+            HideProject(group);
+        }));
+        card.Tertiary = new SessionCardAction(chats.Count == 1 ? "Delete the chat too" : $"Delete {chats.Count} chats too",
+            new AsyncRelayCommand(() => DeleteProjectChatsAsync(card, group, chats)));
+        card.Secondary = new SessionCardAction("Cancel", new RelayCommand(CloseSessionCard));
+        ShowCard(card);
+    }
+
+    /// <summary>Deletes a project's chats (each open one closed first; the one on screen gets a new session), then hides it.</summary>
+    private async Task DeleteProjectChatsAsync(SessionCardViewModel card, SessionGroupViewModel group, List<SessionItemViewModel> chats)
+    {
+        card.State = SessionCardState.Running;
+        card.Message = "Deleting…";
+        card.Primary = card.Secondary = card.Tertiary = null;
+        var failed = new List<string>();
+        foreach (var chat in chats)
+        {
+            if (FindOpen(chat.Model.Path) is { } open)
+            {
+                if (open == _open) await NewSessionAsync(); // off the chat on screen first, so it can be closed
+                if (FindOpen(chat.Model.Path) is { } still) await CloseSessionAsync(still);
+            }
+            try { await Task.Run(() => SessionCatalog.DeleteSession(chat.Model.Path)); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { failed.Add($"{chat.Title}: {e.Message}"); }
+        }
+        RequestCatalogRefresh();
+        HideProject(group, announce: false);
+        if (failed.Count > 0)
+            card.Finish(false, "Some chats were not deleted", string.Join("\n", failed), secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
+        else ShowBrief("IconTrash", $"“{group.Name}” removed", chats.Count == 1 ? "1 chat deleted" : $"{chats.Count} chats deleted");
+    }
+
+    /// <summary>Only the client's list changes (nothing on disk), so it is done at once, with Undo on the card that says so.</summary>
+    private void HideProject(SessionGroupViewModel group, bool announce = true)
+    {
         var (added, hidden) = ProjectPrefs();
         var wasAdded = added.FindIndex(p => SessionCatalog.PathComparer.Equals(p, group.Cwd));
         if (wasAdded >= 0) added.RemoveAt(wasAdded);
         hidden.Add(group.Cwd);
         SaveProjectPrefs();
+        if (!announce) return;
         var card = new SessionCardViewModel("brief", "IconFolder", $"“{group.Name}” removed from the sidebar",
             "Nothing was deleted: add the folder again to list its sessions.");
         card.Primary = new SessionCardAction("Undo", new RelayCommand(() =>
