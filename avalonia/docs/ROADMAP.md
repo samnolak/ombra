@@ -62,7 +62,7 @@ Started before M2's exit: side panes (Plan, Background tasks, Files), settings p
 ring and model options, page comments, dictation and self-update are on `main` (parity in [`PARITY.md`](PARITY.md)),
 checked on Linux only ([`PROJECT_STATE.md`](PROJECT_STATE.md)). A release still needs M2's exit.
 
-In 0.0.4: network privacy (omp contacts only added providers; opt-in strict network privacy), sign-out per stored
+In 0.0.5: network privacy (omp contacts only added providers; opt-in strict network privacy), sign-out per stored
 account, and in the preview device sizes, area comments and a shrinking, scrolling tab strip.
 
 ## M1 scope: the 15 features (fixed 2026-09-25)
