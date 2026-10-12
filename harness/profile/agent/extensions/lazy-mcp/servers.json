@@ -1,0 +1,15 @@
+{
+  "blender": {
+    "description": "Live Blender: run bpy Python, inspect the scene, render previews, import or generate 3D assets. Needs Blender open with the MCP for Blender addon running.",
+    "type": "stdio",
+    "command": "uvx",
+    "args": ["--python", "3.12", "mcp-for-blender"],
+    "timeout": 180000
+  },
+  "figma": {
+    "description": "Figma Dev Mode: read selected frames and nodes, variables and design tokens, screenshots, code from designs. Needs Figma Desktop with the Dev Mode MCP server enabled.",
+    "type": "http",
+    "url": "http://127.0.0.1:3845/mcp",
+    "timeout": 120000
+  }
+}

@@ -1,15 +1,16 @@
 # Harness profile
 
-The harness is an omp profile template: working rules, two agent overrides, nine skills and two MCP servers, tuned
-for predictable work with a single (often local) model. It lives in its own omp profile, so omp's default profile
-(`~/.omp/agent`) and any other profile stay as they are.
+The harness is an omp profile template: working rules, two agent overrides, nine skills, two MCP servers and two
+on-demand MCP servers, tuned for predictable work with a single (often local) model. It lives in its own omp profile,
+so omp's default profile (`~/.omp/agent`) and any other profile stay as they are.
 
 The template is in this repository under [`harness/profile`](../harness/profile). The desktop client in
 [`avalonia/`](../avalonia) uses an existing `harness` profile in place: it never copies, installs or edits it. The
 client's CI builds a throwaway copy of the template for its real-omp tests
 ([`avalonia/tools/stand-in-env/setup.sh`](../avalonia/tools/stand-in-env/setup.sh)).
 
-Template 1.2.0 (rules, agents, skills and settings), verified with omp 18.8.0, the version the desktop client pins.
+Template 1.3.0 (rules, agents, skills, settings and the on-demand MCP extension), verified with omp 18.8.0, the version
+the desktop client pins.
 
 ## What it contains
 
@@ -21,6 +22,7 @@ Template 1.2.0 (rules, agents, skills and settings), verified with omp 18.8.0, t
 | Skills | `skills/<name>/` | `systematic-debugging`, `test-driven-development`, `verification-before-completion`, `requesting-code-review`, `receiving-code-review` (adapted from obra/superpowers); `code-graph` (codebase-memory-mcp); `library-docs` (Context7); `handoff` (one `HANDOFF.md` per project, checked against the code); `karpathy-llm-wiki` |
 | Base settings | `agent/config.yml` (created once) | one subagent at a time, `defaultThinkingLevel: low`, DuckDuckGo web search (20 s timeout, Exa off), the skills folder of the profile, **`memory.backend: "off"`** |
 | MCP servers | `agent/mcp.json` (created once) | `codebase-memory` (stdio, pinned codebase-memory-mcp release in `vendor/`, cache in `cbm-cache/`) and `context7` (remote `https://mcp.context7.com/mcp`, no key) |
+| On-demand MCP | `agent/extensions/lazy-mcp/` (`index.ts`, `servers.json`) | The `mcp_lazy` tool: the agent enables a server when the task needs it (`action=enable` returns the server's instructions and tools), calls its tools (`action=call`) and disables it afterwards (`action=disable`); all are closed when the session ends. Servers in `servers.json` are not in `mcp.json`, so nothing connects at startup. Shipped: `blender` (stdio `uvx --python 3.12 mcp-for-blender`; needs `uv` on PATH and Blender with the MCP for Blender addon running) and `figma` (Figma Desktop's Dev Mode MCP server at `http://127.0.0.1:3845/mcp`; enable it in Figma Desktop). No dependencies: stdio and Streamable HTTP without OAuth, so Figma's remote server (`mcp.figma.com`, OAuth only) is not supported. |
 | Models | `agent/models.yml` (created once, empty) | no provider is preset; see `agent/models.example.yml` |
 | Read-only launcher | `omp-readonly.cmd` | Windows: a read-only CLI session (`read, grep, glob, web_search` tools) on this profile with the omp on PATH |
 
@@ -57,6 +59,9 @@ Nothing personal ships in the template: no model, key, server address or token.
 - **Models:** add your provider to `agent/models.yml` (examples in `agent/models.example.yml`) or sign in with omp's
   `/login`. Keep keys in environment variables or a command (`apiKey: "!…"`), not in plain text.
 - **MCP servers:** `agent/mcp.json` is yours after it is created; `agent/mcp.example.json` shows the shipped servers.
+  On-demand servers go into `agent/extensions/lazy-mcp/servers.json` (`description` tells the agent when to use the
+  server; `type` `stdio` with `command`/`args`/`env`/`cwd`, or `http` with `url`/`headers`; optional `timeout` in ms).
+  The file is read on every call, so new entries need no restart; the tool's server list refreshes with the next session.
 - **Settings:** `agent/config.yml` is yours after it is created. If you change a value the harness relies on
   (`memory.backend`), the profile works differently from what this page describes.
 
@@ -64,7 +69,7 @@ Nothing personal ships in the template: no model, key, server address or token.
 
 | Class | Files | Meaning |
 |---|---|---|
-| template | rules, agents, skills, the launcher, `agent/models.example.yml`, `agent/mcp.example.json` | come from the template; replace them to take a newer one (back up what you edited) |
+| template | rules, agents, skills, the launcher, `agent/models.example.yml`, `agent/mcp.example.json`, `agent/extensions/lazy-mcp/` | come from the template; replace them to take a newer one (back up what you edited, including `servers.json`) |
 | yours | `agent/models.yml`, `agent/mcp.json`, `agent/config.yml` | created once from the `.seed` files; never replaced |
 | runtime state | `agent/sessions/`, `agent/memories/`, `agent/*.db*`, `cache/`, `cbm-cache/`, `run/`, `logs/`, `webcache/`, `puppeteer/`, `vendor/`, `gpu_cache.json`, `HARNESS.md`, `*.bak`, your own files | written by omp, its tools and you; not part of the template, never deleted |
 
