@@ -20,6 +20,13 @@ public sealed class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var args = Program.Args;
+            // Everything this app starts carries its mark, and ends with it (OwnedProcesses). First what an app that is
+            // gone left running — an earlier version's omp daemon broker and its dev servers among them — so no omp
+            // started below joins a broker of that app; before any process of ours starts.
+            OwnedProcesses.MarkThisProcess();
+            var owned = new OwnedProcesses(RuntimePack.DefaultRoot);
+            owned.Stop(OwnedProcesses.Moment.Start);
+            desktop.Exit += (_, _) => owned.Stop(OwnedProcesses.Moment.Quit);
             var store = new ClientSettingsStore(args.ConfigPath ?? Environment.GetEnvironmentVariable(OmpRuntimeOptions.ConfigEnvVar) ?? OmpRuntimeOptions.DefaultConfigPath);
             OmpRuntimeOptions options;
             string? configError = null;

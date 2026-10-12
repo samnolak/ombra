@@ -189,7 +189,11 @@ project yet), so the OS warns on first start:
   the first Esc clears what you typed (as a Mac search field) and the next one hands the keyboard back to the message
   box, as Esc in the preview's address does; in a terminal tab or the preview it stays there (vim keeps its Esc).
 - **Closing or quitting while omp works** — closing the window (⌘W, ⌘Q, **Quit** in the tray menu) stops every
-  chat's omp and ends every terminal tab. While a run is going in any chat, omp waits for your answer, or a terminal
+  chat's omp and ends every terminal tab, and with them everything they started: omp's background jobs (a dev server
+  omp keeps running, its daemon broker) and what you started in a terminal tab, even when it was detached. Only an
+  editor or file manager you opened from the app stays. macOS and Linux; on Windows omp's background jobs may stay
+  (not verified there). If the app was not quit normally (a crash, a forced quit, an update of a version before
+  0.0.6), the next start ends what it left. While a run is going in any chat, omp waits for your answer, or a terminal
   tab still runs something (a dev server), a card above the message box asks first, naming the chat when it is not
   the one shown (or how many chats work): **Quit** or **Keep working** (the keyboard starts on Keep working; Esc
   keeps working too).

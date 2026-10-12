@@ -125,6 +125,8 @@ public static class FileOpeners
     {
         try
         {
+            // An editor or file manager the user opens is theirs: it stays when the app quits (OwnedProcesses)
+            if (!psi.UseShellExecute) psi.Environment.Remove(OmpGui.ClientCore.OwnedProcesses.OwnerVariable);
             using var p = Process.Start(psi);
             if (p is null) return psi.UseShellExecute; // the shell opened it in an app already running
             if (!waitForSuccess) return true;
