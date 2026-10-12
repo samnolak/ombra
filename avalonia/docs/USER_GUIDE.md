@@ -30,12 +30,15 @@ The packages are **not signed** with a developer certificate (no signing certifi
 project yet), so the OS warns on first start:
 
 - **Windows** — extract the zip anywhere and run `OmpGui.exe`. SmartScreen: *More info → Run anyway*.
-- **macOS** — unzip and move *OMP GUI.app* to Applications. The app is only ad-hoc signed and not notarized, so
+- **macOS** — unzip and move *OMP GUI.app* to Applications. The app is signed with the project's own certificate, not
+  an Apple Developer ID, and not notarized, so
   macOS blocks its first start. macOS 15 (Sequoia) and later: open the app once, close the warning, then
   *System Settings → Privacy & Security → Open Anyway* and confirm with *Open*. macOS 14 (Sonoma): Control-click the
   app → *Open* → *Open* (Sequoia removed this way). On any version you can instead run
   `xattr -dr com.apple.quarantine "/Applications/OMP GUI.app"`. After that it starts from its icon as usual. macOS
-  asks for microphone access the first time you dictate.
+  asks for microphone access the first time you dictate, and for a folder such as Documents the first time omp works
+  in it; what you allow stays across updates (every release is signed with the same certificate). Releases before
+  0.0.6 were ad-hoc signed, which macOS treats as a new app at every update: after updating to 0.0.6 it asks once more.
 - **Linux** — `tar -xzf omp-gui-….tar.gz` and run `./OmpGui` in the extracted folder. `./install-desktop-entry.sh`
   adds it to your application menu (only `~/.local/share/applications/omp-gui.desktop` is written; it points at the
   folder, so run it again if you move the folder).
