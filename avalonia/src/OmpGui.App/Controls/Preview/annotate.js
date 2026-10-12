@@ -3,13 +3,15 @@
 // nothing is outlined while the pointer moves. A comment box opens at the mark; the comment goes to the client with
 // the mark (its place in the viewport and on the page), the element that holds it (a selector, its opening tag, its
 // text, its box and, where the dev build exposes it, the source file) and, for an area, the elements inside it.
-// Numbered pins (and an area's outline) stay on the page, anchored to that element so they follow scrolling; a click
-// on a pin opens its comment again to change (Save) or delete it.
+// Numbered pins (and an area's outline) stay on the page they were made on, anchored to that element so they follow
+// scrolling; another page of the site (also one a single-page app shows without a navigation) shows only its own. A
+// click on a pin opens its comment again to change (Save) or delete it.
 // Everything lives in a closed shadow root, so the page's CSS does not reach it and the page's scripts cannot read it;
 // messages carry a token from this closure.
-// Entry: window.__ompAnnotate.{setMode(bool), setPins([{id, number, kind, selector, offsetX, offsetY, width, height,
-// pageX, pageY, comment}])}. Messages (JSON strings) through the web view's invokeCSharpAction:
-// {type: "annotation" | "annotation-update" {id, comment} | "annotation-remove" {id} | "annotate-exit" | "ready", token, ...}.
+// Entry: window.__ompAnnotate.{setMode(bool), setPins([{id, number, url, kind, selector, offsetX, offsetY, width, height,
+// pageX, pageY, comment}])} (the site's pins; each is drawn on its url only). Messages (JSON strings) through the web
+// view's invokeCSharpAction: {type: "annotation" | "annotation-update" {id, comment} | "annotation-remove" {id} |
+// "annotate-exit" | "ready" | "location" {url}, token, ...}.
 (function (token) {
   "use strict";
   // Already here (injected again after a navigation inside the page): it keeps its own token, never takes one from
@@ -262,6 +264,7 @@
     });
     // Shown at once; the client's list then numbers it (setPins)
     pins.push({
+      url: location.href,
       id: id, number: pins.length + 1, kind: d.kind, selector: selector, el: el, offsetX: mark.offsetX, offsetY: mark.offsetY,
       width: mark.width, height: mark.height, pageX: mark.pageX, pageY: mark.pageY, comment: comment
     });
@@ -269,9 +272,22 @@
     drawPins();
   }
 
+  // A page is its address and query, and its fragment when that is a route (#/cart, #!/cart); an anchor (#top) is the
+  // same page. PreviewAnnotations.SamePage decides the same way.
+  function pageKey(href) {
+    try {
+      var u = new URL(href, location.href);
+      return u.origin + u.pathname + u.search + (/^#!?\//.test(u.hash) ? u.hash : "");
+    } catch (e) { return String(href); }
+  }
+
+  // Only the pins of the page shown: the list holds the whole site's, and a single-page app changes its page without a
+  // navigation (the client then never re-injects or resyncs)
   function drawPins() {
     pinsBox.textContent = "";
+    var here = pageKey(location.href);
     pins.forEach(function (m) {
+      if (pageKey(m.url) !== here) return;
       var p = whereIs(m);
       if (!p) return;
       if (m.kind === "area") {
@@ -379,12 +395,28 @@
   window.addEventListener("scroll", reflow, true);
   window.addEventListener("resize", reflow);
 
+  // The page changed without a navigation (pushState, replaceState, back/forward, a hash route): pins and an open
+  // comment box belong to the page they were made on; the client hears the new address. history's methods are not
+  // wrapped (the page's own code may wrap them too): a cheap check of the address catches pushState.
+  var shownKey = pageKey(location.href);
+  function onLocation() {
+    var k = pageKey(location.href);
+    if (k === shownKey) return;
+    shownKey = k;
+    if (draft) closeDraft();
+    drawPins();
+    send({ type: "location", url: location.href });
+  }
+  window.addEventListener("popstate", onLocation);
+  window.addEventListener("hashchange", onLocation);
+  setInterval(onLocation, 300);
+
   window.__ompAnnotate = {
     setMode: function (v) { setMode(v, false); },
     setPins: function (list) {
       pins = (list || []).map(function (p) {
         return {
-          id: p.id, number: p.number, kind: p.kind === "area" ? "area" : "point", selector: p.selector, el: null,
+          id: p.id, number: p.number, url: p.url, kind: p.kind === "area" ? "area" : "point", selector: p.selector, el: null,
           offsetX: +p.offsetX || 0, offsetY: +p.offsetY || 0, width: +p.width || 0, height: +p.height || 0,
           pageX: +p.pageX || 0, pageY: +p.pageY || 0, comment: p.comment
         };

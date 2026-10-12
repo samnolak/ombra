@@ -151,11 +151,15 @@ public sealed class PreviewAnnotationTests
         vm.OnPageMessage(Message(vm, comment: "Tighter cards", id: "a3", selector: "section.cards", kind: "area", width: 240, height: 120,
             inside: [new { selector = "#buy", tag = "button", text = "Buy" }, new { selector = "main > h2", tag = "h2", text = "" }]));
         Assert.Equal("Area 240×120 in button — Sign in", vm.Annotations[2].TargetLabel);
+        vm.OnPageMessage(Message(vm, comment: "Elsewhere", id: "a4", url: "http://localhost:3000/"));
         var pins = JsonDocument.Parse(vm.PinsJson(new Uri("http://localhost:5173/#top"))).RootElement;
-        Assert.Equal(2, pins.GetArrayLength()); // only the pins of the page shown (the fragment does not matter)
+        // The site's pins, each with its page (the script draws a pin on its own page only); another site's never
+        Assert.Equal(["http://localhost:5173/", "http://localhost:5173/about", "http://localhost:5173/"],
+            pins.EnumerateArray().Select(p => p.GetProperty("url").GetString()));
         Assert.Equal(("point", "#login > button.btn", 40, 20, 1200), (pins[0].GetProperty("kind").GetString(), pins[0].GetProperty("selector").GetString(),
             pins[0].GetProperty("offsetX").GetInt32(), pins[0].GetProperty("offsetY").GetInt32(), pins[0].GetProperty("pageY").GetInt32()));
-        Assert.Equal(("area", 240, 120), (pins[1].GetProperty("kind").GetString(), pins[1].GetProperty("width").GetInt32(), pins[1].GetProperty("height").GetInt32()));
+        Assert.Equal(("area", 240, 120), (pins[2].GetProperty("kind").GetString(), pins[2].GetProperty("width").GetInt32(), pins[2].GetProperty("height").GetInt32()));
+        vm.Annotations.Remove(vm.Annotations.Single(a => a.Id == "a4"));
 
         var prompt = PreviewViewModel.BuildPrompt(vm.Annotations);
         Assert.Contains("Comments on the page http://localhost:5173/ (\"Shop\")", prompt);
@@ -169,6 +173,28 @@ public sealed class PreviewAnnotationTests
         Assert.Contains("Comments on the page http://localhost:5173/about", prompt);
         Assert.Contains("2. Remove this", prompt);
         Assert.EndsWith("make the changes the comments ask for.", prompt);
+    }
+
+    [Theory]
+    [InlineData("http://localhost:5173/a", "http://localhost:5173/a#top", true)]      // an anchor is the same page
+    [InlineData("http://localhost:5173/a", "http://localhost:5173/b", false)]
+    [InlineData("http://localhost:5173/a?tab=1", "http://localhost:5173/a?tab=2", false)]
+    [InlineData("http://localhost:5173/#/cart", "http://localhost:5173/#/orders", false)] // hash routes are pages
+    [InlineData("http://localhost:5173/#!/cart", "http://localhost:5173/#!/cart", true)]
+    [InlineData("http://localhost:5173/#/cart", "http://localhost:5173/", false)]
+    public void A_comment_belongs_to_its_page_route_included_anchor_not(string a, string b, bool same) =>
+        Assert.Equal(same, PreviewViewModel.SamePage(new Uri(a), new Uri(b)));
+
+    [Fact]
+    public void A_route_change_inside_the_page_moves_the_address_on_the_same_site_only()
+    {
+        var vm = Opened();
+        string Location(string url, string? token = null) => JsonSerializer.Serialize(new { type = "location", token = token ?? vm.AnnotationToken, url });
+        Assert.Equal("location", vm.OnPageMessage(Location("http://localhost:5173/orders")));
+        Assert.Equal("http://localhost:5173/orders", vm.CurrentUrl?.AbsoluteUri);
+        Assert.Null(vm.OnPageMessage(Location("https://evil.example/")));
+        Assert.Null(vm.OnPageMessage(Location("http://localhost:5173/x", token: "forged")));
+        Assert.Equal("http://localhost:5173/orders", vm.CurrentUrl?.AbsoluteUri);
     }
 
     [Fact]
