@@ -72,7 +72,10 @@ so permissions given to the app (Documents, microphone…) stay across updates. 
 started, omp's detached daemon broker and its background jobs included, and a start ends what a crashed or earlier
 version left (macOS and Linux; Windows not verified). The harness template (1.3.0) gains
 on-demand MCP servers: the agent enables Blender or Figma (Desktop) through the `mcp_lazy` tool only when a task needs
-them and disables them afterwards ([`docs/harness.md`](../../docs/harness.md)).
+them and disables them afterwards ([`docs/harness.md`](../../docs/harness.md)). Settings › Model providers gains
+*Local and custom*: Ollama, LM Studio, llama.cpp and vLLM shown as running or not and added in one click, and custom
+OpenAI- or Anthropic-compatible providers tested, added, edited and removed (omp's `models.yml`, edited in place);
+signing out is a compact icon beside *Signed in*.
 
 ## M1 scope: the 15 features (fixed 2026-09-25)
 

@@ -18,6 +18,8 @@
   <StreamGeometry x:Key="IconAttach">M19.5 11.5 L12.2 18.8 A4.5 4.5 0 0 1 5.8 12.4 L13.4 4.8 A3 3 0 0 1 17.6 9 L10.2 16.4 A1.5 1.5 0 0 1 8.1 14.3 L14.9 7.5</StreamGeometry>
   <StreamGeometry x:Key="IconMic">M12 3.5 A2.5 2.5 0 0 1 14.5 6 V12 A2.5 2.5 0 0 1 9.5 12 V6 A2.5 2.5 0 0 1 12 3.5 Z M6.5 11.5 A5.5 5.5 0 0 0 17.5 11.5 M12 17 V20.5</StreamGeometry>
   <StreamGeometry x:Key="IconClose">M7 7 L17 17 M17 7 L7 17</StreamGeometry>
+  <!-- Sign out: an arrow leaving through a door -->
+  <StreamGeometry x:Key="IconSignOut">M10 4.5 H6.5 A1.5 1.5 0 0 0 5 6 V18 A1.5 1.5 0 0 0 6.5 19.5 H10 M14.5 8 L18.5 12 L14.5 16 M18.5 12 H9.5</StreamGeometry>
   <StreamGeometry x:Key="IconChevronDown">M7 10 L12 15 L17 10</StreamGeometry>
   <StreamGeometry x:Key="IconChevronRight">M10 7 L15 12 L10 17</StreamGeometry>
   <StreamGeometry x:Key="IconCopy">M9.5 9 H18 A1 1 0 0 1 19 10 V19 A1 1 0 0 1 18 20 H9.5 A1 1 0 0 1 8.5 19 V10 A1 1 0 0 1 9.5 9 Z M5 15 V5.5 A1 1 0 0 1 6 4.5 H15</StreamGeometry>

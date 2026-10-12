@@ -17,6 +17,7 @@ OMP GUI is distributed under the MIT License (`LICENSE`). It is an independent c
 | Tmds.DBus.Protocol | 0.94.1 | MIT | https://github.com/tmds/Tmds.DBus |
 | CommunityToolkit.Mvvm | 8.4.2 | MIT | https://github.com/CommunityToolkit/dotnet |
 | Markdig | 1.4.0 | BSD-2-Clause | https://github.com/xoofx/markdig |
+| YamlDotNet (reads and edits omp's models.yml) | 18.1.0 | MIT | https://github.com/aaubry/YamlDotNet |
 | Iciclecreek.Avalonia.Terminal | 4.0.2 | MIT | https://github.com/tomlm/Iciclecreek.Avalonia.Terminal |
 | XTerm.NET | 2.0.2 | MIT | https://github.com/tomlm/XTerm.NET |
 | Porta.Pty | 2.2.2 | MIT | https://github.com/tomlm/Porta.Pty |

@@ -8,4 +8,7 @@
     <!-- tools/verify/webview-harness drives the agent browser bridge against a real WKWebView (scenario agent-native) -->
     <InternalsVisibleTo Include="WebViewHarness" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
 </Project>

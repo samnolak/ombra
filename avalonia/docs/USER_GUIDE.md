@@ -469,11 +469,29 @@ their own below:
   (`bash(npm test:*)`), and where (*This session*, *This project* with its folder, *All projects*), each with
   **Remove** — omp asks again from the next request. Project and always rules are kept in the GUI's settings file
   (`approvalRules`), session rules only until the app quits.
-- **Model providers** — the providers omp can use, each with **Sign in** or *Signed in*; the browser link and any
-  code appear above the message box. **Sign out…** next to *Signed in* lists the accounts omp stored for that provider
-  (the one in use marked *In use*); **Sign out** on one makes omp forget it. A provider signed in only by an API key
-  in the environment or omp's settings has nothing stored to remove: the panel says so. The list appears while omp is
-  running. API keys stay in omp's configuration.
+- **Model providers** — first, *Local and custom*: the model servers omp can use on this computer — **Ollama**,
+  **LM Studio**, **llama.cpp** and **vLLM**, at the address omp would use (its default, or `OLLAMA_BASE_URL` /
+  `OLLAMA_HOST`, `LM_STUDIO_BASE_URL`, `LLAMA_CPP_BASE_URL`) — each with *Running · N models* or *Not running*
+  (the app asks the server for its model list when the page opens). **Add** asks for the address (another port or
+  machine is fine; **Check** asks it again), then writes the server into omp's `models.yml` with no key and its models
+  discovered when omp starts; an added server shows *Added* and a remove button (it asks first). **Add custom
+  provider…** opens a form for any OpenAI- or Anthropic-compatible service: a name (omp's provider id is made from
+  it: *My Server* → `my-server`), the address (base URL, usually ending in `/v1`; for *Anthropic Messages* the address
+  before `/v1`), what it speaks (*OpenAI Chat Completions*, *OpenAI Responses*, *Anthropic Messages*), an API key
+  (optional; the key itself or the name of an environment variable that holds it) and its models — discovered from
+  the server each time omp starts, or listed by id. **Test connection** asks the server for its models with the key
+  before anything is saved and says what it found or what went wrong (a server that answers only under `/v1` is
+  pointed out); with *List them* and no ids yet, the ids it found fill the list. Your providers are listed under the
+  local servers with **Edit** and **Remove** (it asks first); one with settings the form doesn't cover (headers,
+  per-model limits…) is listed with a note to edit `models.yml` itself, and can still be removed. After each change
+  every chat's omp restarts (a replying one when its reply ends) and the new models are in the model chip. A
+  `models.yml` that doesn't parse is shown with the error and left unchanged.
+  Then the providers you sign in to, each with **Sign in** or *Signed in*; the browser link and any code appear above
+  the message box. The sign-out button beside *Signed in* (its tooltip: *Sign out of …*) lists the accounts omp stored
+  for that provider (the one in use marked *In use*); **Sign out** on one makes omp forget it. A provider signed in
+  only by an API key in the environment or omp's settings has nothing stored to remove: the panel says so. The list
+  appears while omp is running. API keys stay in omp's configuration: a key typed for a custom provider goes into
+  `models.yml` (readable only by your user when the app creates it), never into the app's own files.
   Below it, *Plan usage* shows every signed-in account whose provider reports limits (subscription windows, spend),
   as meters with the share used and the time to reset, with a refresh button. Hidden when no provider reports usage.
 - **Advanced** — *omp runtime*: which omp the app starts. **Command** empty means the omp the app
@@ -532,9 +550,11 @@ model list — signed in or not — and probes local model servers (Ollama, llam
 starts omp (every chat, restarts, omp terminal tabs), it first asks omp's own runtime which providers you added — a
 sign-in, an API key in the environment or omp's settings, or an entry in `models.yml` — and starts omp with every
 other provider in `disabledProviders`, passed with omp's `--config` option. Your `config.yml` is not changed, and
-your own `disabledProviders` stay in effect. Local model servers count as providers: add one in `models.yml` to use
-it. omp's built-ins that fetch no model list — web search engines, on-device models — stay on. Signing in to a
-provider under **Settings → Model providers** adds it, and signing out of its last account
+your own `disabledProviders` stay in effect. Local model servers count as providers: add one under **Settings → Model
+providers → Local and custom** (or in `models.yml`) to use it. A provider in `models.yml` — a custom one too — is
+added, and with strict network privacy its address is allowed. omp's built-ins that fetch no model list — web search
+engines, on-device models — stay on. Signing in to a provider under **Settings → Model providers** adds it, and
+signing out of its last account
 removes it; open chats restart omp so the change applies. If the check fails, omp is not started and the start card
 says why. With your own omp command (**Settings → Advanced → omp runtime**, not the Bun runtime) the check cannot
 run: omp starts unchanged, and **Settings → Advanced → Network privacy** says so.
@@ -751,8 +771,11 @@ runtime, the speech model, the error log and the chats' folders.
 
 The GUI writes its own settings file (atomically, keeping a `.bak` of a version you edited by hand), the folders
 above, and what you save (update packages, diagnostics). It reads omp's session folder to list sessions. Of omp's
-own files it changes only the MCP config (editing a connector, or the variables and headers of a new one) and its
-list of pinned sessions (`session-pins.json`, when you pin or unpin from the sidebar, the way omp's `/pin` does);
+own files it changes only the MCP config (editing a connector, or the variables and headers of a new one), its
+list of pinned sessions (`session-pins.json`, when you pin or unpin from the sidebar, the way omp's `/pin` does) and
+`models.yml` in omp's agent folder (`~/.omp/agent`, or the profile's own; adding, editing or removing a local or
+custom provider under **Settings → Model providers**: only that provider's lines change, the rest of the file and
+its comments stay, and the file is replaced atomically);
 everything else goes through omp.
 
 ## Uninstall

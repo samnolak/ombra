@@ -325,11 +325,20 @@ public sealed class SettingsUiTests
         await vm.OpenSettingsAtAsync("providers");
         await Until(() => vm.LoginProviders.Count == 1 && vm.LoginProviders[0].IsAuthenticated, "signed-in provider listed");
         var p = vm.LoginProviders[0];
-        await vm.AskSignOutCommand.ExecuteAsync(p);
+        // The trigger is a compact icon button named for screen readers, beside the "Signed in" chip
+        await Until(() => w.GetVisualDescendants().OfType<Button>().Any(b => AutomationProperties.GetName(b) == "Sign out of Fake Provider" && b.IsEffectivelyVisible), "sign-out icon shown");
+        var trigger = w.GetVisualDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Sign out of Fake Provider");
+        Assert.IsType<OmpGui.App.Controls.Icon>(trigger.Content);
+        Assert.Equal("Sign out of Fake Provider…", ToolTip.GetTip(trigger));
+        trigger.Command!.Execute(trigger.CommandParameter);
+        await Until(() => p.IsSignOutOpen, "sign-out panel open");
         Assert.True(p.IsSignOutOpen);
         var account = Assert.Single(p.Accounts);
         Assert.Equal(("me@example.com", "In use · oauth #1"), (account.Label, account.Detail));
         Shot(w, "ui-providers-sign-out");
+        vm.SettingsTheme = "dark";
+        Shot(w, "ui-providers-sign-out-dark");
+        vm.SettingsTheme = "system";
 
         await vm.SignOutCommand.ExecuteAsync(account);
         Assert.False(Assert.Single(vm.LoginProviders).IsAuthenticated);

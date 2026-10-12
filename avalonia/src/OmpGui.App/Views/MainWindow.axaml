@@ -1787,6 +1787,9 @@
               </StackPanel>
             </Border>
 
+            <!-- Local and custom providers (Views/Settings): first on the Model providers page -->
+            <settings:CustomProvidersSettings x:Name="CustomProvidersPage" IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=providers}" />
+
             <!-- Sign in -->
             <Border Classes="section-card" IsVisible="{Binding SettingsCategory, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=providers}">
               <StackPanel Spacing="10">
@@ -1801,18 +1804,22 @@
                         <StackPanel Margin="0,3,12,3" Spacing="8">
                           <Grid ColumnDefinitions="*,Auto">
                             <TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" FontSize="14" />
-                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsAuthenticated}">
+                            <!-- Signed in: the chip, then a compact sign-out icon whose right edge lines up with the Sign in buttons; it opens the confirmation below -->
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" IsVisible="{Binding IsAuthenticated}" VerticalAlignment="Center">
                               <Border Classes="status done" VerticalAlignment="Center">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                   <Ellipse />
                                   <TextBlock Text="Signed in" />
                                 </StackPanel>
                               </Border>
-                              <Button Classes="flat" Content="Sign out…" IsEnabled="{Binding !IsBusy}"
+                              <Button Classes="icon" Classes.on="{Binding IsSignOutOpen}" IsEnabled="{Binding !IsBusy}" VerticalAlignment="Center"
                                       Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).AskSignOutCommand}" CommandParameter="{Binding}"
-                                      AutomationProperties.Name="{Binding Name, StringFormat='Sign out of {0}'}" />
+                                      ToolTip.Tip="{Binding Name, StringFormat='Sign out of {0}…'}"
+                                      AutomationProperties.Name="{Binding Name, StringFormat='Sign out of {0}'}">
+                                <ctl:Icon Data="{StaticResource IconSignOut}" Size="16" />
+                              </Button>
                             </StackPanel>
-                            <Button Grid.Column="1" Content="Sign in" IsVisible="{Binding !IsAuthenticated}" IsEnabled="{Binding CanSignIn}"
+                            <Button Grid.Column="1" Content="Sign in" IsVisible="{Binding !IsAuthenticated}" IsEnabled="{Binding CanSignIn}" VerticalAlignment="Center"
                                     Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).SignInCommand}" CommandParameter="{Binding}" />
                           </Grid>
                           <Border Classes="conn-inset" IsVisible="{Binding IsSignOutOpen}">
