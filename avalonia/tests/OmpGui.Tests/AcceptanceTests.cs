@@ -107,7 +107,7 @@ public sealed class AcceptanceTests
         await vm.CommitRenameCommand.ExecuteAsync(null);
         await Until(() => vm.SessionTitle == "Acceptance session", "renamed");
         var first = session.Snapshot().SessionFile;
-        vm.NewSessionCommand.Execute(null);
+        vm.NewChatCommand.Execute(null);
         await Until(() => vm.Phase == SessionPhase.Ready && session.Snapshot().SessionFile != first && !vm.Rows.OfType<UserRowViewModel>().Any(), "new session");
         Type(w, "hello from the second session");
         await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.OfType<AssistantRowViewModel>().Any(), "second session reply");

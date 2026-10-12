@@ -163,6 +163,7 @@ public sealed partial class ConversationState
     {
         _rows.Clear();
         _toolsByCallId.Clear();
+        _newFileCalls.Clear();
         _streamingAssistant = null;
         _endedBeforeMessageEnd = null;
         _queued.Clear();
@@ -471,9 +472,12 @@ public sealed partial class ConversationState
                                 var id = Str(p, "id") ?? "";
                                 var hasArgs = p.TryGetProperty("arguments", out var a);
                                 var toolName = Str(p, "name") ?? "tool";
+                                var written = hasArgs ? WrittenContent(toolName, a) : null;
                                 var row = Add(new ToolItem(0, id, toolName,
-                                    Truncate(hasArgs ? Compact(a) : "", MaxArgsChars), ToolStatus.Interrupted, null, hasArgs ? ToolSummary(toolName, a) : "",
-                                    hasArgs ? WrittenContent(toolName, a) : null));
+                                    Truncate(hasArgs ? Compact(a) : "", MaxArgsChars), ToolStatus.Interrupted, null, hasArgs ? ToolSummary(toolName, a) : "", written)
+                                {
+                                    Changes = hasArgs ? WrittenChange(id, toolName, a, written, live: false) : null,
+                                });
                                 _toolsByCallId[id] = row;
                             }
                     break;
@@ -485,8 +489,9 @@ public sealed partial class ConversationState
                     if (Str(m, "toolCallId") is { } callId && _toolsByCallId.TryGetValue(callId, out var tr) && tr.Item is ToolItem ti)
                     {
                         var err = m.TryGetProperty("isError", out var ie) && ie.ValueKind == JsonValueKind.True;
+                        var changes = ChangesAtEnd(ti, m, err);
                         Set(tr, ti with { Status = err ? ToolStatus.Failed : ToolStatus.Succeeded, Output = HeadTail(ContentText(m, "text"), MaxToolOutputChars), Diff = DiffOf(m) ?? ti.Diff,
-                            ResultNote = err ? null : ResultNote(ti.Name, m) });
+                            ResultNote = err ? null : ResultNote(ti.Name, m), Changes = changes, Summary = SummaryOf(ti.Summary, changes) });
                     }
                     break;
             }
@@ -618,7 +623,7 @@ public sealed partial class ConversationState
         var since = _rows.FindLastIndex(r => r.Item is UserItem);
         var tools = _rows.Skip(since + 1).Select(r => r.Item).OfType<ToolItem>().ToList();
         if (tools.Count == 0 && took < TimeSpan.FromSeconds(2)) return; // a slash command or an instant reply: nothing to sum up
-        var files = tools.Where(t => t.Diff is { Length: > 0 }).Select(t => t.Summary).Distinct().Count();
+        var files = FilesChanged(tools);
         Add(new TurnEndItem(0, took, interrupted, tools.Count, files));
     }
 
@@ -630,8 +635,9 @@ public sealed partial class ConversationState
         var hasArgs = j.TryGetProperty("args", out var a);
         var args = hasArgs ? Compact(a) : "";
         var name = Str(j, "toolName") ?? "tool";
+        var written = hasArgs ? WrittenContent(name, a) : null;
         _toolsByCallId[id] = Add(new ToolItem(0, id, name, Truncate(args, MaxArgsChars), ToolStatus.Running, null, hasArgs ? ToolSummary(name, a) : "",
-            hasArgs ? WrittenContent(name, a) : null, now));
+            written, now) { Changes = hasArgs ? WrittenChange(id, name, a, written, live: true) : null });
     }
 
     /// <summary>
@@ -640,7 +646,7 @@ public sealed partial class ConversationState
     /// </summary>
     internal static string? WrittenContent(string tool, JsonElement args)
     {
-        if (tool is not ("write" or "create" or "write_file") || args.ValueKind != JsonValueKind.Object
+        if (!IsWriteTool(tool) || args.ValueKind != JsonValueKind.Object
             || Str(args, "content") is not { } content) return null;
         var lines = content.Replace("\r\n", "\n").Split('\n');
         if (lines.Length > 1 && lines[^1].Length == 0) lines = lines[..^1];
@@ -670,6 +676,9 @@ public sealed partial class ConversationState
             return what is null ? op : $"{op} · {Truncate(what, 200)}";
         }
         if (args.TryGetProperty("ops", out var ops) && ops.ValueKind == JsonValueKind.Array) return Count(ops.GetArrayLength(), "change");
+        // An edit's input: omp's hashline sections or an apply_patch envelope name the files
+        if (Str(args, "input") is { Length: > 0 } input && EditedFiles(input) is { Count: > 0 } files)
+            return files.Count == 1 ? Truncate(files[0], 200) : Count(files.Count, "file");
         // Otherwise the first short words it was given (never raw JSON on the line; the tooltip has the arguments)
         var words = args.EnumerateObject().Select(p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() : null)
             .Where(v => v is { Length: > 0 and <= 80 } && !v.Contains('\n')).Take(2).ToArray();
@@ -727,8 +736,10 @@ public sealed partial class ConversationState
         var hasResult = j.TryGetProperty("result", out var r);
         if (t.Name == "todo" && hasResult && !err) RecordPlan(r, LastFrameAt); // ConversationState.Plan.cs
         var output = hasResult ? HeadTail(ResultText(r), MaxToolOutputChars) : t.Output;
+        var changes = hasResult ? ChangesAtEnd(t, r, err) : err ? null : t.Changes;
         Set(row, t with { Status = err ? ToolStatus.Failed : ToolStatus.Succeeded, Output = output, Diff = hasResult ? DiffOf(r) ?? t.Diff : t.Diff,
-            Took = t.StartedAt is { } s ? DateTimeOffset.UtcNow - s : null, ResultNote = hasResult && !err ? ResultNote(t.Name, r) : null });
+            Took = t.StartedAt is { } s ? DateTimeOffset.UtcNow - s : null, ResultNote = hasResult && !err ? ResultNote(t.Name, r) : null,
+            Changes = changes, Summary = SummaryOf(t.Summary, changes) });
     }
 
     private void OnExtensionUi(JsonElement j, DateTimeOffset now)

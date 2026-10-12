@@ -57,7 +57,7 @@ public static class KeyboardShortcuts
         [
             new("General",
             [
-                S("New session", Mod.Command, "N"),
+                S("New chat", Mod.Command, "N"),
                 S("Show or hide the sidebar", Mod.Command, "B"),
                 S("Next session", Mod.Control, "Tab"),
                 S("Previous session", Mod.Control | Mod.Shift, "Tab"),

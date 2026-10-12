@@ -815,6 +815,7 @@ public sealed partial class SessionController : IAsyncDisposable
             lock (_lock)
             {
                 var wasActive = _state.Phase is SessionPhase.Running or SessionPhase.Aborting;
+                NoteNewFile(frame); // SessionController.Files.cs: a write that creates its file, seen before omp writes it
                 try { _state.Apply(frame, readAt); }
                 catch (Exception e) when (e is InvalidOperationException or FormatException or KeyNotFoundException or IndexOutOfRangeException or ArgumentException or OverflowException)
                 {

@@ -282,21 +282,18 @@ public sealed class ChatLayoutTests
     }
 
     [Fact]
-    public void A_running_tool_shows_its_newest_output_lines_and_folds_them_when_done()
+    public void A_running_command_shows_its_newest_output_lines_and_its_first_ones_when_done()
     {
         var row = new ToolRowViewModel(new ToolItem(1, "t", "bash", "{}", ToolStatus.Running, null, "$ make"));
-        Assert.False(row.ShowTail);
+        Assert.Equal((true, false), (row.ShowConsole, row.ShowConsoleOutput)); // the console, with the command alone
         row.Update(new ToolItem(1, "t", "bash", "{}", ToolStatus.Running, "a\n\nb\nc\nd\ne\n", "$ make"));
-        Assert.True(row.ShowTail);
-        Assert.Equal("c\nd\ne", row.Tail);
-        Assert.Equal(row.Tail, row.Result);
+        Assert.Equal("c\nd\ne", row.ConsoleOutput);
+        Assert.False(row.ShowConsoleMore);
         row.IsExpanded = true;
-        Assert.False(row.ShowTail); // the full output is open instead
-        Assert.False(row.ShowResult);
+        Assert.Equal("a\n\nb\nc\nd\ne", row.ConsoleOutput); // open: all of it
         row.IsExpanded = false;
-        row.Update(new ToolItem(1, "t", "bash", "{}", ToolStatus.Succeeded, "a\nb\n", "$ make"));
-        Assert.False(row.ShowTail);
-        Assert.Equal("a\nb", row.Result); // done: its first lines
+        row.Update(new ToolItem(1, "t", "bash", "{}", ToolStatus.Succeeded, "a\nb\nc\nd\n", "$ make"));
+        Assert.Equal(("a\nb\nc", true), (row.ConsoleOutput, row.ShowConsoleMore)); // done: its first lines
     }
 
     [Fact]

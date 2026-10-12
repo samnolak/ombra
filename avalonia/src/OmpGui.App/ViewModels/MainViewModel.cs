@@ -46,6 +46,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _approvalActions = new ApprovalActions(AllowWithRuleAsync, DenyWithFeedbackAsync);
         _host = new SessionHost(session, MayClose) { MaxProcesses = LoadMaxOpenSessions() }; // MainViewModel.OpenSessions.cs
         _host.Closed += OnHostClosed;
+        _host.Stopped += OnChatStopped; // MainViewModel.Chats.cs
         _open = Register(session);
         Rows.CollectionChanged += (_, _) => NotifyRecoverLayout();
     }
@@ -356,6 +357,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         var items = s.Items;
         var applied = open.AppliedItems;
         int added = 0, updated = 0;
+        // The first row whose change may change the exploration groups (ExplorationGroups.cs)
+        var regroupFrom = int.MaxValue;
         for (var i = 0; i < items.Count; i++)
         {
             var item = items[i];
@@ -366,6 +369,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 if (ReferenceEquals(row.Model, item)) continue;
                 row.Update(item);
                 updated++;
+                if (ExplorationGroups.Matters(row)) regroupFrom = Math.Min(regroupFrom, ExplorationGroups.IndexFromEnd(Rows, row));
             }
             else
             {
@@ -373,14 +377,17 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 open.RowsByKey[item.Key] = row;
                 Rows.Add(row);
                 added++;
+                if (ExplorationGroups.Matters(row)) regroupFrom = Math.Min(regroupFrom, Rows.Count - 1);
             }
         }
+        if (regroupFrom != int.MaxValue) ExplorationGroups.Regroup(Rows, regroupFrom);
         open.AppliedItems = items;
         var changed = newConversation || added + updated > 0;
         var debugAdded = IsDebugVisible && AppendDebugLines(s.DebugTail);
         perf?.Lap("rows");
 
         ApplyExtensionUi(s);
+        MarkAwaitingApproval();
         ApplyQueue(s);
         ApplyCommandsAndProgress(s);
         ApplyPanes(s); // MainViewModel.Panes.cs: the plan and the background tasks
@@ -453,7 +460,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>
     /// The reply that ends a turn (the last row before the next user message, or of a finished run) gets the actions;
-    /// a failed reply that ends the conversation offers "Retry".
+    /// a failed reply that ends the conversation offers "Retry". A "Worked for…" line not yet told which files its turn
+    /// changed takes them from the turn's tool rows (once: the turn is over).
     /// </summary>
     private void MarkTurnEnds()
     {
@@ -473,15 +481,25 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         var turnOver = !IsRunning;
         // The "Worked for…" line after the reply that ends a turn carries that reply's copy action
         TurnEndRowViewModel? endLine = null;
+        // A "Worked for…" line taking its turn's files, and the turn's tool rows seen so far (last first)
+        TurnEndRowViewModel? listing = null;
+        List<ToolRowViewModel>? turnTools = null;
         for (var i = Rows.Count - 1; i >= 0; i--)
         {
             switch (Rows[i])
             {
-                case UserRowViewModel: turnOver = true; Release(); break;
-                case ToolRowViewModel: turnOver = false; Release(); break; // the turn ends in tool calls: no actions mid-turn
+                case UserRowViewModel: turnOver = true; Release(); ListFiles(); break;
+                case ToolRowViewModel t: // the turn ends in tool calls: no actions mid-turn
+                    turnOver = false;
+                    Release();
+                    turnTools?.Add(t);
+                    break;
+                case ExplorationGroupRowViewModel: turnOver = false; Release(); break;
                 case TurnEndRowViewModel te:
                     Release();
+                    ListFiles();
                     endLine = te;
+                    if (!te.FilesKnown) (listing, turnTools) = (te, []);
                     break;
                 case AssistantRowViewModel a:
                     var end = turnOver && a.HasText;
@@ -496,6 +514,15 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             }
         }
         Release();
+        ListFiles();
+
+        void ListFiles()
+        {
+            if (listing is null) return;
+            turnTools!.Reverse();
+            listing.SetFiles(turnTools);
+            (listing, turnTools) = (null, null);
+        }
 
         // A "Worked for…" line with no reply of its own (the turn ended in tool calls) has nothing to copy
         void Release()
@@ -503,6 +530,23 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             if (endLine?.Reply is not null) endLine.Reply = null;
             endLine = null;
         }
+    }
+
+    /// <summary>The running call an approval card asks about: the newest running tool row while omp asks to allow a
+    /// call. It reads "Waiting for approval" rather than "Running", as the activity line and the card say.</summary>
+    private ToolRowViewModel? _awaitingApproval;
+
+    private void MarkAwaitingApproval()
+    {
+        ToolRowViewModel? row = null;
+        if (CurrentDialog is { IsApproval: true })
+            for (var i = Rows.Count - 1; i >= 0 && row is null; i--)
+                if (Rows[i] is ToolRowViewModel { IsRunning: true } t) row = t;
+                else if (Rows[i] is UserRowViewModel) break;
+        if (ReferenceEquals(row, _awaitingApproval)) return;
+        if (_awaitingApproval is not null) _awaitingApproval.AwaitsApproval = false;
+        _awaitingApproval = row;
+        if (row is not null) row.AwaitsApproval = true;
     }
 
     private void ApplyExtensionUi(SessionSnapshot s)

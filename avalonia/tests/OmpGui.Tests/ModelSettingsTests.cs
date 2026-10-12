@@ -126,17 +126,25 @@ public sealed class ModelSettingsTests
     }
 
     [Fact]
-    public void Launch_request_sets_folder_resume_and_approval_mode()
+    public void Launch_request_sets_folder_resume_approval_mode_and_thinking()
     {
         var o = new OmpRuntimeOptions { Command = "omp", Profile = "harness", ApprovalMode = "write", WorkingDirectory = "/configured" };
         var plain = o.ToLaunchSpec();
-        Assert.Equal(["--mode", "rpc-ui", "--approval-mode", "write"], plain.Arguments);
+        // A new session starts at medium, not omp's own default (high)
+        Assert.Equal(["--mode", "rpc-ui", "--approval-mode", "write", "--thinking", "medium"], plain.Arguments);
         Assert.Equal("/configured", plain.WorkingDirectory);
         Assert.Equal("harness", plain.Environment!["OMP_PROFILE"]);
 
+        // A resumed session keeps the level saved with it
         var spec = o.ToLaunchSpec(new LaunchRequest("/other", "/s/x.jsonl", "always-ask"));
         Assert.Equal(["--mode", "rpc-ui", "--approval-mode", "always-ask", "--resume", "/s/x.jsonl"], spec.Arguments);
         Assert.Equal("/other", spec.WorkingDirectory);
+
+        // The settings file's level when omp knows it; the user's own --thinking wins
+        Assert.Equal("high", (o with { DefaultThinkingLevel = "high" }).ToLaunchSpec().Arguments[^1]);
+        Assert.Equal("medium", (o with { DefaultThinkingLevel = "turbo" }).ToLaunchSpec().Arguments[^1]);
+        Assert.Equal(["--mode", "rpc-ui", "--approval-mode", "write", "--thinking", "low"],
+            (o with { ExtraArgs = ["--thinking", "low"] }).ToLaunchSpec().Arguments);
     }
 
     [Fact]

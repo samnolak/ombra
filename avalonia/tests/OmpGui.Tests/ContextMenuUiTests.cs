@@ -242,7 +242,7 @@ public sealed class ContextMenuUiTests
         vm.CopyTextRequested += copied.Add;
         await SendAsync(w, vm, "first topic");
         await Until(() => vm.Sessions.Any(x => x.Title == "first topic"), "first listed");
-        await vm.NewSessionCommand.ExecuteAsync(null);
+        await vm.NewChatCommand.ExecuteAsync(null);
         await Until(() => vm.Rows.Count == 0 && vm.Phase == SessionPhase.Ready, "new session");
         await SendAsync(w, vm, "second topic");
         await Until(() => vm.Sessions.Count == 2 && vm.Sessions.Single(x => x.Title == "second topic").IsCurrent, "both listed");

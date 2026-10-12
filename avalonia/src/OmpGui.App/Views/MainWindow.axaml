@@ -123,12 +123,13 @@
           </Button>
         </Grid>
         <StackPanel DockPanel.Dock="Top" Margin="8,0,8,4" Spacing="2">
-          <Button AutomationProperties.Name="New session" x:Name="NewSessionButton" Classes="sidebar-action" Command="{Binding NewSessionCommand}"
-                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" ToolTip.Tip="Start a new session in this project">
+          <!-- A new chat outside any project (ChatGPT, Claude, Codex); a project's "+" starts a session in that project -->
+          <Button AutomationProperties.Name="New chat" x:Name="NewChatButton" Classes="sidebar-action" Command="{Binding NewChatCommand}"
+                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" ToolTip.Tip="Start a new chat outside any project">
             <Grid ColumnDefinitions="Auto,*,Auto">
               <ctl:Icon Data="{StaticResource IconCompose}" Margin="0,0,10,0" />
-              <TextBlock Grid.Column="1" Text="New session" VerticalAlignment="Center" />
-              <TextBlock Grid.Column="2" Classes="sidebar-shortcut" Text="{x:Static vm:MainViewModel.NewSessionShortcut}" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="1" Text="New chat" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="2" Classes="sidebar-shortcut" Text="{x:Static vm:MainViewModel.NewChatShortcut}" VerticalAlignment="Center" />
             </Grid>
           </Button>
           <TextBox x:Name="SessionFilterBox" Classes="search sidebar-search" Text="{Binding SessionFilter}" PlaceholderText="Search sessions"
@@ -157,7 +158,7 @@
             </Grid>
           </Button>
         </StackPanel>
-        <!-- Pinned sessions, then sessions grouped by project -->
+        <!-- Pinned sessions, then the chats outside any project, then sessions grouped by project -->
         <Panel>
         <ListBox x:Name="SessionList" Classes="sessions" ItemsSource="{Binding SessionGroups}"
                  AutomationProperties.Name="Sessions" ScrollViewer.HorizontalScrollBarVisibility="Disabled" Margin="0,6,0,0">
@@ -207,6 +208,30 @@
                   </Button>
                   <Button Grid.Column="3" Classes="icon group-action" Width="26" Height="26" Margin="0,0,2,0"
                           Command="{Binding NewSessionCommand}" CommandParameter="{Binding}"
+                          ToolTip.Tip="{Binding NewSessionTooltip}" AutomationProperties.Name="{Binding NewSessionTooltip}">
+                    <ctl:Icon Data="{StaticResource IconPlus}" Size="16" />
+                  </Button>
+                </Grid>
+                <!-- Chats: a heading with "new chat" on hover or focus, and in its right-click menu (no path to copy, nothing
+                     to remove: each chat's folder is the app's own) -->
+                <Grid Classes="group-header" ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding IsChatsGroup}" Background="Transparent">
+                  <Grid.ContextFlyout>
+                    <Flyout Placement="Pointer" ctl:ChoiceMenu.CloseOnChoice="True">
+                      <StackPanel MinWidth="220" Spacing="2">
+                        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                Command="{Binding NewSessionCommand}" AutomationProperties.Name="New chat">
+                          <Grid ColumnDefinitions="Auto,*">
+                            <ctl:Icon Data="{StaticResource IconCompose}" Size="16" Margin="0,0,10,0" />
+                            <TextBlock Grid.Column="1" Text="New chat" VerticalAlignment="Center" />
+                          </Grid>
+                        </Button>
+                      </StackPanel>
+                    </Flyout>
+                  </Grid.ContextFlyout>
+                  <ctl:Icon Classes="group-icon" Data="{StaticResource IconComment}" Size="14" Margin="10,0,6,0" VerticalAlignment="Center" />
+                  <TextBlock Grid.Column="1" Classes="group-label" Text="{Binding Name}" VerticalAlignment="Center" />
+                  <Button Grid.Column="2" Classes="icon group-action" Width="26" Height="26" Margin="0,0,2,0"
+                          Command="{Binding NewSessionCommand}"
                           ToolTip.Tip="{Binding NewSessionTooltip}" AutomationProperties.Name="{Binding NewSessionTooltip}">
                     <ctl:Icon Data="{StaticResource IconPlus}" Size="16" />
                   </Button>
@@ -305,8 +330,7 @@
           <TextBox x:Name="RenameBox" DockPanel.Dock="Left" Classes="sm" Text="{Binding RenameText}" IsVisible="{Binding IsRenaming}" MinWidth="240"
                    MaxWidth="420" AutomationProperties.Name="Session name" />
           <!-- The project: a menu (browse files, file manager, editor, terminal, copy path, another project) -->
-          <panes:ProjectMenuButton x:Name="ProjectMenu" Margin="2,0,0,0" VerticalAlignment="Center"
-                                   IsVisible="{Binding ProjectName, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          <panes:ProjectMenuButton x:Name="ProjectMenu" Margin="2,0,0,0" VerticalAlignment="Center" IsVisible="{Binding HasProjectChip}" />
           <!-- The project's branch (and worktree), last so it trims first: Controls/BranchChip -->
           <ctl:BranchChip x:Name="HeaderBranch" Margin="4,0,0,0" />
         </DockPanel>
@@ -443,7 +467,9 @@
           </DataTemplate>
           <DataTemplate DataType="vm:AssistantRowViewModel">
             <!-- Nothing until there is something to read: a reply that only calls tools takes no room. No "…" line
-                 while it streams (it came and went with every message): the activity line above the composer says it. -->
+                 while it streams (it came and went with every message): the activity line above the composer says it.
+                 Between the steps of an exploration group (only thinking), it folds with them. -->
+            <Border Classes="row-step" Classes.in-group="{Binding InGroup}" IsVisible="{Binding !IsFolded}">
             <StackPanel Classes="assistant" Margin="0,6,0,6" Spacing="6" IsVisible="{Binding HasContent}" Background="Transparent"
                         ContextFlyout="{StaticResource ReplyMenu}">
               <!-- "Thinking… 4s" while it thinks, then "Thought for 4s"; the thoughts stay folded until asked for -->
@@ -477,60 +503,154 @@
                 </Button>
               </StackPanel>
             </StackPanel>
+            </Border>
+          </DataTemplate>
+          <DataTemplate DataType="vm:ExplorationGroupRowViewModel">
+            <!-- Codex's "Explored": a run of reads and searches as one line ("Explored 3 files, 2 searches", or the step
+                 that runs now); open, its steps follow, indented under it. Its chevron always shows: the line hides rows. -->
+            <StackPanel Classes="tool" Margin="-8,2,-8,2">
+              <ToggleButton Classes="tool-row group" IsChecked="{Binding IsExpanded}" HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch" AutomationProperties.Name="{Binding Summary, StringFormat='Show the steps: {0}'}">
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+                  <Panel Classes="tool-status">
+                    <ctl:Icon Classes="tool-mark running" Data="{StaticResource IconSpinner}" Size="14" IsVisible="{Binding IsRunning}" />
+                    <ctl:Icon Classes="tool-mark done" Data="{StaticResource IconCheck}" Size="14" IsVisible="{Binding IsDone}" />
+                  </Panel>
+                  <TextBlock Grid.Column="1" Classes="tool-name" Text="{Binding Verb}" />
+                  <TextBlock Grid.Column="2" Classes="tool-summary group-summary" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
+                  <ctl:Icon Grid.Column="3" Classes="chevron" Data="{StaticResource IconChevronRight}" Size="14" />
+                </Grid>
+              </ToggleButton>
+            </StackPanel>
           </DataTemplate>
           <DataTemplate DataType="vm:ToolRowViewModel">
-            <!-- Claude Code's tool call: ● Name args on one line; under it what it gave (a summary, or its first lines and
-                 "… +N lines"); opened, the whole output or the change. Pulled out by the line's inner padding so the dot
-                 sits on the text edge of the column. -->
+            <!-- Codex's tool line: a status mark · what it did, as a verb in the tense of its state ("Running" / "Ran",
+                 "Read", "Created") · what it acts on, in mono · why it failed ("exit 127") · +/− · what it found · how long
+                 · a chevron when there is more. Under it what it gave: a command's console (the prompt, the command, its
+                 output), the change, or the first lines of anything else; opened, all of it. Pulled out by the line's
+                 inner padding so the mark sits on the text edge of the column. A step of a folded exploration group takes
+                 no room; open, the group's steps are indented under its line. -->
+            <Border Classes="row-step" Classes.in-group="{Binding InGroup}" IsVisible="{Binding !IsFolded}">
             <StackPanel Classes="tool" Margin="-8,2,-8,2">
               <ToggleButton Classes="tool-row" IsChecked="{Binding IsExpanded}" HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Stretch" AutomationProperties.Name="Show tool output" ToolTip.Tip="{Binding Title}">
-                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto">
-                  <Ellipse Classes="tool-dot" Classes.running="{Binding IsRunning}" Classes.done="{Binding IsDone}" Classes.failed="{Binding IsFailed}" />
-                  <TextBlock Grid.Column="1" Classes="tool-name" Text="{Binding DisplayName}" Margin="8,0,0,0" />
-                  <!-- 3 px down (1.5 once centred): the 13 px mono's baseline on the 14 px name's -->
-                  <TextBlock Grid.Column="2" Classes="mono tool-summary" Text="{Binding ArgText}" TextTrimming="CharacterEllipsis" Margin="8,3,8,0" IsVisible="{Binding !HasFile}" />
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto,Auto">
+                  <!-- Its state: a pulsing arc while it runs, a quiet check when done, a red cross when it failed, a dashed
+                       circle when it was stopped -->
+                  <Panel Classes="tool-status">
+                    <ctl:Icon Classes="tool-mark running" Classes.waiting="{Binding AwaitsApproval}" Data="{StaticResource IconSpinner}" Size="14" IsVisible="{Binding IsRunning}" />
+                    <ctl:Icon Classes="tool-mark done" Data="{StaticResource IconCheck}" Size="14" IsVisible="{Binding IsDone}" />
+                    <ctl:Icon Classes="tool-mark failed" Data="{StaticResource IconClose}" Size="14" IsVisible="{Binding IsFailed}" />
+                    <ctl:Icon Classes="tool-mark interrupted" Data="{StaticResource IconDashCircle}" Size="14" IsVisible="{Binding IsInterrupted}" />
+                  </Panel>
+                  <TextBlock Grid.Column="1" Classes="tool-name" Text="{Binding Verb}" />
+                  <!-- 3 px down (1.5 once centred): the 13 px mono's baseline on the 14 px verb's -->
+                  <TextBlock Grid.Column="2" Classes="mono tool-summary" Text="{Binding ArgText}" TextTrimming="CharacterEllipsis" Margin="8,3,8,0">
+                    <TextBlock.IsVisible>
+                      <MultiBinding Converter="{x:Static BoolConverters.And}">
+                        <Binding Path="ShowArg" />
+                        <Binding Path="!HasFile" />
+                      </MultiBinding>
+                    </TextBlock.IsVisible>
+                  </TextBlock>
                   <!-- A file the tool reads or changes: its path opens it in the Files pane -->
                   <Button Grid.Column="2" Classes="tool-path" Margin="8,3,8,0" HorizontalAlignment="Left" IsVisible="{Binding HasFile}"
                           Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).Files.OpenToolFileCommand}" CommandParameter="{Binding}"
-                          ToolTip.Tip="Open in the Files pane" AutomationProperties.Name="{Binding Summary, StringFormat='Open {0}'}">
+                          ToolTip.Tip="Open in the Files pane" AutomationProperties.Name="{Binding FilePath, StringFormat='Open {0}'}">
                     <TextBlock Classes="mono tool-summary" Text="{Binding ArgText}" TextTrimming="CharacterEllipsis" />
                   </Button>
+                  <!-- Why it failed, at a glance: "exit 127", "timed out"; right after the verb when the console under the
+                       line holds the command, else at the line's end -->
+                  <Border Grid.Column="2" Classes="tool-chip failed" IsVisible="{Binding ShowFailureAfterVerb}" Margin="8,0,8,0" HorizontalAlignment="Left">
+                    <TextBlock Text="{Binding FailureText}" />
+                  </Border>
+                  <Border Grid.Column="3" Classes="tool-chip failed" IsVisible="{Binding ShowFailureAtEnd}" Margin="0,0,8,0">
+                    <TextBlock Text="{Binding FailureText}" />
+                  </Border>
                   <!-- What a file change adds and removes, like Claude Code's +12 −1 -->
-                  <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" IsVisible="{Binding ShowRowStats}" Margin="0,0,8,0" VerticalAlignment="Center">
+                  <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6" IsVisible="{Binding ShowRowStats}" Margin="0,0,8,0" VerticalAlignment="Center">
                     <TextBlock Classes="mono diff-added" Text="{Binding AddedText}" VerticalAlignment="Center" />
                     <TextBlock Classes="mono diff-removed" Text="{Binding RemovedText}" VerticalAlignment="Center" />
                   </StackPanel>
-                  <!-- 3 px down (1.5 once centred): the 12 px time's baseline on the row's -->
-                  <TextBlock Grid.Column="4" Classes="tool-took" Text="{Binding TookText}" Margin="0,3,6,0"
+                  <!-- What a read or search found ("120 lines", "3 files"), "Interrupted". 2 px down (1 once centred): the
+                       12 px text's baseline on the 14 px verb's -->
+                  <TextBlock Grid.Column="5" Classes="tool-took" Text="{Binding Meta}" Margin="0,2,8,0" IsVisible="{Binding HasMeta}" />
+                  <TextBlock Grid.Column="6" Classes="tool-took" Text="{Binding TookText}" Margin="0,2,6,0"
                              IsVisible="{Binding TookText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                  <ctl:Icon Grid.Column="5" Classes="chevron" Data="{StaticResource IconChevronRight}" Size="14" IsVisible="{Binding CanExpand}" />
+                  <ctl:Icon Grid.Column="7" Classes="chevron" Data="{StaticResource IconChevronRight}" Size="14" IsVisible="{Binding CanExpand}" />
                 </Grid>
               </ToggleButton>
-              <!-- What it gave: "Read 120 lines", "Found 3 files", the first output lines; a running call's newest lines -->
+              <!-- A command's console: "$ command" (a few lines, then an ellipsis), then its output: the newest lines while
+                   it runs, the first ones and "… +N lines" once done, all of it open. Its rule turns red when it failed. -->
+              <Border Classes="console" Classes.failed="{Binding IsFailed}" IsVisible="{Binding ShowConsole}">
+                <StackPanel>
+                  <Grid ColumnDefinitions="Auto,*">
+                    <TextBlock Classes="mono console-prompt" Text="$" />
+                    <SelectableTextBlock Grid.Column="1" Classes="mono console-command" Text="{Binding Command}" MaxLines="{Binding CommandMaxLines}" />
+                  </Grid>
+                  <SelectableTextBlock Classes="mono console-output" Classes.open="{Binding IsExpanded}" Text="{Binding ConsoleOutput}" IsVisible="{Binding ShowConsoleOutput}" />
+                  <Button Classes="tool-more" Content="{Binding MoreText}" Command="{Binding ShowAllCommand}" IsVisible="{Binding ShowConsoleMore}"
+                          ToolTip.Tip="Show the whole output" AutomationProperties.Name="Show the whole output" />
+                </StackPanel>
+              </Border>
+              <!-- What anything else gave: its first output lines, or the error; a running call's newest lines -->
               <StackPanel Classes="tool-result" IsVisible="{Binding ShowResult}">
                 <TextBlock Classes="tool-result" Classes.mono="{Binding ResultIsOutput}" Classes.failed="{Binding IsFailed}" Text="{Binding Result}"
                            TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
                 <Button Classes="tool-more" Content="{Binding MoreText}" Command="{Binding ShowAllCommand}" IsVisible="{Binding ShowMore}"
                         ToolTip.Tip="Show the whole output" AutomationProperties.Name="Show the whole output" />
               </StackPanel>
-              <!-- The change itself, open as it happens -->
-              <ctl:DiffView Classes="tool-diff" Diff="{Binding Diff}" FilePath="{Binding FilePath}" IsVisible="{Binding ShowDiff}"
-                            OpenFileCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).Files.OpenLinkCommand}" />
+              <!-- The change itself, open as it happens: one card per file the call changed -->
+              <ctl:DiffStack Changes="{Binding DiffCards}" IsVisible="{Binding ShowDiff}"
+                             OpenFileCommand="{Binding $parent[Window].((vm:MainViewModel)DataContext).Files.OpenLinkCommand}" />
               <Border Classes="tool-output" IsVisible="{Binding ShowOutput}">
-                <SelectableTextBlock Classes="mono" Text="{Binding Output}" TextWrapping="Wrap" />
+                <SelectableTextBlock Classes="mono" Text="{Binding ShownOutput}" TextWrapping="Wrap" />
               </Border>
             </StackPanel>
+            </Border>
           </DataTemplate>
           <DataTemplate DataType="vm:TurnEndRowViewModel">
-            <!-- The end of a run stays in the conversation: how long, how many tools, how many files; and the reply's Copy -->
-            <StackPanel Orientation="Horizontal" Spacing="8" Height="28" Margin="0,4,0,8" AutomationProperties.Name="{Binding Text}">
-              <ctl:Icon Data="{StaticResource IconSparkle}" Size="14" TextElement.Foreground="{DynamicResource GuiTextTertiary}" VerticalAlignment="Center" />
-              <TextBlock Classes="turn-end" Text="{Binding Text}" VerticalAlignment="Center" />
-              <Button Classes="icon row-action" Margin="-2,0,0,0" Command="{Binding CopyReplyCommand}" IsVisible="{Binding HasReply}"
-                      ToolTip.Tip="Copy the reply as Markdown" AutomationProperties.Name="Copy message">
-                <ctl:Icon Data="{StaticResource IconCopy}" Size="16" />
-              </Button>
+            <!-- The end of a run stays in the conversation: how long, how many tools, the reply's Copy; and (Codex) the
+                 files the turn changed, listed under it, each with what happened to it and its +/−, opening in the Files pane -->
+            <StackPanel Margin="0,4,0,8">
+              <StackPanel Orientation="Horizontal" Spacing="8" Height="28" AutomationProperties.Name="{Binding Text}">
+                <ctl:Icon Data="{StaticResource IconSparkle}" Size="14" TextElement.Foreground="{DynamicResource GuiTextTertiary}" VerticalAlignment="Center" />
+                <TextBlock Classes="turn-end" Text="{Binding Text}" IsVisible="{Binding !HasFiles}" />
+                <TextBlock Classes="turn-end" Text="{Binding LeadText}" IsVisible="{Binding HasLead}" />
+                <ToggleButton Classes="turn-files-toggle" IsChecked="{Binding IsFilesOpen}" IsVisible="{Binding HasFiles}"
+                              AutomationProperties.Name="{Binding FilesText, StringFormat='Show the {0}'}">
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <TextBlock Classes="turn-end" Text="{Binding FilesText}" />
+                    <ctl:Icon Classes="chevron" Data="{StaticResource IconChevronRight}" Size="14" />
+                  </StackPanel>
+                </ToggleButton>
+                <Button Classes="icon row-action" Margin="-2,0,0,0" Command="{Binding CopyReplyCommand}" IsVisible="{Binding HasReply}"
+                        ToolTip.Tip="Copy the reply as Markdown" AutomationProperties.Name="Copy message">
+                  <ctl:Icon Data="{StaticResource IconCopy}" Size="16" />
+                </Button>
+              </StackPanel>
+              <Border Classes="turn-files" IsVisible="{Binding ShowFiles}">
+                <ItemsControl ItemsSource="{Binding Files}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:TurnFileViewModel">
+                      <Button Classes="turn-file" Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).Files.OpenLinkCommand}"
+                              CommandParameter="{Binding Link}" ToolTip.Tip="Open in the Files pane" AutomationProperties.Name="{Binding OpenName}">
+                        <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+                          <TextBlock Classes="mono turn-file-path" Classes.deleted="{Binding IsDeleted}" TextTrimming="CharacterEllipsis">
+                            <Run Text="{Binding Path}" /><Run Classes="moved-from" Text="{Binding MovedFromText, StringFormat='  {0}'}" />
+                          </TextBlock>
+                          <Border Grid.Column="1" Classes="change-tag" Classes.created="{Binding IsCreated}" Classes.deleted="{Binding IsDeleted}"
+                                  Classes.moved="{Binding IsMoved}" IsVisible="{Binding HasKind}" Margin="8,0,0,0">
+                            <TextBlock Text="{Binding KindText}" />
+                          </Border>
+                          <TextBlock Grid.Column="2" Classes="mono diff-added" Text="{Binding AddedText}" Margin="8,0,0,0" />
+                          <TextBlock Grid.Column="3" Classes="mono diff-removed" Text="{Binding RemovedText}" Margin="6,0,0,0" />
+                        </Grid>
+                      </Button>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Border>
             </StackPanel>
           </DataTemplate>
           <DataTemplate DataType="vm:CommandOutputRowViewModel">
@@ -571,7 +691,7 @@
             <TextBlock Classes="greeting" Text="?" Margin="2,0,0,0" />
           </StackPanel>
         </WrapPanel>
-        <ItemsControl x:Name="StarterPrompts" ItemsSource="{Binding StarterPrompts}" Margin="0,4,0,0">
+        <ItemsControl x:Name="StarterPrompts" ItemsSource="{Binding GreetingStarters}" Margin="0,4,0,0">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate><WrapPanel ItemSpacing="8" LineSpacing="8" ItemsAlignment="Center" /></ItemsPanelTemplate>
           </ItemsControl.ItemsPanel>
@@ -1403,22 +1523,34 @@
     <Grid x:Name="ComposerFooter" Grid.Row="4" Grid.Column="0" ColumnDefinitions="Auto,*,Auto" MaxWidth="768" Margin="24,-12,24,10"
           VerticalAlignment="Top">
       <StackPanel x:Name="FooterLeft" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-        <!-- A new session picks its project here, before the first message (Claude Code's prompt area) -->
-        <Button x:Name="ProjectButton" Classes="chip ghost" IsVisible="{Binding ShowGreeting}" ToolTip.Tip="{Binding ShownProjectPath}"
+        <!-- A new session picks its project here, before the first message (Claude Code's prompt area); a chat says it has none -->
+        <Button x:Name="ProjectButton" Classes="chip ghost" IsVisible="{Binding ShowGreeting}" ToolTip.Tip="{Binding ProjectChipTip}"
                 AutomationProperties.Name="Project folder">
           <StackPanel Orientation="Horizontal" Spacing="6">
             <ctl:Icon Data="{StaticResource IconFolder}" Size="14" />
-            <TextBlock Classes="project-label" Text="{Binding ProjectName, TargetNullValue='Choose a folder'}" MaxWidth="180" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+            <TextBlock Classes="project-label" Text="{Binding ProjectChipLabel}" MaxWidth="180" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
             <ctl:Icon Data="{StaticResource IconChevronDown}" Size="14" TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
           </StackPanel>
           <Button.Flyout>
             <Flyout Placement="TopEdgeAlignedLeft">
               <StackPanel Width="320" Spacing="2">
                 <TextBlock Classes="group-label" Text="Project" Margin="10,4,0,4" />
+                <!-- No project: a chat of its own (the sidebar's New chat) -->
+                <Button x:Name="NoProjectButton" Classes="menu-item" Classes.current="{Binding IsProjectless}" HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch" Command="{Binding NewChatCommand}" AutomationProperties.Name="No project">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <ctl:Icon Data="{StaticResource IconComment}" Size="16" Margin="0,0,10,0" VerticalAlignment="Top" />
+                    <StackPanel Grid.Column="1" Spacing="1">
+                      <TextBlock Text="No project" />
+                      <TextBlock Classes="tertiary" Text="A chat with an empty folder of its own" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                  </Grid>
+                </Button>
                 <ItemsControl ItemsSource="{Binding SessionGroups}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:SessionGroupViewModel">
                       <Button Classes="menu-item" Classes.current="{Binding IsCurrentProject}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                              IsVisible="{Binding IsProject}"
                               Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).NewSessionInProjectCommand}" CommandParameter="{Binding}"
                               AutomationProperties.Name="{Binding Name}" ToolTip.Tip="{Binding ShownCwd}">
                         <Grid ColumnDefinitions="Auto,*">

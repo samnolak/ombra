@@ -419,8 +419,9 @@ public sealed class ChatScrollTests
         w.MouseUp(click, Avalonia.Input.MouseButton.Left);
         Frame(w);
         Assert.True(list.IsKeyboardFocusWithin, $"focus {w.FocusManager?.GetFocusedElement()}");
-        // Page Up: what was on screen moves down by exactly one view (rows measured above it on the way move nothing)
-        var held = list.GetRealizedContainers().First(c => Top(c, sv) is >= 0 and < 200);
+        // Page Up: what was on screen moves down by exactly one view (rows measured above it on the way move nothing). The
+        // first row starting on screen (still realized one view lower: the panel builds a view's worth around it)
+        var held = list.GetRealizedContainers().Where(c => Top(c, sv) is >= 0 && Top(c, sv) < sv.Viewport.Height).OrderBy(c => Top(c, sv)).First();
         var heldTop = Top(held, sv)!.Value;
         var before = (sv.Offset.Y, sv.Extent.Height, sv.Viewport.Height);
         w.KeyPress(Avalonia.Input.Key.PageUp, Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.PageUp, null);

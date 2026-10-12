@@ -49,7 +49,7 @@ public sealed class SidebarShellTests
     {
         await SendAsync(w, vm, "first topic");
         await Until(() => vm.Sessions.Any(x => x.Title == "first topic"), "first listed");
-        await vm.NewSessionCommand.ExecuteAsync(null);
+        await vm.NewSessionInProjectCommand.ExecuteAsync(vm.SessionGroups.Single(g => g.IsProject)); // the project's "+"
         await Until(() => vm.Rows.Count == 0 && vm.Phase == SessionPhase.Ready, "new session");
         await SendAsync(w, vm, "second topic");
         await Until(() => vm.Sessions.Count == 2 && vm.Sessions.Single(x => x.Title == "second topic").IsCurrent, "both listed");

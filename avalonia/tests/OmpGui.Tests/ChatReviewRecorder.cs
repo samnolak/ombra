@@ -160,7 +160,7 @@ public sealed class ChatReviewRecorder
             while (vm.Phase != SessionPhase.Ready && DateTime.UtcNow < deadline) { Dispatcher.UIThread.RunJobs(); await Task.Delay(15); }
             vm.ComposerText = "change the greeting to Hello";
             vm.SendCommand.Execute(null);
-            while (!vm.Rows.OfType<ToolRowViewModel>().Any(t => t.ShowTail && t.Tail.Split('\n').Length >= 3) && DateTime.UtcNow < deadline) { Dispatcher.UIThread.RunJobs(); await Task.Delay(10); }
+            while (!vm.Rows.OfType<ToolRowViewModel>().Any(t => t.IsRunning && t.ConsoleOutput.Split('\n').Length >= 3) && DateTime.UtcNow < deadline) { Dispatcher.UIThread.RunJobs(); await Task.Delay(10); }
             Dispatcher.UIThread.RunJobs();
             using (var frame = w.CaptureRenderedFrame())
             using (var f = File.Create(Path.Combine(Dir, $"running-{theme}.png")))
@@ -235,6 +235,102 @@ public sealed class ChatReviewRecorder
             using (var frame = w.CaptureRenderedFrame())
             using (var f = File.Create(Path.Combine(Dir, $"changes-{theme}.png")))
                 frame?.Save(f, new Avalonia.Media.Imaging.PngBitmapEncoderOptions());
+            await vm.DisposeAsync();
+            w.Close();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("FAKE_OMP_PACE_MS", null);
+            MainViewModel.ApplyTheme("light");
+        }
+    }
+
+    /// <summary>The "showcase" turn (every kind of step: reads and searches, commands, an edit, files created, deleted,
+    /// renamed, a two-file change, a failure) in one tall window, as the conversation shows it and with every row open.</summary>
+    [AvaloniaTheory]
+    [InlineData("light")]
+    [InlineData("dark")]
+    public async Task Shoot_the_showcase(string theme)
+    {
+        if (Dir is null) return;
+        MainViewModel.ApplyTheme(theme);
+        try
+        {
+            var s = new SessionController(TestProcesses.FakeFactory("showcase", TestProcesses.TempDir("rev")), new LaunchRequest(TestProcesses.TempDir("rev-project")));
+            var vm = new MainViewModel(s, new AppArgs());
+            var w = new MainWindow { DataContext = vm, Width = 1180, Height = 3000 };
+            w.Show();
+            vm.OnWindowOpened();
+            async Task Settle(int ms) { var d = DateTime.UtcNow.AddMilliseconds(ms); while (DateTime.UtcNow < d) { Dispatcher.UIThread.RunJobs(); AvaloniaHeadlessPlatform.ForceRenderTimerTick(); await Task.Delay(15); } }
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (vm.Phase != SessionPhase.Ready && DateTime.UtcNow < deadline) await Settle(30);
+            vm.ComposerText = "make greet take a name";
+            vm.SendCommand.Execute(null);
+            while (vm.Phase != SessionPhase.Running && DateTime.UtcNow < deadline) await Settle(15);
+            while (vm.Phase != SessionPhase.Ready && DateTime.UtcNow < deadline) await Settle(15);
+            await Settle(600);
+            void Shot(string name)
+            {
+                Dispatcher.UIThread.RunJobs();
+                using var frame = w.CaptureRenderedFrame();
+                using var f = File.Create(Path.Combine(Dir!, $"{name}-{theme}.png"));
+                frame?.Save(f, new Avalonia.Media.Imaging.PngBitmapEncoderOptions());
+            }
+            var list = w.FindControl<ListBox>("Transcript")!;
+            list.ScrollIntoView(vm.Rows[0]);
+            await Settle(300);
+            Shot("showcase");
+            foreach (var r in vm.Rows.OfType<ToolRowViewModel>()) r.IsExpanded = true;
+            await Settle(300);
+            list.ScrollIntoView(vm.Rows[0]);
+            await Settle(300);
+            Shot("showcase-open");
+            await vm.DisposeAsync();
+            w.Close();
+        }
+        finally
+        {
+            MainViewModel.ApplyTheme("light");
+        }
+    }
+
+    /// <summary>A run of reads and searches ("explore"), paced: the group's line while a step runs ("Exploring…"), once
+    /// the run ended ("Explored …"), and opened, with its steps under it.</summary>
+    [AvaloniaTheory]
+    [InlineData("light")]
+    [InlineData("dark")]
+    public async Task Shoot_an_exploration(string theme)
+    {
+        if (Dir is null) return;
+        MainViewModel.ApplyTheme(theme);
+        Environment.SetEnvironmentVariable("FAKE_OMP_PACE_MS", "60");
+        try
+        {
+            var s = new SessionController(TestProcesses.FakeFactory("explore", TestProcesses.TempDir("rev")), new LaunchRequest(TestProcesses.TempDir("rev-project")));
+            var vm = new MainViewModel(s, new AppArgs());
+            var w = new MainWindow { DataContext = vm, Width = 1180, Height = 760 };
+            w.Show();
+            vm.OnWindowOpened();
+            async Task Settle(int ms) { var d = DateTime.UtcNow.AddMilliseconds(ms); while (DateTime.UtcNow < d) { Dispatcher.UIThread.RunJobs(); AvaloniaHeadlessPlatform.ForceRenderTimerTick(); await Task.Delay(15); } }
+            void Shot(string name)
+            {
+                Dispatcher.UIThread.RunJobs();
+                using var frame = w.CaptureRenderedFrame();
+                using var f = File.Create(Path.Combine(Dir!, $"{name}-{theme}.png"));
+                frame?.Save(f, new Avalonia.Media.Imaging.PngBitmapEncoderOptions());
+            }
+            var deadline = DateTime.UtcNow.AddSeconds(30);
+            while (vm.Phase != SessionPhase.Ready && DateTime.UtcNow < deadline) await Settle(30);
+            vm.ComposerText = "where is the greeting?";
+            vm.SendCommand.Execute(null);
+            while (!vm.Rows.OfType<ExplorationGroupRowViewModel>().Any(g => g.IsRunning && g.Steps.Count >= 3) && DateTime.UtcNow < deadline) await Settle(10);
+            Shot("exploring");
+            while (vm.Phase != SessionPhase.Ready && DateTime.UtcNow < deadline) await Settle(15);
+            await Settle(300);
+            Shot("explored");
+            foreach (var g in vm.Rows.OfType<ExplorationGroupRowViewModel>()) g.IsExpanded = true;
+            await Settle(300);
+            Shot("explored-open");
             await vm.DisposeAsync();
             w.Close();
         }

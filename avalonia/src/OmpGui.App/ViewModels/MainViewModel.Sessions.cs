@@ -41,7 +41,7 @@ public sealed partial class MainViewModel
     // Shortcuts as the platform writes them (⌘ on macOS, Ctrl elsewhere), for tooltips and the sidebar's hints.
     public static string HideSidebarTip { get; } = $"Hide sidebar ({CommandKey("B")})";
     public static string ShowSidebarTip { get; } = $"Show sidebar ({CommandKey("B")})";
-    public static string NewSessionShortcut { get; } = CommandKey("N");
+    public static string NewChatShortcut { get; } = CommandKey("N");
     public static string SettingsShortcut { get; } = CommandKey(",");
     public static string SettingsTip { get; } = $"Settings ({SettingsShortcut})";
 
@@ -86,7 +86,7 @@ public sealed partial class MainViewModel
 
     partial void OnIsNarrowChanged(bool value) => SidebarShownWhileNarrow = false;
     [ObservableProperty] private string _sessionFilter = "";
-    [ObservableProperty] private string _sessionTitle = "New session";
+    [ObservableProperty] private string _sessionTitle = UntitledSession;
     [ObservableProperty] private string _projectName = "";
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(ShownProjectPath))] private string _projectPath = "";
     /// <summary>The project folder as the user reads it (~/…, /var not /private/var), for tooltips and menus.</summary>
@@ -104,20 +104,6 @@ public sealed partial class MainViewModel
     {
         if (IsNarrow) SidebarShownWhileNarrow = !SidebarShownWhileNarrow;
         else IsSidebarVisible = !IsSidebarVisible;
-    }
-
-    /// <summary>A new chat in the shown chat's project, with an omp of its own: a run in another chat goes on. The shown
-    /// chat is that already while nothing was said or typed in it.</summary>
-    [RelayCommand]
-    private async Task NewSessionAsync()
-    {
-        SidebarShownWhileNarrow = false; // the drawer closes on a choice
-        if (IsUntouched(_open))
-        {
-            FocusComposerRequested?.Invoke();
-            return;
-        }
-        await StartNewSessionAsync(NewLaunch(ProjectFolder ?? Session.CurrentLaunch.WorkingDirectory)); // MainViewModel.OpenSessions.cs
     }
 
     /// <summary>A sidebar row: shows that chat; one that is open already (working or not) is shown as it is, any other
@@ -142,12 +128,14 @@ public sealed partial class MainViewModel
         await OpenProjectAsync(folder);
     }
 
-    /// <summary>A new session in a project listed in the sidebar: a new chat there, beside the chats already open.</summary>
+    /// <summary>A new session in a group of the sidebar: a new chat in that project (beside the chats already open), or a
+    /// new chat outside any project from the Chats group.</summary>
     [RelayCommand]
     private async Task NewSessionInProjectAsync(SessionGroupViewModel? group)
     {
-        if (group is null) return;
-        if (group.IsCurrentProject) await NewSessionAsync();
+        if (group is null || group.IsPinnedGroup) return;
+        if (group.IsChatsGroup) await NewChatAsync(); // MainViewModel.Chats.cs
+        else if (group.IsCurrentProject) await NewSessionHereAsync();
         else await OpenProjectAsync(group.Cwd);
     }
 
@@ -158,7 +146,7 @@ public sealed partial class MainViewModel
     private void StartRename()
     {
         // Start from what the header shows (a session named after its first message has no explicit name yet)
-        RenameText = _open.Last?.SessionName ?? (SessionTitle == "New session" ? "" : SessionTitle);
+        RenameText = _open.Last?.SessionName ?? (IsUntitled(SessionTitle) ? "" : SessionTitle);
         IsRenaming = true;
     }
 
@@ -194,12 +182,16 @@ public sealed partial class MainViewModel
     private void ApplySessionInfo(SessionSnapshot s)
     {
         var firstUser = s.Items.OfType<UserItem>().FirstOrDefault()?.Text;
+        // A chat outside any project is one from its start (before omp reports its folder)
+        IsProjectless = Chats.Contains(s.Cwd ?? Session.CurrentLaunch.WorkingDirectory);
         SessionTitle = s.SessionName is { Length: > 0 } n ? n
             : firstUser is { Length: > 0 } u ? SessionCatalogTitle(u)
-            : "New session";
-        ProjectName = SessionItemViewModel.ProjectName(s.Cwd);
+            : IsProjectless ? UntitledChat : UntitledSession;
+        ProjectName = IsProjectless ? "" : SessionItemViewModel.ProjectName(s.Cwd);
         var projectChanged = ProjectPath != (s.Cwd ?? "");
         ProjectPath = s.Cwd ?? "";
+        // The window has started once its first omp is ready: the spare for the next new chat follows (MainViewModel.Chats.cs)
+        if (!_spareScheduled && s.Phase == SessionPhase.Ready) ScheduleSpare();
         if (projectChanged) RebuildSessionGroups(); // the open project's group goes first
         var current = ShownFile;
         foreach (var item in Sessions)
@@ -209,6 +201,11 @@ public sealed partial class MainViewModel
         }
         UpdateSessionStatuses();
     }
+
+    /// <summary>What the header and the sidebar call a session nothing was said in yet.</summary>
+    private const string UntitledSession = "New session", UntitledChat = "New chat";
+
+    private static bool IsUntitled(string title) => title is UntitledSession or UntitledChat;
 
     /// <summary>
     /// The shown chat's session file: the one it is switching to, else the one its omp reports, else the one it was
@@ -341,7 +338,7 @@ public sealed partial class MainViewModel
             if ((s.Cwd ?? c.CurrentLaunch.WorkingDirectory) is not { Length: > 0 } cwd) continue;
             var firstUser = s.Items.OfType<UserItem>().FirstOrDefault()?.Text;
             var named = s.SessionName is { Length: > 0 };
-            var title = named ? s.SessionName! : firstUser is { Length: > 0 } u ? SessionCatalogTitle(u) : "New session";
+            var title = named ? s.SessionName! : firstUser is { Length: > 0 } u ? SessionCatalogTitle(u) : Chats.Contains(cwd) ? UntitledChat : UntitledSession;
             yield return new SessionSummary(file, s.SessionId ?? Path.GetFileNameWithoutExtension(file), cwd, title, o.OpenedAt,
                 IsEmpty: !named && firstUser is null);
         }
@@ -396,12 +393,13 @@ public sealed partial class MainViewModel
 
     /// <summary>The open session's row reads like the header, before omp's file (and the list) catch up.</summary>
     private string? LiveTitleFor(SessionItemViewModel item) =>
-        item.IsCurrent && SessionTitle != "New session" && SessionTitle != item.Model.Title ? SessionTitle : null;
+        item.IsCurrent && !IsUntitled(SessionTitle) && SessionTitle != item.Model.Title ? SessionTitle : null;
 
     private SessionGroupViewModel? _pinnedGroup;
+    private SessionGroupViewModel? _chatsGroup;
 
-    /// <summary>Groups the listed sessions by project; the groups and their rows that stay are kept (see
-    /// <see cref="Reconcile{T}"/>), so a refresh changes only what moved.</summary>
+    /// <summary>Groups the listed sessions: pinned ones first, then the chats outside any project, then by project. The
+    /// groups and their rows that stay are kept (see <see cref="Reconcile{T}"/>), so a refresh changes only what moved.</summary>
     private void RebuildSessionGroups()
     {
         var project = _open.Last?.Cwd ?? ProjectPath;
@@ -417,14 +415,20 @@ public sealed partial class MainViewModel
         }
         var groups = new List<(SessionGroupViewModel Group, List<SessionItemViewModel> Items, DateTimeOffset Newest)>();
         var pinned = new List<SessionItemViewModel>();
+        var chats = new List<SessionItemViewModel>();
         foreach (var item in Sessions)
         {
+            // A chat outside any project goes under Chats; pinned sessions are listed once, under Pinned
+            if (Chats.Contains(item.Cwd))
+            {
+                (item.IsPinned ? pinned : chats).Add(item);
+                continue;
+            }
             // A removed project stays out of the list, the open chat's too (it had stayed until the app restarted)
             if (hidden.Contains(item.Cwd)) continue;
             var i = groups.FindIndex(x => SessionCatalog.PathComparer.Equals(x.Group.Cwd, item.Cwd));
             if (i < 0) groups.Add((GroupFor(item.Cwd), [], item.Model.LastMessageAt));
             else if (item.Model.LastMessageAt > groups[i].Newest) groups[i] = groups[i] with { Newest = item.Model.LastMessageAt };
-            // Pinned sessions are listed once, under Pinned
             if (item.IsPinned) pinned.Add(item);
             else groups[i < 0 ? ^1 : i].Items.Add(item);
         }
@@ -442,6 +446,11 @@ public sealed partial class MainViewModel
                     Reconcile(group.Items, []);
                     ordered.Insert(0, group);
                 }
+        // Chats keep their place under the top button that makes them; the group stays while one is shown, for its "+"
+        _chatsGroup ??= new SessionGroupViewModel(Chats.Root, false, isChatsGroup: true) { NewSessionCommand = NewChatCommand };
+        _chatsGroup.IsCurrentProject = IsProjectless;
+        Reconcile(_chatsGroup.Items, chats);
+        if (chats.Count > 0 || (IsProjectless && SessionFilter.Trim().Length == 0)) ordered.Insert(0, _chatsGroup);
         _pinnedGroup ??= new SessionGroupViewModel("", false, isPinnedGroup: true);
         Reconcile(_pinnedGroup.Items, pinned);
         if (pinned.Count > 0) ordered.Insert(0, _pinnedGroup);
@@ -544,7 +553,7 @@ public sealed partial class MainViewModel
         {
             if (FindOpen(chat.Model.Path) is { } open)
             {
-                if (open == _open) await NewSessionAsync(); // off the chat on screen first, so it can be closed
+                if (open == _open) await NewChatAsync(); // off the chat on screen first (to a chat: the project goes), so it can be closed
                 if (FindOpen(chat.Model.Path) is { } still) await CloseSessionAsync(still);
             }
             try { await Task.Run(() => SessionCatalog.DeleteSession(chat.Model.Path)); }

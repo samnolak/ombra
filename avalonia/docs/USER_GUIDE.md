@@ -59,7 +59,8 @@ project yet), so the OS warns on first start:
 
 ## Daily use
 
-- **Sessions** — the sidebar lists omp's sessions of all your projects, grouped by project folder. Sessions are
+- **Sessions** — the sidebar lists omp's sessions of all your projects, grouped by project folder, and the chats
+  that belong to no project under **Chats** (after *Pinned*, before the projects). Sessions are
   ordered by their last message (yours or the agent's), newest first, and groups by their newest session; opening a
   session does not reorder the list. Each row shows how long ago its last message was (*now*, *5m*, *3h*, *2d*, then
   the date), or a dot for a chat that is open: green and pulsing while omp works in it, amber when it waits for your
@@ -76,9 +77,18 @@ project yet), so the OS warns on first start:
   **Settings → General → Chats kept running** (4 by default) keep their omp; opening one more closes the idle chat
   you used longest ago (its omp stops; the chat is still in the list and opens again when you click it). A chat that
   is working, waiting for you or has something typed in its message box is never closed for that.
-  **New session** (Ctrl/⌘+N) starts a fresh one (in a new omp, while the open chats go on), and a project's **+** starts
-  one in that project. A new chat is listed as soon as it is open — omp saves its file only once the first reply is
-  complete, but the row is there before, so a chat you leave while its first reply streams stays one click away. A
+  **New chat** (Ctrl/⌘+N, the button above the search) starts a chat outside any project, as ChatGPT, Claude and
+  Codex do: it gets an empty folder of its own in the app's data folder (see *Where things are kept*), the header and
+  the chip under the message box read *No project*, and its project menu offers a new session in one of your
+  projects or **Open folder…** instead. It opens at once and takes a message right away: the app keeps one omp
+  started ahead of time for it (a few seconds after the first chat is ready, and again after each new chat), so the
+  first message does not wait for omp to start. That spare omp is not a chat (it is not listed and does not count
+  towards *Chats kept running*); a settings change that restarts omp replaces it. A chat's folder is deleted when the
+  chat is closed with nothing in it (an empty folder, no session file). A project's **+** (or its menu's *New session
+  here*) starts a session in that project, in a new omp, while the open chats go on; `/new` does the same in the
+  current project (in a chat without a project, a new chat). A new chat is listed as soon as it is open — omp saves
+  its file only once the first reply is complete, but the row is there before, so a chat you leave while its first
+  reply streams stays one click away. A
   session omp cannot open (a damaged file) leaves you where you were, with a card saying why.
   Ctrl+Tab and Ctrl+Shift+Tab go to the next and previous session. Hover a session for **Pin**
   and **⋯** (or right-click it): **Rename** (opens it and edits its name in the header), **Pin / Unpin**, **Copy path**
@@ -94,7 +104,10 @@ project yet), so the OS warns on first start:
   title opens the session menu (below).
 - **Models and thinking** — in the message box: the *Thinking effort* chip sets omp's reasoning level (*Off*,
   *Minimal*, *Low*, *Medium*, *High*, *Extra high*, *Max* — each with a line on what it does; only the levels the
-  model accepts; hidden for models that don't reason) and the model chip lists the models omp can use, one row per
+  model accepts; hidden for models that don't reason). A new chat or session — and omp's terminal UI in the terminal
+  panel — starts at *Medium* (omp's own default is *High*); the chip changes it for that chat, and a session you open
+  again keeps the level it had. `"defaultThinkingLevel"` in the client's settings file (`omp-gui.local.json`; any of
+  `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `auto`) sets another starting level. The model chip lists the models omp can use, one row per
   family (*Claude Sonnet*, *Claude Haiku*…) that opens to its versions, newest first (→ opens, ← or Esc goes back);
   two entries under one name show their ids. Typing searches every model. The model options sit below the list. The
   model menu opens above the message box, so what you are writing
@@ -142,14 +155,31 @@ project yet), so the OS warns on first start:
   animated GIF shows its first frame.
 - **New session** — the page asks *What should we work on in ‹project›?*; the project opens the same project menu,
   and the starter prompts under it (*Explain how this project is organized*, *Find a bug and fix it*, *Add tests for
-  the code I changed last*) fill the message box to edit and send. Notices from omp's start (or a session that could
-  not be opened) do not hide it: they are listed above it.
-- **Tool calls** — each is one line, as in Claude Code: a dot (grey and blinking while it runs, green when done, red
-  when it failed), the tool's name and what it works on, and how long it took (from a tenth of a second). Under it,
-  what it gave: *Read 120 lines*, *Found 12 files*, *Added 2 lines, removed 1 line*, or the first three lines of its
-  output with **… +N lines** to see all of it; a running command shows its newest lines. Click the line to open the
-  whole output; a file change shows as it happens. *Thinking…* counts the seconds while the model thinks, then
-  reads *Thought for 4s*; click it for the thoughts.
+  the code I changed last*) fill the message box to edit and send. A new chat without a project asks *What should we
+  work on?* with general starters (*Explain a concept in simple terms*, *Write a script that automates a task*, *Help
+  me plan something step by step*). Notices from omp's start (or a session that could not be opened) do not hide it:
+  they are listed above it.
+- **Tool calls** — each is one line that says what happened, in the tense of its state: *Running* / *Ran*,
+  *Reading* / *Read*, *Searching* / *Searched*, *Editing* / *Edited*, *Created*, *Deleted*, *Renamed* (same folder) or
+  *Moved* (`old → new`),
+  *Wrote*, then what it works on, what it found (*2 lines*, *3 matches in 2 files*), its +N −M and how long it took
+  (from a tenth of a second). The mark in front pulses while it runs, is a check when it is done, a red ✕ when it
+  failed (with the reason as a chip: *exit 127*, *timed out*) and a dashed circle when it was interrupted; while omp
+  waits for your approval the step reads *Waiting for approval*. A command shows as a console block: `$ command` and
+  its newest lines while it runs, its first three lines and **… +N lines** when it is done (a failed one has a red
+  edge); a command with no output stays one line. Two or more reads and searches in a row fold into one line,
+  *Explored 2 files, 2 searches* (*Exploring…* with the current step while they run); click it for the steps. Click a
+  line to open the whole output. *Thinking…* counts the seconds while the model thinks, then reads *Thought for 4s*;
+  click it for the thoughts.
+- **File changes** — a change shows as it happens, one card per file (a patch that changes several files has a card
+  for each). The card's header has the file's folder and name, a badge for a **New file**, a **Deleted** one (folded
+  to *Show N deleted lines*), a **Renamed** or **Moved** one (`old → new`), and +N −M. Changed lines have a coloured
+  bar on their left edge and a tinted background, with the words that changed inside a line marked more strongly;
+  two line-number columns give the line in the old file and in the new one. Click the path to open the file in the
+  Files pane at its first change, double-click a line to open it there. The end of a run (*Worked for 1m · 13 tools ·
+  7 files changed ›*) lists the files the run changed, with their +N −M and New / Deleted / Renamed / Moved marks (open when
+  the run changed two or more files); click one to open it. The Files pane's *Changes* review uses the same colours,
+  bars, word marks and line numbers.
 - **Keyboard shortcuts** — Ctrl/⌘+/ (or `/hotkeys`) shows them all; Esc closes the sheet.
 - **Stop** — the Stop button or Esc stops the current run; if omp does not stop, the button offers Force stop. Esc
   stops the run only from the message box, the conversation or a button: in the sidebar's search and the Files filter
@@ -291,10 +321,10 @@ project yet), so the OS warns on first start:
   (bringing the window back opens that chat), macOS shows a Notification Center banner, Linux a desktop notification
   through `notify-send` if it is installed (a click opens that chat). **Settings → General → Notifications** turns
   that off.
-- **Menus and tray** — on macOS the app menu has **Settings…** (⌘,) and the menu bar *File* (New Session ⌘N, Open
+- **Menus and tray** — on macOS the app menu has **Settings…** (⌘,) and the menu bar *File* (New Chat ⌘N, Open
   Folder… ⌘O), *Edit* (Undo, Redo, Cut, Copy, Paste, Select All, on the text that has the keyboard), *View*
   (Sessions, Terminal, Events) and *Window* (Minimize ⌘M, Zoom, Close ⌘W). Where the desktop has a tray or menu-bar
-  area, an OMP GUI icon there offers **Show OMP GUI**, **New Session** and **Quit** (which asks first while omp works,
+  area, an OMP GUI icon there offers **Show OMP GUI**, **New Chat** and **Quit** (which asks first while omp works,
   as closing the window does).
 - **In the conversation** — **Retry** on a failed reply. Point at a reply's end (*Worked for 12s · 3 tools*) for
   **Copy** (as Markdown); point at one of your messages for **Copy** and **Rewind to here** (a new session from
@@ -328,7 +358,7 @@ project yet), so the OS warns on first start:
 | ↑ (in the empty message box) | edit the last queued message |
 | Ctrl+/ (⌘/) | keyboard shortcuts |
 | Ctrl+Enter (⌘+Enter) | send |
-| Ctrl+N (⌘+N) | new session |
+| Ctrl+N (⌘+N) | new chat (outside any project) |
 | Ctrl+B (⌘+B) | show / hide the sidebar |
 | Ctrl+Tab / Ctrl+Shift+Tab | next / previous session in the sidebar |
 | Ctrl+, (⌘+,) | settings |
@@ -403,7 +433,7 @@ omp's settings and apply to every session.
 
 Some omp commands exist only in its terminal UI (for example `/plan`, `/goal`, `/loop`, `/fork`, `/tree`, `/collab`).
 Typed in the message box they are never sent to omp as a message: where the window has its own way it uses it —
-`/settings` → Settings, `/login` (`/setup`, `/providers`) and `/logout` → Model providers, `/new` → a new session, `/resume` → the
+`/settings` → Settings, `/login` (`/setup`, `/providers`) and `/logout` → Model providers, `/new` → a new session in the current project, `/resume` → the
 sessions list (text after it filters the list), `/model` without arguments → the model picker, `/hub` → Background
 tasks, `/branch` or `/rewind` → Rewind, `/drop` → Delete session, `/restart` → restarts omp, `/extensions` and
 `/status` → a card that opens Plugins and skills, `/hotkeys` → the keyboard shortcuts. `/quit`, `/exit`, `/copy`,
@@ -704,12 +734,13 @@ report. Without the variable none of this runs.
 | Providers turned off for omp (`network-privacy/providers-*.yml`, one per project, rewritten at every start) | `%APPDATA%\OmpGui\network-privacy` | `~/Library/Application Support/OmpGui/network-privacy` | `~/.config/OmpGui/network-privacy` |
 | Installed omp runtime | `%LOCALAPPDATA%\OmpGui\runtimes` | `~/Library/Application Support/OmpGui/runtimes` | `~/.local/share/OmpGui/runtimes` |
 | Dictation model | `%LOCALAPPDATA%\OmpGui\speech-models` | `~/Library/Application Support/OmpGui/speech-models` | `~/.local/share/OmpGui/speech-models` |
+| Chats without a project (one empty folder each, deleted when the chat is closed with nothing in it) | `%LOCALAPPDATA%\OmpGui\chats` | `~/Library/Application Support/OmpGui/chats` | `~/.local/share/OmpGui/chats` |
 | The app's own errors (`client.log`) | `%LOCALAPPDATA%\OmpGui\logs` | `~/Library/Logs/OMP GUI` | `~/.local/share/OmpGui/logs` |
 | omp's own data (sessions, sign-in, settings) | omp's folder (`~/.omp`), managed by omp | same | same |
 
 On Linux `XDG_CONFIG_HOME` and `XDG_DATA_HOME` move the GUI's folders. `--config <file>` or `OMPGUI_CONFIG` use
-another settings file; `OMPGUI_RUNTIME_DIR`, `OMPGUI_STT_DIR` and `OMPGUI_LOG_DIR` move the runtime, the speech model
-and the error log.
+another settings file; `OMPGUI_RUNTIME_DIR`, `OMPGUI_STT_DIR`, `OMPGUI_LOG_DIR` and `OMPGUI_CHATS_DIR` move the
+runtime, the speech model, the error log and the chats' folders.
 
 The GUI writes its own settings file (atomically, keeping a `.bak` of a version you edited by hand), the folders
 above, and what you save (update packages, diagnostics). It reads omp's session folder to list sessions. Of omp's

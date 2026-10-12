@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using OmpGui.ClientCore;
@@ -9,6 +11,17 @@ public abstract partial class RowViewModel : ObservableObject
 {
     public long Key { get; }
     public TranscriptItem Model { get; private set; }
+
+    /// <summary>The exploration group this row is a step of (ExplorationGroups.cs), or null: tool steps and the replies
+    /// with nothing to read between them.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(InGroup))]
+    private ExplorationGroupRowViewModel? _group;
+
+    /// <summary>Hidden inside its folded group: the group's one line stands for it.</summary>
+    [ObservableProperty] private bool _isFolded;
+
+    public bool InGroup => Group is not null;
 
     protected RowViewModel(TranscriptItem model)
     {
@@ -228,10 +241,17 @@ public sealed partial class AssistantRowViewModel : RowViewModel
     }
 }
 
+/// <summary>
+/// A tool call, Codex style: a status mark, what it does as a verb in the tense of its state ("Running" / "Ran",
+/// "Reading" / "Read", "Created"), what it acts on, and what it gave. A command shows its command line and output in a
+/// console block; a failure says why on its line ("exit 127").
+/// </summary>
 public sealed partial class ToolRowViewModel : RowViewModel
 {
     /// <summary>Output lines shown under a finished call before "… +N lines" (Claude Code shows three).</summary>
     public const int PreviewLines = 3;
+    /// <summary>A command's lines in its console before it is cut with an ellipsis (open, all of it).</summary>
+    public const int CommandLines = 3;
 
     [ObservableProperty] private string _title = "";
     [ObservableProperty] private string _name = "";
@@ -243,24 +263,42 @@ public sealed partial class ToolRowViewModel : RowViewModel
     [ObservableProperty] private bool _isRunning;
     [ObservableProperty] private bool _isFailed;
     [ObservableProperty] private bool _isDone;
+    /// <summary>Stopped before it ended (the user's stop, or omp went away): neither done nor failed.</summary>
+    [ObservableProperty] private bool _isInterrupted;
+    /// <summary>What the call does, in the tense of its state: "Running" / "Ran", "Reading" / "Read", "Created".</summary>
+    [ObservableProperty] private string _verb = "";
+    /// <summary>What it acts on, after the verb: the path, the pattern and where, the command's first line.</summary>
+    [ObservableProperty] private string _argText = "";
+    /// <summary>A few quiet words at the line's end: what a read or search found ("120 lines", "3 files"), "Interrupted".</summary>
+    [ObservableProperty] private string _meta = "";
+    /// <summary>omp asks to allow this running call (the approval card under the conversation): "Waiting for approval",
+    /// its mark in the waiting colour (MainViewModel.MarkAwaitingApproval).</summary>
+    [ObservableProperty] private bool _awaitsApproval;
+    /// <summary>Why it failed, at a glance on its line: "exit 127", "timed out", "failed"; null unless it failed.</summary>
+    [ObservableProperty] private string? _failureText;
+    /// <summary>A command's whole command line, in its console after the prompt.</summary>
+    [ObservableProperty] private string _command = "";
+    /// <summary>The output in a command's console: its newest lines while it runs, then its first ones; open, all of it.</summary>
+    [ObservableProperty] private string _consoleOutput = "";
     /// <summary>How long it ran ("2.3s"), once it ended; empty under a tenth of a second (an instant call says nothing).</summary>
     [ObservableProperty] private string _tookText = "";
-    /// <summary>What it gave, under the call: a summary ("Read 120 lines", "Found 3 files") or its first output lines.</summary>
+    /// <summary>What a tool other than a command gave, under its line: its first output lines, or the error.</summary>
     [ObservableProperty] private string _result = "";
     /// <summary>Output lines past the preview ("… +12 lines" opens the rest).</summary>
     [ObservableProperty] private int _moreLines;
-    /// <summary>The result is the tool's own output lines (mono), not a summary in words.</summary>
+    /// <summary>The result is the tool's own output lines (mono), not words.</summary>
     [ObservableProperty] private bool _resultIsOutput;
 
-    private string? _resultNote;
+    /// <summary>The output without omp's own notes at its end ("Wall time: …", "Command exited with code 1").</summary>
+    private string _shownOutput = "";
+    private string[] _lines = [];
+    private string? _parsedArgs;
+    private string _pattern = "", _searchPath = "", _commandArg = "";
 
     public ToolRowViewModel(ToolItem item) : base(item) => OnUpdated();
 
-    /// <summary>The tool as a person reads it: "Bash", "Read", "Search" (omp's names are lowercase ids).</summary>
-    public string DisplayName => DisplayNameOf(Name);
-
-    /// <summary>The call's argument summary on its line, without the shell prompt the name already implies.</summary>
-    public string ArgText => Summary.StartsWith("$ ", StringComparison.Ordinal) ? Summary[2..] : Summary;
+    /// <summary>A shell command (bash, shell): its command line and output show in a console block.</summary>
+    public bool IsCommand => Name is "bash" or "shell";
 
     public static string DisplayNameOf(string tool)
     {
@@ -288,6 +326,43 @@ public sealed partial class ToolRowViewModel : RowViewModel
         }
     }
 
+    /// <summary>
+    /// The verb on a call's line (Codex: "Ran", "Read", "Searched"), in the tense of its state; a file change says what
+    /// it did to its one file (a move within its folder is a rename). Tools without a verb of their own keep their name
+    /// ("Create issue (github)").
+    /// </summary>
+    public static string VerbOf(string tool, bool running, FileChangeKind? change = null, bool rename = false)
+    {
+        string V(string doing, string done) => running ? doing : done;
+        switch (tool)
+        {
+            case "bash" or "shell": return V("Running", "Ran");
+            case "read": return V("Reading", "Read");
+            case "grep" or "ast_grep": return V("Searching", "Searched");
+            case "glob" or "find": return V("Finding files", "Found files");
+            case "ls": return V("Listing", "Listed");
+            case "lsp": return V("Looking up", "Looked up");
+            case "edit" or "ast_edit" or "notebook_edit" or "write" or "create" or "write_file":
+                return change switch
+                {
+                    FileChangeKind.Created => V("Creating", "Created"),
+                    FileChangeKind.Deleted => V("Deleting", "Deleted"),
+                    FileChangeKind.Moved => rename ? V("Renaming", "Renamed") : V("Moving", "Moved"),
+                    _ => tool is "write" or "create" or "write_file" ? V("Writing", "Wrote") : V("Editing", "Edited"),
+                };
+            case "todo": return V("Updating todos", "Updated todos");
+            case "task": return V("Delegating", "Delegated");
+            case "ask": return V("Asking", "Asked");
+            case "eval": return V("Running code", "Ran code");
+            case "fetch": return V("Fetching", "Fetched");
+            case "web_search": return V("Searching the web", "Searched the web");
+            case "browser": return V("Browsing", "Browsed");
+            default: return DisplayNameOf(tool);
+        }
+    }
+
+    partial void UpdateFiles(); // ToolRowViewModel.Files.cs: the files the call changed
+
     protected override void OnUpdated()
     {
         var t = (ToolItem)Model;
@@ -295,14 +370,13 @@ public sealed partial class ToolRowViewModel : RowViewModel
         Name = t.Name;
         Summary = t.Summary;
         Diff = t.Diff;
+        UpdateFiles();
         (Added, Removed) = OmpGui.App.Controls.DiffView.Stats(t.Diff);
-        OnPropertyChanged(nameof(DisplayName));
-        OnPropertyChanged(nameof(ArgText));
+        OnPropertyChanged(nameof(IsCommand));
         OnPropertyChanged(nameof(HasDiff));
         OnPropertyChanged(nameof(HasStats));
         OnPropertyChanged(nameof(ShowDiff));
         OnPropertyChanged(nameof(ShowRowStats));
-        OnPropertyChanged(nameof(FilePath));
         OnPropertyChanged(nameof(AddedText));
         OnPropertyChanged(nameof(RemovedText));
         // A file change is shown as it happens (Claude Code), once; the user can fold it away
@@ -320,32 +394,100 @@ public sealed partial class ToolRowViewModel : RowViewModel
         };
         Output = t.Output ?? "";
         IsRunning = t.Status == ToolStatus.Running;
-        TookText = t.Took is { TotalSeconds: >= 0.1 } took && t.Status != ToolStatus.Running ? TurnEndRowViewModel.Duration(took) : "";
-        Tail = IsRunning ? LastLines(Output, PreviewLines) : "";
         IsFailed = t.Status == ToolStatus.Failed;
         IsDone = t.Status == ToolStatus.Succeeded;
-        _resultNote = t.ResultNote;
-        UpdateResult();
-        OnPropertyChanged(nameof(ShowTail));
+        IsInterrupted = t.Status == ToolStatus.Interrupted;
+        TookText = t.Took is { TotalSeconds: >= 0.1 } took && t.Status != ToolStatus.Running ? TurnEndRowViewModel.Duration(took) : "";
+        ParseArgs(t.Args);
+        Verb = CurrentVerb();
+        ArgText = ChangeKind == FileChangeKind.Moved && MovedFrom is { } from ? $"{from} → {FilePath}"
+            : Name is "grep" or "ast_grep" && _pattern.Length > 0 ? (_searchPath.Length > 0 ? $"{_pattern} in {_searchPath}" : _pattern)
+            : Summary.StartsWith("$ ", StringComparison.Ordinal) ? Summary[2..] : Summary;
+        // omp ends a command's output with its own notes, which the line says its own way: the time, and an exit chip
+        var (shown, exit, timedOut) = IsCommand ? SplitNotices(Output) : (Output, null, false);
+        _shownOutput = shown;
+        _lines = OutputLines(shown);
+        FailureText = !IsFailed ? null : exit is { } code ? $"exit {code}" : timedOut ? "timed out" : "failed";
+        Command = _commandArg.Length > 0 ? _commandArg.Trim() : ArgText;
+        UpdateResult(t);
+        OnPropertyChanged(nameof(ShowArg));
+        OnFailureTextChanged(FailureText);
+        OnPropertyChanged(nameof(HasMeta));
         OnPropertyChanged(nameof(ShowOutput));
+        OnPropertyChanged(nameof(ShownOutput));
         OnPropertyChanged(nameof(CanExpand));
     }
 
-    /// <summary>
-    /// The line(s) under the call, as Claude Code words them: a file change says what changed, a read how much it read,
-    /// a search what it found (from omp's counts); anything else shows its first output lines and how many more there are.
-    /// </summary>
-    private void UpdateResult()
+    /// <summary>The call's arguments a line words better than its summary does: a search's pattern and where, the whole
+    /// command (the summary joins its lines). Parsed when they change; cut-off arguments leave the summary.</summary>
+    private void ParseArgs(string args)
     {
-        var lines = OutputLines(Output);
+        if (args == _parsedArgs) return;
+        _parsedArgs = args;
+        (_pattern, _searchPath, _commandArg) = ("", "", "");
+        if (args.Length == 0) return;
+        try
+        {
+            using var doc = JsonDocument.Parse(args);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return;
+            _pattern = Str(root, "pattern");
+            _searchPath = Str(root, "path");
+            _commandArg = Str(root, "command");
+        }
+        catch (JsonException)
+        {
+        }
+
+        static string Str(JsonElement o, string key) => o.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+    }
+
+    /// <summary>
+    /// omp's notes at the end of a command's output: "Wall time: 0.02 seconds", "Command exited with code 1" (omp's bash
+    /// tool), "exit code 1" (a command the user ran, ConversationState.Session), "[Command timed out after 30 seconds]".
+    /// </summary>
+    [GeneratedRegex(@"^(?:Wall time: [\d.]+ seconds|Command exited with code (?<code>-?\d+)|exit code (?<code>-?\d+)|\[?Command timed out[^\]]*\]?)$")]
+    private static partial Regex OmpNotice();
+
+    /// <summary>The output without omp's notes at its end, the exit code they gave, and whether the command timed out.</summary>
+    internal static (string Output, int? Exit, bool TimedOut) SplitNotices(string output)
+    {
+        var lines = output.Replace("\r", "").Split('\n');
+        var n = lines.Length;
+        int? exit = null;
+        var timedOut = false;
+        while (n > 0)
+        {
+            var line = lines[n - 1].Trim();
+            if (line.Length > 0)
+            {
+                if (OmpNotice().Match(line) is not { Success: true } m) break;
+                if (m.Groups["code"].Success && int.TryParse(m.Groups["code"].Value, out var code)) exit ??= code;
+                else if (line.Contains("timed out", StringComparison.Ordinal)) timedOut = true;
+            }
+            n--;
+        }
+        return (string.Join('\n', lines, 0, n), exit, timedOut);
+    }
+
+    /// <summary>
+    /// What the row says beyond its line. A command: its console (newest lines while it runs, then the first ones and how
+    /// many more). A read or search: what it found, in a few words at the line's end. A file change: nothing (its +N −M and
+    /// the change itself say it). Anything else: its first output lines, or the error, under the line.
+    /// </summary>
+    private void UpdateResult(ToolItem t)
+    {
+        var lines = _lines;
         var more = 0;
         var isOutput = false;
-        string result;
-        if (IsRunning) (result, isOutput) = (Tail, true);
-        else if (HasDiff && !IsFailed)
-            result = Name is "write" or "create" or "write_file" && Removed == 0 ? $"Wrote {Count(Added, "line")}" : Changed(Added, Removed);
-        else if (_resultNote is { } note) result = note;
-        else if (Name == "read" && !IsFailed && lines.Length > 0) result = $"Read {Count(lines.Length, "line")}";
+        var result = "";
+        var meta = "";
+        if (IsCommand) more = IsRunning ? 0 : Math.Max(0, lines.Length - PreviewLines);
+        else if (IsRunning) (result, isOutput) = (string.Join('\n', lines.Skip(Math.Max(0, lines.Length - PreviewLines))), true);
+        else if (HasDiff && !IsFailed) { }
+        else if (t.ResultNote is { } note) meta = note.StartsWith("Found ", StringComparison.Ordinal) ? note[6..] : note;
+        else if (Name == "read" && !IsFailed && lines.Length > 0) meta = Count(lines.Length, "line");
+        else if (Name == "ls" && !IsFailed && lines.Length > 0) meta = lines.Length == 1 ? "1 entry" : $"{lines.Length} entries";
         else if (lines.Length > 0)
         {
             result = string.Join('\n', lines.Take(PreviewLines));
@@ -353,29 +495,34 @@ public sealed partial class ToolRowViewModel : RowViewModel
             // A command's output is mono; what a subagent, the todo list or a question answered is words
             isOutput = Name is not ("task" or "todo" or "ask");
         }
-        else result = Model is ToolItem { Status: ToolStatus.Interrupted, StartedAt: not null } ? "Interrupted"
-            : IsDone && Name is "bash" or "shell" ? "(No output)"
-            : "";
+        if (IsInterrupted && t.StartedAt is not null) meta = "Interrupted";
         Result = result;
         ResultIsOutput = isOutput;
         MoreLines = more;
+        Meta = meta;
+        UpdateConsole();
         OnPropertyChanged(nameof(ShowResult));
         OnPropertyChanged(nameof(ShowMore));
         OnPropertyChanged(nameof(MoreText));
     }
 
+    /// <summary>The console's output: open, all of it; running, its newest lines (Claude Code shows them live); done, its first.</summary>
+    private void UpdateConsole()
+    {
+        var lines = _lines;
+        ConsoleOutput = !IsCommand ? ""
+            : IsExpanded ? string.Join('\n', lines)
+            : IsRunning ? string.Join('\n', lines.Skip(Math.Max(0, lines.Length - PreviewLines)))
+            : string.Join('\n', lines.Take(PreviewLines));
+        OnPropertyChanged(nameof(ShowConsole));
+        OnPropertyChanged(nameof(ShowConsoleOutput));
+        OnPropertyChanged(nameof(ShowConsoleMore));
+        OnPropertyChanged(nameof(CommandMaxLines));
+    }
+
     private static string Count(int n, string noun) => n == 1 ? $"1 {noun}" : $"{n} {noun}s";
 
-    /// <summary>"Added 2 lines, removed 1 line" (Claude Code: "Updated … with 2 additions and 1 removal").</summary>
-    private static string Changed(int added, int removed) => (added, removed) switch
-    {
-        (> 0, > 0) => $"Added {Count(added, "line")}, removed {Count(removed, "line")}",
-        (> 0, _) => $"Added {Count(added, "line")}",
-        (_, > 0) => $"Removed {Count(removed, "line")}",
-        _ => "No changes",
-    };
-
-    /// <summary>The output's lines without carriage returns and without the blank lines at its end.</summary>
+    /// <summary>The output's lines without carriage returns and without the blank lines around it.</summary>
     private static string[] OutputLines(string text)
     {
         if (text.Length == 0) return [];
@@ -387,16 +534,6 @@ public sealed partial class ToolRowViewModel : RowViewModel
         return lines[start..n];
     }
 
-    /// <summary>The newest output lines of a running tool, under its line (Claude Code shows a running command's output live).</summary>
-    [ObservableProperty] private string _tail = "";
-    public bool ShowTail => IsRunning && !IsExpanded && Tail.Length > 0;
-
-    private static string LastLines(string text, int n)
-    {
-        var lines = text.Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Trim().Length > 0).ToArray();
-        return string.Join("\n", lines.Skip(Math.Max(0, lines.Length - n)));
-    }
-
     public bool HasDiff => Diff is { Length: > 0 };
     private bool _diffOpened;
     public int Added { get; private set; }
@@ -404,16 +541,36 @@ public sealed partial class ToolRowViewModel : RowViewModel
     public bool HasStats => Added + Removed > 0;
     public string AddedText => Added > 0 ? $"+{Added}" : "";
     public string RemovedText => Removed > 0 ? $"−{Removed}" : "";
-    /// <summary>The file a file tool acts on (its summary is the path), for the change card's header.</summary>
-    public string FilePath => Summary;
     public bool ShowDiff => HasDiff && IsExpanded;
     /// <summary>+4 −1 on the line while the change is folded; open, the change's own header says it (not twice).</summary>
     public bool ShowRowStats => HasStats && !ShowDiff;
-    /// <summary>The diff says it better than the tool's text output for edits.</summary>
-    public bool ShowOutput => IsExpanded && !HasDiff && Output.Length > 0;
-    /// <summary>There is more than the line says: the whole output or the change.</summary>
-    public bool CanExpand => HasDiff || Output.Trim().Length > 0;
-    /// <summary>The summary under the call, unless the whole output or the change is open in its place.</summary>
+    /// <summary>The failure chip right after the verb when nothing follows it on the line ("✕ Ran exit 127" over the
+    /// console), else at the line's end after the argument.</summary>
+    public bool ShowFailureAfterVerb => FailureText is not null && !ShowArg;
+    public bool ShowFailureAtEnd => FailureText is not null && ShowArg;
+    public bool HasMeta => Meta.Length > 0;
+    /// <summary>The argument on the line, unless the console under it shows the command already.</summary>
+    public bool ShowArg => ArgText.Length > 0 && !ShowConsole;
+    /// <summary>The output without omp's notes, as the opened row shows it.</summary>
+    public string ShownOutput => _shownOutput;
+
+    /// <summary>
+    /// A command shows its console while it runs, when it printed something and when it failed; one that succeeded
+    /// without a word stays a single line ("Ran make").
+    /// </summary>
+    public bool ShowConsole => IsCommand && (IsRunning || IsFailed || _lines.Length > 0);
+    public bool ShowConsoleOutput => ShowConsole && ConsoleOutput.Length > 0;
+    public bool ShowConsoleMore => ShowConsole && MoreLines > 0 && !IsExpanded;
+    /// <summary>The command's lines in the console: a few, then an ellipsis; open, all of them.</summary>
+    public int CommandMaxLines => IsExpanded ? 0 : CommandLines;
+
+    /// <summary>The whole output of a tool other than a command, opened (a command opens in its console).</summary>
+    public bool ShowOutput => IsExpanded && !HasDiff && !IsCommand && _shownOutput.Length > 0;
+    /// <summary>There is more than the line says: the change, the rest of a command's output or command line, the output.</summary>
+    public bool CanExpand => HasDiff || (IsCommand
+        ? _lines.Length > PreviewLines || Command.Count(c => c == '\n') >= CommandLines || Command.Length > 240
+        : _shownOutput.Trim().Length > 0);
+    /// <summary>The words or lines under the call, unless the whole output or the change is open in its place.</summary>
     public bool ShowResult => Result.Length > 0 && !ShowOutput && !ShowDiff;
     public bool ShowMore => MoreLines > 0 && ShowResult;
     public string MoreText => MoreLines == 1 ? "… +1 line" : $"… +{MoreLines} lines";
@@ -424,12 +581,25 @@ public sealed partial class ToolRowViewModel : RowViewModel
 
     partial void OnIsExpandedChanged(bool value)
     {
+        UpdateConsole();
         OnPropertyChanged(nameof(ShowOutput));
         OnPropertyChanged(nameof(ShowDiff));
         OnPropertyChanged(nameof(ShowRowStats));
-        OnPropertyChanged(nameof(ShowTail));
         OnPropertyChanged(nameof(ShowResult));
         OnPropertyChanged(nameof(ShowMore));
+    }
+
+    partial void OnMetaChanged(string value) => OnPropertyChanged(nameof(HasMeta));
+
+    partial void OnAwaitsApprovalChanged(bool value) => Verb = CurrentVerb();
+
+    private string CurrentVerb() => AwaitsApproval && IsRunning ? "Waiting for approval"
+        : VerbOf(Name, IsRunning, ChangeKind, Changes.Count == 1 && Changes[0].IsRename);
+
+    partial void OnFailureTextChanged(string? value)
+    {
+        OnPropertyChanged(nameof(ShowFailureAfterVerb));
+        OnPropertyChanged(nameof(ShowFailureAtEnd));
     }
 }
 
@@ -447,7 +617,10 @@ public sealed partial class NoticeRowViewModel(NoticeItem item) : RowViewModel(i
     }
 }
 
-/// <summary>"Worked for 1m 12s · 6 tools · 2 files changed": the end of a run, kept in the conversation.</summary>
+/// <summary>
+/// "Worked for 1m 12s · 6 tools · 2 files changed": the end of a run, kept in the conversation, with the files the turn
+/// changed listed under it (Codex), each with its +N −M and opening in the Files pane.
+/// </summary>
 public sealed partial class TurnEndRowViewModel(TurnEndItem item) : RowViewModel(item)
 {
     /// <summary>The reply that ends this turn: its copy action sits on this line (MainViewModel.MarkTurnEnds).</summary>
@@ -455,22 +628,101 @@ public sealed partial class TurnEndRowViewModel(TurnEndItem item) : RowViewModel
     [NotifyPropertyChangedFor(nameof(HasReply))]
     private AssistantRowViewModel? _reply;
 
+    /// <summary>The list of changed files is open. It is at first when the turn changed several (what a turn changed is
+    /// what its reader checks); one file is the change shown just above.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowFiles))]
+    private bool _isFilesOpen;
+
     public bool HasReply => Reply is not null;
 
-    public string Text
+    /// <summary>The files the turn changed, in the order it first changed them (from its tool rows' changes).</summary>
+    public IReadOnlyList<TurnFileViewModel> Files { get; private set; } = [];
+    public bool HasFiles => Files.Count > 0;
+    public bool ShowFiles => HasFiles && IsFilesOpen;
+    /// <summary>The files were taken from the turn's rows (once, when the turn had ended: MainViewModel.MarkTurnEnds).</summary>
+    internal bool FilesKnown { get; private set; }
+
+    /// <summary>The whole line, as a screen reader says it.</summary>
+    public string Text => Line(withFiles: true);
+    /// <summary>The line up to its files, which follow it as the toggle of their list: "Worked for 12s · 3 tools ·"
+    /// (empty without a list: <see cref="Text"/> is the line then).</summary>
+    public string LeadText => HasFiles && Line(withFiles: false) is { Length: > 0 } lead ? lead + " ·" : "";
+    public bool HasLead => LeadText.Length > 0;
+    public string FilesText => FilesCount == 1 ? "1 file changed" : $"{FilesCount} files changed";
+
+    /// <summary>The files changed: as listed when the rows say which, else as omp's events counted them.</summary>
+    private int FilesCount => HasFiles ? Files.Count : ((TurnEndItem)Model).FilesChanged;
+
+    private string Line(bool withFiles)
     {
-        get
+        var e = (TurnEndItem)Model;
+        var parts = new List<string>();
+        // Under a tenth of a second says nothing ("Worked for 0.0s"); the counts still do
+        if (e.Took.TotalSeconds >= 0.1) parts.Add((e.Interrupted ? "Stopped after " : "Worked for ") + Duration(e.Took));
+        else if (e.Interrupted) parts.Add("Stopped");
+        if (e.Tools > 0) parts.Add(e.Tools == 1 ? "1 tool" : $"{e.Tools} tools");
+        if (withFiles && FilesCount > 0) parts.Add(FilesText);
+        var text = string.Join(" · ", parts);
+        return text.Length > 0 ? char.ToUpperInvariant(text[0]) + text[1..] : withFiles ? "Done" : "";
+    }
+
+    /// <summary>
+    /// The files the turn's tool calls changed (<paramref name="tools"/>, in order), one entry per file: its changes
+    /// added up, a move followed to the new path, a file created and then changed still new, one created and deleted again
+    /// left out. Failed calls changed nothing.
+    /// </summary>
+    internal void SetFiles(IEnumerable<ToolRowViewModel> tools)
+    {
+        FilesKnown = true;
+        var files = new List<TurnFile>();
+        foreach (var t in tools)
         {
-            var e = (TurnEndItem)Model;
-            var parts = new List<string>();
-            // Under a tenth of a second says nothing ("Worked for 0.0s"); the counts still do
-            if (e.Took.TotalSeconds >= 0.1) parts.Add((e.Interrupted ? "Stopped after " : "Worked for ") + Duration(e.Took));
-            else if (e.Interrupted) parts.Add("Stopped");
-            if (e.Tools > 0) parts.Add(e.Tools == 1 ? "1 tool" : $"{e.Tools} tools");
-            if (e.FilesChanged > 0) parts.Add(e.FilesChanged == 1 ? "1 file changed" : $"{e.FilesChanged} files changed");
-            var text = string.Join(" · ", parts);
-            return text.Length > 0 ? char.ToUpperInvariant(text[0]) + text[1..] : "Done";
+            if (t.IsFailed) continue;
+            foreach (var c in t.Changes)
+            {
+                var (added, removed) = OmpGui.App.Controls.DiffView.Stats(c.Diff);
+                var line = OmpGui.App.Controls.DiffView.FirstChangedLine(c.Diff);
+                var was = files.Find(f => f.Path == (c.MovedFrom ?? c.Path)) ?? files.Find(f => f.Path == c.Path);
+                if (was is null)
+                {
+                    files.Add(new TurnFile { Path = c.Path, Kind = c.Kind, MovedFrom = c.MovedFrom, Added = added, Removed = removed, Line = line });
+                    continue;
+                }
+                if (was.Kind == FileChangeKind.Created && c.Kind == FileChangeKind.Deleted)
+                {
+                    files.Remove(was);
+                    continue;
+                }
+                was.Kind = (was.Kind, c.Kind) switch
+                {
+                    (FileChangeKind.Created, not FileChangeKind.Deleted) => FileChangeKind.Created,
+                    (_, FileChangeKind.Deleted) => FileChangeKind.Deleted,
+                    (FileChangeKind.Moved, _) or (_, FileChangeKind.Moved) => FileChangeKind.Moved,
+                    (_, var now) => now,
+                };
+                if (c.MovedFrom is not null && was.Kind == FileChangeKind.Moved) was.MovedFrom ??= c.MovedFrom;
+                was.Path = c.Path;
+                was.Added += added;
+                was.Removed += removed;
+                was.Line ??= line;
+            }
         }
+        Files = [.. files.Select(f => new TurnFileViewModel(f.Path, f.Kind, f.MovedFrom, f.Added, f.Removed, f.Line))];
+        IsFilesOpen = Files.Count > 1;
+        OnPropertyChanged(nameof(Files));
+        OnPropertyChanged(nameof(HasFiles));
+        OnPropertyChanged(nameof(ShowFiles));
+        OnUpdated();
+    }
+
+    private sealed class TurnFile
+    {
+        public required string Path;
+        public FileChangeKind Kind;
+        public string? MovedFrom;
+        public int Added, Removed;
+        public int? Line;
     }
 
     [RelayCommand]
@@ -482,7 +734,38 @@ public sealed partial class TurnEndRowViewModel(TurnEndItem item) : RowViewModel
         : t.TotalHours < 1 ? $"{(int)t.TotalMinutes}m {t.Seconds:00}s"
         : $"{(int)t.TotalHours}h {t.Minutes:00}m";
 
-    protected override void OnUpdated() => OnPropertyChanged(nameof(Text));
+    protected override void OnUpdated()
+    {
+        OnPropertyChanged(nameof(Text));
+        OnPropertyChanged(nameof(LeadText));
+        OnPropertyChanged(nameof(HasLead));
+        OnPropertyChanged(nameof(FilesText));
+    }
+}
+
+/// <summary>A file on a turn's list of changes: its path, what happened to it ("New", "Deleted", "Renamed", "Moved"), +N −M.</summary>
+public sealed class TurnFileViewModel(string path, FileChangeKind kind, string? movedFrom, int added, int removed, int? line)
+{
+    public string Path { get; } = path;
+    public FileChangeKind Kind { get; } = kind;
+    public string KindText { get; } = kind switch
+    {
+        FileChangeKind.Created => "New",
+        FileChangeKind.Deleted => "Deleted",
+        FileChangeKind.Moved => movedFrom is not null && FileChange.SameFolder(movedFrom, path) ? "Renamed" : "Moved",
+        _ => "",
+    };
+    public bool HasKind => KindText.Length > 0;
+    public bool IsCreated => Kind == FileChangeKind.Created;
+    public bool IsDeleted => Kind == FileChangeKind.Deleted;
+    public bool IsMoved => Kind == FileChangeKind.Moved;
+    /// <summary>Where a moved file was: "from src/util.py".</summary>
+    public string MovedFromText { get; } = movedFrom is null ? "" : $"from {movedFrom}";
+    public string AddedText { get; } = added > 0 ? $"+{added}" : "";
+    public string RemovedText { get; } = removed > 0 ? $"−{removed}" : "";
+    /// <summary>The file at its first change, for the Files pane (a deleted file opens to say it is gone).</summary>
+    public OmpGui.App.Controls.FileLink Link { get; } = new(path, kind == FileChangeKind.Deleted ? null : line);
+    public string OpenName => $"Open {Path}";
 }
 
 public sealed partial class CommandOutputRowViewModel(CommandOutputItem item) : RowViewModel(item)

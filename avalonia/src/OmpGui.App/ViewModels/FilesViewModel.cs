@@ -552,8 +552,9 @@ public sealed partial class FilesViewModel : ObservableObject
         var root = Root ?? Owner.ProjectFolder;
         var now = new HashSet<string>(ProjectFiles.PathComparer);
         foreach (var row in Owner.Rows)
-            if (row is ToolRowViewModel t && IsFileChange(t) && ProjectFiles.Resolve(root, t.FilePath) is { } full)
-                now.Add(full);
+            if (row is ToolRowViewModel t && IsFileChange(t))
+                foreach (var path in t.Changes.Count > 0 ? t.Changes.Select(c => c.Path) : new[] { t.FilePath })
+                    if (ProjectFiles.Resolve(root, path) is { } full) now.Add(full);
         if (now.SetEquals(_sessionChanged)) return;
         _sessionChanged.Clear();
         _sessionChanged.UnionWith(now);

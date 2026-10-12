@@ -606,7 +606,7 @@ public sealed partial class MainWindow : Window
         if (this.GetPlatformSettings()?.HotkeyConfiguration.CommandModifiers is { } command)
         {
             SendButton.HotKey = new KeyGesture(Key.Enter, command);
-            NewSessionButton.HotKey = new KeyGesture(Key.N, command);
+            NewChatButton.HotKey = new KeyGesture(Key.N, command);
             if (Vm is { } vm)
             {
                 KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.B, command), Command = vm.ToggleSidebarCommand });

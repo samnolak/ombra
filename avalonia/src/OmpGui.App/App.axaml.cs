@@ -64,10 +64,11 @@ public sealed class App : Application
                 return await privacy.ApplyAsync(titles.Apply(browserDefaults?.ForSession(o, request) ?? o.ToLaunchSpec(request)), o, ct);
             }
             configError ??= options.ApprovalModeWarning;
-            // Without a saved folder that still exists, the home folder: an app opened from Finder runs in "/", and omp
-            // started there listed its chats as a project named "/"
-            var initial = new LaunchRequest(options.WorkingDirectory ?? ExistingDirectory(options.LastWorkingDirectory)
-                    ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            // The project used last, when it still exists; else a new chat outside any project, in a folder of its own (not
+            // the home folder, which the agent would roam and the Files pane list; an app opened from Finder runs in "/").
+            // A chat used last is not taken up again: its folder holds that chat, and the window starts on a new one.
+            var chats = new ChatFolders(ChatFolders.DefaultRoot);
+            var initial = new LaunchRequest(options.WorkingDirectory ?? ProjectToResume(options.LastWorkingDirectory, chats) ?? NewChatFolder(chats),
                 ApprovalMode: OmpRuntimeOptions.EffectiveApprovalMode(options.ApprovalMode));
             // "Bypass permissions" was chosen explicitly before; say so at every start, not only in the chip.
             if (initial.ApprovalMode == "yolo")
@@ -77,6 +78,7 @@ public sealed class App : Application
             var updater = OmpGui.App.Services.UpdateInstaller.ForThisApp(out var noInstall);
             var vm = new MainViewModel(session, args, configError, store)
             {
+                Chats = chats,
                 Privacy = privacy,
                 OmpTuiLaunch = async (dir, ct) =>
                 {
@@ -127,7 +129,20 @@ public sealed class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
-    private static string? ExistingDirectory(string? path) => path is not null && Directory.Exists(path) ? path : null;
+    private static string? ProjectToResume(string? path, ChatFolders chats) =>
+        path is not null && Directory.Exists(path) && !chats.Contains(path) ? path : null;
+
+    /// <summary>A new chat's folder; the home folder only when the app's data folder cannot be written (omp needs some
+    /// folder to start in).</summary>
+    private static string NewChatFolder(ChatFolders chats)
+    {
+        try { return chats.Create(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine("No folder for a new chat: " + e.Message);
+            return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+    }
 
     /// <summary>Platform Layer choice: the only place that asks which OS this is.</summary>
     private static OmpGui.App.Platform.INotifier CreateNotifier() =>
@@ -156,7 +171,7 @@ public sealed class App : Application
             quit.Click += (_, _) => window.Close();
             var trayMenu = new NativeMenu();
             trayMenu.Add(show);
-            trayMenu.Add(new NativeMenuItem("New Session") { Command = vm.NewSessionCommand });
+            trayMenu.Add(new NativeMenuItem("New Chat") { Command = vm.NewChatCommand });
             trayMenu.Add(quit);
             var tray = new TrayIcon
             {

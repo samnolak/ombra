@@ -27,7 +27,7 @@ public sealed partial class MainWindow
 
         var file = new NativeMenu
         {
-            Item("New Session", vm.NewSessionCommand, Key.N),
+            Item("New Chat", vm.NewChatCommand, Key.N),
             Item("Open Folder…", vm.OpenFolderCommand, Key.O),
         };
         var edit = new NativeMenu

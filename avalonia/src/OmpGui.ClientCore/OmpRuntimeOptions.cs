@@ -25,6 +25,9 @@ public sealed record OmpRuntimeOptions
     public string Mode { get; init; } = "rpc-ui";
     /// <summary><c>--approval-mode</c>: always-ask | write | yolo. Default write (edits run, commands ask).</summary>
     public string? ApprovalMode { get; init; } = "write";
+    /// <summary><c>--thinking</c> for a new session: off | minimal | low | medium | high | xhigh | max | auto. Null (or a
+    /// level omp does not know) means <see cref="DefaultThinkingLevelValue"/>. A resumed session keeps its own level.</summary>
+    public string? DefaultThinkingLevel { get; init; }
     public string? WorkingDirectory { get; init; }
     /// <summary>Extra environment for omp; a null value removes the variable. Keep secrets out of committed files.</summary>
     public Dictionary<string, string?> Environment { get; init; } = [];
@@ -106,6 +109,14 @@ public sealed record OmpRuntimeOptions
     public static readonly IReadOnlyList<string> ApprovalModes = ["always-ask", "write", "yolo"];
     public const string DefaultApprovalMode = "write";
 
+    /// <summary>omp's own default is high: slow and costly for everyday chats, so a new chat starts at medium (the
+    /// thinking chip changes it per chat).</summary>
+    public const string DefaultThinkingLevelValue = "medium";
+    public static readonly IReadOnlyList<string> ThinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"];
+
+    /// <summary>The level a new session starts at: <see cref="DefaultThinkingLevel"/> when omp knows it, else medium.</summary>
+    public string EffectiveThinkingLevel => DefaultThinkingLevel is { } l && ThinkingLevels.Contains(l) ? l : DefaultThinkingLevelValue;
+
     /// <summary>
     /// The mode omp runs with: exactly one of <see cref="ApprovalModes"/>, else <see cref="DefaultApprovalMode"/>.
     /// Never left out: omp's own default is yolo, and it ignores an invalid flag with only a log line.
@@ -125,8 +136,10 @@ public sealed record OmpRuntimeOptions
     public OmpLaunchSpec ToTuiLaunchSpec(string? workingDirectory)
     {
         var rpc = ToLaunchSpec(new LaunchRequest(workingDirectory));
-        // The same approval mode as the window's session: omp's own default is yolo.
+        // The same approval mode as the window's session (omp's own default is yolo), and the same thinking level as
+        // a new chat's.
         var args = new List<string>(PrefixArgs) { "--approval-mode", EffectiveApprovalMode(ApprovalMode) };
+        if (!ExtraArgs.Contains("--thinking")) args.AddRange(["--thinking", EffectiveThinkingLevel]);
         if (Model is not null) args.AddRange(["--model", Model]);
         args.AddRange(ExtraArgs);
         // The user's environment settings only: the RPC process's hints (NO_COLOR, C.UTF-8 locale) would take the
@@ -154,6 +167,9 @@ public sealed record OmpRuntimeOptions
         var args = new List<string>(PrefixArgs) { "--mode", Mode };
         args.AddRange(["--approval-mode", EffectiveApprovalMode(request?.ApprovalMode ?? ApprovalMode)]);
         if (request?.ResumeSessionFile is { } resume) args.AddRange(["--resume", resume]);
+        // A new session starts at the app's level; a resumed one at its own (omp restores it from the file). A
+        // --thinking among the user's extra arguments wins.
+        else if (!ExtraArgs.Contains("--thinking")) args.AddRange(["--thinking", EffectiveThinkingLevel]);
         if (Model is not null) args.AddRange(["--model", Model]);
         args.AddRange(ExtraArgs);
         // UTF-8 hints for the shells and tools omp spawns (Git Bash, Python on Windows) and no colour codes in omp's

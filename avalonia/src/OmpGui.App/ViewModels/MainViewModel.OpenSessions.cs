@@ -72,11 +72,13 @@ public sealed partial class MainViewModel
     private LaunchRequest NewLaunch(string? cwd, string? file = null) =>
         new(cwd, file, _chosenApprovalMode ?? Session.CurrentLaunch.ApprovalMode);
 
-    /// <summary>Starts a chat's update loop and its omp.</summary>
+    /// <summary>Starts a chat's update loop and its omp. The start runs off the UI thread: building omp's launch starts
+    /// processes (the provider check of network privacy, then omp), and each start held the click 30–60 ms.</summary>
     private Task StartSessionAsync(OpenSession open)
     {
         open.Pump = Task.Run(() => PumpAsync(open));
-        return open.Controller.StartAsync(open.Lifetime.Token);
+        var token = open.Lifetime.Token;
+        return Task.Run(() => open.Controller.StartAsync(token));
     }
 
     private bool IsShown(OpenSession open) => ReferenceEquals(Volatile.Read(ref _open), open) && _visible.Task.IsCompleted;
@@ -194,11 +196,7 @@ public sealed partial class MainViewModel
     /// </summary>
     private async Task StartNewSessionAsync(LaunchRequest request)
     {
-        var leaving = _open;
-        var windowCard = LeaveSession(leaving); // first: whether the chat left may be closed depends on its draft
-        var open = Register(_host.Open(request));
-        EnterSession(open, windowCard);
-        if (IsUntouched(leaving)) _ = CloseSessionAsync(leaving);
+        var (open, leaving) = ShowNewChat(() => _host.Open(request));
         try
         {
             await StartSessionAsync(open);
@@ -220,6 +218,26 @@ public sealed partial class MainViewModel
         }
         ApplyIfShown(open);
         RequestCatalogRefresh();
+    }
+
+    /// <summary>A new chat in an omp that is ready already (the host's spare): shown at once, and usable at once.</summary>
+    private void ShowStartedChat(SessionController started)
+    {
+        var (open, _) = ShowNewChat(() => _host.Adopt(started));
+        open.Pump = Task.Run(() => PumpAsync(open));
+        RequestCatalogRefresh();
+    }
+
+    /// <summary>Leaves the shown chat for the new one <paramref name="add"/> puts in the host, and shows it; the chat left
+    /// goes when nothing was said or typed in it (it would only hold an omp).</summary>
+    private (OpenSession Open, OpenSession Left) ShowNewChat(Func<SessionController> add)
+    {
+        var leaving = _open;
+        var windowCard = LeaveSession(leaving); // first: whether the chat left may be closed depends on its draft
+        var open = Register(add());
+        EnterSession(open, windowCard);
+        if (IsUntouched(leaving)) _ = CloseSessionAsync(leaving);
+        return (open, leaving);
     }
 
     /// <summary>
@@ -264,6 +282,7 @@ public sealed partial class MainViewModel
             return;
         }
         var reused = _open;
+        var (leftFolder, leftFile) = (reused.Controller.CurrentLaunch.WorkingDirectory, reused.Controller.SessionFile);
         reused.OpeningFile = file; // until omp reports it: a second click finds it here instead of starting another omp on it
         reused.ScrollAnchor = null;
         try
@@ -278,6 +297,7 @@ public sealed partial class MainViewModel
         {
             reused.OpeningFile = null;
         }
+        LeftChatFolder(reused.Controller, leftFolder, leftFile); // MainViewModel.Chats.cs
         ApplyIfShown(reused);
         RequestCatalogRefresh();
     }
@@ -291,6 +311,7 @@ public sealed partial class MainViewModel
             return;
         }
         var reused = _open;
+        var (leftFolder, leftFile) = (reused.Controller.CurrentLaunch.WorkingDirectory, reused.Controller.SessionFile);
         try
         {
             await reused.Controller.OpenFolderAsync(folder, reused.Lifetime.Token);
@@ -299,6 +320,7 @@ public sealed partial class MainViewModel
         {
             return;
         }
+        LeftChatFolder(reused.Controller, leftFolder, leftFile); // MainViewModel.Chats.cs
         ApplyIfShown(reused);
         RequestCatalogRefresh();
     }
@@ -432,9 +454,11 @@ public sealed partial class MainViewModel
     /// <summary>
     /// Starts every chat's omp again so it reads changed settings: an idle one now, one that is working (or starting)
     /// once it is idle (<see cref="WhenIdle"/>), so no run is cut short. True when the shown chat's omp restarted now.
+    /// The spare, started with the old settings, is replaced (MainViewModel.Chats.cs).
     /// </summary>
     private async Task<bool> RestartAllSessionsAsync()
     {
+        ReplaceSpare(again: true);
         var restarts = new List<Task>();
         var shownNow = false;
         foreach (var open in _opens.Values.ToList())
@@ -476,9 +500,11 @@ public sealed partial class MainViewModel
         else if (s.Phase == SessionPhase.Ready && SessionHost.IsIdle(s)) _ = RestartSessionAsync(open);
     }
 
-    /// <summary>Stops and starts again each idle chat's omp (before the runtime it runs from is replaced).</summary>
+    /// <summary>Stops and starts again each idle chat's omp (before the runtime it runs from is replaced); the spare,
+    /// which runs from it too, goes (the restart after the install prepares the next one).</summary>
     private async Task ForceStopReadySessionsAsync(CancellationToken ct)
     {
+        ReplaceSpare(again: false);
         foreach (var open in _opens.Values.ToList())
             if (open.Controller.Snapshot().Phase == SessionPhase.Ready) await open.Controller.ForceStopAsync(ct);
     }
