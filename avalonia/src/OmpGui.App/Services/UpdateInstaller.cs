@@ -187,6 +187,9 @@ public sealed class UpdateInstaller
             psi = new ProcessStartInfo("/bin/sh") { UseShellExecute = false, WorkingDirectory = StateDirectory };
             psi.ArgumentList.Add(script);
         }
+        // The script outlives the app on purpose (it waits for it to quit): not one of the processes the app ends at
+        // quit (OwnedProcesses), and neither is the new version it starts
+        psi.Environment.Remove(OmpGui.ClientCore.OwnedProcesses.OwnerVariable);
         Launch(psi);
         return script;
     }
