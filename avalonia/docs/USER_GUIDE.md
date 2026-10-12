@@ -287,7 +287,9 @@ project yet), so the OS warns on first start:
 - **Comments on the page** — **Annotate** in the preview's toolbar (or **+ → Comment on the page**, or
   Ctrl/⌘+Shift+S) turns on the mode: click to mark a point, or drag to select an area, write what to change and press
   **Comment** (or Enter). Nothing is outlined while you move the pointer. A numbered pin (and, for an area, its dashed
-  outline) stays on the page, following the element it was left on as the page scrolls, and the comment becomes a
+  outline) stays on the page it was left on, following the element as the page scrolls; another page shows only its
+  own pins — also in a single-page app that changes its page without loading one (a route like `/cart` or `#/cart`;
+  an anchor such as `#top` is the same page). The comment becomes a
   chip in the message box with its page's address (× removes it). To change a comment, click its pin on the page
   (**Save** or **Delete**, in or out of the mode) or the chip's text (an editor with **Save** and **Show on the page**,
   which opens that page — its tab if one shows it). The page's own links and buttons do nothing until you leave the

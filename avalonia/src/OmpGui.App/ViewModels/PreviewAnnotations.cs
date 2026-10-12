@@ -160,8 +160,8 @@ public sealed partial class PreviewViewModel
 
     /// <summary>
     /// A message from the page's script. Returns what it was: "annotation", "annotation-update", "annotation-remove",
-    /// "annotate-exit", "ready", or null when it is not ours (no or a wrong token, not JSON, missing fields, an unknown
-    /// comment) and was ignored.
+    /// "annotate-exit", "ready", "location", or null when it is not ours (no or a wrong token, not JSON, missing fields, an
+    /// unknown comment, another site's address) and was ignored.
     /// </summary>
     public string? OnPageMessage(string? body)
     {
@@ -175,6 +175,14 @@ public sealed partial class PreviewViewModel
             {
                 case "ready":
                     return "ready";
+                case "location":
+                    // A single-page app moved to another route (pushState, a hash route): no navigation the panel sees,
+                    // so the address follows from here (the same site only), and "show this comment" finds the page
+                    if (!Uri.TryCreate(Str(j, "url"), UriKind.Absolute, out var moved) || CurrentUrl is not { } was
+                        || !SameSite(moved, was) || !IsAllowed(moved)) return null;
+                    CurrentUrl = moved;
+                    Address = Display(moved);
+                    return "location";
                 case "annotate-exit":
                     IsAnnotating = false;
                     return "annotate-exit";
@@ -229,17 +237,29 @@ public sealed partial class PreviewViewModel
                 ? (int)Math.Clamp(Math.Round(d), -1_000_000, 1_000_000) : 0;
     }
 
-    /// <summary>The pins for the page shown: the comments made on it, as JSON for the script's setPins.</summary>
+    /// <summary>
+    /// The pins for the site shown, each with its page, as JSON for the script's setPins. The script draws only the pins
+    /// of the page it is on: a single-page app changes its address without a navigation the panel sees (pushState, a
+    /// hash route), and the script follows that itself. Comments made on other sites never reach the page.
+    /// </summary>
     internal string PinsJson(Uri? page)
     {
-        var pins = Annotations.Where(a => page is not null && SamePage(a.Page, page))
-            .Select(a => new PinDto(a.Id, a.Number, a.Mark.Kind == PageMarkKind.Area ? "area" : "point", a.Element.Selector,
+        var pins = Annotations.Where(a => page is not null && SameSite(a.Page, page))
+            .Select(a => new PinDto(a.Id, a.Number, a.Page.AbsoluteUri, a.Mark.Kind == PageMarkKind.Area ? "area" : "point", a.Element.Selector,
                 a.Mark.OffsetX, a.Mark.OffsetY, a.Mark.Width, a.Mark.Height, a.Mark.PageX, a.Mark.PageY, a.Comment)).ToArray();
         return JsonSerializer.Serialize(pins, PreviewAnnotationsJson.Default.PinDtoArray);
     }
 
-    private static bool SamePage(Uri a, Uri b) =>
-        Uri.Compare(a, b, UriComponents.HttpRequestUrl, UriFormat.Unescaped, StringComparison.Ordinal) == 0;
+    private static bool SameSite(Uri a, Uri b) =>
+        Uri.Compare(a, b, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0;
+
+    /// <summary>The same page: address and query, and the fragment when it is a route (<c>#/cart</c>, <c>#!/cart</c>);
+    /// an anchor (<c>#top</c>) is the same page. annotate.js's pageKey decides the same way.</summary>
+    internal static bool SamePage(Uri a, Uri b) =>
+        Uri.Compare(a, b, UriComponents.HttpRequestUrl, UriFormat.Unescaped, StringComparison.Ordinal) == 0
+        && RouteOf(a) == RouteOf(b);
+
+    private static string RouteOf(Uri u) => u.Fragment is ['#', '/', ..] or ['#', '!', '/', ..] ? u.Fragment : "";
 
     /// <summary>The comments as a message for the agent: per page, each comment with its mark and what finds it in the code.</summary>
     public static string BuildPrompt(IReadOnlyList<AnnotationViewModel> annotations)
@@ -276,7 +296,7 @@ public sealed partial class PreviewViewModel
     }
 }
 
-internal sealed record PinDto(string id, int number, string kind, string selector, int offsetX, int offsetY, int width, int height,
+internal sealed record PinDto(string id, int number, string url, string kind, string selector, int offsetX, int offsetY, int width, int height,
     int pageX, int pageY, string comment);
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(PinDto[]))]
