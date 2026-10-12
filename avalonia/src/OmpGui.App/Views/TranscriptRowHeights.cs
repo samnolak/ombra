@@ -17,6 +17,8 @@ public static class TranscriptRowHeights
 
     /// <summary>The rows' column (ListBoxItem MaxWidth in Styles.Session.axaml).</summary>
     private const double ColumnWidth = 768;
+    /// <summary>How far a step open under its exploration group is indented (Border.row-step.in-group: 7 + 1 + 15).</summary>
+    private const double GroupIndent = 23;
     /// <summary>Average character advances, in ems, of the proportional text and of the code font.</summary>
     private const double CharWidth = 0.57;
     private const double MonoCharWidth = 0.6;
@@ -24,13 +26,17 @@ public static class TranscriptRowHeights
 
     private static double EstimateRow(object? row, double width)
     {
-        var column = Math.Min(width, ColumnWidth);
+        // A step of a folded exploration group takes no room
+        if (row is RowViewModel { IsFolded: true }) return 0;
+        var column = Math.Min(width, ColumnWidth) - (row is RowViewModel { InGroup: true } ? GroupIndent : 0);
         return row switch
         {
             AssistantRowViewModel a => Assistant(a, column),
             UserRowViewModel u => User(u, column),
             ToolRowViewModel t => Tool(t, column),
-            TurnEndRowViewModel => 40, // 28 high, 4 above, 8 below
+            ExplorationGroupRowViewModel => 32, // one tool line
+            // 28 high, 4 above, 8 below; the list of files 2 below, its hairline and 4 inside around 28 px rows
+            TurnEndRowViewModel e => 40 + (e.ShowFiles ? 2 + 2 + 8 + e.Files.Count * 28 : 0),
             CommandOutputRowViewModel c => c.IsMarker ? 37 : 8 + 16 + Lines(c.Text, (column - 24) / (Code * MonoCharWidth)) * CodeLine,
             NoticeRowViewModel n => 8 + (n.IsError || n.IsWarning ? 16 : 4) + Lines(n.Text, (column - 48) / (Ui * CharWidth)) * UiLine,
             _ => 60,
@@ -74,13 +80,27 @@ public static class TranscriptRowHeights
         return height;
     }
 
-    /// <summary>The call's line (28, 2 above and below); under it what it gave (its lines, "… +N lines"), or opened, the change or the output.</summary>
+    /// <summary>
+    /// The call's line (28, 2 above and below); under it, 30 px in: a command's console (2 above, 6 below, 7 inside,
+    /// the command's lines, its output 4 below them, "… +N lines"), what anything else gave (its lines, "… +N lines"),
+    /// or opened, the change or the output.
+    /// </summary>
     private static double Tool(ToolRowViewModel t, double column)
     {
         var height = 32.0;
+        var mono = Code * MonoCharWidth;
+        if (t.ShowConsole)
+        {
+            // The console spans the column's 16 px of pull-out less 30 + 8 around it, a 2 px rule and 10 + 12 inside
+            var text = column - 46;
+            var command = Lines(t.Command, (text - mono - 8) / mono);
+            height += 2 + 6 + 14 + (t.IsExpanded ? command : Math.Min(command, ToolRowViewModel.CommandLines)) * CodeLine;
+            if (t.ShowConsoleOutput) height += 4 + (t.IsExpanded ? Lines(t.ConsoleOutput, text / mono) : Count(t.ConsoleOutput, '\n')) * CodeLine;
+            if (t.ShowConsoleMore) height += 2 + 20;
+        }
         if (t.ShowResult) height += Count(t.Result, '\n') * 19 + 2 + (t.ShowMore ? 20 : 0);
-        if (t.ShowDiff) height += 10 + 32 + Count(t.Diff ?? "", '\n') * 20 + 2;
-        if (t.ShowOutput) height += 8 + 16 + Math.Min(320, Lines(t.Output, (column - 56) / (Code * MonoCharWidth)) * CodeLine);
+        if (t.ShowDiff) height += t.DiffCards.Sum(DiffView.EstimatedHeight);
+        if (t.ShowOutput) height += 8 + 16 + Lines(t.ShownOutput, (column - 46) / mono) * CodeLine;
         return height;
     }
 

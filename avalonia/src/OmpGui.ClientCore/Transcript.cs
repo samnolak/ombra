@@ -28,12 +28,32 @@ public sealed record QueuedMessage(long Seq, QueueKind Kind, string Text, IReadO
 
 public sealed record AssistantItem(long Key, string Text, string Thinking, bool Streaming, string? StopReason, string? Error) : TranscriptItem(Key);
 
+/// <summary>What a tool did to one file: changed it, created it, deleted it, or moved it (and maybe changed it).</summary>
+public enum FileChangeKind { Modified, Created, Deleted, Moved }
+
+/// <summary>One file a tool changed, with its own diff (omp's code-frame lines or a unified diff).</summary>
+/// <param name="Path">The file as it is after the change (the new path of a moved file).</param>
+/// <param name="MovedFrom">The path it had before a move; null otherwise.</param>
+public sealed record FileChange(string Path, FileChangeKind Kind, string? Diff, string? MovedFrom = null)
+{
+    /// <summary>A move within the same folder: the file was renamed ("Renamed", not "Moved").</summary>
+    public bool IsRename => Kind == FileChangeKind.Moved && MovedFrom is { } from && SameFolder(from, Path);
+
+    /// <summary>Both paths are in the same folder (a move between them is a rename).</summary>
+    public static bool SameFolder(string a, string b) => string.Equals(Folder(a), Folder(b), StringComparison.Ordinal);
+
+    private static string Folder(string path) => path[..(path.LastIndexOfAny(['/', '\\']) + 1)];
+}
+
 /// <param name="Summary">What the call does in a few words (the command, the path, the query), from its arguments.</param>
 /// <param name="Diff">Unified diff of a file edit (omp's edit tool puts it in the result details).</param>
 /// <param name="Took">How long it ran (start to end event), once it ended; null for history loaded from a file.</param>
 /// <param name="ResultNote">What a search found, from the result's details ("Found 12 files"); null when it says nothing.</param>
+/// <param name="Changes">The files the call changed, one entry per file (a patch may change several); null when it changed
+/// none or the client cannot tell.</param>
 public sealed record ToolItem(long Key, string ToolCallId, string Name, string Args, ToolStatus Status, string? Output,
-    string Summary = "", string? Diff = null, DateTimeOffset? StartedAt = null, TimeSpan? Took = null, string? ResultNote = null) : TranscriptItem(Key);
+    string Summary = "", string? Diff = null, DateTimeOffset? StartedAt = null, TimeSpan? Took = null, string? ResultNote = null,
+    IReadOnlyList<FileChange>? Changes = null) : TranscriptItem(Key);
 
 /// <summary>The end of a run, kept in the conversation (Claude Code's "Worked for 4m 46s"): how long, what it did.</summary>
 public sealed record TurnEndItem(long Key, TimeSpan Took, bool Interrupted, int Tools, int FilesChanged) : TranscriptItem(Key);

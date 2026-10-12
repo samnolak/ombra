@@ -419,6 +419,71 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
             await Stream("text_delta", "Done. The greeting now says **Hello**.\n\n- Changed `greet` in `src/hello.py`\n- The tests pass (4 of 4)\n- `ruff` is not installed, so style was not checked\n\n```python\ndef greet():\n    print('Hello')\n```\n\nWant me to add a test for the new text?");
         }
     }
+    else if (!aborted && scenario == "showcase")
+    {
+        // Every kind of step a real turn has, at once (no pacing), for design screenshots: a run of reads and searches, a
+        // command, an edit with changes inside lines, files created (edit op "create", and write), deleted, renamed, one
+        // call changing two files (perFileResults), a failing command. Shapes as omp 18.8 reports them (edit details:
+        // op / move / sourcePath / perFileResults; code-frame diffs "+12|code").
+        void Message(string text, string id, string name, object args)
+        {
+            Emit(new { type = "message_start", message = new { role = "assistant", content = Array.Empty<object>() } });
+            if (text.Length > 0) Emit(new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = text } });
+            var content = new List<object>();
+            if (text.Length > 0) content.Add(new { type = "text", text });
+            content.Add(new { type = "toolCall", id, name, arguments = args });
+            Emit(new { type = "message_end", message = new { role = "assistant", content, stopReason = "toolUse" } });
+        }
+        void Step(string text, string id, string name, object args, string output, object? details = null, bool fail = false)
+        {
+            Message(text, id, name, args);
+            Emit(new { type = "tool_execution_start", toolCallId = id, toolName = name, args });
+            Emit(new { type = "tool_execution_end", toolCallId = id, toolName = name, isError = fail, result = new { content = new[] { new { type = "text", text = output } }, details } });
+        }
+        Step("I'll look around first.", "x1", "read", new { path = "src/hello.py" }, "def greet():\n    print('Hi')\n");
+        Step("", "x2", "read", new { path = "src/cli.py" }, "import sys\nfrom src.hello import greet\n\n\ndef main():\n    greet()\n");
+        Step("", "x3", "grep", new { pattern = "greet\\(", path = "src" }, "src/cli.py:6:    greet()\nsrc/hello.py:1:def greet():", new { matchCount = 2, fileCount = 2 });
+        Step("", "x4", "glob", new { pattern = "tests/**/*.py" }, "tests/test_hello.py\ntests/test_cli.py", new { fileCount = 2 });
+        Step("Running the tests to see where we start.", "x5", "bash", new { command = "python -m pytest -q" },
+            "tests/test_hello.py::test_greet PASSED\ntests/test_hello.py::test_name PASSED\ntests/test_cli.py::test_help PASSED\n4 passed in 0.31s");
+        Step("", "x6", "edit", new { path = "src/hello.py" }, "Updated src/hello.py", new
+        {
+            op = "update", path = "src/hello.py", firstChangedLine = 2,
+            diff = " 1|def greet(name: str = \"world\"):\n-2|    print('Hi')  # old greeting\n+2|    print(f\"Hello, {name}!\")  # new greeting\n 3|\n 4|\n\n 12|def main():\n-13|    greet()\n+13|    greet(sys.argv[1] if len(sys.argv) > 1 else \"world\")\n+14|    return 0\n 15|\n",
+        });
+        Step("Adding tests for the new greeting.", "x7", "edit", new { path = "tests/test_greet.py" }, "Created tests/test_greet.py", new
+        {
+            op = "create", path = "tests/test_greet.py", firstChangedLine = 1,
+            diff = "+1|import pytest\n+2|from src.hello import greet\n+3|\n+4|\n+5|def test_default(capsys):\n+6|    greet()\n+7|    assert capsys.readouterr().out == \"Hello, world!\\n\"\n+8|\n+9|\n+10|@pytest.mark.parametrize(\"name\", [\"Ann\", \"Bob\"])\n+11|def test_named(capsys, name):\n+12|    greet(name)\n+13|    assert capsys.readouterr().out == f\"Hello, {name}!\\n\"\n",
+        });
+        Step("", "x8", "write", new { path = "docs/GREETING.md", content = "# Greeting\n\n`greet(name)` prints `Hello, <name>!`.\nWithout a name it greets the world.\n" }, "Successfully wrote 92 bytes to docs/GREETING.md");
+        Step("The old module is unused now.", "x9", "edit", new { path = "src/legacy_greet.py" }, "Deleted src/legacy_greet.py", new
+        {
+            op = "delete", path = "src/legacy_greet.py",
+            diff = "-1|# Kept for the 0.x CLI.\n-2|def legacy_greet():\n-3|    print('Hi')\n-4|\n-5|\n-6|def shout():\n-7|    print('HI')\n",
+        });
+        Step("", "x10", "edit", new { path = "src/util.py" }, "Moved src/util.py to src/helpers.py", new
+        {
+            op = "update", path = "src/helpers.py", move = "src/helpers.py", sourcePath = "src/util.py", firstChangedLine = 1,
+            diff = "-1|\"\"\"Odds and ends.\"\"\"\n+1|\"\"\"Helpers for the greeting CLI.\"\"\"\n 2|\n 3|def clamp(n, lo, hi):\n",
+        });
+        Step("Updating the callers in one go.", "x11", "edit", new { input = "*** Begin Patch" }, "Updated 2 files", new
+        {
+            diff = " 1|import sys\n-2|from src.util import clamp\n+2|from src.helpers import clamp\n 3|from src.hello import greet\n",
+            firstChangedLine = 2,
+            perFileResults = new object[]
+            {
+                new { path = "src/cli.py", op = "update", firstChangedLine = 2, diff = " 1|import sys\n-2|from src.util import clamp\n+2|from src.helpers import clamp\n 3|from src.hello import greet\n" },
+                new { path = "tests/test_cli.py", op = "update", firstChangedLine = 3, diff = " 2|\n-3|from src.util import clamp\n+3|from src.helpers import clamp\n 4|\n" },
+            },
+        });
+        Step("Checking the style too.", "x12", "bash", new { command = "ruff check src" }, "bash: ruff: command not found\nexit code 127", fail: true);
+        Step("", "x13", "bash", new { command = "python -m pytest -q" }, "6 passed in 0.33s");
+        Emit(new { type = "message_start", message = new { role = "assistant", content = Array.Empty<object>() } });
+        const string done = "Done. `greet` takes a name now and says **Hello, <name>!**.\n\n- Tests: 6 of 6 pass\n- `ruff` is not installed, so style was not checked";
+        sb.Append(done);
+        Emit(new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = done } });
+    }
     else if (!aborted && scenario == "markdown")
     {
         Emit(new { type = "message_update", assistantMessageEvent = new { type = "thinking_delta", contentIndex = 0, delta = "Considering the file layout first." } });
@@ -428,6 +493,37 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
         Emit(new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = md } });
         Emit(new { type = "tool_execution_start", toolCallId = "e1", toolName = "edit", args = new { path = "hello.py", edits = new[] { new { op = "update" } } } });
         Emit(new { type = "tool_execution_end", toolCallId = "e1", toolName = "edit", result = new { content = new[] { new { type = "text", text = "Updated hello.py" } }, details = new { diff = "--- a/hello.py\n+++ b/hello.py\n@@ -1,2 +1,2 @@\n def greet():\n-    print('Hi')\n+    print('Hello')\n" } } });
+    }
+    else if (!aborted && scenario == "explore")
+    {
+        // A run of reads and searches, paced (FAKE_OMP_PACE_MS, default 40), between short texts, for the exploration
+        // group's live states (ChatReviewRecorder.Shoot_an_exploration): "Exploring…" while a step runs, then "Explored".
+        var pace = int.TryParse(Environment.GetEnvironmentVariable("FAKE_OMP_PACE_MS"), out var pm) ? pm : 40;
+        async Task Step(string text, string id, string name, object args, string output, object? details = null)
+        {
+            if (aborted) return;
+            Emit(new { type = "message_start", message = new { role = "assistant", content = Array.Empty<object>() } });
+            if (text.Length > 0) Emit(new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = text } });
+            var content = new List<object>();
+            if (text.Length > 0) content.Add(new { type = "text", text });
+            content.Add(new { type = "toolCall", id, name, arguments = args });
+            Emit(new { type = "message_end", message = new { role = "assistant", content, stopReason = "toolUse" } });
+            Emit(new { type = "tool_execution_start", toolCallId = id, toolName = name, args });
+            try { await Task.Delay(pace * 8, ct); } catch (OperationCanceledException) { aborted = true; return; }
+            Emit(new { type = "tool_execution_end", toolCallId = id, toolName = name, isError = false, result = new { content = new[] { new { type = "text", text = output } }, details } });
+        }
+        await Step("Let me find where the greeting lives.", "p1", "grep", new { pattern = "def greet", path = "src" }, "src/hello.py:1:def greet():", new { matchCount = 1, fileCount = 1 });
+        await Step("", "p2", "read", new { path = "src/hello.py" }, "def greet():\n    print('Hi')\n");
+        await Step("", "p3", "glob", new { pattern = "tests/**/*.py" }, "tests/test_hello.py\ntests/test_cli.py", new { fileCount = 2 });
+        await Step("", "p4", "read", new { path = "tests/test_hello.py" }, "def test_greet(capsys):\n    greet()\n    assert capsys.readouterr().out == 'Hi\\n'\n");
+        await Step("", "p5", "ls", new { path = "src" }, "hello.py\ncli.py\nutil.py");
+        if (!aborted)
+        {
+            Emit(new { type = "message_start", message = new { role = "assistant", content = Array.Empty<object>() } });
+            const string found = "`greet` is in `src/hello.py` and one test checks its output.";
+            sb.Append(found);
+            Emit(new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = found } });
+        }
     }
     else if (!aborted && scenario == "markdown-stream")
     {
@@ -1002,7 +1098,7 @@ while (true)
                 "multi" when msg.Contains("FOREVER", StringComparison.Ordinal) => (100000, 20),
                 "multi" when msg.Contains("LONG", StringComparison.Ordinal) => (longDeltas, 25),
                 _ when scenario.StartsWith("queue-stream", StringComparison.Ordinal) => (60, 20),
-                "markdown" or "markdown-stream" or "session" or "plan" or "subagents" => (0, 0),
+                "markdown" or "markdown-stream" or "session" or "showcase" or "explore" or "plan" or "subagents" => (0, 0),
                 _ => (50, 0),
             };
             var promptImages = cmd?["images"] as JsonArray;

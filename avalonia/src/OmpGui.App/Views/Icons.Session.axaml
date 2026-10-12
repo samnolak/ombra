@@ -22,4 +22,6 @@
   <StreamGeometry x:Key="IconBolt">M13 3 L5.5 13.5 H11.5 L10.5 21 L18.5 10 H12.5 Z</StreamGeometry>
   <StreamGeometry x:Key="IconExpand">M3.5 12 H20.5 M7 8.5 L3.5 12 L7 15.5 M17 8.5 L20.5 12 L17 15.5</StreamGeometry>
   <StreamGeometry x:Key="IconAdvisor">M2.5 12 C5 7.5 8.3 5.5 12 5.5 C15.7 5.5 19 7.5 21.5 12 C19 16.5 15.7 18.5 12 18.5 C8.3 18.5 5 16.5 2.5 12 Z M12 9 A3 3 0 1 1 12 15 A3 3 0 1 1 12 9 Z</StreamGeometry>
+  <!-- A tool call that runs: three quarters of a circle, from the top round to the left (it pulses; nothing spins) -->
+  <StreamGeometry x:Key="IconSpinner">M12 4.5 A7.5 7.5 0 1 1 4.5 12</StreamGeometry>
 </ResourceDictionary>

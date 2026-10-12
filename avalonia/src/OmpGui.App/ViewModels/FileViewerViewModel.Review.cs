@@ -11,26 +11,34 @@ public enum DiffRowKind { Hunk, Context, Added, Removed }
 
 /// <summary>
 /// A row of the viewer's Changes: a hunk's header (with Revert) or one line, which takes a comment for omp (the "+" at
-/// its start, as in Codex's review pane).
+/// its start, as in Codex's review pane). A line reads as the conversation's diffs do (Controls/DiffView): its number in
+/// the last commit and in the file now (two gutters), a bar and a fill when it changed, and the words that changed in it.
 /// </summary>
-public sealed partial class DiffRowViewModel(FileViewerViewModel owner, DiffRowKind kind, string text, int? number = null, DiffHunk? hunk = null,
-    bool startsInBlock = false) : ObservableObject
+public sealed partial class DiffRowViewModel(FileViewerViewModel owner, DiffRowKind kind, string text, int? oldNumber = null, int? newNumber = null,
+    DiffHunk? hunk = null, bool startsInBlock = false, IReadOnlyList<DiffWords.Span>? marks = null) : ObservableObject
 {
     public FileViewerViewModel Owner { get; } = owner;
     public DiffRowKind Kind { get; } = kind;
     /// <summary>The line (a hunk row: git's "@@ -12,7 +12,9 @@" with the code around it).</summary>
     public string Text { get; } = text;
+    /// <summary>The line's number in the last commit (null for an added line).</summary>
+    public int? OldNumber { get; } = oldNumber;
+    /// <summary>Its number in the file now (null for a removed line).</summary>
+    public int? NewNumber { get; } = newNumber;
     /// <summary>Its number in the file now; a removed line's in the last commit.</summary>
-    public int? Number { get; } = number;
+    public int? Number => NewNumber ?? OldNumber;
     public DiffHunk? Hunk { get; } = hunk;
     /// <summary>The line begins inside a block comment or string that started above (colouring, SyntaxHighlighter).</summary>
     public bool StartsInBlock { get; } = startsInBlock;
+    /// <summary>The words that changed, against the line it replaced or that replaced it (Controls/DiffWords); null: none marked.</summary>
+    public IReadOnlyList<DiffWords.Span>? Marks { get; } = marks;
 
     public bool IsHunk => Kind == DiffRowKind.Hunk;
     public bool IsLine => Kind != DiffRowKind.Hunk;
     public bool IsAdded => Kind == DiffRowKind.Added;
     public bool IsRemoved => Kind == DiffRowKind.Removed;
-    public string NumberText => Number?.ToString(CultureInfo.InvariantCulture) ?? "";
+    public string OldNumberText => OldNumber?.ToString(CultureInfo.InvariantCulture) ?? "";
+    public string NewNumberText => NewNumber?.ToString(CultureInfo.InvariantCulture) ?? "";
     public string Sign => Kind switch { DiffRowKind.Added => "+", DiffRowKind.Removed => "−", _ => "" };
     public string CommentTip => Number is { } n ? $"Comment on line {n}" : "Comment on this line";
 
@@ -161,24 +169,27 @@ public sealed partial class FileViewerViewModel
             if (DiffRows.Count >= MaxDiffRows) cut = true;
             else DiffRows.Add(new DiffRowViewModel(this, DiffRowKind.Hunk, hunk.Header.TrimEnd('\r'), hunk: hunk));
             int oldNo = hunk.OldStart, newNo = hunk.NewStart;
-            var inBlock = false;
+            var lines = new List<(DiffRowKind Kind, string Text, int? Old, int? New)>();
             foreach (var raw in hunk.Lines)
             {
                 if (raw.Length == 0 || raw[0] == '\\') continue; // "\ No newline at end of file"
                 var kind = raw[0] switch { '+' => DiffRowKind.Added, '-' => DiffRowKind.Removed, _ => DiffRowKind.Context };
-                var number = kind == DiffRowKind.Removed ? oldNo++ : newNo++;
-                if (kind == DiffRowKind.Context) oldNo++;
+                int? old = kind == DiffRowKind.Added ? null : oldNo++;
+                int? @new = kind == DiffRowKind.Removed ? null : newNo++;
                 if (kind == DiffRowKind.Added) added++;
                 if (kind == DiffRowKind.Removed) removed++;
-                if (DiffRows.Count >= MaxDiffRows)
-                {
-                    cut = true;
-                    continue;
-                }
-                var text = raw[1..].TrimEnd('\r').Replace("\t", "    ");
+                if (DiffRows.Count + lines.Count >= MaxDiffRows) cut = true;
+                else lines.Add((kind, raw[1..].TrimEnd('\r').Replace("\t", "    "), old, @new));
+            }
+            // The words that changed in a line replaced by another (removed lines, then the added ones)
+            var marks = DiffWords.Mark(lines.Count, i => lines[i].Kind switch { DiffRowKind.Removed => -1, DiffRowKind.Added => 1, _ => 0 }, i => lines[i].Text);
+            var inBlock = false;
+            for (var i = 0; i < lines.Count; i++)
+            {
+                var (kind, text, old, @new) = lines[i];
                 var starts = inBlock;
                 SyntaxHighlighter.Tokenize(text, lang, ref inBlock);
-                DiffRows.Add(new DiffRowViewModel(this, kind, text, number, hunk, starts));
+                DiffRows.Add(new DiffRowViewModel(this, kind, text, old, @new, hunk, starts, marks[i]));
             }
         }
         DiffStats = string.Join(" ", new[] { added > 0 ? $"+{added}" : "", removed > 0 ? $"−{removed}" : "" }.Where(s => s.Length > 0));

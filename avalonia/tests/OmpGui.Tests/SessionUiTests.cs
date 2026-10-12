@@ -58,7 +58,7 @@ public sealed class SessionUiTests
     }
 
     [AvaloniaFact]
-    public async Task Sidebar_lists_sessions_new_session_and_switching_back()
+    public async Task Sidebar_lists_sessions_new_chat_and_switching_back()
     {
         var (w, vm, _) = await OpenAsync();
         Assert.True(w.FindControl<ListBox>("SessionList")!.IsEffectivelyVisible);
@@ -67,9 +67,10 @@ public sealed class SessionUiTests
         Assert.True(vm.Sessions[0].IsCurrent);
         Assert.Equal("first topic", vm.SessionTitle);
 
+        // ⌘N: a new chat outside the project
         var mod = w.GetPlatformSettings()!.HotkeyConfiguration.CommandModifiers;
         w.KeyPress(Key.N, (RawInputModifiers)mod, PhysicalKey.N, null);
-        await Until(() => vm.Rows.Count == 0 && vm.SessionTitle == "New session" && vm.Phase == SessionPhase.Ready, "new session");
+        await Until(() => vm.Rows.Count == 0 && vm.SessionTitle == "New chat" && vm.IsProjectless && vm.Phase == SessionPhase.Ready, "new chat");
         await SendAsync(w, vm, "second topic");
         await Until(() => vm.Sessions.Count == 2 && vm.Sessions[0].Title == "second topic", "both listed");
         Shot(w, "ui-sessions-sidebar");

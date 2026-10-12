@@ -76,7 +76,7 @@ public sealed class MultiSessionTests
     private static async Task<SessionController> NewChatAsync(MainViewModel vm)
     {
         var before = vm.Session;
-        vm.NewSessionCommand.Execute(null);
+        vm.NewChatCommand.Execute(null);
         await Until(() => vm.Session != before && vm.Phase == SessionPhase.Ready && vm.Rows.Count == 0, "a new chat");
         return vm.Session;
     }
@@ -388,7 +388,7 @@ public sealed class MultiSessionTests
         // The crash comes a moment after the message: by then another chat is shown
         vm.ComposerText = "LONG then CRASH";
         vm.SendCommand.Execute(null);
-        vm.NewSessionCommand.Execute(null);
+        vm.NewChatCommand.Execute(null);
         await Until(() => vm.Session != a, "B shown");
         await Until(() => a.Snapshot().Phase == SessionPhase.Faulted, "A's omp crashed");
         await Until(() => Row(vm, file)?.Status == SessionStatus.Error, "A marked as stopped by an error");
@@ -645,7 +645,7 @@ public sealed class MultiSessionTests
         // A new chat from a working one, left untouched: it closes, and its row goes with it
         var untouched = await NewChatAsync(vm);
         var untouchedFile = untouched.SessionFile!;
-        await Until(() => Row(vm, untouchedFile) is { IsCurrent: true, Title: "New session" }, "the new chat listed");
+        await Until(() => Row(vm, untouchedFile) is { IsCurrent: true, Title: "New chat" }, "the new chat listed");
         await vm.OpenSessionCommand.ExecuteAsync(Row(vm, chats[0].File));
         Assert.DoesNotContain(untouched, vm.OpenChats);
         Assert.Null(Row(vm, untouchedFile));
@@ -712,6 +712,90 @@ public sealed class MultiSessionTests
 
         vm.AbortCommand.Execute(null);
         await Until(() => vm.Phase == SessionPhase.Ready, "A stopped");
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    /// <summary>A window whose spare omp starts as soon as its first chat is ready.</summary>
+    private static async Task<(MainWindow W, MainViewModel Vm)> OpenWithSpareAsync()
+    {
+        var cwd = SessionCatalog.ResolveLinks(TestProcesses.TempDir("multi-project"));
+        var s = new SessionController(TestProcesses.FakeFactory("multi", TestProcesses.TempDir("multi-sessions")), new LaunchRequest(cwd, ApprovalMode: "write"));
+        var vm = new MainViewModel(s, new AppArgs()) { SpareDelay = TimeSpan.Zero };
+        var w = new MainWindow { DataContext = vm, Width = 1180, Height = 760, Notifier = new AttentionTests.RecordingNotifier() };
+        w.Show();
+        vm.OnWindowOpened();
+        await Until(() => vm.Phase == SessionPhase.Ready, "ready");
+        return (w, vm);
+    }
+
+    [AvaloniaFact]
+    public async Task New_chat_takes_over_the_ready_spare_and_can_send_at_once()
+    {
+        var (w, vm) = await OpenWithSpareAsync();
+        await RunAsync(vm, "first in the project");
+        await Until(() => vm.Spare?.Snapshot().Phase == SessionPhase.Ready, "the spare ready");
+        var spare = vm.Spare!;
+        var project = vm.Session;
+
+        // The click shows the spare's omp, ready: no omp starts, and the message box sends at once
+        vm.NewChatCommand.Execute(null);
+        Assert.Same(spare, vm.Session);
+        Assert.Equal(SessionPhase.Ready, vm.Phase);
+        Assert.True(vm.IsProjectless);
+        Assert.Equal([project, spare], vm.OpenChats);
+        vm.ComposerText = "hello in a chat";
+        Assert.True(vm.SendCommand.CanExecute(null));
+        vm.ComposerText = "";
+
+        // Listed under Chats, apart from the project; and the next spare is prepared
+        await Until(() => vm.SessionGroups.SingleOrDefault(g => g.IsChatsGroup) is { Items: [{ IsCurrent: true }] }, "the chat under Chats");
+        Assert.Contains(vm.SessionGroups, g => g.IsProject && g.Items.Any(i => i.Title == "first in the project"));
+        await Until(() => vm.Spare is { } next && next != spare && next.Snapshot().Phase == SessionPhase.Ready, "the next spare");
+        await RunAsync(vm, "hello in a chat");
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task A_spare_started_with_another_permission_mode_is_not_served()
+    {
+        var (w, vm) = await OpenWithSpareAsync();
+        await RunAsync(vm, "first in the project");
+        await Until(() => vm.Spare?.Snapshot().Phase == SessionPhase.Ready, "the spare ready");
+        var stale = vm.Spare!;
+        var stalePid = stale.ProcessId;
+        await vm.SetApprovalModeCommand.ExecuteAsync("always-ask");
+        await Until(() => vm.Phase == SessionPhase.Ready && vm.Session.CurrentLaunch.ApprovalMode == "always-ask", "the project's omp switched");
+
+        vm.NewChatCommand.Execute(null);
+        Assert.NotSame(stale, vm.Session);
+        Assert.Equal("always-ask", vm.Session.CurrentLaunch.ApprovalMode);
+        Assert.True(vm.IsProjectless);
+        await Until(() => vm.Phase == SessionPhase.Ready, "the new chat's own omp ready");
+        await Until(() => !Alive(stalePid), "the stale spare stopped");
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task A_chat_left_untouched_takes_its_empty_folder_with_it()
+    {
+        var (w, vm, _, _, _) = await OpenAsync();
+        await RunAsync(vm, "first in the project");
+        var chat = await NewChatAsync(vm);
+        var folder = chat.CurrentLaunch.WorkingDirectory!;
+        Assert.True(Directory.Exists(folder));
+        await vm.OpenSessionCommand.ExecuteAsync(vm.Sessions.Single(i => i.Title == "first in the project"));
+        await Until(() => !vm.OpenChats.Contains(chat), "the untouched chat closed");
+        await Until(() => !Directory.Exists(folder), "its folder removed");
+
+        // A chat something was said in keeps its folder
+        var kept = await NewChatAsync(vm);
+        await RunAsync(vm, "hello in a chat");
+        await vm.OpenSessionCommand.ExecuteAsync(vm.Sessions.Single(i => i.Title == "first in the project"));
+        await Task.Delay(500);
+        Assert.True(Directory.Exists(kept.CurrentLaunch.WorkingDirectory));
         await vm.DisposeAsync();
         w.Close();
     }

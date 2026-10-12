@@ -69,10 +69,19 @@
           <SolidColorBrush x:Key="GuiModeAcceptEdits" Color="#FF8700FF" />
           <SolidColorBrush x:Key="GuiModePlan" Color="#FF006666" />
           <SolidColorBrush x:Key="GuiModeBypass" Color="#FFAB2B3F" />
-          <SolidColorBrush x:Key="GuiDiffAddedBg" Color="#2E1E9E3C" />
+          <!-- Diffs (Controls/DiffView, the Files pane's Changes): a line's fill, the stronger fill of the words that changed
+               in it, the solid bar at its left edge and the sign / count colour; a new file's lighter fill; the "Moved" badge -->
+          <SolidColorBrush x:Key="GuiDiffAddedBg" Color="#262DA44E" />
+          <SolidColorBrush x:Key="GuiDiffAddedWordBg" Color="#6B2DA44E" />
+          <SolidColorBrush x:Key="GuiDiffAddedBar" Color="#FF1F883D" />
           <SolidColorBrush x:Key="GuiDiffAddedText" Color="#FF17692D" />
-          <SolidColorBrush x:Key="GuiDiffRemovedBg" Color="#29CD2054" />
+          <SolidColorBrush x:Key="GuiDiffNewFileBg" Color="#142DA44E" />
+          <SolidColorBrush x:Key="GuiDiffRemovedBg" Color="#26E5484D" />
+          <SolidColorBrush x:Key="GuiDiffRemovedWordBg" Color="#66E5484D" />
+          <SolidColorBrush x:Key="GuiDiffRemovedBar" Color="#FFCF222E" />
           <SolidColorBrush x:Key="GuiDiffRemovedText" Color="#FFB42346" />
+          <SolidColorBrush x:Key="GuiDiffMovedBg" Color="#1F2A78D6" />
+          <SolidColorBrush x:Key="GuiDiffMovedText" Color="#FF1B67B2" />
           <SolidColorBrush x:Key="GuiStatusRunning" Color="#FF2C7A39" />
           <SolidColorBrush x:Key="GuiStatusWaiting" Color="#FFB5661B" />
           <SolidColorBrush x:Key="GuiStatusUnread" Color="#FFE0A100" />
@@ -86,9 +95,6 @@
           <SolidColorBrush x:Key="GuiCodeNumber" Color="#FFA6501A" />
           <SolidColorBrush x:Key="GuiCodeType" Color="#FF1D5FC2" />
           <SolidColorBrush x:Key="GuiCodeFunction" Color="#FF9A3412" />
-          <!-- diff row fills used by the transcript styles -->
-          <SolidColorBrush x:Key="DiffAddedBackgroundBrush" Color="#2E1E9E3C" />
-          <SolidColorBrush x:Key="DiffRemovedBackgroundBrush" Color="#29CD2054" />
           <!-- Fluent theme keys -->
           <SolidColorBrush x:Key="TextControlForeground" Color="#FF141413" />
           <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#FF141413" />
@@ -305,10 +311,19 @@
           <SolidColorBrush x:Key="GuiModeAcceptEdits" Color="#FFAF87FF" />
           <SolidColorBrush x:Key="GuiModePlan" Color="#FF48968C" />
           <SolidColorBrush x:Key="GuiModeBypass" Color="#FFFF6B80" />
-          <SolidColorBrush x:Key="GuiDiffAddedBg" Color="#2445B653" />
-          <SolidColorBrush x:Key="GuiDiffAddedText" Color="#FF7DCB8A" />
-          <SolidColorBrush x:Key="GuiDiffRemovedBg" Color="#26E0505F" />
-          <SolidColorBrush x:Key="GuiDiffRemovedText" Color="#FFF0909B" />
+          <!-- Diffs: saturated green / red at a sixth, so the fills read as colour on the warm charcoal, not as mud; the
+               changed words at a half, well apart from the line's fill -->
+          <SolidColorBrush x:Key="GuiDiffAddedBg" Color="#2B3FB950" />
+          <SolidColorBrush x:Key="GuiDiffAddedWordBg" Color="#853FB950" />
+          <SolidColorBrush x:Key="GuiDiffAddedBar" Color="#FF3FB950" />
+          <SolidColorBrush x:Key="GuiDiffAddedText" Color="#FF56D364" />
+          <SolidColorBrush x:Key="GuiDiffNewFileBg" Color="#173FB950" />
+          <SolidColorBrush x:Key="GuiDiffRemovedBg" Color="#2EF85149" />
+          <SolidColorBrush x:Key="GuiDiffRemovedWordBg" Color="#85F85149" />
+          <SolidColorBrush x:Key="GuiDiffRemovedBar" Color="#FFF85149" />
+          <SolidColorBrush x:Key="GuiDiffRemovedText" Color="#FFFF7B72" />
+          <SolidColorBrush x:Key="GuiDiffMovedBg" Color="#334C8FE0" />
+          <SolidColorBrush x:Key="GuiDiffMovedText" Color="#FF8CC2FF" />
           <SolidColorBrush x:Key="GuiStatusRunning" Color="#FF89D185" />
           <SolidColorBrush x:Key="GuiStatusWaiting" Color="#FFE09A4F" />
           <SolidColorBrush x:Key="GuiStatusUnread" Color="#FFFFD24D" />
@@ -322,9 +337,6 @@
           <SolidColorBrush x:Key="GuiCodeNumber" Color="#FFF0A45D" />
           <SolidColorBrush x:Key="GuiCodeType" Color="#FF7AB8FF" />
           <SolidColorBrush x:Key="GuiCodeFunction" Color="#FFE8B26A" />
-          <!-- diff row fills used by the transcript styles -->
-          <SolidColorBrush x:Key="DiffAddedBackgroundBrush" Color="#2445B653" />
-          <SolidColorBrush x:Key="DiffRemovedBackgroundBrush" Color="#26E0505F" />
           <!-- Fluent theme keys -->
           <SolidColorBrush x:Key="TextControlForeground" Color="#FFFAF9F5" />
           <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#FFFAF9F5" />

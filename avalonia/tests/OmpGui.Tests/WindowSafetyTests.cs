@@ -143,7 +143,7 @@ public sealed class WindowSafetyTests
         var items = bar.Items.OfType<NativeMenuItem>().SelectMany(m => m.Menu!.Items.OfType<NativeMenuItem>())
             .Where(i => i is not NativeMenuItemSeparator).ToDictionary(i => i.Header!);
         var cmd = w.GetPlatformSettings()!.HotkeyConfiguration.CommandModifiers;
-        Assert.Equal(new KeyGesture(Key.N, cmd), items["New Session"].Gesture);
+        Assert.Equal(new KeyGesture(Key.N, cmd), items["New Chat"].Gesture);
         Assert.Equal(new KeyGesture(Key.O, cmd), items["Open Folder…"].Gesture);
         Assert.Equal(new KeyGesture(Key.M, cmd), items["Minimize"].Gesture);
         Assert.Equal(new KeyGesture(Key.W, cmd), items["Close"].Gesture);

@@ -312,7 +312,7 @@ public sealed class CorporateTrustTests
         await Until(() => vm.Phase == SessionPhase.Running, "A working");
         var a = vm.Session;
         var pidA = a.ProcessId;
-        vm.NewSessionCommand.Execute(null);
+        vm.NewChatCommand.Execute(null);
         await Until(() => vm.Session != a && vm.Phase == SessionPhase.Ready, "B ready");
         var b = vm.Session;
         var pidB = b.ProcessId;

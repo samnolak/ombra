@@ -107,7 +107,7 @@ extension commands that omp lists itself keep going to omp.
 
 | Command | RPC | GUI |
 |---|---|---|
-| `/new` | TUI | **Done** — New session (sidebar, Ctrl+N); `/new` starts one |
+| `/new` | TUI | **Done** — a project's **+** or *New session here*; `/new` starts one in the current project (the sidebar's New chat, Ctrl+N, starts a chat outside any project) |
 | `/resume` | TUI | **Done** — the sidebar; `/resume [text]` shows it filtered |
 | `/rename [title]` | yes | **Done** — session menu › Rename (`set_session_name`); `/rename` without a title (omp names it) typed |
 | `/session info` | yes | **Done** — session menu › Copy session ID, Copy session file path |

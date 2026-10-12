@@ -341,6 +341,10 @@ public sealed class FilesPaneTests
         Assert.True(Row("read", "src/app.py").HasFile);
         Assert.True(Row("edit", "src/app.py", "   1|a\n+   2|b\n").HasFile);
         Assert.Equal(2, Row("edit", "src/app.py", "   1|a\n+   2|b\n").FirstChangedLine);
+        // A patch over two files opens the first file it changed, never its summary
+        var patch = (ToolRowViewModel)RowViewModel.Create(new ToolItem(1, "t", "edit", "{}", ToolStatus.Succeeded, "", "2 files", " 1|x\n+2|y\n",
+            Changes: [new FileChange("src/cli.py", FileChangeKind.Modified, " 1|x\n+2|y\n"), new FileChange("tests/test_cli.py", FileChangeKind.Modified, "+3|z\n")]));
+        Assert.Equal((true, "src/cli.py", 2, (FileChangeKind?)null), (patch.HasFile, patch.FilePath, patch.FirstChangedLine, patch.ChangeKind));
         Assert.False(Row("bash", "$ cat src/app.py").HasFile);
         Assert.False(Row("fetch", "https://example.com/a.js").HasFile);
         Assert.False(Row("todo", "init · 3 items").HasFile);
@@ -547,14 +551,18 @@ public sealed class FilesPaneTests
     public void The_change_card_path_opens_the_file_at_its_first_change()
     {
         int? opened = -1;
-        var card = (Border)DiffView.Build("   1|a\n   2|b\n+   3|c\n", "src/x.py", openFile: line => opened = line);
+        var card = (Border)DiffView.Build(new FileChange("src/x.py", FileChangeKind.Modified, " 1|a\n 2|b\n+3|c\n"), openFile: line => opened = line);
         var link = card.GetLogicalDescendants().OfType<Button>().Single(b => b.Classes.Contains("diff-path-link"));
-        Assert.Equal("src/x.py", ((TextBlock)link.Content!).Text);
+        Assert.Equal("src/x.py", string.Concat(((TextBlock)link.Content!).Inlines!.OfType<Avalonia.Controls.Documents.Run>().Select(r => r.Text)));
         link.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
         Assert.Equal(3, opened);
-        // Without a handler the path is plain text (the API is unchanged)
-        var plain = (Border)DiffView.Build("+   1|a\n", "y.py");
+        // Without a handler the path is plain text
+        var plain = (Border)DiffView.Build(new FileChange("y.py", FileChangeKind.Created, "+1|a\n"));
         Assert.DoesNotContain(plain.GetLogicalDescendants().OfType<Button>(), b => b.Classes.Contains("diff-path-link"));
-        Assert.Equal(3, DiffView.FirstChangedLine("--- a\n+++ b\n@@ -1,2 +1,2 @@\n x\n y\n-z\n+w\n"));
+        // A deleted file is its header (with its badge) and "Show N deleted lines" until asked
+        var gone = (Border)DiffView.Build(new FileChange("old.py", FileChangeKind.Deleted, "-1|a\n-2|b\n"), unfolded: false, toggleFold: () => { });
+        Assert.DoesNotContain(gone.GetLogicalDescendants().OfType<Grid>(), g => g.Classes.Contains("diff-row"));
+        Assert.Contains(gone.GetLogicalDescendants().OfType<Button>(), b => b.Content as string == "Show 2 deleted lines");
+        Assert.Contains(gone.GetLogicalDescendants().OfType<TextBlock>(), t => t.Text == "Deleted");
     }
 }

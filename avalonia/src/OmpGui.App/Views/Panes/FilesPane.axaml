@@ -352,14 +352,18 @@
                                     IsVisible="{Binding Owner.CanRevertHunks}" IsEnabled="{Binding !Owner.IsReverting}"
                                     ToolTip.Tip="Put this part back as the last commit has it" AutomationProperties.Name="Revert this hunk" />
                           </Grid>
-                          <Grid Classes="diff-row review" Classes.added="{Binding IsAdded}" Classes.removed="{Binding IsRemoved}" ColumnDefinitions="24,Auto,18,*"
+                          <Grid Classes="diff-row review" Classes.added="{Binding IsAdded}" Classes.removed="{Binding IsRemoved}" ColumnDefinitions="3,24,Auto,Auto,18,*"
                                 IsVisible="{Binding IsLine}">
-                            <Button Classes="icon diff-comment" Command="{Binding CommentCommand}" ToolTip.Tip="{Binding CommentTip}" AutomationProperties.Name="{Binding CommentTip}">
+                            <Border Classes="diff-bar" />
+                            <Button Grid.Column="1" Classes="icon diff-comment" Command="{Binding CommentCommand}" ToolTip.Tip="{Binding CommentTip}" AutomationProperties.Name="{Binding CommentTip}">
                               <ctl:Icon Data="{StaticResource IconPlus}" Size="12" />
                             </Button>
-                            <TextBlock Grid.Column="1" Classes="mono diff-number" Text="{Binding NumberText}" MinWidth="32" TextAlignment="Right" Padding="0,0,8,0" VerticalAlignment="Top" />
-                            <TextBlock Grid.Column="2" Classes="mono diff-sign" Text="{Binding Sign}" VerticalAlignment="Top" />
-                            <ctl:DiffLineText Grid.Column="3" Classes="mono diff-code" Line="{Binding Text}" FileName="{Binding Owner.Name}" StartsInBlock="{Binding StartsInBlock}"
+                            <!-- The line's number in the last commit, then in the file now (a removed line has only the first, an added only the second) -->
+                            <TextBlock Grid.Column="2" Classes="mono diff-number" Text="{Binding OldNumberText}" MinWidth="36" TextAlignment="Right" Padding="0,0,8,0" VerticalAlignment="Top" />
+                            <TextBlock Grid.Column="3" Classes="mono diff-number" Text="{Binding NewNumberText}" MinWidth="36" TextAlignment="Right" Padding="0,0,8,0" VerticalAlignment="Top" />
+                            <TextBlock Grid.Column="4" Classes="mono diff-sign" Text="{Binding Sign}" TextAlignment="Center" VerticalAlignment="Top" />
+                            <ctl:DiffLineText Grid.Column="5" Classes="mono diff-code" Line="{Binding Text}" FileName="{Binding Owner.Name}" StartsInBlock="{Binding StartsInBlock}"
+                                              Marks="{Binding Marks}" IsRemoved="{Binding IsRemoved}"
                                               TextWrapping="Wrap" Padding="0,0,12,0" VerticalAlignment="Top" />
                           </Grid>
                           <Border Classes="diff-comment-box" IsVisible="{Binding IsCommenting}">

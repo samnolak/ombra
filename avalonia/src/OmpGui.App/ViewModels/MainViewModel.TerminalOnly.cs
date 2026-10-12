@@ -60,7 +60,7 @@ public sealed partial class MainViewModel
                     new SessionCardAction("Open Plugins and skills", new RelayCommand(() => { CloseSessionCard(); _ = OpenSettingsAtAsync("plugins"); }))));
                 return true;
             case GuiEquivalent.NewSession:
-                _ = NewSessionCommand.ExecuteAsync(null);
+                _ = NewSessionHereAsync(); // MainViewModel.Chats.cs
                 return true;
             case GuiEquivalent.Sessions:
                 // The sidebar is the GUI's session list; text after /resume filters it

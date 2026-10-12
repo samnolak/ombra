@@ -33,17 +33,15 @@ Files:
   the soft status colours, cards on surface 1 with radius 12. The client is a desktop window: it restyles Fluent's
   controls with the tokens instead of drawing its own.
 
-## Tokens: three layers
+## Tokens: two layers
 
-`Tokens.axaml` has one `ThemeDictionaries` entry per theme (`Light`, `Dark`), each with three layers of brushes, plus
+`Tokens.axaml` has one `ThemeDictionaries` entry per theme (`Light`, `Dark`), each with two layers of brushes, plus
 theme-independent resources after them.
 
 1. **`Gui*`**: the client's semantic tokens, one `SolidColorBrush` each (`GuiTextPrimary`, `GuiSurface1`,
    `GuiStatusErrorSoft`, …). New XAML and C# use only these (C# looks them up by name: `CodeView`, `MarkdownView`,
    `SyntaxHighlighter`).
-2. **Two older alias keys** (`DiffAddedBackgroundBrush`, `DiffRemovedBackgroundBrush`) with the `GuiDiff*Bg` values.
-   Do not add new ones.
-3. **Fluent keys** (`ButtonBackground`, `AccentButtonBackground`, `TextControlBorderBrushFocused`, `ComboBox*`,
+2. **Fluent keys** (`ButtonBackground`, `AccentButtonBackground`, `TextControlBorderBrushFocused`, `ComboBox*`,
    `CheckBox*`, `RadioButton*`, `ToggleSwitch*`, `MenuFlyout*`, `ToolTip*`, `ProgressBar*`, `ScrollBar*`,
    `SystemAccentColor*`, `SystemControlFocusVisual*`, …) so stock controls follow the tokens without per-control
    styles.
@@ -87,7 +85,8 @@ Values are light / dark; contrast is against the window. Only the keys the style
 | `GuiInverse` (+`Hover`, `Pressed`) | #141413 / #FAF9F5 | `inverse` buttons (Stop), tooltips (`GuiTooltip`) |
 | `GuiModeManual` / `AcceptEdits` / `Plan` / `Bypass` | #6B6A64 · #8700FF · #006666 · #AB2B3F / #9C9A92 · #AF87FF · #48968C · #FF6B80 | the permission-mode pill and the mode marks in its menu (the composer and Send keep the accent in every mode) |
 | `GuiStatusRunning` / `Waiting` / `Unread` | #2C7A39 · #B5661B · #E0A100 / #89D185 · #E09A4F · #FFD24D | session status dots: working (pulsing), needs your input (amber; ≥ 3.9:1 on the sidebar), unseen reply (yellow; in the light theme 2.1:1 on the sidebar, under the 3:1 WCAG asks of graphics — open, see QA_AUDIT 8) |
-| `GuiDiffAddedBg` / `Text`, `GuiDiffRemovedBg` / `Text` | green / red at 16–18 % (dark 14–15 %) with AA text | diff rows, calm in dark |
+| `GuiDiffAddedBg` / `WordBg` / `Bar` / `Text`, `GuiDiffRemovedBg` / `WordBg` / `Bar` / `Text` | row fill 15–18 %, changed words 40–52 %, a solid 3 px bar and AA text, in GitHub's green / red (dark: #3FB950 / #F85149) | diff rows (conversation and the Files pane's Changes): fill, word marks inside a changed line, left edge bar, sign and numbers |
+| `GuiDiffNewFileBg`, `GuiDiffMovedBg` / `Text` | a lighter green fill; blue at 12–20 % with AA text | a new file's lines (not a wall of green); the Renamed / Moved badge |
 | `GuiBorderSoft` / `GuiBorder` / `GuiBorderStrong` | ink or ivory at 10 / 20 / 40 % | dividers, menus, tool rows / text boxes, composer / composer while focused, switch track off |
 | `GuiBorderDarkOnly` | transparent / ivory 10 % | card hairline (dark only) |
 | `GuiStatus*Soft` | pale status fills / deep muted fills | badges, `notice`, `banner error`, `chip danger` |

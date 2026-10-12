@@ -62,8 +62,12 @@ Started before M2's exit: side panes (Plan, Background tasks, Files), settings p
 ring and model options, page comments, dictation and self-update are on `main` (parity in [`PARITY.md`](PARITY.md)),
 checked on Linux only ([`PROJECT_STATE.md`](PROJECT_STATE.md)). A release still needs M2's exit.
 
-In 0.0.5: network privacy (omp contacts only added providers; opt-in strict network privacy), sign-out per stored
-account, and in the preview device sizes, area comments and a shrinking, scrolling tab strip.
+In 0.0.6: file changes as one diff card per file with New file / Deleted / Renamed / Moved badges, old and new line
+numbers, colour bars and word-level marks (the Files pane's Changes alike). Tool steps read as verbs with clear status
+marks, commands as console blocks with the exit code, runs of reads and searches fold into *Explored*, and a run's end
+lists the files it changed. New chat (⌘N) starts outside any project in a folder of its own, at once, from an omp
+started ahead of time; the sidebar lists such chats under *Chats*. New chats and sessions start at thinking *Medium*
+instead of omp's *High*.
 
 ## M1 scope: the 15 features (fixed 2026-09-25)
 
