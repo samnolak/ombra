@@ -6,12 +6,14 @@
 #   tools/package/sign.sh windows  <folder> <record>          Authenticode (SHA-256, RFC 3161 timestamp) on OmpGui.exe and
 #                                                             the client's own OmpGui*.dll; verified with signtool verify /pa
 #   tools/package/sign.sh macos    <app> <record>             Developer ID, hardened runtime, packaging/entitlements.plist,
-#                                                             every Mach-O inside, then the bundle; else an ad-hoc signature
+#                                                             every Mach-O inside, then the bundle; else the project's own
+#                                                             self-signed certificate; else an ad-hoc signature
 #   tools/package/sign.sh notarize <zip> <app> <record>       notarytool submit --wait, staple the app, re-zip; else skipped
 #
 # Secrets (all optional; missing = unsigned, the package is still built):
 #   WINDOWS_CERT_PFX_BASE64, WINDOWS_CERT_PASSWORD, WINDOWS_TIMESTAMP_URL (default http://timestamp.digicert.com)
 #   MACOS_CERT_P12_BASE64, MACOS_CERT_PASSWORD, MACOS_SIGN_IDENTITY ("Developer ID Application: … (TEAMID)")
+#   MACOS_SELFSIGN_P12_BASE64, MACOS_SELFSIGN_PASSWORD (tools/release/macos-selfsign-keygen.sh; used without a Developer ID)
 #   APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD (an app-specific password, for notarization)
 set -euo pipefail
 MODE=${1:?mode}; TARGET=${2:?target}
@@ -19,6 +21,7 @@ HERE=$(cd "$(dirname "$0")/../.." && pwd)          # avalonia/
 TMP=$(mktemp -d)
 cleanup() {
   if [ -n "${KEYCHAIN:-}" ]; then security delete-keychain "$KEYCHAIN" 2>/dev/null || true; fi
+  if [ -n "${TRUSTED_CERT:-}" ]; then sudo -n security remove-trusted-cert -d "$TRUSTED_CERT" 2>/dev/null || true; fi
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -49,9 +52,37 @@ case "$MODE" in
     REC=${3:?record}
     APP=$TARGET
     if [ -z "${MACOS_CERT_P12_BASE64:-}" ] || [ -z "${MACOS_CERT_PASSWORD:-}" ] || [ -z "${MACOS_SIGN_IDENTITY:-}" ]; then
+      if [ -n "${MACOS_SELFSIGN_P12_BASE64:-}" ] && [ -n "${MACOS_SELFSIGN_PASSWORD:-}" ]; then
+        # macOS keeps what the user allowed (Documents, Desktop, microphone…) for the app's designated requirement. An
+        # ad-hoc signature's is its cdhash, different in every build: each update lost every permission and macOS asked
+        # again. Signed with one long-lived certificate the requirement is "identifier and this certificate", the same
+        # for every release, so a permission given once stays. Gatekeeper still warns (not a Developer ID).
+        KEYCHAIN="$TMP/selfsign.keychain-db"
+        KCPASS=$(openssl rand -hex 16)
+        printf '%s' "$MACOS_SELFSIGN_P12_BASE64" | base64 -d > "$TMP/selfsign.p12"
+        security create-keychain -p "$KCPASS" "$KEYCHAIN"
+        security set-keychain-settings -lut 3600 "$KEYCHAIN"
+        security unlock-keychain -p "$KCPASS" "$KEYCHAIN"
+        security import "$TMP/selfsign.p12" -k "$KEYCHAIN" -P "$MACOS_SELFSIGN_PASSWORD" -T /usr/bin/codesign >/dev/null
+        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPASS" "$KEYCHAIN" >/dev/null
+        # codesign uses only a trusted identity: trust the certificate for code signing on this (CI) machine while
+        # signing, removed again on exit. Needs sudo without a password, as GitHub's macOS runners have.
+        openssl pkcs12 -in "$TMP/selfsign.p12" -passin "pass:$MACOS_SELFSIGN_PASSWORD" -nokeys -clcerts -out "$TMP/selfsign.pem" 2>/dev/null \
+          || openssl pkcs12 -legacy -in "$TMP/selfsign.p12" -passin "pass:$MACOS_SELFSIGN_PASSWORD" -nokeys -clcerts -out "$TMP/selfsign.pem"
+        sudo -n security add-trusted-cert -d -r trustRoot -p codeSign -k "$KEYCHAIN" "$TMP/selfsign.pem"
+        TRUSTED_CERT="$TMP/selfsign.pem"
+        HASH=$(openssl x509 -in "$TMP/selfsign.pem" -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')
+        codesign --force --deep --keychain "$KEYCHAIN" --sign "$HASH" "$APP"
+        codesign --verify --deep --strict "$APP"
+        REQ=$(codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => //p')
+        case "$REQ" in *"certificate leaf = H\"$(echo "$HASH" | tr 'A-F' 'a-f')\""*|*"certificate root = H\"$(echo "$HASH" | tr 'A-F' 'a-f')\""*) ;;
+          *) echo "unexpected designated requirement: $REQ"; exit 1 ;; esac
+        record "macos: self-signed (project certificate $HASH; permissions stay across updates), verified; not a Developer ID, Gatekeeper will warn"
+        exit 0
+      fi
       codesign --force --deep --sign - "$APP"          # ad-hoc: Apple Silicon refuses unsigned native code; not a Developer ID
       codesign --verify --deep --strict "$APP"
-      record "macos: UNSIGNED — ad-hoc signature only (no Developer ID certificate in the CI secrets); Gatekeeper will warn"
+      record "macos: UNSIGNED — ad-hoc signature only (no certificate in the CI secrets); Gatekeeper will warn, and macOS asks for permissions again after every update"
       exit 0
     fi
     KEYCHAIN="$TMP/signing.keychain-db"

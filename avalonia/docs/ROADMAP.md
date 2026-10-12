@@ -67,7 +67,8 @@ numbers, colour bars and word-level marks (the Files pane's Changes alike). Tool
 marks, commands as console blocks with the exit code, runs of reads and searches fold into *Explored*, and a run's end
 lists the files it changed. New chat (⌘N) starts outside any project in a folder of its own, at once, from an omp
 started ahead of time; the sidebar lists such chats under *Chats*. New chats and sessions start at thinking *Medium*
-instead of omp's *High*.
+instead of omp's *High*. macOS releases are signed with the project's own long-lived certificate instead of ad-hoc,
+so permissions given to the app (Documents, microphone…) stay across updates.
 
 ## M1 scope: the 15 features (fixed 2026-09-25)
 
