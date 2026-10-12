@@ -68,7 +68,11 @@ marks, commands as console blocks with the exit code, runs of reads and searches
 lists the files it changed. New chat (⌘N) starts outside any project in a folder of its own, at once, from an omp
 started ahead of time; the sidebar lists such chats under *Chats*. New chats and sessions start at thinking *Medium*
 instead of omp's *High*. macOS releases are signed with the project's own long-lived certificate instead of ad-hoc,
-so permissions given to the app (Documents, microphone…) stay across updates.
+so permissions given to the app (Documents, microphone…) stay across updates. Quitting the app ends everything it
+started, omp's detached daemon broker and its background jobs included, and a start ends what a crashed or earlier
+version left (macOS and Linux; Windows not verified). The harness template (1.3.0) gains
+on-demand MCP servers: the agent enables Blender or Figma (Desktop) through the `mcp_lazy` tool only when a task needs
+them and disables them afterwards ([`docs/harness.md`](../../docs/harness.md)).
 
 ## M1 scope: the 15 features (fixed 2026-09-25)
 
