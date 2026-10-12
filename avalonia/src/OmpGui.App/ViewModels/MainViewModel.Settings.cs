@@ -721,6 +721,14 @@ public sealed partial class MainViewModel
         }
     }
 
+    /// <summary>The variables Settings → Advanced sets for omp (a null value removes one).</summary>
+    internal IReadOnlyDictionary<string, string?> RuntimeEnvironment() => LoadSettingsOrDefault().Environment;
+
+    private CustomProvidersViewModel? _customProviders;
+
+    /// <summary>Settings → Model providers → Local and custom (omp's models.yml).</summary>
+    public CustomProvidersViewModel CustomProviders => _customProviders ??= new CustomProvidersViewModel(this);
+
     /// <summary>Writes one change to the client's settings file; false (with a message) when it cannot.</summary>
     private bool Persist(Func<OmpRuntimeOptions, OmpRuntimeOptions> change)
     {

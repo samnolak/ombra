@@ -113,8 +113,9 @@ public static class ProviderGate
           }
         }
 
-        const modelsYml = path.join(agentDir, "models.yml");
-        if (fs.existsSync(modelsYml)) {
+        // The file omp reads: models.yml, or models.yaml when only that one exists (its ConfigFile fallback)
+        const modelsYml = ["models.yml", "models.yaml"].map(f => path.join(agentDir, f)).find(f => fs.existsSync(f));
+        if (modelsYml) {
           const doc = Bun.YAML.parse(fs.readFileSync(modelsYml, "utf8"));
           for (const [p, cfg] of Object.entries(doc?.providers ?? {})) {
             added.add(p);

@@ -142,7 +142,7 @@ extension commands that omp lists itself keep going to omp.
 | `/git [revision]` | TUI | **Via omp terminal** (git TUI); branch chip — *Workspace* area |
 | `/hub` | TUI | **Done** — opens Background tasks — *Panes* area |
 | `/login [provider]` | TUI (RPC `login`) | **Done** — Settings › Model providers (RPC sign-in with the browser link / code card) |
-| `/logout [provider]` | TUI (RPC `get_logout_accounts`, `logout`, omp 18.8.0) | **Done** — Settings › Model providers (**Sign out…** on a signed-in provider: pick the stored account to remove) |
+| `/logout [provider]` | TUI (RPC `get_logout_accounts`, `logout`, omp 18.8.0) | **Done** — Settings › Model providers (the sign-out icon beside *Signed in*: pick the stored account to remove) |
 | `/mcp …` | yes | **Done** — Settings › Connectors — *Connectors* area |
 | `/ssh …` | yes | **Done** — Settings › SSH hosts — *Workspace* area |
 | `/btw`, `/tan`, `/omfg`, `/cleanse`, `/debug` | TUI | **Via omp terminal** |
@@ -164,6 +164,7 @@ extension commands that omp lists itself keep going to omp.
 | `/force <tool> [prompt]` | yes | **Done (typed)** |
 | `/settings` | TUI | **Done** — opens Settings |
 | `/setup`, `/providers` | TUI | **Done** — opens Settings › Model providers |
+| Custom and local providers (`models.yml`) | — (omp reads the file at start) | **Done** — Settings › Model providers › Local and custom: Ollama, LM Studio, llama.cpp, vLLM (running or not, Add / remove) and custom OpenAI- or Anthropic-compatible providers (test, add, edit, remove); the app edits `models.yml` in place and restarts omp |
 | `/plan`, `/plan-review` | TUI | **Via omp terminal** (plan mode). The Plan pane (*Panes* area) shows omp's todo plan |
 | `/vibe`, `/goal`, `/guided-goal`, `/loop` | TUI | **Via omp terminal** (omp's goal updates still show in the conversation) |
 | `/queue <message>` | TUI | **Done** differently: while omp works, Enter queues (`follow_up`) and Alt+Enter steers (`steer`); × or ↑ takes a queued message back (`remove_queued_message`) |
