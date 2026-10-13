@@ -631,7 +631,7 @@
                         <ctl:Icon Classes="card-icon" Data="{StaticResource IconTerminal}" Size="14" />
                         <TextBlock Grid.Column="1" Classes="card-kind" Text="{loc:T 'Terminal'}" />
                         <TextBlock Grid.Column="2" Classes="mono card-summary" Text="{Binding Command}" MaxLines="1" TextTrimming="CharacterEllipsis" />
-                        <ctl:Icon Grid.Column="3" Classes="card-chevron" Data="{StaticResource IconChevronDown}" Size="14" />
+                        <ctl:Icon Grid.Column="3" Classes="card-chevron" Data="{StaticResource IconChevronUp}" Size="14" />
                       </Grid>
                     </Button>
                   </Border>
@@ -666,7 +666,7 @@
                         <ctl:Icon Classes="card-icon" Data="{StaticResource IconFileText}" Size="14" />
                         <TextBlock Grid.Column="1" Classes="card-kind" Text="{loc:T 'Output'}" />
                         <TextBlock Grid.Column="2" Classes="mono card-summary" Text="{Binding ArgText}" MaxLines="1" TextTrimming="CharacterEllipsis" />
-                        <ctl:Icon Grid.Column="3" Classes="card-chevron" Data="{StaticResource IconChevronDown}" Size="14" />
+                        <ctl:Icon Grid.Column="3" Classes="card-chevron" Data="{StaticResource IconChevronUp}" Size="14" />
                       </Grid>
                     </Button>
                   </Border>
