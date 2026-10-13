@@ -1,6 +1,6 @@
+using OmpGui.App.Localization;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.Globalization;
 using System.Text.Json.Nodes;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -74,16 +74,16 @@ public sealed partial class McpServerRowViewModel : ObservableObject
     public bool IsFromProjectFile => Entry.Scope == "file";
 
     // The same words as the SSH hosts page and the form's choice: "All projects" / "This project"
-    public string ScopeLabel => Entry.Scope switch { "project" => "This project", "file" => SourceFile ?? "Project file", _ => "All projects" };
+    public string ScopeLabel => Entry.Scope switch { "project" => Loc.T("This project"), "file" => SourceFile ?? Loc.T("Project file"), _ => Loc.T("All projects") };
 
     public string ScopeTip => Entry.Scope switch
     {
-        "project" => "In this project's .omp/mcp.json",
-        "file" => $"In the project folder's {SourceFile}, a file other tools (Claude Code…) read too",
-        _ => "In your omp settings: all projects",
+        "project" => Loc.T("In this project's .omp/mcp.json"),
+        "file" => Loc.F("In the project folder's {0}, a file other tools (Claude Code…) read too", SourceFile),
+        _ => Loc.T("In your omp settings: all projects"),
     };
 
-    public string FileNote => $"From the project's {SourceFile}: change it in that file.";
+    public string FileNote => Loc.F("From the project's {0}: change it in that file.", SourceFile);
     public string Transport => Entry.Transport;
     public string TransportLabel => Entry.Transport switch { "http" => "HTTP", "sse" => "SSE", _ => "stdio" };
     public bool IsRemote => Entry.Transport is "http" or "sse";
@@ -106,7 +106,7 @@ public sealed partial class McpServerRowViewModel : ObservableObject
         get
         {
             var names = McpConfigFile.GetMap(Config, IsRemote ? "headers" : "env").Select(kv => kv.Key).ToList();
-            return names.Count == 0 ? "" : (IsRemote ? "Headers: " : "Environment: ") + string.Join(", ", names);
+            return names.Count == 0 ? "" : (IsRemote ? Loc.T("Headers: ") : Loc.T("Environment: ")) + string.Join(", ", names);
         }
     }
 
@@ -154,7 +154,7 @@ public sealed partial class McpServerRowViewModel : ObservableObject
                                               || Failure.Contains("OAuth", StringComparison.OrdinalIgnoreCase));
 
     public string ReauthCommand => "/mcp reauth " + OmpMcp.Quote(Name);
-    public string RemoveQuestion => $"Remove “{Name}” from {(Scope == "project" ? "this project's" : "your")} connectors?";
+    public string RemoveQuestion => (Scope == "project" ? Loc.F("Remove “{0}” from this project's connectors?", Name) : Loc.F("Remove “{0}” from your connectors?", Name));
 
     partial void OnIsEnabledChanged(bool value)
     {
@@ -342,8 +342,8 @@ public sealed partial class ConnectorsViewModel : ObservableObject
 
     [ObservableProperty] private bool _isSubmitting;
 
-    public string FormTitle => IsEditing ? $"Edit “{FormName}”" : "Add a connector";
-    public string FormSubmitLabel => IsEditing ? "Save" : "Add connector";
+    public string FormTitle => IsEditing ? Loc.F("Edit “{0}”", FormName) : Loc.T("Add a connector");
+    public string FormSubmitLabel => IsEditing ? Loc.T("Save") : Loc.T("Add connector");
     public bool CanEditName => !IsEditing;
     public bool FormIsStdio => FormTransport == "stdio";
     public bool FormIsRemote => !FormIsStdio;
@@ -351,7 +351,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
     public bool FormIsSse => FormTransport == "sse";
     public bool FormIsUser => FormScope == "user";
     public bool FormIsProject => FormScope == "project";
-    public string FormScopeLabel => FormScope == "project" ? "This project only (.omp/mcp.json)" : "All projects (your omp settings)";
+    public string FormScopeLabel => FormScope == "project" ? Loc.T("This project only (.omp/mcp.json)") : Loc.T("All projects (your omp settings)");
     public bool HasFormError => FormError.Length > 0;
 
     // ── Resources and prompts ──
@@ -435,14 +435,14 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             if (version != _loadVersion) return;
             if (!list.Ok || list.AgentInvoked)
             {
-                LoadError = list.Unsupported ? "This version of omp can't list connectors. Update omp to manage them here."
-                    : list.Error is { Length: > 0 } why && !list.AgentInvoked ? "Couldn't read the connectors from omp: " + why + "."
-                    : "Couldn't read the connectors from omp. Try again.";
+                LoadError = list.Unsupported ? Loc.T("This version of omp can't list connectors. Update omp to manage them here.")
+                    : list.Error is { Length: > 0 } why && !list.AgentInvoked ? Loc.T("Couldn't read the connectors from omp: ") + why + "."
+                    : Loc.T("Couldn't read the connectors from omp. Try again.");
                 return;
             }
             if (OmpMcp.ParseList(list.Output) is not { } entries)
             {
-                LoadError = list.Output.Length > 0 ? list.Output : "omp didn't return its connector list. Try again.";
+                LoadError = list.Output.Length > 0 ? list.Output : Loc.T("omp didn't return its connector list. Try again.");
                 return;
             }
             var tools = await _owner.RunOmpCommandAsync("/tools");
@@ -532,17 +532,17 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         row.Failure = "";
         row.Tools = "";
         if (!row.IsEnabled)
-            (row.State, row.StateText) = (ConnectorState.Off, _pending.Contains(row.Name) ? "Off after omp restarts" : "Off");
+            (row.State, row.StateText) = (ConnectorState.Off, _pending.Contains(row.Name) ? Loc.T("Off after omp restarts") : Loc.T("Off"));
         else if (_pending.Contains(row.Name))
-            (row.State, row.StateText) = (ConnectorState.Pending, "Connects when omp restarts");
+            (row.State, row.StateText) = (ConnectorState.Pending, Loc.T("Connects when omp restarts"));
         else if (OmpMcp.IsExa(row.Name, row.Entry.Location))
-            (row.State, row.StateText) = (ConnectorState.Replaced, "omp uses its built-in Exa search instead");
+            (row.State, row.StateText) = (ConnectorState.Replaced, Loc.T("omp uses its built-in Exa search instead"));
         else if (toolCount > 0)
-            (row.State, row.StateText) = (ConnectorState.Connected, string.Create(CultureInfo.InvariantCulture, $"Connected · {toolCount} {(toolCount == 1 ? "tool" : "tools")}"));
+            (row.State, row.StateText) = (ConnectorState.Connected, Loc.Plural(toolCount, "Connected · {0} tool", "Connected · {0} tools"));
         else if (row.Scope is "project" or "file" && HasOptions && !ProjectServers)
-            (row.State, row.StateText) = (ConnectorState.Off, "Skipped: servers from project files are off");
+            (row.State, row.StateText) = (ConnectorState.Off, Loc.T("Skipped: servers from project files are off"));
         else
-            (row.State, row.StateText) = (ConnectorState.NotConnected, "Not connected in this session");
+            (row.State, row.StateText) = (ConnectorState.NotConnected, Loc.T("Not connected in this session"));
     }
 
     /// <summary>omp's list of servers switched off by name (<c>disabledServers</c> in the user file).</summary>
@@ -569,7 +569,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         if (!r.Ok || !ok)
         {
             HasOptions = false;
-            OptionsError = "Couldn't read omp's settings: " + Why(r);
+            OptionsError = Loc.T("Couldn't read omp's settings: ") + Why(r);
             return;
         }
         _syncingOptions = true;
@@ -581,7 +581,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
     }
 
     private static string Why(OmpCliResult r) =>
-        OmpPlugins.Clean(r.Stderr.Trim().Length > 0 ? r.Stderr : r.Stdout) is { Length: > 0 } s ? s : $"omp exited with code {r.ExitCode}.";
+        OmpPlugins.Clean(r.Stderr.Trim().Length > 0 ? r.Stderr : r.Stdout) is { Length: > 0 } s ? s : Loc.F("omp exited with code {0}.", r.ExitCode);
 
     partial void OnProjectServersChanged(bool value)
     {
@@ -600,13 +600,13 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             OptionsFeedback.Error = Why(r);
             return;
         }
-        OptionsFeedback.Notice = value ? "omp will load servers from project files." : "omp will skip servers from project files.";
+        OptionsFeedback.Notice = value ? Loc.T("omp will load servers from project files.") : Loc.T("omp will skip servers from project files.");
         RequireRestart(OptionsFeedback);
     }
 
     // ── Row actions ──
 
-    private static string Said(SlashCommandResult r) => r.Ok ? r.Output.Length > 0 ? r.Output : "omp printed nothing." : r.Error ?? "omp did not answer.";
+    private static string Said(SlashCommandResult r) => r.Ok ? r.Output.Length > 0 ? r.Output : Loc.T("omp printed nothing.") : r.Error ?? Loc.T("omp did not answer.");
 
     internal async Task SetEnabledAsync(McpServerRowViewModel row, bool enabled)
     {
@@ -624,7 +624,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             row.Entry = row.Entry with { Enabled = enabled };
             _pending.Add(row.Name);
             ApplySessionState(row, keepTest: false);
-            Feedback.Notice = enabled ? $"Turned on “{row.Name}”." : $"Turned off “{row.Name}”.";
+            Feedback.Notice = enabled ? Loc.F("Turned on “{0}”.", row.Name) : Loc.F("Turned off “{0}”.", row.Name);
             RequireRestart(Feedback);
         }
         finally
@@ -637,22 +637,22 @@ public sealed partial class ConnectorsViewModel : ObservableObject
     {
         row.IsConfirmingRemove = false;
         row.State = ConnectorState.Testing;
-        row.StateText = "Testing…";
+        row.StateText = Loc.T("Testing…");
         row.Failure = "";
         row.Tools = "";
         var r = await _owner.RunOmpCommandAsync("/mcp test " + OmpMcp.Quote(row.Name), TimeSpan.FromMinutes(2));
-        var result = r.Ok ? OmpMcp.ParseTest(r.Output) : new McpTestResult(false, 0, [], r.Error ?? "omp did not answer.");
+        var result = r.Ok ? OmpMcp.ParseTest(r.Output) : new McpTestResult(false, 0, [], r.Error ?? Loc.T("omp did not answer."));
         row.Tested = true;
         if (result.Connected)
         {
             row.State = ConnectorState.Connected;
-            row.StateText = string.Create(CultureInfo.InvariantCulture, $"Test passed · {result.ToolCount} {(result.ToolCount == 1 ? "tool" : "tools")}");
+            row.StateText = Loc.Plural(result.ToolCount, "Test passed · {0} tool", "Test passed · {0} tools");
             row.Tools = string.Join(", ", result.Tools);
         }
         else
         {
             row.State = ConnectorState.Failed;
-            row.StateText = "Test failed";
+            row.StateText = Loc.T("Test failed");
             row.Failure = result.Message;
         }
     }
@@ -671,7 +671,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             }
             Servers.Remove(row);
             NotifyList();
-            Feedback.Notice = $"Removed “{row.Name}”.";
+            Feedback.Notice = Loc.F("Removed “{0}”.", row.Name);
             RequireRestart(Feedback);
         }
         finally
@@ -742,30 +742,30 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         var headers = new List<KeyValuePair<string, string>>();
         if (OmpMcp.ValidateName(name) is { } bad) return (bad, args, env, headers);
         if (!IsEditing && Servers.Any(s => s.Name == name && s.Scope == FormScope))
-            return ($"There is already a connector named “{name}” in {(FormScope == "project" ? "this project" : "your settings")}.", args, env, headers);
+            return ((FormScope == "project" ? Loc.F("There is already a connector named “{0}” in this project.", name) : Loc.F("There is already a connector named “{0}” in your settings.", name)), args, env, headers);
         if (FormIsStdio)
         {
-            if (FormCommand.Trim().Length == 0) return ("Enter the command that starts the server (for example npx).", args, env, headers);
-            if (FormCommand.Contains('\n', StringComparison.Ordinal)) return ("The command is one line; put its arguments below, one per line.", args, env, headers);
+            if (FormCommand.Trim().Length == 0) return (Loc.T("Enter the command that starts the server (for example npx)."), args, env, headers);
+            if (FormCommand.Contains('\n', StringComparison.Ordinal)) return (Loc.T("The command is one line; put its arguments below, one per line."), args, env, headers);
             foreach (var line in Lines(FormEnv))
             {
                 var eq = line.IndexOf('=', StringComparison.Ordinal);
-                if (eq <= 0) return ($"“{line}” is not NAME=value.", args, env, headers);
+                if (eq <= 0) return (Loc.F("“{0}” is not NAME=value.", line), args, env, headers);
                 env.Add(new(line[..eq].Trim(), line[(eq + 1)..]));
             }
         }
         else
         {
             var url = FormUrl.Trim();
-            if (url.Length == 0) return ("Enter the server's URL.", args, env, headers);
-            if (url.Any(char.IsWhiteSpace)) return ("The URL cannot contain spaces.", args, env, headers);
+            if (url.Length == 0) return (Loc.T("Enter the server's URL."), args, env, headers);
+            if (url.Any(char.IsWhiteSpace)) return (Loc.T("The URL cannot contain spaces."), args, env, headers);
             foreach (var line in Lines(FormHeaders))
             {
                 var colon = line.IndexOf(':', StringComparison.Ordinal);
-                if (colon <= 0) return ($"“{line}” is not Name: value.", args, env, headers);
+                if (colon <= 0) return (Loc.F("“{0}” is not Name: value.", line), args, env, headers);
                 headers.Add(new(line[..colon].Trim(), line[(colon + 1)..].Trim()));
             }
-            if (FormToken.Trim().Any(char.IsWhiteSpace)) return ("The token cannot contain spaces.", args, env, headers);
+            if (FormToken.Trim().Any(char.IsWhiteSpace)) return (Loc.T("The token cannot contain spaces."), args, env, headers);
         }
         return (null, args, env, headers);
     }
@@ -799,7 +799,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
     {
         if (!_owner.CanRunOmpCommands)
         {
-            FormError = "omp isn't running. Start it, then add the connector: omp checks it and saves it.";
+            FormError = Loc.T("omp isn't running. Start it, then add the connector: omp checks it and saves it.");
             return;
         }
         var name = FormName.Trim();
@@ -820,7 +820,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             var path = ConfigPath(FormScope);
             try
             {
-                if (path is null) throw new IOException("omp's settings folder is unknown");
+                if (path is null) throw new IOException(Loc.T("omp's settings folder is unknown"));
                 McpConfigFile.UpdateServer(path, name, e =>
                 {
                     if (stdio) McpConfigFile.SetMap(e, "env", env);
@@ -829,12 +829,12 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
             {
-                Feedback.Error = $"omp added “{name}”, but its {(stdio ? "environment variables" : "headers")} could not be saved: {e.Message}";
+                Feedback.Error = (stdio ? Loc.F("omp added “{0}”, but its environment variables could not be saved: {1}", name, e.Message) : Loc.F("omp added “{0}”, but its headers could not be saved: {1}", name, e.Message));
             }
         }
         _pending.Add(name);
         IsFormOpen = false;
-        Feedback.Notice = $"Added “{name}”.";
+        Feedback.Notice = Loc.F("Added “{0}”.", name);
         RequireRestart(Feedback);
         await RefreshAsync();
     }
@@ -844,7 +844,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         await LoadUserConfigPathAsync();
         if (ConfigPath(row.Scope) is not { } path)
         {
-            FormError = "omp's settings folder is unknown, so the file cannot be changed.";
+            FormError = Loc.T("omp's settings folder is unknown, so the file cannot be changed.");
             return;
         }
         var transport = FormTransport;
@@ -881,14 +881,14 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
         {
-            FormError = "The file could not be changed: " + e.Message;
+            FormError = Loc.T("The file could not be changed: ") + e.Message;
             return;
         }
         ClearFeedback();
         _pending.Add(row.Name);
         IsFormOpen = false;
         _editing = null;
-        Feedback.Notice = $"Saved “{row.Name}”.";
+        Feedback.Notice = Loc.F("Saved “{0}”.", row.Name);
         RequireRestart(Feedback);
         await RefreshAsync();
     }
@@ -903,7 +903,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         ItemsMessage = "";
         if (!_owner.CanRunOmpCommands)
         {
-            ItemsMessage = "omp isn't running.";
+            ItemsMessage = Loc.T("omp isn't running.");
             NotifyItems();
             return;
         }
@@ -914,7 +914,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             var prompts = await _owner.RunOmpCommandAsync("/mcp prompts", TimeSpan.FromMinutes(3));
             if (!resources.Ok || !prompts.Ok)
             {
-                ItemsMessage = (resources.Ok ? prompts.Error : resources.Error) ?? "omp did not answer.";
+                ItemsMessage = (resources.Ok ? prompts.Error : resources.Error) ?? Loc.T("omp did not answer.");
                 return;
             }
             var commands = _owner.OmpCommandCatalog.Where(c => c.Source == "mcp_prompt").Select(c => c.Name).ToHashSet(StringComparer.Ordinal);
@@ -923,7 +923,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             foreach (var i in resourceItems) Resources.Add(new McpItemViewModel(this, i, false));
             foreach (var i in promptItems) Prompts.Add(new McpItemViewModel(this, i, commands.Contains($"{i.Server}:{i.Name}")));
             if (Resources.Count == 0 && Prompts.Count == 0)
-                ItemsMessage = noResources == OmpMcp.NoServers ? "No connectors are set up yet." : "The connected servers offer no resources or prompts.";
+                ItemsMessage = noResources == OmpMcp.NoServers ? Loc.T("No connectors are set up yet.") : Loc.T("The connected servers offer no resources or prompts.");
         }
         finally
         {
@@ -950,7 +950,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         SearchNeedsSignIn = false;
         if (!_owner.CanRunOmpCommands)
         {
-            SearchMessage = "omp isn't running.";
+            SearchMessage = Loc.T("omp isn't running.");
             OnPropertyChanged(nameof(HasSearchResults));
             return;
         }
@@ -963,7 +963,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             var r = await _owner.RunOmpCommandAsync($"/mcp smithery-search {keyword} --limit 20", TimeSpan.FromMinutes(1));
             if (!r.Ok)
             {
-                SearchMessage = r.Error ?? "omp did not answer.";
+                SearchMessage = r.Error ?? Loc.T("omp did not answer.");
                 return;
             }
             if (OmpMcp.ParseSmithery(r.Output) is { } results)
@@ -971,7 +971,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             else
             {
                 SearchNeedsSignIn = OmpMcp.IsSmitherySignInNeeded(r.Output);
-                SearchMessage = r.Output.Length > 0 ? r.Output : "omp printed nothing.";
+                SearchMessage = r.Output.Length > 0 ? r.Output : Loc.T("omp printed nothing.");
             }
         }
         finally
@@ -1000,8 +1000,8 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         NeedsRestart = true;
         foreach (var f in new[] { Feedback, OptionsFeedback }) f.ShowRestart = ReferenceEquals(f, where);
         where.RestartText = _owner.IsRunning
-            ? "omp reads connectors when it starts. Restart it once the reply finishes."
-            : "omp reads connectors when it starts. Restart it to apply the change.";
+            ? Loc.T("omp reads connectors when it starts. Restart it once the reply finishes.")
+            : Loc.T("omp reads connectors when it starts. Restart it to apply the change.");
     }
 
     private async Task RestartOmpAsync()
@@ -1014,11 +1014,11 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             {
                 RestartDone();
                 _owner.Plugins.RestartDone();
-                where.Notice = "omp restarted and read the connectors again.";
+                where.Notice = Loc.T("omp restarted and read the connectors again.");
                 await RefreshAsync();
             }
             // The shown chat is replying: its omp restarts when the reply ends (the other chats' already did, or do then)
-            else where.RestartText = "omp is replying: it restarts and reads the connectors when the reply ends.";
+            else where.RestartText = Loc.T("omp is replying: it restarts and reads the connectors when the reply ends.");
         }
         finally
         {

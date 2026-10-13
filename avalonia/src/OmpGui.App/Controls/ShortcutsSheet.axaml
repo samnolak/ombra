@@ -1,7 +1,8 @@
 <!-- Keyboard shortcuts (⌘/ or Ctrl+/, /hotkeys): a card over the dimmed window, its groups in columns as wide as the
      window allows. Esc, ×, or a click on the dimmed window closes it (MainViewModel.IsShortcutsOpen). Styles: Border.keycap
      in Styles.Composer.axaml. -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:OmpGui.App.Localization"
+             xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
@@ -10,12 +11,12 @@
   <Panel>
     <Border x:Name="Scrim" Classes="scrim" />
     <Border x:Name="Card" Classes="menu" MaxWidth="660" Margin="24,40" Padding="0" HorizontalAlignment="Center" VerticalAlignment="Center"
-            AutomationProperties.Name="Keyboard shortcuts">
+            AutomationProperties.Name="{loc:T 'Keyboard shortcuts'}">
       <DockPanel>
         <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="20,14,12,6">
-          <TextBlock Text="Keyboard shortcuts" FontSize="{DynamicResource GuiFontM}" FontWeight="SemiBold" VerticalAlignment="Center" />
+          <TextBlock Text="{loc:T 'Keyboard shortcuts'}" FontSize="{DynamicResource GuiFontM}" FontWeight="SemiBold" VerticalAlignment="Center" />
           <Button x:Name="CloseButton" Grid.Column="1" Classes="icon" Width="28" Height="28" Command="{Binding CloseShortcutsCommand}"
-                  ToolTip.Tip="Close (Esc)" AutomationProperties.Name="Close keyboard shortcuts">
+                  ToolTip.Tip="{loc:T 'Close (Esc)'}" AutomationProperties.Name="{loc:T 'Close keyboard shortcuts'}">
             <ctl:Icon Data="{StaticResource IconClose}" Size="16" />
           </Button>
         </Grid>

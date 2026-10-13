@@ -81,7 +81,14 @@ themselves: the new version goes in at the next restart or quit.
 
 In 0.0.7: the preview's tab strip ends with **+** (alone as *+ New tab* while there is one tab) to open tabs of your
 own, closable like omp's; the first tab, while empty, is no longer listed as *New tab* before omp's. The model menu
-folds models under their provider (an accordion; the current model's provider open, search still flat).
+folds models under their provider (an accordion; the current model's provider open, search still flat). Sidebar:
+projects can be pinned (first, in the order pinned) and renamed (a name of the sidebar's; the folder stays), and their
+right-click menu shows the folder in Finder / Explorer; a pinned chat stays in its project, at its top (no separate
+*Pinned* group). Settings › General › **Language**: English or Russian built in, and languages of one's own (JSON files in the
+settings folder's `languages/`, started from `template.json`). Expanded tool output, consoles, diffs and thoughts have a
+header bar that stays at the top while the block is on screen and folds it; a running tool's mark turns instead of
+blinking; a chat waiting for an answer shows an amber raised hand in the sidebar; the message box's caret no longer
+vanishes after a pause; hovers and clipped areas are rounded everywhere; tool tooltips read as plain text.
 
 ## M1 scope: the 15 features (fixed 2026-09-25)
 
@@ -127,3 +134,5 @@ settings replace the provider-gate script and close the `catalog.stencil.so` lim
 1. M2 gates: the macOS and Windows gates need runners or machines; the target model gate needs a larger model server.
 2. A release candidate from one commit once those gates pass on each OS, signed.
 3. The rest of Wave 2 (backlog above) after M2's exit.
+4. Parity with Codex / Claude Code, the bug classes they fixed and optimizations from other pi/omp clients, in
+   waves: [`PARITY_ROADMAP.md`](PARITY_ROADMAP.md) (sources and evidence in [`parity-research/`](parity-research/)).

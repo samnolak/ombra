@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
 using OmpGui.App.Services;
@@ -106,8 +107,8 @@ public sealed partial class FileNodeViewModel : ObservableObject
         {
             var parts = new List<string> { RelativePath.Length > 0 ? RelativePath : FullPath };
             if (GitSnapshot.Describe(IsIgnored && Git == GitMark.None ? GitMark.Ignored : Git) is { Length: > 0 } g) parts.Add(g);
-            if (IsSessionChanged) parts.Add("Changed by omp in this session");
-            if (IsHeavy && !IsIgnored) parts.Add("Dependencies or build output");
+            if (IsSessionChanged) parts.Add(Loc.T("Changed by omp in this session"));
+            if (IsHeavy && !IsIgnored) parts.Add(Loc.T("Dependencies or build output"));
             return string.Join("\n", parts);
         }
     }

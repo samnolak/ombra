@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -52,12 +53,12 @@ public sealed partial class MainViewModel
         string? title = null, message = null;
         if (dialog is not null && dialog.Id != open.LastDialogId)
         {
-            title = dialog.Kind == DialogKind.Approval ? "omp needs your approval" : "omp is asking";
+            title = dialog.Kind == DialogKind.Approval ? Loc.T("omp needs your approval") : Loc.T("omp is asking");
             message = dialog.Headline;
         }
         else if (runEnded && s.Phase == SessionPhase.Ready)
         {
-            title = "omp finished";
+            title = Loc.T("omp finished");
             var answer = s.Items.OfType<AssistantItem>().LastOrDefault()?.Text ?? "";
             message = answer.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() is { Length: > 0 } line
                 ? (line.Length > 140 ? line[..140] + "…" : line)
@@ -65,8 +66,8 @@ public sealed partial class MainViewModel
         }
         else if (runEnded && s.Phase == SessionPhase.Faulted)
         {
-            title = "omp stopped";
-            message = s.LastError?.Split('\n')[0] ?? "omp is not running";
+            title = Loc.T("omp stopped");
+            message = s.LastError?.Split('\n')[0] ?? Loc.T("omp is not running");
         }
         open.LastDialogId = dialog?.Id;
         open.RunsEndedSeen = Math.Max(open.RunsEndedSeen, s.RunsEnded); // an older snapshot applied late must not count a run twice
@@ -89,7 +90,7 @@ public sealed partial class MainViewModel
     private static string ChatTitle(SessionSnapshot s) =>
         s.SessionName is { Length: > 0 } n ? n
         : s.Items.OfType<UserItem>().FirstOrDefault()?.Text is { Length: > 0 } u ? SessionCatalogTitle(u)
-        : "New session";
+        : Loc.T("New session");
 
     /// <summary>The user clicked a notification: its chat is shown (on the question it asked), if it is still open.</summary>
     private void ShowFromNotification(OpenSession open)

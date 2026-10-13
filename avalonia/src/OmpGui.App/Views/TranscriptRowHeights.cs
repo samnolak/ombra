@@ -23,6 +23,8 @@ public static class TranscriptRowHeights
     private const double CharWidth = 0.57;
     private const double MonoCharWidth = 0.6;
     private const double Message = 16, MessageLine = 24, Ui = 14, UiLine = 22, Code = 13, CodeLine = 19;
+    /// <summary>An open console's or output's bar (Button.card-header).</summary>
+    private const double CardHeader = 28;
 
     private static double EstimateRow(object? row, double width)
     {
@@ -83,7 +85,7 @@ public static class TranscriptRowHeights
     /// <summary>
     /// The call's line (28, 2 above and below); under it, 30 px in: a command's console (2 above, 6 below, 7 inside,
     /// the command's lines, its output 4 below them, "… +N lines"), what anything else gave (its lines, "… +N lines"),
-    /// or opened, the change or the output.
+    /// or opened, the change or the output. Open, a console and an output start with their 28 px bar.
     /// </summary>
     private static double Tool(ToolRowViewModel t, double column)
     {
@@ -94,13 +96,13 @@ public static class TranscriptRowHeights
             // The console spans the column's 16 px of pull-out less 30 + 8 around it, a 2 px rule and 10 + 12 inside
             var text = column - 46;
             var command = Lines(t.Command, (text - mono - 8) / mono);
-            height += 2 + 6 + 14 + (t.IsExpanded ? command : Math.Min(command, ToolRowViewModel.CommandLines)) * CodeLine;
+            height += 2 + 6 + 14 + (t.IsExpanded ? CardHeader + command * CodeLine : Math.Min(command, ToolRowViewModel.CommandLines) * CodeLine);
             if (t.ShowConsoleOutput) height += 4 + (t.IsExpanded ? Lines(t.ConsoleOutput, text / mono) : Count(t.ConsoleOutput, '\n')) * CodeLine;
             if (t.ShowConsoleMore) height += 2 + 20;
         }
         if (t.ShowResult) height += Count(t.Result, '\n') * 19 + 2 + (t.ShowMore ? 20 : 0);
         if (t.ShowDiff) height += t.DiffCards.Sum(DiffView.EstimatedHeight);
-        if (t.ShowOutput) height += 8 + 16 + Lines(t.ShownOutput, (column - 46) / mono) * CodeLine;
+        if (t.ShowOutput) height += 8 + 16 + CardHeader + Lines(t.ShownOutput, (column - 46) / mono) * CodeLine;
         return height;
     }
 

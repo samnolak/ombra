@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.App.Services;
 
 namespace OmpGui.App.ViewModels;
@@ -27,11 +28,11 @@ public sealed partial class MainViewModel
                     ClientLog = ClientLog,
                 }.WriteAsync(stream, _cts.Token);
             }
-            SettingsMessage = "Diagnostics saved. They hold versions, settings with secrets removed, omp's state and the app's own errors — no conversation text.";
+            SettingsMessage = Loc.T("Diagnostics saved. They hold versions, settings with secrets removed, omp’s state and the app’s own errors — no conversation text.");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            SettingsMessage = "Could not save diagnostics: " + e.Message;
+            SettingsMessage = Loc.T("Could not save diagnostics: ") + e.Message;
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
     }
@@ -50,6 +51,6 @@ public sealed partial class MainViewModel
         ClientLog.Write("ui", error);
         if (_clientErrorShown) return;
         _clientErrorShown = true;
-        ComposerMessage = "Something went wrong in OMP GUI; it carried on. Settings → Diagnostics saves the details for a bug report.";
+        ComposerMessage = Loc.T("Something went wrong in OMP GUI; it carried on. Settings → Diagnostics saves the details for a bug report.");
     }
 }

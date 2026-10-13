@@ -1,7 +1,8 @@
 <!-- The context ring next to the model (Claude Code's context indicator) and its popover: omp's /context breakdown as
      bars, this session's tokens and cost (get_session_stats), the model provider's plan limits (omp's usage JSON) and
      "Compact now" (UsageViewModel, ProviderUsageViewModel). -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:OmpGui.App.Localization"
+             xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
@@ -24,10 +25,10 @@
         <ScrollViewer x:Name="UsageScroll" HorizontalScrollBarVisibility="Disabled">
         <StackPanel Spacing="10" Margin="10,8,10,10">
           <Grid ColumnDefinitions="*,Auto,Auto">
-            <TextBlock Classes="caps" Text="Context window" VerticalAlignment="Center" />
-            <TextBlock Grid.Column="1" Classes="tertiary" Text="Updating…" IsVisible="{Binding Usage.IsLoading}" VerticalAlignment="Center" Margin="0,0,6,0" />
-            <Button Grid.Column="2" Classes="icon" Width="26" Height="26" Command="{Binding Usage.RefreshCommand}" ToolTip.Tip="Measure again"
-                    AutomationProperties.Name="Refresh usage">
+            <TextBlock Classes="caps" Text="{loc:T 'Context window'}" VerticalAlignment="Center" />
+            <TextBlock Grid.Column="1" Classes="tertiary" Text="{loc:T 'Updating…'}" IsVisible="{Binding Usage.IsLoading}" VerticalAlignment="Center" Margin="0,0,6,0" />
+            <Button Grid.Column="2" Classes="icon" Width="26" Height="26" Command="{Binding Usage.RefreshCommand}" ToolTip.Tip="{loc:T 'Measure again'}"
+                    AutomationProperties.Name="{loc:T 'Refresh usage'}">
               <ctl:Icon Data="{StaticResource IconReload}" Size="14" />
             </Button>
           </Grid>
@@ -47,7 +48,7 @@
           <TextBlock Classes="tertiary" Text="{Binding Usage.ContextNote}" TextWrapping="Wrap"
                      IsVisible="{Binding Usage.ContextNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
-          <TextBlock Classes="caps" Text="This session" IsVisible="{Binding Usage.HasTotals}" />
+          <TextBlock Classes="caps" Text="{loc:T 'This session'}" IsVisible="{Binding Usage.HasTotals}" />
           <ItemsControl x:Name="UsageTotals" ItemsSource="{Binding Usage.Totals}" IsVisible="{Binding Usage.HasTotals}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:UsageTotalViewModel">
@@ -59,9 +60,9 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
           <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding Usage.HasLimits}">
-            <TextBlock Classes="caps" Text="Plan usage" VerticalAlignment="Center" />
-            <Button x:Name="AllProvidersButton" Grid.Column="1" Classes="link action" Content="All providers" Command="{Binding Usage.ShowAllProvidersCommand}"
-                    VerticalAlignment="Center" ToolTip.Tip="Every signed-in provider's limits (Settings → Model providers)" />
+            <TextBlock Classes="caps" Text="{loc:T 'Plan usage'}" VerticalAlignment="Center" />
+            <Button x:Name="AllProvidersButton" Grid.Column="1" Classes="link action" Content="{loc:T 'All providers'}" Command="{Binding Usage.ShowAllProvidersCommand}"
+                    VerticalAlignment="Center" ToolTip.Tip="{loc:T 'Every signed-in provider’s limits (Settings → Model providers)'}" />
           </Grid>
           <ItemsControl x:Name="UsageLimits" ItemsSource="{Binding Usage.Limits}" IsVisible="{Binding Usage.HasLimits}">
             <ItemsControl.ItemTemplate>
@@ -75,10 +76,10 @@
           <TextBlock Classes="warning" Text="{Binding Usage.Error}" TextWrapping="Wrap"
                      IsVisible="{Binding Usage.Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           <Grid ColumnDefinitions="Auto,*,Auto">
-            <Button x:Name="CompactNowButton" Classes="accent" Content="Compact now" Command="{Binding Usage.CompactNowCommand}"
-                    ToolTip.Tip="omp summarizes the conversation and goes on from the summary (/compact)" />
-            <Button x:Name="DashboardButton" Grid.Column="2" Classes="link action" Content="Usage dashboard" Command="{Binding Usage.OpenDashboardCommand}"
-                    VerticalAlignment="Center" ToolTip.Tip="omp's local dashboard of tokens and cost across all sessions (/stats)" />
+            <Button x:Name="CompactNowButton" Classes="accent" Content="{loc:T 'Compact now'}" Command="{Binding Usage.CompactNowCommand}"
+                    ToolTip.Tip="{loc:T 'omp summarizes the conversation and goes on from the summary (/compact)'}" />
+            <Button x:Name="DashboardButton" Grid.Column="2" Classes="link action" Content="{loc:T 'Usage dashboard'}" Command="{Binding Usage.OpenDashboardCommand}"
+                    VerticalAlignment="Center" ToolTip.Tip="{loc:T 'omp’s local dashboard of tokens and cost across all sessions (/stats)'}" />
           </Grid>
         </StackPanel>
         </ScrollViewer>

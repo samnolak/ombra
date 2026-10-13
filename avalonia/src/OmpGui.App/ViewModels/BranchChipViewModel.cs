@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 
 namespace OmpGui.App.ViewModels;
 
@@ -37,7 +38,7 @@ public sealed partial class BranchChipViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(Tooltip), nameof(AccessibleName), nameof(CopyLabel))]
     private bool _isDetached;
 
-    public string CopyLabel => IsDetached ? "Copy commit" : "Copy branch name";
+    public string CopyLabel => IsDetached ? Loc.T("Copy commit") : Loc.T("Copy branch name");
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(Tooltip))]
@@ -47,10 +48,10 @@ public sealed partial class BranchChipViewModel : ObservableObject
 
     public bool CanCopy => Branch is not null;
 
-    public string Tooltip => Branch is null ? "" : (IsDetached ? $"No branch: at commit {Branch}" : $"Branch {Branch}")
-        + (IsWorktree ? MainCheckout is { } m ? $"\nIn a worktree of {GitProbe.Tilde(m)}" : "\nIn a worktree" : "");
+    public string Tooltip => Branch is null ? "" : (IsDetached ? Loc.F("No branch: at commit {0}", Branch) : Loc.F("Branch {0}", Branch))
+        + (IsWorktree ? MainCheckout is { } m ? "\n" + Loc.F("In a worktree of {0}", GitProbe.Tilde(m)) : "\n" + Loc.T("In a worktree") : "");
 
-    public string AccessibleName => Branch is null ? "Branch" : (IsDetached ? $"Commit {Branch}" : $"Branch {Branch}") + (IsWorktree ? ", worktree" : "");
+    public string AccessibleName => Branch is null ? Loc.T("Branch") : (IsDetached ? Loc.F("Commit {0}", Branch) : Loc.F("Branch {0}", Branch)) + (IsWorktree ? Loc.T(", worktree") : "");
 
     private void OnMainChanged(object? sender, PropertyChangedEventArgs e)
     {

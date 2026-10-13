@@ -281,6 +281,16 @@ public sealed class UiTests
         w.KeyPress(Key.A, RawInputModifiers.None, PhysicalKey.A, "a");
         Assert.NotEqual(TimeSpan.Zero, composer.CaretBlinkInterval); // typing: the caret blinks
         await Until(() => composer.CaretBlinkInterval == TimeSpan.Zero, "caret idle", 5);
+        // Stopped with the caret drawn, whatever phase the blink was in (it had frozen invisible half the time)
+        var presenter = composer.GetVisualDescendants().OfType<Avalonia.Controls.Presenters.TextPresenter>().First();
+        var blink = typeof(Avalonia.Controls.Presenters.TextPresenter).GetField("_caretBlink", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        for (var i = 0; i < 6; i++)
+        {
+            w.KeyPress(Key.A, RawInputModifiers.None, PhysicalKey.A, "a");
+            await Task.Delay(260 + 90 * i); // lands in different blink phases
+            await Until(() => composer.CaretBlinkInterval == TimeSpan.Zero, "caret idle", 5);
+            Assert.True((bool)blink.GetValue(presenter)!, $"caret hidden after idle #{i}");
+        }
         w.KeyPress(Key.B, RawInputModifiers.None, PhysicalKey.B, "b");
         Assert.NotEqual(TimeSpan.Zero, composer.CaretBlinkInterval); // back on the next key
         await CloseAsync(w, vm);

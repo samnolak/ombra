@@ -1,6 +1,7 @@
 <!-- Settings → Model providers, "Local and custom": model servers on this computer (Ollama, LM Studio, llama.cpp, vLLM)
      and providers of the user's own, both kept in omp's models.yml (CustomProvidersViewModel). -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:OmpGui.App.Localization"
+        xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
@@ -9,12 +10,12 @@
   <Border x:Name="CustomProvidersCard" Classes="section-card" DataContext="{Binding CustomProviders}" x:DataType="vm:CustomProvidersViewModel">
     <StackPanel Spacing="12">
       <Grid ColumnDefinitions="*,Auto">
-        <TextBlock Classes="section" Text="Local and custom" VerticalAlignment="Center" />
-        <Button Grid.Column="1" x:Name="AddCustomProviderButton" Content="Add custom provider…" Command="{Binding BeginAddCommand}"
+        <TextBlock Classes="section" Text="{loc:T 'Local and custom'}" VerticalAlignment="Center" />
+        <Button Grid.Column="1" x:Name="AddCustomProviderButton" Content="{loc:T 'Add custom provider…'}" Command="{Binding BeginAddCommand}"
                 IsVisible="{Binding !IsFormOpen}" IsEnabled="{Binding CanChange}" />
       </Grid>
       <TextBlock Classes="muted" TextWrapping="Wrap"
-                 Text="Model servers on this computer and providers of your own. omp reads them from its models.yml when it starts: after each change here, omp restarts and its models appear in the model picker." />
+                 Text="{loc:T 'Model servers on this computer and providers of your own. omp reads them from its models.yml when it starts: after each change here, omp restarts and its models appear in the model picker.'}" />
 
       <Border x:Name="CustomProvidersMessageBar" Classes="ws-note" Classes.ok="{Binding !MessageIsError}" Classes.error="{Binding MessageIsError}" IsVisible="{Binding HasMessage}">
         <Grid ColumnDefinitions="Auto,*,Auto">
@@ -24,7 +25,7 @@
           </Panel>
           <SelectableTextBlock x:Name="CustomProvidersMessage" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" />
           <Button Grid.Column="2" Classes="icon" Width="24" Height="24" Margin="8,-4,-6,-4" VerticalAlignment="Top" Command="{Binding DismissMessageCommand}"
-                  ToolTip.Tip="Dismiss" AutomationProperties.Name="Dismiss">
+                  ToolTip.Tip="{loc:T 'Dismiss'}" AutomationProperties.Name="{loc:T 'Dismiss'}">
             <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
           </Button>
         </Grid>
@@ -38,20 +39,20 @@
         <StackPanel Spacing="10">
           <TextBlock Classes="ws-title" Text="{Binding FormTitle}" />
           <StackPanel Spacing="4" IsVisible="{Binding IsNew}">
-            <TextBlock Classes="label" Text="Name" />
-            <TextBox x:Name="CustomProviderNameBox" Classes="sm" Text="{Binding FormName}" PlaceholderText="My server" AutomationProperties.Name="Provider name" />
+            <TextBlock Classes="label" Text="{loc:T 'Name'}" />
+            <TextBox x:Name="CustomProviderNameBox" Classes="sm" Text="{Binding FormName}" PlaceholderText="{loc:T 'My server'}" AutomationProperties.Name="{loc:T 'Provider name'}" />
             <TextBlock Classes="tertiary" Text="{Binding FormIdNote}" IsVisible="{Binding FormIdNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           </StackPanel>
           <StackPanel Spacing="4">
-            <TextBlock Classes="label" Text="Address (base URL)" />
-            <TextBox x:Name="CustomProviderUrlBox" Classes="sm" Text="{Binding FormBaseUrl}" PlaceholderText="{Binding BaseUrlHint}" AutomationProperties.Name="Base URL" />
+            <TextBlock Classes="label" Text="{loc:T 'Address (base URL)'}" />
+            <TextBox x:Name="CustomProviderUrlBox" Classes="sm" Text="{Binding FormBaseUrl}" PlaceholderText="{Binding BaseUrlHint}" AutomationProperties.Name="{loc:T 'Base URL'}" />
           </StackPanel>
           <StackPanel Spacing="4">
-            <TextBlock Classes="label" Text="Speaks" />
+            <TextBlock Classes="label" Text="{loc:T 'Speaks'}" />
             <Border Classes="segmented" HorizontalAlignment="Left">
               <StackPanel Orientation="Horizontal" Spacing="2">
                 <Button x:Name="CustomProviderApiChat" Classes="segment" Classes.selected="{Binding FormApiIsChat}" Content="OpenAI Chat Completions"
-                        Command="{Binding SetApiCommand}" CommandParameter="openai-completions" AutomationProperties.Name="OpenAI-compatible Chat Completions" />
+                        Command="{Binding SetApiCommand}" CommandParameter="openai-completions" AutomationProperties.Name="{loc:T 'OpenAI-compatible Chat Completions'}" />
                 <Button x:Name="CustomProviderApiResponses" Classes="segment" Classes.selected="{Binding FormApiIsResponses}" Content="OpenAI Responses"
                         Command="{Binding SetApiCommand}" CommandParameter="openai-responses" AutomationProperties.Name="OpenAI Responses" />
                 <Button x:Name="CustomProviderApiAnthropic" Classes="segment" Classes.selected="{Binding FormApiIsAnthropic}" Content="Anthropic Messages"
@@ -60,26 +61,26 @@
             </Border>
           </StackPanel>
           <StackPanel Spacing="4">
-            <TextBlock Classes="label" Text="API key (optional)" />
-            <TextBox x:Name="CustomProviderKeyBox" Classes="sm" Text="{Binding FormApiKey}" PasswordChar="•" PlaceholderText="sk-…, or the name of an environment variable that holds it"
-                     AutomationProperties.Name="API key" />
-            <TextBlock Classes="tertiary" TextWrapping="Wrap" Text="Saved in omp's models.yml, which only your user can read. Leave it empty for a server that needs no key." />
+            <TextBlock Classes="label" Text="{loc:T 'API key (optional)'}" />
+            <TextBox x:Name="CustomProviderKeyBox" Classes="sm" Text="{Binding FormApiKey}" PasswordChar="•" PlaceholderText="{loc:T 'sk-…, or the name of an environment variable that holds it'}"
+                     AutomationProperties.Name="{loc:T 'API key'}" />
+            <TextBlock Classes="tertiary" TextWrapping="Wrap" Text="{loc:T 'Saved in omp’s models.yml, which only your user can read. Leave it empty for a server that needs no key.'}" />
           </StackPanel>
           <StackPanel Spacing="6">
-            <TextBlock Classes="label" Text="Models" />
+            <TextBlock Classes="label" Text="{loc:T 'Models'}" />
             <Border Classes="segmented" HorizontalAlignment="Left">
               <StackPanel Orientation="Horizontal" Spacing="2">
-                <Button x:Name="CustomProviderDiscover" Classes="segment" Classes.selected="{Binding FormDiscover}" Content="Discover from the server"
-                        Command="{Binding SetDiscoverCommand}" CommandParameter="true" AutomationProperties.Name="Discover models from the server" />
-                <Button x:Name="CustomProviderListModels" Classes="segment" Classes.selected="{Binding FormListsModels}" Content="List them"
-                        Command="{Binding SetDiscoverCommand}" CommandParameter="false" AutomationProperties.Name="List the models" />
+                <Button x:Name="CustomProviderDiscover" Classes="segment" Classes.selected="{Binding FormDiscover}" Content="{loc:T 'Discover from the server'}"
+                        Command="{Binding SetDiscoverCommand}" CommandParameter="true" AutomationProperties.Name="{loc:T 'Discover models from the server'}" />
+                <Button x:Name="CustomProviderListModels" Classes="segment" Classes.selected="{Binding FormListsModels}" Content="{loc:T 'List them'}"
+                        Command="{Binding SetDiscoverCommand}" CommandParameter="false" AutomationProperties.Name="{loc:T 'List the models'}" />
               </StackPanel>
             </Border>
             <TextBlock Classes="tertiary" TextWrapping="Wrap" IsVisible="{Binding FormDiscover}"
-                       Text="omp asks the server for its models each time it starts." />
+                       Text="{loc:T 'omp asks the server for its models each time it starts.'}" />
             <TextBox x:Name="CustomProviderModelsBox" Classes="sm" Text="{Binding FormModels}" IsVisible="{Binding FormListsModels}"
-                     AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="72" MaxHeight="160" PlaceholderText="One model id per line"
-                     AutomationProperties.Name="Model ids" />
+                     AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="72" MaxHeight="160" PlaceholderText="{loc:T 'One model id per line'}"
+                     AutomationProperties.Name="{loc:T 'Model ids'}" />
           </StackPanel>
           <Border Classes="ws-note" Classes.ok="{Binding TestOk}" Classes.error="{Binding !TestOk}" IsVisible="{Binding HasTestResult}">
             <Grid ColumnDefinitions="Auto,*">
@@ -95,16 +96,16 @@
             <SelectableTextBlock x:Name="CustomProviderFormError" Grid.Column="1" Text="{Binding FormError}" TextWrapping="Wrap" FontSize="13" />
           </Grid>
           <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button x:Name="CustomProviderSave" Classes="accent" Content="Save" Command="{Binding SaveFormCommand}" IsEnabled="{Binding CanChange}" />
-            <Button x:Name="CustomProviderTest" Content="Test connection" Command="{Binding TestCommand}" IsEnabled="{Binding !Testing}" />
-            <Button Content="Cancel" Classes="flat" Command="{Binding CancelFormCommand}" />
-            <TextBlock Classes="muted" Text="Connecting…" IsVisible="{Binding Testing}" VerticalAlignment="Center" />
+            <Button x:Name="CustomProviderSave" Classes="accent" Content="{loc:T 'Save'}" Command="{Binding SaveFormCommand}" IsEnabled="{Binding CanChange}" />
+            <Button x:Name="CustomProviderTest" Content="{loc:T 'Test connection'}" Command="{Binding TestCommand}" IsEnabled="{Binding !Testing}" />
+            <Button Content="{loc:T 'Cancel'}" Classes="flat" Command="{Binding CancelFormCommand}" />
+            <TextBlock Classes="muted" Text="{loc:T 'Connecting…'}" IsVisible="{Binding Testing}" VerticalAlignment="Center" />
           </StackPanel>
         </StackPanel>
       </Border>
 
       <!-- On this computer -->
-      <TextBlock Classes="label" Text="On this computer" Margin="0,4,0,-6" />
+      <TextBlock Classes="label" Text="{loc:T 'On this computer'}" Margin="0,4,0,-6" />
       <ItemsControl x:Name="LocalServerList" ItemsSource="{Binding LocalServers}">
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:LocalServerRowViewModel">
@@ -120,7 +121,7 @@
                     <Border Classes="status" Classes.done="{Binding IsRunning}" IsVisible="{Binding IsAdded}" VerticalAlignment="Center">
                       <StackPanel Orientation="Horizontal" Spacing="6">
                         <Ellipse />
-                        <TextBlock Text="Added" />
+                        <TextBlock Text="{loc:T 'Added'}" />
                       </StackPanel>
                     </Border>
                     <Button Classes="icon" IsVisible="{Binding IsAdded}" Command="{Binding AskRemoveCommand}" VerticalAlignment="Center"
@@ -128,7 +129,7 @@
                             ToolTip.Tip="{Binding Name, StringFormat='Remove {0}…'}" AutomationProperties.Name="{Binding Name, StringFormat='Remove {0}'}">
                       <ctl:Icon Data="{StaticResource IconTrash}" Size="16" />
                     </Button>
-                    <Button Content="Add" IsVisible="{Binding IsNotAdded}" Command="{Binding BeginAddCommand}" VerticalAlignment="Center"
+                    <Button Content="{loc:T 'Add'}" IsVisible="{Binding IsNotAdded}" Command="{Binding BeginAddCommand}" VerticalAlignment="Center"
                             IsEnabled="{Binding $parent[ItemsControl].((vm:CustomProvidersViewModel)DataContext).CanChange}"
                             AutomationProperties.Name="{Binding Name, StringFormat='Add {0}'}" />
                   </StackPanel>
@@ -139,13 +140,13 @@
                                Text="{Binding Name, StringFormat='omp will use {0} at this address and ask it for its models each time it starts.'}" />
                     <Grid ColumnDefinitions="*,Auto">
                       <TextBox Classes="sm" Text="{Binding Url}" AutomationProperties.Name="{Binding Name, StringFormat='Address of {0}'}" />
-                      <Button Grid.Column="1" Content="Check" Margin="8,0,0,0" Command="{Binding CheckCommand}" IsEnabled="{Binding !Checking}"
+                      <Button Grid.Column="1" Content="{loc:T 'Check'}" Margin="8,0,0,0" Command="{Binding CheckCommand}" IsEnabled="{Binding !Checking}"
                               AutomationProperties.Name="{Binding Name, StringFormat='Check {0}'}" />
                     </Grid>
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                      <Button Classes="accent" Content="Add to omp" Command="{Binding ConfirmAddCommand}"
+                      <Button Classes="accent" Content="{loc:T 'Add to omp'}" Command="{Binding ConfirmAddCommand}"
                               IsEnabled="{Binding $parent[ItemsControl].((vm:CustomProvidersViewModel)DataContext).CanChange}" />
-                      <Button Classes="flat" Content="Cancel" Command="{Binding CancelAddCommand}" />
+                      <Button Classes="flat" Content="{loc:T 'Cancel'}" Command="{Binding CancelAddCommand}" />
                     </StackPanel>
                   </StackPanel>
                 </Border>
@@ -153,8 +154,8 @@
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="{Binding RemoveQuestion}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0" />
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                      <Button Classes="danger" Content="Remove" Command="{Binding ConfirmRemoveCommand}" AutomationProperties.Name="{Binding Name, StringFormat='Confirm removing {0}'}" />
-                      <Button Content="Cancel" Classes="flat" Command="{Binding CancelRemoveCommand}" />
+                      <Button Classes="danger" Content="{loc:T 'Remove'}" Command="{Binding ConfirmRemoveCommand}" AutomationProperties.Name="{Binding Name, StringFormat='Confirm removing {0}'}" />
+                      <Button Content="{loc:T 'Cancel'}" Classes="flat" Command="{Binding CancelRemoveCommand}" />
                     </StackPanel>
                   </Grid>
                 </Border>
@@ -168,7 +169,7 @@
       </ItemsControl>
 
       <!-- Providers of the user's own -->
-      <TextBlock Classes="label" Text="Your providers" Margin="0,4,0,-6" IsVisible="{Binding HasCustomProviders}" />
+      <TextBlock Classes="label" Text="{loc:T 'Your providers'}" Margin="0,4,0,-6" IsVisible="{Binding HasCustomProviders}" />
       <ItemsControl x:Name="CustomProviderList" ItemsSource="{Binding CustomProviders}" IsVisible="{Binding HasCustomProviders}">
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:CustomProviderRowViewModel">
@@ -198,8 +199,8 @@
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="{Binding RemoveQuestion}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0" />
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                      <Button Classes="danger" Content="Remove" Command="{Binding ConfirmRemoveCommand}" AutomationProperties.Name="{Binding Id, StringFormat='Confirm removing {0}'}" />
-                      <Button Content="Cancel" Classes="flat" Command="{Binding CancelRemoveCommand}" />
+                      <Button Classes="danger" Content="{loc:T 'Remove'}" Command="{Binding ConfirmRemoveCommand}" AutomationProperties.Name="{Binding Id, StringFormat='Confirm removing {0}'}" />
+                      <Button Content="{loc:T 'Cancel'}" Classes="flat" Command="{Binding CancelRemoveCommand}" />
                     </StackPanel>
                   </Grid>
                 </Border>

@@ -38,6 +38,8 @@ public sealed record OmpRuntimeOptions
     public string? LastWorkingDirectory { get; init; }
     /// <summary>system | light | dark.</summary>
     public string? Theme { get; init; }
+    /// <summary>The app's language (<c>en</c>, <c>ru</c>, or a code of the user's own file in <c>languages/</c>); null follows the system.</summary>
+    public string? Language { get; init; }
     /// <summary>OS notification when a run ends or omp asks while the window is in the background (default on).</summary>
     public bool? Notifications { get; init; }
     /// <summary>How the message box sends: <c>enter</c> (default; Shift+Enter adds a line) or <c>mod-enter</c> (⌘/Ctrl+Enter sends, Enter adds a line).</summary>
@@ -52,6 +54,10 @@ public sealed record OmpRuntimeOptions
     public string[]? SidebarProjects { get; init; }
     /// <summary>Project folders removed from the sidebar: their sessions are not listed (nothing is deleted on disk).</summary>
     public string[]? HiddenProjects { get; init; }
+    /// <summary>Project folders pinned to the top of the sidebar, in the order they were pinned.</summary>
+    public string[]? PinnedProjects { get; init; }
+    /// <summary>Names the user gave project folders in the sidebar (folder → name); a folder not here shows its own name.</summary>
+    public Dictionary<string, string>? ProjectNames { get; init; }
     /// <summary>The sidebar's width as last dragged (220–480 px); null means the default.</summary>
     public double? SidebarWidth { get; init; }
     /// <summary>"Don't ask again" rules for omp's approval requests (<see cref="ApprovalRuleSet"/>); session rules are never saved.</summary>

@@ -1,7 +1,8 @@
 <!-- The side pane right of the conversation (Views menu ⋮): a 48 px header level with the window's (the pane's name,
      what it counts, close) over one of Plan, Background tasks, Files. MainWindow.FitPanels docks it beside the
      conversation or, in a narrow window, lays it over the conversation until it is closed. DataContext: MainViewModel. -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:OmpGui.App.Localization"
+             xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
@@ -23,11 +24,11 @@
         <!-- One header for every pane: the Files pane's own toolbar (for it on its own) is hidden here (Styles.Files) -->
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
           <Button x:Name="RefreshFilesButton" Classes="icon" Command="{Binding Files.RefreshNowCommand}"
-                  IsVisible="{Binding IsFilesPaneShown}" ToolTip.Tip="Read the files again" AutomationProperties.Name="Refresh files">
+                  IsVisible="{Binding IsFilesPaneShown}" ToolTip.Tip="{loc:T 'Read the files again'}" AutomationProperties.Name="{loc:T 'Refresh files'}">
             <ctl:Icon Data="{StaticResource IconReload}" Size="18" />
           </Button>
           <Button x:Name="ClosePaneButton" Classes="icon" Command="{Binding ClosePaneCommand}"
-                  ToolTip.Tip="Close the pane" AutomationProperties.Name="Close pane">
+                  ToolTip.Tip="{loc:T 'Close the pane'}" AutomationProperties.Name="{loc:T 'Close pane'}">
             <ctl:Icon Data="{StaticResource IconClose}" Size="18" />
           </Button>
         </StackPanel>

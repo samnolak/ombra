@@ -143,18 +143,26 @@
   </Style>
 
   <!-- ─────────────── Transcript ─────────────── -->
-  <!-- Transcript rows are not selectable list items: no hover/selection chrome; one reading column, centered. -->
+  <!-- Transcript rows are not selectable list items: no hover/selection chrome; one reading column, centered. Not
+       clipped (Fluent clips a ListBoxItem): a tool line reaches 8 px past the column on each side, and the item's clip cut
+       its rounded hover fill into a square-cornered strip. -->
   <Style Selector="ListBox.transcript ListBoxItem">
     <Setter Property="MaxWidth" Value="768" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="Focusable" Value="False" />
     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="ClipToBounds" Value="False" />
   </Style>
   <Style Selector="ListBox.transcript ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
   </Style>
   <Style Selector="ListBox.transcript ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <!-- A row held at the top of the view (an open exploration group's line, Controls/TranscriptPanel) covers what scrolls
+       under it -->
+  <Style Selector="ListBox.transcript ListBoxItem.stuck /template/ ContentPresenter#PART_ContentPresenter, ListBox.transcript ListBoxItem.stuck:pointerover /template/ ContentPresenter#PART_ContentPresenter, ListBox.transcript ListBoxItem.stuck:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiWindow}" />
   </Style>
   <Style Selector="ListBox.transcript">
     <Setter Property="Background" Value="Transparent" />
@@ -203,6 +211,10 @@
   </Style>
   <Style Selector="ToggleButton.thinking-toggle:checked ctl|Icon.chevron">
     <Setter Property="RenderTransform" Value="rotate(90deg)" />
+  </Style>
+  <!-- The thinking line held at the top of the view (Controls/StickyHeader) covers the thoughts under it -->
+  <Style Selector="Border.sticky-bar.stuck">
+    <Setter Property="Background" Value="{DynamicResource GuiWindow}" />
   </Style>
   <!-- Pulses while omp thinks (ctl:Pulse, not a style animation: that would redraw the window every vsync) -->
   <Style Selector="TextBlock.thinking-label.live">
@@ -336,8 +348,8 @@
   <Style Selector="ctl|Icon.tool-mark.running">
     <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiStatusInfo}" />
     <Setter Property="StrokeThickness" Value="2.25" />
-    <Setter Property="ctl:Pulse.Low" Value="0.3" />
-    <Setter Property="ctl:Pulse.Duration" Value="0:0:0.9" />
+    <!-- Turns (a spinner), stepped like Pulse's fade so it costs no frame every vsync -->
+    <Setter Property="ctl:Pulse.Spin" Value="0:0:0.9" />
   </Style>
   <!-- Waiting for the user's approval: the waiting colour, as the activity line and the session dot have it -->
   <Style Selector="ctl|Icon.tool-mark.running.waiting">
@@ -392,14 +404,73 @@
     <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
   </Style>
   <!-- A command's console: the code surface with a rule on its left (red when the command failed), "$" and the command
-       in primary text, then its output in secondary; the preview's lines are cut, the opened output wraps -->
+       in primary text, then its output in secondary; the preview's lines are cut, the opened output wraps. Rounded on
+       every corner like every other card; the rule bends into the left ones. -->
   <Style Selector="Border.console">
     <Setter Property="Margin" Value="30,2,8,6" />
-    <Setter Property="Padding" Value="10,7,12,7" />
     <Setter Property="Background" Value="{DynamicResource GuiCodeBlockBg}" />
     <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderStrong}" />
     <Setter Property="BorderThickness" Value="2,0,0,0" />
-    <Setter Property="CornerRadius" Value="0,8,8,0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusControl}" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+  <!-- An open console's bar covers the top of its rule: the card starts with the bar, the rule under it -->
+  <Style Selector="Border.console Border.card-head">
+    <Setter Property="Margin" Value="-2,0,0,0" />
+  </Style>
+  <Style Selector="StackPanel.console-body">
+    <Setter Property="Margin" Value="10,7,12,7" />
+  </Style>
+  <!-- An open output's bar (a console's, an output's): an icon, what it is, what it ran on, and a chevron that folds it.
+       On the card's own surface with a hairline under it: it stays at the top of the view over the card's lines
+       (Controls/StickyHeader). Its top corners are the card's (GuiRadiusControl); held at the top of the view, the window
+       shows around them, so the bar still reads as the top of a rounded card and no line pokes out at its corners. -->
+  <Style Selector="Border.card-head.stuck">
+    <Setter Property="Background" Value="{DynamicResource GuiWindow}" />
+  </Style>
+  <Style Selector="Button.card-header">
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Height" Value="28" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="10,0" />
+    <Setter Property="Background" Value="{DynamicResource GuiCodeBlockBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+    <Setter Property="CornerRadius" Value="8,8,0,0" />
+    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+  <Style Selector="Button.card-header:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.card-header:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiCodeBlockBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
+  </Style>
+  <Style Selector="Border.tool-output Button.card-header">
+    <Setter Property="Padding" Value="12,0" />
+  </Style>
+  <Style Selector="Button.card-header ctl|Icon">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextTertiary}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.card-header ctl|Icon.card-icon">
+    <Setter Property="Margin" Value="0,0,6,0" />
+  </Style>
+  <Style Selector="Button.card-header:pointerover ctl|Icon.card-chevron">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="TextBlock.card-kind">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="TextBlock.card-summary">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="Margin" Value="8,0" />
   </Style>
   <Style Selector="Border.console.failed">
     <Setter Property="BorderBrush" Value="{DynamicResource GuiStatusError}" />
@@ -456,12 +527,15 @@
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
   </Style>
-  <!-- The whole output, opened: a code surface that scrolls past 320 px -->
+  <!-- The whole output, opened: a code surface under its bar -->
   <Style Selector="Border.tool-output">
     <Setter Property="Margin" Value="30,2,8,6" />
-    <Setter Property="Padding" Value="12,8" />
     <Setter Property="Background" Value="{DynamicResource GuiCodeBlockBg}" />
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusControl}" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+  <Style Selector="SelectableTextBlock.tool-output-text">
+    <Setter Property="Margin" Value="12,8" />
   </Style>
   <Style Selector="Border.tool-output SelectableTextBlock">
     <Setter Property="LineHeight" Value="19" />
@@ -600,6 +674,38 @@
        a tinted fill and its changed words on a stronger tint -->
   <Style Selector="ctl|DiffView.tool-diff">
     <Setter Property="Margin" Value="30,2,8,8" />
+  </Style>
+  <!-- The header on the card's surface: it stays at the top of the view over the card's lines (Controls/StickyHeader).
+       Its bar lies over the card's top hairline and draws it, rounded like the card, so held at the top of the view it
+       is still a rounded card top; the window shows around its corners there -->
+  <Style Selector="Border.diff-head">
+    <Setter Property="Margin" Value="-1,-1,-1,0" />
+  </Style>
+  <Style Selector="Border.diff-head.stuck">
+    <Setter Property="Background" Value="{DynamicResource GuiWindow}" />
+  </Style>
+  <Style Selector="Border.diff-head-bar">
+    <Setter Property="Background" Value="{DynamicResource GuiSurface1}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
+    <Setter Property="BorderThickness" Value="1,1,1,0" />
+    <Setter Property="CornerRadius" Value="8,8,0,0" />
+  </Style>
+  <!-- Folds the card away (its tool row's line) -->
+  <Style Selector="Button.diff-collapse">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="4" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Margin" Value="8,0,-4,0" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+  <Style Selector="Button.diff-collapse:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.diff-collapse:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+  </Style>
+  <Style Selector="Button.diff-collapse ctl|Icon">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+  <Style Selector="Button.diff-collapse:pointerover ctl|Icon">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextPrimary}" />
   </Style>
   <Style Selector="Border.diff-card">
     <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />

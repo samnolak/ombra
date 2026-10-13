@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -52,15 +53,15 @@ public sealed partial class MainViewModel
     /// </summary>
     internal async Task<(bool Ok, string Message)> MoveSessionToNewWorktreeAsync(string branch)
     {
-        if (!CanRunOmpCommands) return (false, "omp isn't running. Start it, then try again.");
-        if (IsRunning) return (false, "omp is replying. Try again when the reply ends.");
+        if (!CanRunOmpCommands) return (false, Loc.T("omp isn't running. Start it, then try again."));
+        if (IsRunning) return (false, Loc.T("omp is replying. Try again when the reply ends."));
         // This chat's omp throughout: another chat may be shown by the time omp has made the worktree
         var open = _open;
         var session = open.Controller;
         var r = await session.RunSlashCommandAsync(branch.Length == 0 ? "/wt" : "/wt " + branch, TimeSpan.FromMinutes(3), Lifetime);
-        if (!r.Ok) return (false, r.Error ?? "omp did not answer.");
+        if (!r.Ok) return (false, r.Error ?? Loc.T("omp did not answer."));
         if (WorkspaceParsers.ParseMovedToWorktree(r.Output) is not { } moved)
-            return (false, r.Output.Length > 0 ? r.Output : "omp did not create the worktree.");
+            return (false, r.Output.Length > 0 ? r.Output : Loc.T("omp did not create the worktree."));
         try
         {
             await session.FollowSessionMoveAsync(moved.Path, Lifetime);

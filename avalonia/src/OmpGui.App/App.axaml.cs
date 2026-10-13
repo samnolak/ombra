@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Controls;
@@ -37,8 +38,9 @@ public sealed class App : Application
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
             {
                 options = new OmpRuntimeOptions();
-                configError = $"Could not read the settings ({e.Message}); using defaults.";
+                configError = Loc.F("Could not read the settings ({0}); using defaults.", e.Message);
             }
+            OmpGui.App.Localization.Loc.Load(OmpGui.App.Localization.Loc.Resolve(options.Language, store.Path), store.Path);
             MainViewModel.ApplyTheme(options.Theme);
             var platform = OmpGui.App.Platform.RuntimePlatform.Key(out _);
             var installer = new RuntimeInstaller(new HttpClient { Timeout = Timeout.InfiniteTimeSpan }, RuntimePack.DefaultRoot, platform);
@@ -79,7 +81,7 @@ public sealed class App : Application
                 ApprovalMode: OmpRuntimeOptions.EffectiveApprovalMode(options.ApprovalMode));
             // "Bypass permissions" was chosen explicitly before; say so at every start, not only in the chip.
             if (initial.ApprovalMode == "yolo")
-                configError = (configError is null ? "" : configError + "\n") + "Bypass permissions is on: omp runs every tool, including shell commands, without asking. Change it under the message box.";
+                configError = (configError is null ? "" : configError + "\n") + Loc.T("Bypass permissions is on: omp runs every tool, including shell commands, without asking. Change it under the message box.");
             installer.RemovePrevious(); // packs of earlier versions, once this version's is installed (before omp starts)
             var session = new SessionController(Launch, initial);
             var updater = OmpGui.App.Services.UpdateInstaller.ForThisApp(out var noInstall);
@@ -164,7 +166,7 @@ public sealed class App : Application
     /// </summary>
     private void SetUpMenus(IClassicDesktopStyleApplicationLifetime desktop, MainWindow window, MainViewModel vm)
     {
-        var settings = new NativeMenuItem("Settings…") { Command = vm.OpenSettingsCommand, Gesture = new Avalonia.Input.KeyGesture(Avalonia.Input.Key.OemComma, Avalonia.Input.KeyModifiers.Meta) };
+        var settings = new NativeMenuItem(Loc.T("Settings…")) { Command = vm.OpenSettingsCommand, Gesture = new Avalonia.Input.KeyGesture(Avalonia.Input.Key.OemComma, Avalonia.Input.KeyModifiers.Meta) };
         var appMenu = new NativeMenu();
         appMenu.Add(settings);
         NativeMenu.SetMenu(this, appMenu);
@@ -172,13 +174,13 @@ public sealed class App : Application
 
         try
         {
-            var show = new NativeMenuItem("Show OMP GUI");
+            var show = new NativeMenuItem(Loc.T("Show OMP GUI"));
             show.Click += (_, _) => ShowWindow(window);
             var quit = new NativeMenuItem("Quit");
             quit.Click += (_, _) => window.Close();
             var trayMenu = new NativeMenu();
             trayMenu.Add(show);
-            trayMenu.Add(new NativeMenuItem("New Chat") { Command = vm.NewChatCommand });
+            trayMenu.Add(new NativeMenuItem(Loc.T("New Chat")) { Command = vm.NewChatCommand });
             trayMenu.Add(quit);
             var tray = new TrayIcon
             {

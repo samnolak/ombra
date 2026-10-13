@@ -1,13 +1,14 @@
 <!-- The session's title in the header; a click opens the session menu (Claude Code's title menu). Every item runs one of
      omp's builtins over RPC (MainViewModel.Session.cs) and reports on the session card above the message box. -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:OmpGui.App.Localization"
+             xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
              x:Class="OmpGui.App.Views.Session.SessionTitle"
              x:DataType="vm:MainViewModel">
-  <Button x:Name="TitleButton" Classes="title" ToolTip.Tip="Session menu: rename, compact, export, share…"
-          AutomationProperties.Name="{Binding SessionTitle, StringFormat='Session menu: {0}'}">
+  <Button x:Name="TitleButton" Classes="title" ToolTip.Tip="{loc:T 'Session menu: rename, compact, export, share…'}"
+          AutomationProperties.Name="{Binding SessionTitle, StringFormat={loc:T 'Session menu: {0}'}}">
     <Grid ColumnDefinitions="*,Auto">
       <TextBlock x:Name="TitleText" Text="{Binding SessionTitle}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
       <ctl:Icon Grid.Column="1" Data="{StaticResource IconChevronDown}" Size="14" Margin="4,0,0,0" VerticalAlignment="Center"
@@ -16,89 +17,89 @@
     <Button.Flyout>
       <Flyout Placement="BottomEdgeAlignedLeft">
         <ScrollViewer x:Name="MenuScroll" MaxHeight="560" HorizontalScrollBarVisibility="Disabled">
-          <StackPanel x:Name="SessionMenu" Width="300" Spacing="1" Classes="session-menu">
-            <Button x:Name="RenameItem" Classes="menu-item" Command="{Binding StartRenameCommand}" AutomationProperties.Name="Rename">
+          <StackPanel x:Name="SessionMenu" MinWidth="300" Spacing="1" Classes="session-menu">
+            <Button x:Name="RenameItem" Classes="menu-item" Command="{Binding StartRenameCommand}" AutomationProperties.Name="{loc:T 'Rename'}">
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <ctl:Icon Data="{StaticResource IconPencil}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Rename" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Rename'}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="2" Classes="menu-hint" Text="/rename" VerticalAlignment="Center" />
               </Grid>
             </Button>
-            <Button x:Name="CopyIdItem" Classes="menu-item" Command="{Binding CopySessionIdCommand}" AutomationProperties.Name="Copy session ID">
+            <Button x:Name="CopyIdItem" Classes="menu-item" Command="{Binding CopySessionIdCommand}" AutomationProperties.Name="{loc:T 'Copy session ID'}">
               <Grid ColumnDefinitions="Auto,*">
                 <ctl:Icon Data="{StaticResource IconHash}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Copy session ID" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Copy session ID'}" VerticalAlignment="Center" />
               </Grid>
             </Button>
-            <Button x:Name="CopyFileItem" Classes="menu-item" Command="{Binding CopySessionFileCommand}" AutomationProperties.Name="Copy session file path">
+            <Button x:Name="CopyFileItem" Classes="menu-item" Command="{Binding CopySessionFileCommand}" AutomationProperties.Name="{loc:T 'Copy session file path'}">
               <Grid ColumnDefinitions="Auto,*">
                 <ctl:Icon Data="{StaticResource IconFileText}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Copy session file path" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Copy session file path'}" VerticalAlignment="Center" />
               </Grid>
             </Button>
             <Border Classes="menu-separator" />
-            <Button x:Name="CompactItem" Classes="menu-item" Command="{Binding CompactConversationCommand}" AutomationProperties.Name="Compact conversation">
+            <Button x:Name="CompactItem" Classes="menu-item" Command="{Binding CompactConversationCommand}" AutomationProperties.Name="{loc:T 'Compact conversation'}">
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <ctl:Icon Data="{StaticResource IconCompact}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Compact conversation…" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Compact conversation…'}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="2" Classes="menu-hint" Text="/compact" VerticalAlignment="Center" />
               </Grid>
             </Button>
-            <Button x:Name="HandoffItem" Classes="menu-item" Command="{Binding HandOffCommand}" AutomationProperties.Name="Hand off">
+            <Button x:Name="HandoffItem" Classes="menu-item" Command="{Binding HandOffCommand}" AutomationProperties.Name="{loc:T 'Hand off'}">
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <ctl:Icon Data="{StaticResource IconHandoff}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Hand off…" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Hand off…'}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="2" Classes="menu-hint" Text="/handoff" VerticalAlignment="Center" />
               </Grid>
             </Button>
-            <Button x:Name="FreshItem" Classes="menu-item" Command="{Binding FreshProviderSessionCommand}" AutomationProperties.Name="Fresh provider session">
+            <Button x:Name="FreshItem" Classes="menu-item" Command="{Binding FreshProviderSessionCommand}" AutomationProperties.Name="{loc:T 'Fresh provider session'}">
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <ctl:Icon Data="{StaticResource IconFresh}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Fresh provider session" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Fresh provider session'}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="2" Classes="menu-hint" Text="/fresh" VerticalAlignment="Center" />
               </Grid>
             </Button>
-            <Button x:Name="RetryItem" Classes="menu-item" Command="{Binding RetryLastTurnCommand}" AutomationProperties.Name="Retry the last turn">
+            <Button x:Name="RetryItem" Classes="menu-item" Command="{Binding RetryLastTurnCommand}" AutomationProperties.Name="{loc:T 'Retry the last turn'}">
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <ctl:Icon Data="{StaticResource IconRetry}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Retry the last turn" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Retry the last turn'}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="2" Classes="menu-hint" Text="/retry" VerticalAlignment="Center" />
               </Grid>
             </Button>
-            <Button x:Name="RewindItem" Classes="menu-item" Command="{Binding RewindCommand}" AutomationProperties.Name="Rewind to an earlier message">
+            <Button x:Name="RewindItem" Classes="menu-item" Command="{Binding RewindCommand}" AutomationProperties.Name="{loc:T 'Rewind to an earlier message'}">
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <ctl:Icon Data="{StaticResource IconRewind}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Rewind…" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Rewind…'}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="2" Classes="menu-hint" Text="/branch" VerticalAlignment="Center" />
               </Grid>
             </Button>
             <Border Classes="menu-separator" />
-            <Button x:Name="ExportItem" Classes="menu-item" Command="{Binding ExportHtmlCommand}" AutomationProperties.Name="Export as HTML">
+            <Button x:Name="ExportItem" Classes="menu-item" Command="{Binding ExportHtmlCommand}" AutomationProperties.Name="{loc:T 'Export as HTML'}">
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <ctl:Icon Data="{StaticResource IconExport}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Export as HTML" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Export as HTML'}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="2" Classes="menu-hint" Text="/export" VerticalAlignment="Center" />
               </Grid>
             </Button>
-            <Button x:Name="ShareItem" Classes="menu-item" Command="{Binding ShareSessionCommand}" AutomationProperties.Name="Share a link">
+            <Button x:Name="ShareItem" Classes="menu-item" Command="{Binding ShareSessionCommand}" AutomationProperties.Name="{loc:T 'Share a link'}">
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <ctl:Icon Data="{StaticResource IconShare}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Share a link…" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Share a link…'}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="2" Classes="menu-hint" Text="/share" VerticalAlignment="Center" />
               </Grid>
             </Button>
             <Border Classes="menu-separator" />
-            <Button x:Name="FoldersItem" Classes="menu-item" Command="{Binding WorkspaceFoldersCommand}" AutomationProperties.Name="Workspace folders">
+            <Button x:Name="FoldersItem" Classes="menu-item" Command="{Binding WorkspaceFoldersCommand}" AutomationProperties.Name="{loc:T 'Workspace folders'}">
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <ctl:Icon Data="{StaticResource IconFolders}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Workspace folders…" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Workspace folders…'}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="2" Classes="menu-hint" Text="/dirs" VerticalAlignment="Center" />
               </Grid>
             </Button>
-            <Button x:Name="MoveItem" Classes="menu-item" Command="{Binding MoveSessionCommand}" AutomationProperties.Name="Move to another folder">
+            <Button x:Name="MoveItem" Classes="menu-item" Command="{Binding MoveSessionCommand}" AutomationProperties.Name="{loc:T 'Move to another folder'}">
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <ctl:Icon Data="{StaticResource IconMove}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Move to another folder…" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Move to another folder…'}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="2" Classes="menu-hint" Text="/move" VerticalAlignment="Center" />
               </Grid>
             </Button>
@@ -109,18 +110,18 @@
                 <TextBlock Grid.Column="2" Classes="menu-hint" Text="/pin" VerticalAlignment="Center" />
               </Grid>
             </Button>
-            <Button x:Name="MemoryItem" Classes="menu-item" Command="{Binding ShowMemoryCommand}" AutomationProperties.Name="Memory">
+            <Button x:Name="MemoryItem" Classes="menu-item" Command="{Binding ShowMemoryCommand}" AutomationProperties.Name="{loc:T 'Memory'}">
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <ctl:Icon Data="{StaticResource IconMemory}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Memory" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Memory'}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="2" Classes="menu-hint" Text="/memory" VerticalAlignment="Center" />
               </Grid>
             </Button>
             <Border Classes="menu-separator" />
-            <Button x:Name="DeleteItem" Classes="menu-item danger" Command="{Binding DeleteSessionCommand}" AutomationProperties.Name="Delete session">
+            <Button x:Name="DeleteItem" Classes="menu-item danger" Command="{Binding DeleteSessionCommand}" AutomationProperties.Name="{loc:T 'Delete session'}">
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <ctl:Icon Data="{StaticResource IconTrash}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Delete session…" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Delete session…'}" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="2" Classes="menu-hint" Text="/drop" VerticalAlignment="Center" />
               </Grid>
             </Button>

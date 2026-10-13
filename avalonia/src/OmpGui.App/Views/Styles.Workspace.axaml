@@ -141,6 +141,12 @@
   <Style Selector="Ellipse.session-dot.running">
     <Setter Property="ctl:Pulse.Low" Value="0.3" />
   </Style>
+  <!-- Waiting on the user (an approval or a question): a raised hand in the waiting colour, gently pulsing -->
+  <Style Selector="ctl|Icon.session-hand">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiStatusWaiting}" />
+    <Setter Property="StrokeThickness" Value="1.5" />
+    <Setter Property="ctl:Pulse.Low" Value="0.55" />
+  </Style>
   <Style Selector="Ellipse.session-dot.waiting">
     <Setter Property="Fill" Value="{DynamicResource GuiStatusWaiting}" />
   </Style>

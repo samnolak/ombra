@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -48,13 +49,13 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
     public string RingLevel => IsFull ? "full" : IsWarn ? "warn" : "normal";
 
     public string Tooltip => Percent is { } p
-        ? string.Create(CultureInfo.InvariantCulture, $"Context {p:0}% used") + (IsFull ? " — omp compacts it soon" : "") + " · details"
-        : "Context usage: details";
+        ? string.Format(CultureInfo.InvariantCulture, Loc.T("Context {0:0}% used"), p) + (IsFull ? Loc.T(" — omp compacts it soon") : "") + Loc.T(" · details")
+        : Loc.T("Context usage: details");
 
-    public string AccessibleName => Percent is { } p ? string.Create(CultureInfo.InvariantCulture, $"Context usage, {p:0} percent") : "Context usage";
+    public string AccessibleName => Percent is { } p ? string.Format(CultureInfo.InvariantCulture, Loc.T("Context usage, {0:0} percent"), p) : Loc.T("Context usage");
 
     /// <summary>The popover's headline when omp gave no breakdown: the ring's own number, not a bare "Context".</summary>
-    private string PercentHeadline => PercentText.Length > 0 ? $"{PercentText} of the context used" : "Context";
+    private string PercentHeadline => PercentText.Length > 0 ? Loc.F("{0} of the context used", PercentText) : Loc.T("Context");
 
     [ObservableProperty] private bool _isOpen;
     [ObservableProperty] private bool _isLoading;
@@ -145,7 +146,7 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
             var limits = owner.ProviderUsage.LoadAsync(); // a side process: runs while omp answers the rest
             if (!owner.CanRunOmpCommands)
             {
-                Error = "omp is not running.";
+                Error = Loc.T("omp is not running.");
                 return;
             }
             owner.Session.RefreshState(); // the ring from get_state, measured now
@@ -173,7 +174,7 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
         {
             HasContext = false;
             ContextHeadline = PercentHeadline;
-            ContextNote = r.Ok ? r.Output.Trim() : r.Error ?? "omp did not answer.";
+            ContextNote = r.Ok ? r.Output.Trim() : r.Error ?? Loc.T("omp did not answer.");
             return;
         }
         if (report.Unavailable is { } why)
@@ -184,13 +185,13 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
             return;
         }
         HasContext = true;
-        ContextHeadline = string.Create(CultureInfo.InvariantCulture,
-            $"{report.UsedPercent:0}% of {SessionOutputs.ShortTokens(report.Window)} tokens used");
+        ContextHeadline = string.Format(CultureInfo.InvariantCulture,
+            Loc.T("{0:0}% of {1} tokens used"), report.UsedPercent, SessionOutputs.ShortTokens(report.Window));
         foreach (var c in report.Categories)
             ContextRows.Add(new ContextRowViewModel(c.Label, c.Fraction, SessionOutputs.Tokens(c.Tokens),
                 string.Create(CultureInfo.InvariantCulture, $"{c.Fraction * 100:0}%"), c.Label == "Free", c.Label == "Auto-compact buffer"));
         if (ContextRows.Any(x => x.IsReserve))
-            ContextNote = "The auto-compact buffer is kept free: omp compacts the conversation when the rest is full.";
+            ContextNote = Loc.T("The auto-compact buffer is kept free: omp compacts the conversation when the rest is full.");
     }
 
     private void ApplyTotals(SessionTokenStats? s)
@@ -198,13 +199,13 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
         Totals.Clear();
         if (s is not null)
         {
-            Totals.Add(new UsageTotalViewModel("Input", SessionOutputs.Tokens(s.Input)));
-            Totals.Add(new UsageTotalViewModel("Output", SessionOutputs.Tokens(s.Output)));
-            if (s.CacheRead > 0) Totals.Add(new UsageTotalViewModel("Cache read", SessionOutputs.Tokens(s.CacheRead)));
-            if (s.CacheWrite > 0) Totals.Add(new UsageTotalViewModel("Cache write", SessionOutputs.Tokens(s.CacheWrite)));
-            if (s.PremiumRequests > 0) Totals.Add(new UsageTotalViewModel("Premium requests", SessionOutputs.Tokens(s.PremiumRequests)));
+            Totals.Add(new UsageTotalViewModel(Loc.T("Input"), SessionOutputs.Tokens(s.Input)));
+            Totals.Add(new UsageTotalViewModel(Loc.T("Output"), SessionOutputs.Tokens(s.Output)));
+            if (s.CacheRead > 0) Totals.Add(new UsageTotalViewModel(Loc.T("Cache read"), SessionOutputs.Tokens(s.CacheRead)));
+            if (s.CacheWrite > 0) Totals.Add(new UsageTotalViewModel(Loc.T("Cache write"), SessionOutputs.Tokens(s.CacheWrite)));
+            if (s.PremiumRequests > 0) Totals.Add(new UsageTotalViewModel(Loc.T("Premium requests"), SessionOutputs.Tokens(s.PremiumRequests)));
             // omp prices a turn from the model's catalog rates; nothing to show when it has none (0)
-            if (s.Cost > 0) Totals.Add(new UsageTotalViewModel("Cost", Money(s.Cost)));
+            if (s.Cost > 0) Totals.Add(new UsageTotalViewModel(Loc.T("Cost"), Money(s.Cost)));
         }
         HasTotals = Totals.Count > 0;
     }

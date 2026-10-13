@@ -2,7 +2,8 @@
      box (PetPerch), and on the desktop (PetWindow). Placed in code (PetStage.Plan/Apply): the bubble beside the pet at
      the height of its head, the message box above it (below when there is no room above). Only the three take the
      pointer: the canvas has no background. -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:OmpGui.App.Localization"
+             xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
@@ -18,7 +19,7 @@
     </StackPanel>
     <Border x:Name="PetChat" Classes="pet-chat" IsVisible="{Binding IsChatOpen}">
       <TextBox x:Name="PetChatBox" Classes="sm pet-chat" Text="{Binding ChatText}" PlaceholderText="{Binding ChatPlaceholder}"
-               AcceptsReturn="False" TextWrapping="NoWrap" AutomationProperties.Name="Message to omp from your pet">
+               AcceptsReturn="False" TextWrapping="NoWrap" AutomationProperties.Name="{loc:T 'Message to omp from your pet'}">
         <!-- The card around it is the field, as for the message box -->
         <TextBox.Resources>
           <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />

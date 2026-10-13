@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Text.Json.Nodes;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -30,7 +31,7 @@ public sealed partial class PluginRowViewModel : ObservableObject
     public bool HasVersion => Info.Version.Length > 0;
     public bool IsMarketplace => Info.Marketplace is not null;
     public string SourceLabel => Info.Marketplace ?? "npm";
-    public string SourceTip => Info.Marketplace is { } m ? $"From the marketplace {m}" + (Info.Scope == "project" ? ", installed for this project" : "") : "An npm package (or a linked folder)";
+    public string SourceTip => Info.Marketplace is { } m ? (Info.Scope == "project" ? Loc.F("From the marketplace {0}, installed for this project", m) : Loc.F("From the marketplace {0}", m)) : Loc.T("An npm package (or a linked folder)");
     public bool IsProjectScope => Info.Scope == "project";
     public bool IsShadowed => Info.Shadowed;
 
@@ -50,7 +51,7 @@ public sealed partial class PluginRowViewModel : ObservableObject
     private string _updateVersion = "";
 
     public bool HasUpdate => UpdateVersion.Length > 0;
-    public string UninstallQuestion => $"Uninstall “{Name}”? Its files are removed; its skills, commands and tools go away.";
+    public string UninstallQuestion => Loc.F("Uninstall “{0}”? Its files are removed; its skills, commands and tools go away.", Name);
 
     partial void OnIsEnabledChanged(bool value)
     {
@@ -91,7 +92,7 @@ public sealed partial class MarketplaceRowViewModel(PluginsViewModel page, Marke
     [NotifyPropertyChangedFor(nameof(BrowseLabel))]
     private bool _isOpen;
 
-    public string BrowseLabel => IsOpen ? "Hide plugins" : "Browse";
+    public string BrowseLabel => IsOpen ? Loc.T("Hide plugins") : Loc.T("Browse");
     [ObservableProperty] private bool _isBusy;
     [ObservableProperty] private bool _isConfirmingRemove;
 
@@ -100,7 +101,7 @@ public sealed partial class MarketplaceRowViewModel(PluginsViewModel page, Marke
     private string _message = "";
 
     public bool HasMessage => Message.Length > 0;
-    public string RemoveQuestion => $"Remove the marketplace “{Name}”? Plugins already installed from it stay installed.";
+    public string RemoveQuestion => Loc.F("Remove the marketplace “{0}”? Plugins already installed from it stay installed.", Name);
 
     [RelayCommand] private Task Browse() => page.BrowseAsync(this);
     [RelayCommand] private Task Refresh() => page.UpdateMarketplaceAsync(this);
@@ -259,15 +260,15 @@ public sealed partial class PluginsViewModel : ObservableObject
         owner.PropertyChanged += OnOwnerChanged;
         SkillSources =
         [
-            new(this, "skills.enabled", "Use skills", "omp offers skills to the model and as /skill: commands", true),
-            new(this, "skills.enableSkillCommands", "Skill commands", "Each skill as a /skill:name command (the list above shows those)", true),
-            new(this, "skills.enablePiUser", "omp skills", "~/.omp/agent/skills (or your profile's)", true),
-            new(this, "skills.enablePiProject", "omp project skills", ".omp/skills in the project", true),
-            new(this, "skills.enableClaudeUser", "Claude Code skills", "~/.claude/skills", false),
-            new(this, "skills.enableClaudeProject", "Claude Code project skills", ".claude/skills in the project", true),
-            new(this, "skills.enableAgentsUser", "Agent skills", "~/.agents/skills and ~/.agent/skills", true),
-            new(this, "skills.enableAgentsProject", "Agent project skills", ".agents/skills and .agent/skills in the project", true),
-            new(this, "skills.enableCodexUser", "Codex skills", "~/.codex/skills", false),
+            new(this, "skills.enabled", Loc.T("Use skills"), Loc.T("omp offers skills to the model and as /skill: commands"), true),
+            new(this, "skills.enableSkillCommands", Loc.T("Skill commands"), Loc.T("Each skill as a /skill:name command (the list above shows those)"), true),
+            new(this, "skills.enablePiUser", Loc.T("omp skills"), Loc.T("~/.omp/agent/skills (or your profile's)"), true),
+            new(this, "skills.enablePiProject", Loc.T("omp project skills"), Loc.T(".omp/skills in the project"), true),
+            new(this, "skills.enableClaudeUser", Loc.T("Claude Code skills"), "~/.claude/skills", false),
+            new(this, "skills.enableClaudeProject", Loc.T("Claude Code project skills"), Loc.T(".claude/skills in the project"), true),
+            new(this, "skills.enableAgentsUser", Loc.T("Agent skills"), Loc.T("~/.agents/skills and ~/.agent/skills"), true),
+            new(this, "skills.enableAgentsProject", Loc.T("Agent project skills"), Loc.T(".agents/skills and .agent/skills in the project"), true),
+            new(this, "skills.enableCodexUser", Loc.T("Codex skills"), "~/.codex/skills", false),
         ];
         // Created while the page is already shown (the page asked for it late): load now.
         if (owner.IsSettingsOpen && owner.SettingsCategory == "plugins") _ = RefreshAsync();
@@ -351,7 +352,7 @@ public sealed partial class PluginsViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(PluginsErrorTitle), nameof(ShowMarketplacesEmpty))]
     private bool _pageFailed;
 
-    public string PluginsErrorTitle => PageFailed ? "Couldn't load plugins and skills from omp" : "omp couldn't list the plugins";
+    public string PluginsErrorTitle => PageFailed ? Loc.T("Couldn't load plugins and skills from omp") : Loc.T("omp couldn't list the plugins");
     public bool HasMarketplacesError => MarketplacesError.Length > 0;
     public bool HasMarketplaceFormError => MarketplaceFormError.Length > 0;
     public bool HasSettingsError => SettingsError.Length > 0;
@@ -414,14 +415,14 @@ public sealed partial class PluginsViewModel : ObservableObject
     }
 
     private static string Why(OmpCliResult r) =>
-        OmpPlugins.Clean(r.Stderr.Trim().Length > 0 ? r.Stderr : r.Stdout) is { Length: > 0 } s ? s : $"omp exited with code {r.ExitCode}.";
+        OmpPlugins.Clean(r.Stderr.Trim().Length > 0 ? r.Stderr : r.Stdout) is { Length: > 0 } s ? s : Loc.F("omp exited with code {0}.", r.ExitCode);
 
     private void ApplyPlugins(OmpCliResult r)
     {
         var parsed = r.Ok ? OmpPlugins.ParseList(r.Stdout) : null;
         if (parsed is null)
         {
-            PluginsError = r.Ok ? "omp's plugin list could not be read." : Why(r);
+            PluginsError = r.Ok ? Loc.T("omp's plugin list could not be read.") : Why(r);
             Plugins.Clear();
             return;
         }
@@ -445,7 +446,7 @@ public sealed partial class PluginsViewModel : ObservableObject
         var parsed = r.Ok ? OmpPlugins.ParseMarketplaces(r.Stdout) : null;
         if (parsed is null)
         {
-            MarketplacesError = r.Ok ? "omp's marketplace list could not be read." : Why(r);
+            MarketplacesError = r.Ok ? Loc.T("omp's marketplace list could not be read.") : Why(r);
             Marketplaces.Clear();
             return;
         }
@@ -466,7 +467,7 @@ public sealed partial class PluginsViewModel : ObservableObject
         var config = r.Ok ? OmpPlugins.ParseConfigList(r.Stdout) : null;
         if (config is null)
         {
-            SettingsError = "Couldn't read omp's settings: " + (r.Ok ? "unexpected output" : Why(r));
+            SettingsError = Loc.T("Couldn't read omp's settings: ") + (r.Ok ? Loc.T("unexpected output") : Why(r));
             HasSettings = false;
             return;
         }
@@ -501,10 +502,10 @@ public sealed partial class PluginsViewModel : ObservableObject
             Skills.Add(row);
         }
         SkillsMessage = Skills.Count > 0 ? ""
-            : !_owner.CanRunOmpCommands ? "Skills appear while omp is running."
-            : !SkillSources[0].IsOn ? "Skills are off (Skill sources below)."
-            : !SkillSources[1].IsOn ? "Skill commands are off (Skill sources below), so omp lists no /skill: commands to show here."
-            : "omp found no skills. Add SKILL.md folders to one of the places below, or install a plugin that brings skills.";
+            : !_owner.CanRunOmpCommands ? Loc.T("Skills appear while omp is running.")
+            : !SkillSources[0].IsOn ? Loc.T("Skills are off (Skill sources below).")
+            : !SkillSources[1].IsOn ? Loc.T("Skill commands are off (Skill sources below), so omp lists no /skill: commands to show here.")
+            : Loc.T("omp found no skills. Add SKILL.md folders to one of the places below, or install a plugin that brings skills.");
         OnPropertyChanged(nameof(HasSkills));
     }
 
@@ -542,7 +543,7 @@ public sealed partial class PluginsViewModel : ObservableObject
         if (!_catalogs.TryGetValue(m.Name, out var plugins)) return;
         var installed = Plugins.Where(p => p.IsMarketplace && p.SourceLabel == m.Name).Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
         foreach (var p in plugins) m.Plugins.Add(new MarketplacePluginRowViewModel(this, m, p) { IsInstalled = installed.Contains(p.Name) });
-        m.Message = plugins.Count == 0 ? "This marketplace lists no plugins." : "";
+        m.Message = plugins.Count == 0 ? Loc.T("This marketplace lists no plugins.") : "";
     }
 
     // ── After a change ──
@@ -564,7 +565,7 @@ public sealed partial class PluginsViewModel : ObservableObject
         if (_owner.CanRunOmpCommands)
         {
             var r = await _owner.RunOmpCommandAsync("/reload-plugins");
-            where.Notice = r.Ok ? done + " Skills and commands are updated." : done;
+            where.Notice = r.Ok ? done + " " + Loc.T("Skills and commands are updated.") : done;
             await WaitForCatalogAsync();
             RefreshSkills();
         }
@@ -583,7 +584,7 @@ public sealed partial class PluginsViewModel : ObservableObject
     {
         NeedsRestart = true;
         foreach (var f in Areas) f.ShowRestart = ReferenceEquals(f, where);
-        where.RestartText = _owner.IsRunning ? text.Replace("Restart it", "Restart it once the reply finishes", StringComparison.Ordinal) : text;
+        where.RestartText = Loc.T(_owner.IsRunning ? text.Replace("Restart it", "Restart it once the reply finishes", StringComparison.Ordinal) : text);
     }
 
     private async Task RestartOmpAsync()
@@ -596,12 +597,12 @@ public sealed partial class PluginsViewModel : ObservableObject
             {
                 RestartDone();
                 _owner.Connectors.RestartDone();
-                where.Notice = "omp restarted with the new plugins and settings.";
+                where.Notice = Loc.T("omp restarted with the new plugins and settings.");
                 await WaitForCatalogAsync();
                 RefreshSkills();
             }
             // The shown chat is replying: its omp restarts when the reply ends (the other chats' already did, or do then)
-            else where.RestartText = "omp is replying: it restarts with the change when the reply ends.";
+            else where.RestartText = Loc.T("omp is replying: it restarts with the change when the reply ends.");
         }
         finally
         {
@@ -632,7 +633,7 @@ public sealed partial class PluginsViewModel : ObservableObject
                 PluginsFeedback.Error = Why(r);
                 return;
             }
-            await ReloadAsync(PluginsFeedback, enabled ? $"Turned on “{row.Name}”." : $"Turned off “{row.Name}”.");
+            await ReloadAsync(PluginsFeedback, enabled ? Loc.F("Turned on “{0}”.", row.Name) : Loc.F("Turned off “{0}”.", row.Name));
         }
         finally
         {
@@ -657,7 +658,7 @@ public sealed partial class PluginsViewModel : ObservableObject
             Plugins.Remove(row);
             NotifyLists();
             foreach (var m in Marketplaces.Where(m => m.IsOpen)) FillMarketplace(m);
-            await ReloadAsync(PluginsFeedback, $"Uninstalled “{row.Name}”.");
+            await ReloadAsync(PluginsFeedback, Loc.F("Uninstalled “{0}”.", row.Name));
         }
         finally
         {
@@ -682,7 +683,7 @@ public sealed partial class PluginsViewModel : ObservableObject
             }
             var said = OmpPlugins.Clean(r.Stdout);
             ApplyPlugins(await _owner.RunOmpCliAsync(["plugin", "list", "--json"], CliWait));
-            await ReloadAsync(PluginsFeedback, said.Length > 0 ? said + "." : $"Upgraded “{row.Name}”.");
+            await ReloadAsync(PluginsFeedback, said.Length > 0 ? said + "." : Loc.F("Upgraded “{0}”.", row.Name));
         }
         finally
         {
@@ -708,7 +709,7 @@ public sealed partial class PluginsViewModel : ObservableObject
             InstallSpec = "";
             ApplyPlugins(await _owner.RunOmpCliAsync(["plugin", "list", "--json"], CliWait));
             NotifyLists();
-            await ReloadAsync(PluginsFeedback, $"Installed {spec}.");
+            await ReloadAsync(PluginsFeedback, Loc.F("Installed {0}.", spec));
         }
         finally
         {
@@ -737,7 +738,7 @@ public sealed partial class PluginsViewModel : ObservableObject
             MarketplaceSource = "";
             ApplyMarketplaces(await _owner.RunOmpCliAsync(["plugin", "marketplace", "list"], CliWait));
             NotifyLists();
-            MarketplacesFeedback.Notice = "Added the marketplace. Open it to see its plugins.";
+            MarketplacesFeedback.Notice = Loc.T("Added the marketplace. Open it to see its plugins.");
             await LoadCatalogsAsync(_loadVersion);
         }
         finally
@@ -795,7 +796,7 @@ public sealed partial class PluginsViewModel : ObservableObject
             if (d.Ok && OmpPlugins.ParseDiscover(d.Stdout) is { } plugins) _catalogs[m.Name] = plugins;
             ApplyCatalogsToRows();
             if (m.IsOpen) FillMarketplace(m);
-            MarketplacesFeedback.Notice = $"Updated the catalog of “{m.Name}”.";
+            MarketplacesFeedback.Notice = Loc.F("Updated the catalog of “{0}”.", m.Name);
         }
         finally
         {
@@ -818,7 +819,7 @@ public sealed partial class PluginsViewModel : ObservableObject
             Marketplaces.Remove(m);
             _catalogs.Remove(m.Name);
             NotifyLists();
-            MarketplacesFeedback.Notice = $"Removed the marketplace “{m.Name}”.";
+            MarketplacesFeedback.Notice = Loc.F("Removed the marketplace “{0}”.", m.Name);
         }
         finally
         {
@@ -842,7 +843,7 @@ public sealed partial class PluginsViewModel : ObservableObject
             p.IsInstalled = true;
             ApplyPlugins(await _owner.RunOmpCliAsync(["plugin", "list", "--json"], CliWait));
             NotifyLists();
-            await ReloadAsync(MarketplacesFeedback, $"Installed “{p.Name}”.");
+            await ReloadAsync(MarketplacesFeedback, Loc.F("Installed “{0}”.", p.Name));
         }
         finally
         {
@@ -852,7 +853,7 @@ public sealed partial class PluginsViewModel : ObservableObject
 
     partial void OnAutoUpdateChanged(string value)
     {
-        if (!_syncingAutoUpdate) _ = SetConfigAsync(MarketplacesFeedback, "marketplace.autoUpdate", value, "Plugin updates at startup: " + value + ".");
+        if (!_syncingAutoUpdate) _ = SetConfigAsync(MarketplacesFeedback, "marketplace.autoUpdate", value, Loc.F("Plugin updates at startup: {0}.", value));
     }
 
     [RelayCommand] private void SetAutoUpdate(string? mode) { if (mode is "off" or "notify" or "auto") AutoUpdate = mode; }
@@ -871,7 +872,7 @@ public sealed partial class PluginsViewModel : ObservableObject
             if (!current.Ok || !ok)
             {
                 skill.SetEnabledQuietly(!enabled);
-                SkillsFeedback.Error = "Couldn't read omp's settings: " + Why(current);
+                SkillsFeedback.Error = Loc.T("Couldn't read omp's settings: ") + Why(current);
                 return;
             }
             var id = "skill:" + skill.Name;
@@ -885,7 +886,7 @@ public sealed partial class PluginsViewModel : ObservableObject
                 return;
             }
             _disabledExtensions = ids;
-            SkillsFeedback.Notice = enabled ? $"Turned on the skill “{skill.Name}”." : $"Turned off the skill “{skill.Name}”.";
+            SkillsFeedback.Notice = enabled ? Loc.F("Turned on the skill “{0}”.", skill.Name) : Loc.F("Turned off the skill “{0}”.", skill.Name);
             RequireRestart(SkillsFeedback, "omp reads skill settings when it starts. Restart it to apply the change.");
         }
         finally
@@ -906,7 +907,7 @@ public sealed partial class PluginsViewModel : ObservableObject
             SourcesFeedback.Error = Why(r);
             return;
         }
-        SourcesFeedback.Notice = $"{source.Title}: {(on ? "on" : "off")}.";
+        SourcesFeedback.Notice = $"{source.Title}: {(on ? Loc.T("on") : Loc.T("off"))}.";
         RequireRestart(SourcesFeedback, "omp reads skill settings when it starts. Restart it to apply the change.");
     }
 
@@ -930,7 +931,7 @@ public sealed partial class PluginsViewModel : ObservableObject
         var dir = NewDirectory.Trim();
         if (dir.Length == 0 || _directories.Contains(dir)) return;
         List<string> next = [.. _directories, dir];
-        if (await SetConfigAsync(SourcesFeedback, "skills.customDirectories", OmpPlugins.ArrayValue(next), $"omp will also look for skills in {dir}."))
+        if (await SetConfigAsync(SourcesFeedback, "skills.customDirectories", OmpPlugins.ArrayValue(next), Loc.F("omp will also look for skills in {0}.", dir)))
         {
             _directories = next;
             Directories.Add(new SkillDirectoryViewModel(this, dir));
@@ -942,7 +943,7 @@ public sealed partial class PluginsViewModel : ObservableObject
     internal async Task RemoveDirectoryAsync(SkillDirectoryViewModel d)
     {
         List<string> next = [.. _directories.Where(x => x != d.Path)];
-        if (await SetConfigAsync(SourcesFeedback, "skills.customDirectories", OmpPlugins.ArrayValue(next), $"omp will no longer look for skills in {d.Path}."))
+        if (await SetConfigAsync(SourcesFeedback, "skills.customDirectories", OmpPlugins.ArrayValue(next), Loc.F("omp will no longer look for skills in {0}.", d.Path)))
         {
             _directories = next;
             Directories.Remove(d);

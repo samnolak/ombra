@@ -1,6 +1,7 @@
 <!-- What a settings section says after an action: done (a check), an error in omp's words, and the restart offer when
      omp applies the change only when it starts. Used by the Connectors and Plugins and skills pages. -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:OmpGui.App.Localization"
+        xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
@@ -22,8 +23,8 @@
       <Grid ColumnDefinitions="Auto,*,Auto">
         <ctl:Icon Classes="warning-mark" Data="{StaticResource IconReload}" Size="16" VerticalAlignment="Center" Margin="0,0,8,0" />
         <TextBlock Grid.Column="1" Text="{Binding RestartText}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" />
-        <Button Grid.Column="2" x:Name="RestartOmpButton" Content="Restart omp" Command="{Binding RestartCommand}" IsEnabled="{Binding !IsRestarting}"
-                Margin="12,0,0,0" VerticalAlignment="Center" AutomationProperties.Name="Restart omp" />
+        <Button Grid.Column="2" x:Name="RestartOmpButton" Content="{loc:T 'Restart omp'}" Command="{Binding RestartCommand}" IsEnabled="{Binding !IsRestarting}"
+                Margin="12,0,0,0" VerticalAlignment="Center" AutomationProperties.Name="{loc:T 'Restart omp'}" />
       </Grid>
     </Border>
   </StackPanel>

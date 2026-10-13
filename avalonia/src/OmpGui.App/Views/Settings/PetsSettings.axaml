@@ -1,6 +1,7 @@
 <!-- Settings page "Pets": show a pet and its size; "My pets" (the chosen one ringed); create a pet or customize the
      chosen one (name, body, color, accessory) with a live, animated preview. All of it is the app's: omp has no pets. -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:OmpGui.App.Localization"
+        xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
@@ -13,57 +14,57 @@
       <Border Classes="section-card">
         <StackPanel Spacing="14">
           <StackPanel Spacing="6">
-            <TextBlock Classes="section" Text="Pets" />
+            <TextBlock Classes="section" Text="{loc:T 'Pets'}" />
             <TextBlock Classes="muted" TextWrapping="Wrap"
-                       Text="A little pixel companion on the message box. It thinks and works along with omp, waits with you when omp asks something, cheers when a run is done and winces when something fails. Click it to send omp a message; drag it anywhere on your screens, over your other apps, to keep an eye on omp from there." />
+                       Text="{loc:T 'A little pixel companion on the message box. It thinks and works along with omp, waits with you when omp asks something, cheers when a run is done and winces when something fails. Click it to send omp a message; drag it anywhere on your screens, over your other apps, to keep an eye on omp from there.'}" />
           </StackPanel>
           <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
-              <TextBlock Text="Show a pet" FontWeight="Medium" />
-              <TextBlock Classes="muted" TextWrapping="Wrap" Text="On the top edge of the message box. It falls asleep when nothing happens and then stops moving." />
+              <TextBlock Text="{loc:T 'Show a pet'}" FontWeight="Medium" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'On the top edge of the message box. It falls asleep when nothing happens and then stops moving.'}" />
             </StackPanel>
             <ToggleButton x:Name="ShowPetSwitch" Grid.Column="1" Classes="switch" IsChecked="{Binding ShowPet}"
-                          AutomationProperties.Name="Show a pet" VerticalAlignment="Center" />
+                          AutomationProperties.Name="{loc:T 'Show a pet'}" VerticalAlignment="Center" />
           </Grid>
           <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
-              <TextBlock Text="Size" FontWeight="Medium" />
-              <TextBlock Classes="muted" TextWrapping="Wrap" Text="Small is 32 pixels tall, medium 48" />
+              <TextBlock Text="{loc:T 'Size'}" FontWeight="Medium" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'Small is 32 pixels tall, medium 48'}" />
             </StackPanel>
             <Border Grid.Column="1" Classes="segmented" VerticalAlignment="Center">
               <StackPanel Orientation="Horizontal" Spacing="2">
-                <Button x:Name="PetSizeSmall" Classes="segment" Classes.selected="{Binding IsSmall}" Content="Small"
-                        Command="{Binding SetSizeCommand}" CommandParameter="small" AutomationProperties.Name="Pet size: small" />
-                <Button x:Name="PetSizeMedium" Classes="segment" Classes.selected="{Binding IsMedium}" Content="Medium"
-                        Command="{Binding SetSizeCommand}" CommandParameter="medium" AutomationProperties.Name="Pet size: medium" />
+                <Button x:Name="PetSizeSmall" Classes="segment" Classes.selected="{Binding IsSmall}" Content="{loc:T 'Small'}"
+                        Command="{Binding SetSizeCommand}" CommandParameter="small" AutomationProperties.Name="{loc:T 'Pet size: small'}" />
+                <Button x:Name="PetSizeMedium" Classes="segment" Classes.selected="{Binding IsMedium}" Content="{loc:T 'Medium'}"
+                        Command="{Binding SetSizeCommand}" CommandParameter="medium" AutomationProperties.Name="{loc:T 'Pet size: medium'}" />
               </StackPanel>
             </Border>
           </Grid>
           <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
-              <TextBlock Text="Roams" FontWeight="Medium" />
-              <TextBlock Classes="muted" TextWrapping="Wrap" Text="Where you can drag it: anywhere on your screens, staying on top of other apps, or only inside this window" />
+              <TextBlock Text="{loc:T 'Roams'}" FontWeight="Medium" />
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'Where you can drag it: anywhere on your screens, staying on top of other apps, or only inside this window'}" />
             </StackPanel>
             <Border Grid.Column="1" Classes="segmented" VerticalAlignment="Center">
               <StackPanel Orientation="Horizontal" Spacing="2">
-                <Button x:Name="PetRoamDesktop" Classes="segment" Classes.selected="{Binding IsRoamDesktop}" Content="Whole desktop"
-                        Command="{Binding SetRoamCommand}" CommandParameter="desktop" AutomationProperties.Name="Pet roams the whole desktop" />
-                <Button x:Name="PetRoamWindow" Classes="segment" Classes.selected="{Binding IsRoamWindow}" Content="Inside the window"
-                        Command="{Binding SetRoamCommand}" CommandParameter="window" AutomationProperties.Name="Pet stays inside the window" />
+                <Button x:Name="PetRoamDesktop" Classes="segment" Classes.selected="{Binding IsRoamDesktop}" Content="{loc:T 'Whole desktop'}"
+                        Command="{Binding SetRoamCommand}" CommandParameter="desktop" AutomationProperties.Name="{loc:T 'Pet roams the whole desktop'}" />
+                <Button x:Name="PetRoamWindow" Classes="segment" Classes.selected="{Binding IsRoamWindow}" Content="{loc:T 'Inside the window'}"
+                        Command="{Binding SetRoamCommand}" CommandParameter="window" AutomationProperties.Name="{loc:T 'Pet stays inside the window'}" />
               </StackPanel>
             </Border>
           </Grid>
           <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
-              <TextBlock Text="Place" FontWeight="Medium" />
+              <TextBlock Text="{loc:T 'Place'}" FontWeight="Medium" />
               <TextBlock Classes="muted" TextWrapping="Wrap" Text="{Binding PlaceText}" />
             </StackPanel>
-            <Button x:Name="PetReturnToPerch" Grid.Column="1" Content="Reset position" VerticalAlignment="Center"
-                    Command="{Binding ReturnToPerchCommand}" AutomationProperties.Name="Put the pet back on the message box" />
+            <Button x:Name="PetReturnToPerch" Grid.Column="1" Content="{loc:T 'Reset position'}" VerticalAlignment="Center"
+                    Command="{Binding ReturnToPerchCommand}" AutomationProperties.Name="{loc:T 'Put the pet back on the message box'}" />
           </Grid>
         </StackPanel>
       </Border>
@@ -72,19 +73,19 @@
       <Border Classes="section-card">
         <StackPanel Spacing="14">
           <Grid ColumnDefinitions="*,Auto,Auto">
-            <TextBlock Classes="section" Text="My pets" VerticalAlignment="Center" />
+            <TextBlock Classes="section" Text="{loc:T 'My pets'}" VerticalAlignment="Center" />
             <Button x:Name="CustomizePetButton" Grid.Column="1" Classes="flat" Command="{Binding StartCustomizeCommand}"
                     AutomationProperties.Name="{Binding CustomizeTitle}" ToolTip.Tip="{Binding CustomizeTitle}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <ctl:Icon Data="{StaticResource IconPetEdit}" Size="16" VerticalAlignment="Center" />
-                <TextBlock Text="Customize" VerticalAlignment="Center" />
+                <TextBlock Text="{loc:T 'Customize'}" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
             <Button x:Name="CreatePetButton" Grid.Column="2" Command="{Binding StartCreateCommand}" Margin="8,0,0,0"
-                    AutomationProperties.Name="Create a pet">
+                    AutomationProperties.Name="{loc:T 'Create a pet'}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <ctl:Icon Data="{StaticResource IconPlus}" Size="16" VerticalAlignment="Center" />
-                <TextBlock Text="Create pet" VerticalAlignment="Center" />
+                <TextBlock Text="{loc:T 'Create pet'}" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
           </Grid>
@@ -119,7 +120,7 @@
             <StackPanel Spacing="10" Width="168" VerticalAlignment="Top">
               <Border Classes="pet-stage" Height="120">
                 <ctl:PetView x:Name="PetPreview" Look="{Binding DraftLook}" Mood="{Binding PreviewMood}" PixelScale="3"
-                             HorizontalAlignment="Center" VerticalAlignment="Center" AutomationProperties.Name="Preview" />
+                             HorizontalAlignment="Center" VerticalAlignment="Center" AutomationProperties.Name="{loc:T 'Preview'}" />
               </Border>
               <ItemsControl ItemsSource="{Binding MoodOptions}">
                 <ItemsControl.ItemsPanel>
@@ -136,12 +137,12 @@
             </StackPanel>
             <StackPanel Grid.Column="1" Spacing="14" Margin="20,0,0,0">
               <StackPanel Spacing="6">
-                <TextBlock Classes="label" Text="Name" />
+                <TextBlock Classes="label" Text="{loc:T 'Name'}" />
                 <TextBox x:Name="PetNameBox" Classes="sm" Text="{Binding DraftName}" PlaceholderText="{Binding NamePlaceholder}" MaxLength="24"
-                         AutomationProperties.Name="Pet name" />
+                         AutomationProperties.Name="{loc:T 'Pet name'}" />
               </StackPanel>
               <StackPanel Spacing="6" IsVisible="{Binding CanChangeBody}">
-                <TextBlock Classes="label" Text="Body" />
+                <TextBlock Classes="label" Text="{loc:T 'Body'}" />
                 <ItemsControl ItemsSource="{Binding BodyOptions}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate><WrapPanel ItemSpacing="4" LineSpacing="4" /></ItemsPanelTemplate>
@@ -157,7 +158,7 @@
                 </ItemsControl>
               </StackPanel>
               <StackPanel Spacing="6">
-                <TextBlock Classes="label" Text="Color" />
+                <TextBlock Classes="label" Text="{loc:T 'Color'}" />
                 <ItemsControl ItemsSource="{Binding CoatOptions}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate><WrapPanel ItemSpacing="4" LineSpacing="4" /></ItemsPanelTemplate>
@@ -173,7 +174,7 @@
                 </ItemsControl>
               </StackPanel>
               <StackPanel Spacing="6">
-                <TextBlock Classes="label" Text="Accessory" />
+                <TextBlock Classes="label" Text="{loc:T 'Accessory'}" />
                 <ItemsControl ItemsSource="{Binding AccessoryOptions}">
                   <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate><WrapPanel ItemSpacing="4" LineSpacing="4" /></ItemsPanelTemplate>
@@ -191,10 +192,10 @@
           <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
           <Grid ColumnDefinitions="Auto,Auto,*,Auto">
             <Button x:Name="SavePetButton" Classes="accent" Content="{Binding EditorSaveLabel}" Command="{Binding SaveEditorCommand}" />
-            <Button Grid.Column="1" Classes="flat" Content="Cancel" Command="{Binding CancelEditorCommand}" Margin="8,0,0,0" />
-            <Button x:Name="DeletePetButton" Grid.Column="3" Classes="flat danger-text" Content="Delete pet" IsVisible="{Binding CanDelete}"
+            <Button Grid.Column="1" Classes="flat" Content="{loc:T 'Cancel'}" Command="{Binding CancelEditorCommand}" Margin="8,0,0,0" />
+            <Button x:Name="DeletePetButton" Grid.Column="3" Classes="flat danger-text" Content="{loc:T 'Delete pet'}" IsVisible="{Binding CanDelete}"
                     Command="{Binding DeleteChosenCommand}" />
-            <Button x:Name="ResetPetButton" Grid.Column="3" Classes="flat" Content="Reset to original" IsVisible="{Binding CanReset}"
+            <Button x:Name="ResetPetButton" Grid.Column="3" Classes="flat" Content="{loc:T 'Reset to original'}" IsVisible="{Binding CanReset}"
                     Command="{Binding ResetChosenCommand}" />
           </Grid>
         </StackPanel>

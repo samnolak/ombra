@@ -2,7 +2,8 @@
      DataContext = PreviewViewModel. A 48 px toolbar (back, forward, reload, address, open in browser, close), suggestion
      chips while nothing is open, then the page. The native web view is created in code only once a page is navigated;
      where the platform's engine is missing a card offers the system browser instead. -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:OmpGui.App.Localization"
+             xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
@@ -10,7 +11,7 @@
              x:Class="OmpGui.App.Controls.PreviewPanel"
              x:DataType="vm:PreviewViewModel"
              Background="{DynamicResource GuiWindow}"
-             AutomationProperties.Name="Preview">
+             AutomationProperties.Name="{loc:T 'Preview'}">
   <UserControl.Styles>
     <Style Selector="Border.preview-toolbar">
       <!-- level with the main window's 48 px header -->
@@ -67,34 +68,34 @@
       <Border Classes="preview-toolbar">
         <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto,Auto" VerticalAlignment="Center">
           <Button x:Name="BackButton" Grid.Column="0" Classes="icon" Command="{Binding BackCommand}"
-                  ToolTip.Tip="Back" AutomationProperties.Name="Back">
+                  ToolTip.Tip="{loc:T 'Back'}" AutomationProperties.Name="{loc:T 'Back'}">
             <ctl:Icon Data="{StaticResource IconArrowLeft}" Size="18" />
           </Button>
           <Button x:Name="ForwardButton" Grid.Column="1" Classes="icon" Command="{Binding ForwardCommand}"
-                  ToolTip.Tip="Forward" AutomationProperties.Name="Forward">
+                  ToolTip.Tip="{loc:T 'Forward'}" AutomationProperties.Name="{loc:T 'Forward'}">
             <ctl:Icon Data="{StaticResource IconArrowRight}" Size="18" />
           </Button>
           <Button x:Name="ReloadButton" Grid.Column="2" Classes="icon" Command="{Binding ReloadCommand}"
-                  ToolTip.Tip="Reload" AutomationProperties.Name="Reload">
+                  ToolTip.Tip="{loc:T 'Reload'}" AutomationProperties.Name="{loc:T 'Reload'}">
             <ctl:Icon Data="{StaticResource IconReload}" Size="18" />
           </Button>
           <TextBox x:Name="AddressBox" Grid.Column="3" Classes="sm" Margin="6,0"
                    Text="{Binding Address}" PlaceholderText="localhost:3000"
-                   AutomationProperties.Name="Address" ToolTip.Tip="{Binding Title}">
+                   AutomationProperties.Name="{loc:T 'Address'}" ToolTip.Tip="{Binding Title}">
             <TextBox.KeyBindings>
               <KeyBinding Gesture="Enter" Command="{Binding NavigateCommand}" />
             </TextBox.KeyBindings>
             <!-- Open in the system browser: part of the address, as in browsers -->
             <TextBox.InnerRightContent>
               <Button x:Name="OpenExternallyButton" Classes="icon" Width="26" Height="26" Margin="0,0,2,0" Command="{Binding OpenExternallyCommand}"
-                      ToolTip.Tip="Open in the browser" AutomationProperties.Name="Open in browser">
+                      ToolTip.Tip="{loc:T 'Open in the browser'}" AutomationProperties.Name="{loc:T 'Open in browser'}">
                 <ctl:Icon Data="{StaticResource IconExternal}" Size="15" />
               </Button>
             </TextBox.InnerRightContent>
           </TextBox>
           <!-- omp's browser tool is using the page (as Claude in Chrome marks the tab it drives); in the toolbar, so the page keeps its size -->
           <Border x:Name="AgentBrowsingPill" Grid.Column="4" Classes="preview-agent" IsVisible="{Binding IsAgentBrowsing}"
-                  ToolTip.Tip="omp is using this page" AutomationProperties.Name="omp is using this page">
+                  ToolTip.Tip="{loc:T 'omp is using this page'}" AutomationProperties.Name="{loc:T 'omp is using this page'}">
             <StackPanel Orientation="Horizontal" Spacing="6">
               <Ellipse Classes="state-dot running" />
               <TextBlock Text="omp" FontSize="{DynamicResource GuiFontS}" VerticalAlignment="Center" />
@@ -102,16 +103,16 @@
           </Border>
           <!-- Device mode (the browsers' device toolbar): the page at a phone's, a tablet's or a desktop's size and platform -->
           <Button x:Name="DeviceButton" Grid.Column="5" Classes="icon" Classes.on="{Binding HasDevice}" Command="{Binding ToggleDeviceCommand}"
-                  ToolTip.Tip="{Binding DeviceTip}" AutomationProperties.Name="Device size">
+                  ToolTip.Tip="{Binding DeviceTip}" AutomationProperties.Name="{loc:T 'Device size'}">
             <ctl:Icon Data="{StaticResource IconDevices}" Size="18" />
           </Button>
           <!-- Annotate (Codex's page comments): click a point or drag over an area, write what to change -->
           <Button x:Name="AnnotateButton" Grid.Column="6" Classes="icon" Classes.on="{Binding IsAnnotating}" Command="{Binding ToggleAnnotateCommand}"
-                  ToolTip.Tip="Annotate: mark a point or an area (Ctrl/⌘+Shift+S)" AutomationProperties.Name="Annotate">
+                  ToolTip.Tip="{loc:T 'Annotate: mark a point or an area (Ctrl/⌘+Shift+S)'}" AutomationProperties.Name="{loc:T 'Annotate'}">
             <ctl:Icon Data="{StaticResource IconSelect}" Size="18" />
           </Button>
           <Button x:Name="ClosePreviewButton" Grid.Column="7" Classes="icon" Command="{Binding CloseCommand}"
-                  ToolTip.Tip="Close preview" AutomationProperties.Name="Close preview">
+                  ToolTip.Tip="{loc:T 'Close preview'}" AutomationProperties.Name="{loc:T 'Close preview'}">
             <ctl:Icon Data="{StaticResource IconClose}" Size="18" />
           </Button>
         </Grid>
@@ -124,7 +125,7 @@
     <Border x:Name="DeviceBar" DockPanel.Dock="Top" Classes="preview-tabs" IsVisible="{Binding HasDevice}">
       <WrapPanel ItemSpacing="8" LineSpacing="6" VerticalAlignment="Center">
         <ComboBox x:Name="DevicePresetBox" ItemsSource="{x:Static vm:PreviewViewModel.DevicePresets}" SelectedItem="{Binding DevicePreset}"
-                  PlaceholderText="Custom size" MinWidth="170" VerticalAlignment="Center" AutomationProperties.Name="Device">
+                  PlaceholderText="{loc:T 'Custom size'}" MinWidth="170" VerticalAlignment="Center" AutomationProperties.Name="{loc:T 'Device'}">
           <ComboBox.ItemTemplate>
             <DataTemplate x:DataType="vm:DevicePreset">
               <StackPanel Orientation="Horizontal" Spacing="8">
@@ -135,22 +136,22 @@
           </ComboBox.ItemTemplate>
         </ComboBox>
         <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-          <TextBox x:Name="DeviceWidthBox" Classes="sm" Width="64" Text="{Binding CustomWidth}" AutomationProperties.Name="Width" ToolTip.Tip="Width (Enter applies)">
+          <TextBox x:Name="DeviceWidthBox" Classes="sm" Width="64" Text="{Binding CustomWidth}" AutomationProperties.Name="{loc:T 'Width'}" ToolTip.Tip="{loc:T 'Width (Enter applies)'}">
             <TextBox.KeyBindings><KeyBinding Gesture="Enter" Command="{Binding ApplyCustomSizeCommand}" /></TextBox.KeyBindings>
           </TextBox>
           <TextBlock Classes="muted" Text="×" VerticalAlignment="Center" />
-          <TextBox x:Name="DeviceHeightBox" Classes="sm" Width="64" Text="{Binding CustomHeight}" AutomationProperties.Name="Height" ToolTip.Tip="Height (Enter applies)">
+          <TextBox x:Name="DeviceHeightBox" Classes="sm" Width="64" Text="{Binding CustomHeight}" AutomationProperties.Name="{loc:T 'Height'}" ToolTip.Tip="{loc:T 'Height (Enter applies)'}">
             <TextBox.KeyBindings><KeyBinding Gesture="Enter" Command="{Binding ApplyCustomSizeCommand}" /></TextBox.KeyBindings>
           </TextBox>
         </StackPanel>
         <Button x:Name="RotateDeviceButton" Classes="icon" Classes.on="{Binding IsLandscape}" Command="{Binding RotateDeviceCommand}"
-                ToolTip.Tip="Portrait / landscape" AutomationProperties.Name="Rotate" VerticalAlignment="Center">
+                ToolTip.Tip="{loc:T 'Portrait / landscape'}" AutomationProperties.Name="{loc:T 'Rotate'}" VerticalAlignment="Center">
           <ctl:Icon Data="{StaticResource IconRotate}" Size="18" />
         </Button>
         <ComboBox x:Name="DevicePlatformBox" ItemsSource="{x:Static vm:PreviewViewModel.DevicePlatforms}" SelectedItem="{Binding DevicePlatform}"
                   IsEnabled="{x:Static vm:PreviewViewModel.CanSetUserAgent}" MinWidth="110" VerticalAlignment="Center"
-                  ToolTip.Tip="The platform the page sees (its user agent). Only the size changes where the engine can't set one."
-                  AutomationProperties.Name="Platform">
+                  ToolTip.Tip="{loc:T 'The platform the page sees (its user agent). Only the size changes where the engine can’t set one.'}"
+                  AutomationProperties.Name="{loc:T 'Platform'}">
           <ComboBox.ItemTemplate>
             <DataTemplate x:DataType="vm:DevicePlatform">
               <TextBlock Text="{Binding Converter={x:Static vm:PreviewViewModel.PlatformNameConverter}}" />
@@ -158,7 +159,7 @@
           </ComboBox.ItemTemplate>
         </ComboBox>
         <Button x:Name="CloseDeviceButton" Classes="icon" Command="{Binding ClearDeviceCommand}" VerticalAlignment="Center"
-                ToolTip.Tip="Fit the pane again (Ctrl/⌘+Shift+M)" AutomationProperties.Name="Leave device mode">
+                ToolTip.Tip="{loc:T 'Fit the pane again (Ctrl/⌘+Shift+M)'}" AutomationProperties.Name="{loc:T 'Leave device mode'}">
           <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
         </Button>
       </WrapPanel>
@@ -189,7 +190,7 @@
                   <DockPanel>
                     <Button DockPanel.Dock="Right" Classes="icon" Width="22" Height="22" Margin="0,0,3,0" IsVisible="{Binding CanClose}"
                             Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).CloseTabCommand}" CommandParameter="{Binding}"
-                            ToolTip.Tip="Close tab" AutomationProperties.Name="Close tab">
+                            ToolTip.Tip="{loc:T 'Close tab'}" AutomationProperties.Name="{loc:T 'Close tab'}">
                       <ctl:Icon Data="{StaticResource IconClose}" Size="12" />
                     </Button>
                     <Button Classes="flat" Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).SelectTabCommand}" CommandParameter="{Binding}"
@@ -197,7 +198,7 @@
                       <DockPanel>
                         <Ellipse DockPanel.Dock="Left" Classes="state-dot running" IsVisible="{Binding IsLoading}" Margin="0,0,6,0" />
                         <!-- A window the page opened (sign-in pop-ups): it closes itself when done -->
-                        <TextBlock DockPanel.Dock="Right" Classes="tertiary" Text="Pop-up" IsVisible="{Binding IsPopup}" VerticalAlignment="Center"
+                        <TextBlock DockPanel.Dock="Right" Classes="tertiary" Text="{loc:T 'Pop-up'}" IsVisible="{Binding IsPopup}" VerticalAlignment="Center"
                                    FontSize="{DynamicResource GuiFontXs}" Margin="6,0,0,0" />
                         <TextBlock Text="{Binding Header}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
                                    FontSize="{DynamicResource GuiFontS}" />
@@ -210,14 +211,14 @@
           </ItemsControl>
         </ScrollViewer>
         <Button x:Name="NewTabButton" Classes="icon" Width="28" Height="28" Margin="4,0,0,0" Command="{Binding NewTabCommand}"
-                IsVisible="{Binding HasTabList}" ToolTip.Tip="New tab" AutomationProperties.Name="New tab">
+                IsVisible="{Binding HasTabList}" ToolTip.Tip="{loc:T 'New tab'}" AutomationProperties.Name="{loc:T 'New tab'}">
           <ctl:Icon Data="{StaticResource IconPlus}" Size="14" />
         </Button>
         <Button x:Name="NewTabTextButton" Classes="flat" Height="28" MinHeight="0" Padding="8,0,10,0" Command="{Binding NewTabCommand}"
-                IsVisible="{Binding !HasTabList}" AutomationProperties.Name="New tab">
+                IsVisible="{Binding !HasTabList}" AutomationProperties.Name="{loc:T 'New tab'}">
           <StackPanel Orientation="Horizontal" Spacing="6">
             <ctl:Icon Data="{StaticResource IconPlus}" Size="14" VerticalAlignment="Center" />
-            <TextBlock Text="New tab" FontSize="{DynamicResource GuiFontS}" VerticalAlignment="Center" />
+            <TextBlock Text="{loc:T 'New tab'}" FontSize="{DynamicResource GuiFontS}" VerticalAlignment="Center" />
           </StackPanel>
         </Button>
       </ctl:TabStripRow>
@@ -234,7 +235,7 @@
       <ItemsControl.ItemTemplate>
         <DataTemplate x:DataType="x:String">
           <Button Classes="chip" Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).NavigateCommand}"
-                  CommandParameter="{Binding}" ToolTip.Tip="Open in the preview" AutomationProperties.Name="{Binding}">
+                  CommandParameter="{Binding}" ToolTip.Tip="{loc:T 'Open in the preview'}" AutomationProperties.Name="{Binding}">
             <StackPanel Orientation="Horizontal" Spacing="6">
               <ctl:Icon Data="{StaticResource IconGlobe}" Size="14" />
               <TextBlock Text="{Binding}" VerticalAlignment="Center" />
@@ -256,7 +257,7 @@
     <Border x:Name="DownloadsStrip" DockPanel.Dock="Bottom" Classes="preview-downloads" IsVisible="{Binding HasDownloads}">
       <DockPanel>
         <Button x:Name="ClearDownloadsButton" DockPanel.Dock="Right" Classes="icon" Width="26" Height="26" VerticalAlignment="Top"
-                Command="{Binding ClearDownloadsCommand}" ToolTip.Tip="Clear finished downloads" AutomationProperties.Name="Clear downloads">
+                Command="{Binding ClearDownloadsCommand}" ToolTip.Tip="{loc:T 'Clear finished downloads'}" AutomationProperties.Name="{loc:T 'Clear downloads'}">
           <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
         </Button>
         <ScrollViewer MaxHeight="132" HorizontalScrollBarVisibility="Disabled">
@@ -269,12 +270,12 @@
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="cb:BrowserDownload">
                 <DockPanel AutomationProperties.Name="{Binding FileName}">
-                  <Button DockPanel.Dock="Right" Classes="md" Content="Show in Finder" IsVisible="{Binding IsFinished}" Margin="8,0,0,0"
+                  <Button DockPanel.Dock="Right" Classes="md" Content="{loc:T 'Show in Finder'}" IsVisible="{Binding IsFinished}" Margin="8,0,0,0"
                           Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).ShowDownloadCommand}" CommandParameter="{Binding}"
-                          AutomationProperties.Name="Show in Finder" />
-                  <Button DockPanel.Dock="Right" Classes="md" Content="Stop" IsVisible="{Binding IsActive}" Margin="8,0,0,0"
+                          AutomationProperties.Name="{loc:T 'Show in Finder'}" />
+                  <Button DockPanel.Dock="Right" Classes="md" Content="{loc:T 'Stop'}" IsVisible="{Binding IsActive}" Margin="8,0,0,0"
                           Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).CancelDownloadCommand}" CommandParameter="{Binding}"
-                          AutomationProperties.Name="Stop download" />
+                          AutomationProperties.Name="{loc:T 'Stop download'}" />
                   <ctl:Icon DockPanel.Dock="Left" Data="{StaticResource IconDownload}" Size="16" Margin="0,2,8,0" VerticalAlignment="Top"
                             TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
                   <StackPanel Spacing="2">
@@ -308,7 +309,7 @@
             <TextBlock Classes="section" Text="{Binding FallbackText}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontM}" />
           </DockPanel>
           <TextBlock Classes="muted" Text="{Binding EngineDetail}" TextWrapping="Wrap" IsVisible="{Binding EngineDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-          <Button x:Name="FallbackOpenButton" Classes="accent" Content="Open in browser" Command="{Binding OpenExternallyCommand}"
+          <Button x:Name="FallbackOpenButton" Classes="accent" Content="{loc:T 'Open in browser'}" Command="{Binding OpenExternallyCommand}"
                   HorizontalAlignment="Left" />
         </StackPanel>
       </Border>
@@ -319,12 +320,12 @@
         <StackPanel Spacing="10">
           <DockPanel>
             <ctl:Icon DockPanel.Dock="Left" Classes="warning-mark" Data="{StaticResource IconAlert}" Size="18" Margin="0,0,10,0" VerticalAlignment="Top" />
-            <TextBlock Classes="section" Text="This page stopped working" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontM}" />
+            <TextBlock Classes="section" Text="{loc:T 'This page stopped working'}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontM}" />
           </DockPanel>
-          <TextBlock Classes="muted" Text="Its web content process ended. Reload to open it again." TextWrapping="Wrap" />
+          <TextBlock Classes="muted" Text="{loc:T 'Its web content process ended. Reload to open it again.'}" TextWrapping="Wrap" />
           <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button x:Name="CrashReloadButton" Classes="accent" Content="Reload" Command="{Binding ReloadCommand}" />
-            <Button x:Name="CrashOpenExternallyButton" Content="Open in browser" Command="{Binding OpenExternallyCommand}" />
+            <Button x:Name="CrashReloadButton" Classes="accent" Content="{loc:T 'Reload'}" Command="{Binding ReloadCommand}" />
+            <Button x:Name="CrashOpenExternallyButton" Content="{loc:T 'Open in browser'}" Command="{Binding OpenExternallyCommand}" />
           </StackPanel>
         </StackPanel>
       </Border>
@@ -339,8 +340,8 @@
           </DockPanel>
           <SelectableTextBlock x:Name="ErrorPageDetail" Classes="muted" Text="{Binding ErrorDetail}" TextWrapping="Wrap" />
           <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button x:Name="ErrorRetryButton" Classes="accent" Content="Try again" Command="{Binding ReloadCommand}" />
-            <Button x:Name="ErrorOpenExternallyButton" Content="Open in browser" Command="{Binding OpenExternallyCommand}" />
+            <Button x:Name="ErrorRetryButton" Classes="accent" Content="{loc:T 'Try again'}" Command="{Binding ReloadCommand}" />
+            <Button x:Name="ErrorOpenExternallyButton" Content="{loc:T 'Open in browser'}" Command="{Binding OpenExternallyCommand}" />
           </StackPanel>
         </StackPanel>
       </Border>
@@ -375,7 +376,7 @@
                     <ctl:Icon x:Name="BrowserDialogIcon" Classes="dialog-mark" Size="18" Margin="0,1,10,0" VerticalAlignment="Top" />
                     <SelectableTextBlock x:Name="BrowserDialogTitle" Grid.Column="1" Classes="dialog-title" Text="{Binding Title}" VerticalAlignment="Center" />
                     <TextBlock Grid.Column="2" Classes="tertiary" Text="{Binding QueueText}" IsVisible="{Binding HasQueue}" Margin="12,0,0,0"
-                               VerticalAlignment="Center" ToolTip.Tip="More questions from this page are waiting" />
+                               VerticalAlignment="Center" ToolTip.Tip="{loc:T 'More questions from this page are waiting'}" />
                   </Grid>
                   <TextBlock Classes="muted" Text="{Binding Detail}" IsVisible="{Binding HasDetail}" TextWrapping="Wrap" Margin="0,-6,0,0" />
                   <ScrollViewer MaxHeight="220" HorizontalScrollBarVisibility="Disabled" IsVisible="{Binding HasMessage}">
@@ -390,10 +391,10 @@
                     <TextBlock Classes="warning" Text="{Binding Warning}" TextWrapping="Wrap" />
                   </DockPanel>
                   <StackPanel Spacing="8" IsVisible="{Binding IsCredentials}">
-                    <TextBox x:Name="BrowserDialogUser" Text="{Binding UserName}" PlaceholderText="Username" AutomationProperties.Name="Username" />
-                    <TextBox x:Name="BrowserDialogPassword" Text="{Binding Password}" PasswordChar="•" PlaceholderText="Password" AutomationProperties.Name="Password" />
+                    <TextBox x:Name="BrowserDialogUser" Text="{Binding UserName}" PlaceholderText="{loc:T 'Username'}" AutomationProperties.Name="{loc:T 'Username'}" />
+                    <TextBox x:Name="BrowserDialogPassword" Text="{Binding Password}" PasswordChar="•" PlaceholderText="{loc:T 'Password'}" AutomationProperties.Name="{loc:T 'Password'}" />
                   </StackPanel>
-                  <TextBox x:Name="BrowserDialogPrompt" Text="{Binding PromptText}" IsVisible="{Binding IsPrompt}" AutomationProperties.Name="Answer" />
+                  <TextBox x:Name="BrowserDialogPrompt" Text="{Binding PromptText}" IsVisible="{Binding IsPrompt}" AutomationProperties.Name="{loc:T 'Answer'}" />
                   <TextBlock Classes="muted" Text="{Binding Note}" IsVisible="{Binding HasNote}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
                   <!-- Two answers: in a row, the main one last. Three (permission, download): stacked full width, the main one first. -->
                   <WrapPanel ItemSpacing="8" LineSpacing="8" HorizontalAlignment="Right" IsVisible="{Binding !HasTertiary}">

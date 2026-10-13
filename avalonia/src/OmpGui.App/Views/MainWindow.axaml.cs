@@ -108,7 +108,7 @@ public sealed partial class MainWindow : Window
         _caretIdle.Tick += (_, _) =>
         {
             _caretIdle.Stop();
-            Composer.CaretBlinkInterval = TimeSpan.Zero;
+            StopCaretBlink(visible: true);
         };
         AddHandler(KeyDownEvent, (_, _) => ResumeCaret(), RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(PointerPressedEvent, (_, _) => ResumeCaret(), RoutingStrategies.Tunnel, handledEventsToo: true);
@@ -123,7 +123,7 @@ public sealed partial class MainWindow : Window
         Deactivated += (_, _) =>
         {
             _caretIdle.Stop();
-            Composer.CaretBlinkInterval = TimeSpan.Zero;
+            StopCaretBlink(visible: false);
             Vm?.SetWindowActive(false);
         };
         PropertyChanged += (_, e) =>
@@ -482,6 +482,18 @@ public sealed partial class MainWindow : Window
         set { _caretIdleTimeout = value; if (_caretIdle is not null) _caretIdle.Interval = value; }
     }
     private TimeSpan _caretIdleTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Stops the blink with the caret drawn (idle: it stays where you type) or not (another window is active). A zero
+    /// interval alone froze the caret in whatever phase the blink was in, so half the time it vanished from the box.
+    /// </summary>
+    private void StopCaretBlink(bool visible)
+    {
+        Composer.CaretBlinkInterval = TimeSpan.Zero;
+        if (Composer.GetVisualDescendants().OfType<Avalonia.Controls.Presenters.TextPresenter>().FirstOrDefault() is not { } presenter) return;
+        if (visible && Composer.IsFocused) presenter.ShowCaret();
+        else presenter.HideCaret();
+    }
 
     private void ResumeCaret()
     {

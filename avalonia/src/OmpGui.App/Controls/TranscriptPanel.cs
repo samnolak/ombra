@@ -5,6 +5,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
+using Avalonia.Media;
 using Avalonia.VisualTree;
 
 namespace OmpGui.App.Controls;
@@ -31,6 +32,8 @@ namespace OmpGui.App.Controls;
 /// <item>The visible rows are the ScrollViewer's anchor candidates, so its scroll anchoring holds them still when a row
 /// above them changes height. A width change, which it does not follow, holds the row at the top of the view itself
 /// (<see cref="HoldRowAfterWidthChange"/>).</item>
+/// <item>Headers stay at the top of the view while their block is on screen (<see cref="StickyBlock"/>, <see
+/// cref="StickyHeader"/>), placed when the view moves or the rows are laid out, never per frame.</item>
 /// </list>
 /// </summary>
 public sealed class TranscriptPanel : VirtualizingPanel
@@ -69,6 +72,14 @@ public sealed class TranscriptPanel : VirtualizingPanel
     private IScrollAnchorProvider? _anchors;
     private Func<object?, double, double>? _estimateHeight;
     private bool _viewportOnly;
+    private Func<IReadOnlyList<object?>, int, (int Header, int Last)?>? _stickyBlock;
+    /// <summary>The row stuck at the top of the view (<see cref="StickyBlock"/>), -1 when none; its container, moved by
+    /// <see cref="_stuckShift"/>.</summary>
+    private int _stuck = -1;
+    private Control? _stuckRow;
+    private readonly TranslateTransform _stuckShift = new();
+    /// <summary>The row whose headers were placed last (<see cref="StickyHeader"/>): put back once another row is at the top.</summary>
+    private Control? _placedRow;
 
     public TranscriptPanel() => EffectiveViewportChanged += OnEffectiveViewportChanged;
 
@@ -91,6 +102,22 @@ public sealed class TranscriptPanel : VirtualizingPanel
             _estimateHeight = value;
             ForgetEstimates();
             InvalidateMeasure();
+        }
+    }
+
+    /// <summary>
+    /// For a row, the block of rows it is in that keeps its first row on screen: that header row's index and the
+    /// block's last row, or null (Views/TranscriptStickyRows: an open exploration group's line and its steps). While the
+    /// block crosses the top of the view, its header row is moved onto it (pushed up by the block's end), drawn over the
+    /// rows under it and kept realized wherever the view is; the headers of the row under it stick under it.
+    /// </summary>
+    public Func<IReadOnlyList<object?>, int, (int Header, int Last)?>? StickyBlock
+    {
+        get => _stickyBlock;
+        set
+        {
+            _stickyBlock = value;
+            InvalidateArrange();
         }
     }
 
@@ -197,7 +224,9 @@ public sealed class TranscriptPanel : VirtualizingPanel
                 element.Measure(constraint);
                 changed |= SetHeight(i, element.DesiredSize.Height);
             }
-            // Rows still realized outside the range (the one holding the focus) keep their measured height
+            // The row stuck at the top of the view stays realized wherever the view is
+            if (_stuck >= 0 && _stuck < items.Count && (_stuck < first || _stuck > last)) Realize(items, _stuck);
+            // Rows still realized outside the range (the one holding the focus, the stuck one) keep their measured height
             foreach (var (i, element) in _realized)
                 if (i < first || i > last)
                 {
@@ -232,10 +261,92 @@ public sealed class TranscriptPanel : VirtualizingPanel
             // only once this arrange is done moves its offset by what the anchor moved. _viewport is still where the view
             // was, so a row above shrinking by more than the anchor's distance to the top of the view put the anchor
             // outside it, and unregistering it then dropped the anchor: nothing was held, the rows on screen jumped.
-            if (element.IsVisible && _hasViewport && (_viewport.Intersects(rect) || _viewport.Intersects(was))) _anchors?.RegisterAnchorCandidate(element);
+            // The stuck row is drawn where the view is, not where it is laid out: never the row the view is held by
+            if (i != _stuck && element.IsVisible && _hasViewport && (_viewport.Intersects(rect) || _viewport.Intersects(was))) _anchors?.RegisterAnchorCandidate(element);
             else _anchors?.UnregisterAnchorCandidate(element);
         }
+        UpdateSticky();
         return finalSize;
+    }
+
+    /// <summary>
+    /// The headers at the top of the view. A block (<see cref="StickyBlock"/>) crossing the top of the view has its header
+    /// row moved onto it, pushed up by the block's end, over the rows under it (ZIndex, class <c>stuck</c>); one not
+    /// realized is realized by the next measure. The row under it (or under the top of the view) places its own headers
+    /// (<see cref="StickyHeader"/>). Run when the view moves and after each arrange.
+    /// </summary>
+    private void UpdateSticky()
+    {
+        var items = Items;
+        if (!_hasViewport || items.Count == 0 || _heights.Count != items.Count)
+        {
+            Unstick();
+            Unplace();
+            return;
+        }
+        var tops = Tops;
+        var line = _viewport.Top;
+        var stuck = -1;
+        var shift = 0.0;
+        if (_stickyBlock is { } blockOf && blockOf(items, RowAt(tops, line)) is { } block && block.Header >= 0 && block.Header < block.Last && block.Last < items.Count)
+        {
+            var height = tops[block.Header + 1] - tops[block.Header];
+            shift = Math.Min(line - tops[block.Header], tops[block.Last + 1] - tops[block.Header] - height);
+            if (shift >= 0.5)
+            {
+                stuck = block.Header;
+                line = tops[block.Header] + shift + height;
+            }
+        }
+        if (stuck != _stuck)
+        {
+            Unstick();
+            _stuck = stuck;
+        }
+        if (stuck >= 0)
+        {
+            if (_realized.TryGetValue(stuck, out var row))
+            {
+                if (!ReferenceEquals(row, _stuckRow))
+                {
+                    _stuckRow = row;
+                    _anchors?.UnregisterAnchorCandidate(row);
+                    row.RenderTransform = _stuckShift;
+                    row.ZIndex = 1;
+                    row.Classes.Add("stuck");
+                }
+                _stuckShift.Y = shift;
+            }
+            else InvalidateMeasure();
+        }
+        var under = RowAt(tops, line);
+        var placed = under != stuck && _realized.TryGetValue(under, out var underRow) ? underRow : null;
+        if (!ReferenceEquals(placed, _placedRow))
+        {
+            Unplace();
+            _placedRow = placed;
+        }
+        if (placed is not null) StickyHeader.PlaceIn(placed, line - placed.Bounds.Y);
+    }
+
+    /// <summary>The stuck row back where it is laid out.</summary>
+    private void Unstick()
+    {
+        _stuck = -1;
+        _stuckShift.Y = 0;
+        if (_stuckRow is not { } row) return;
+        _stuckRow = null;
+        row.ClearValue(RenderTransformProperty);
+        row.ClearValue(ZIndexProperty);
+        row.Classes.Remove("stuck");
+    }
+
+    /// <summary>The headers of the row last placed back where they are laid out.</summary>
+    private void Unplace()
+    {
+        if (_placedRow is not { } row) return;
+        _placedRow = null;
+        StickyHeader.ReleaseIn(row);
     }
 
     /// <summary>The viewport to realize rows for: the visible part of the panel, or its start before it has one.</summary>
@@ -402,6 +513,7 @@ public sealed class TranscriptPanel : VirtualizingPanel
         // Measure again when the view comes near the edge of the realized rows (or changes size): moving within them
         // needs nothing, which keeps a wheel turn from laying the list out again.
         if (resized || !Covers(viewport)) InvalidateMeasure();
+        UpdateSticky();
     }
 
     /// <summary>
@@ -508,7 +620,7 @@ public sealed class TranscriptPanel : VirtualizingPanel
     {
         List<int>? gone = null;
         foreach (var (i, element) in _realized)
-            if ((i < first || i > last) && !element.IsKeyboardFocusWithin) (gone ??= []).Add(i);
+            if ((i < first || i > last) && i != _stuck && !element.IsKeyboardFocusWithin) (gone ??= []).Add(i);
         if (gone is null) return;
         foreach (var i in gone)
         {
@@ -534,6 +646,8 @@ public sealed class TranscriptPanel : VirtualizingPanel
     private void Hide(Control element)
     {
         _anchors?.UnregisterAnchorCandidate(element);
+        if (ReferenceEquals(element, _stuckRow)) Unstick();
+        if (ReferenceEquals(element, _placedRow)) Unplace();
         MarkdownView.ForgetAnchorsIn(element);
         var recycleKey = element.GetValue(RecycleKeyProperty);
         if (recycleKey == ItemIsItsOwnContainer)
@@ -567,6 +681,9 @@ public sealed class TranscriptPanel : VirtualizingPanel
     {
         base.OnItemsChanged(items, e);
         InvalidateMeasure();
+        // Rows added after the stuck one (the conversation growing) leave it; any other change moves the indexes, and the
+        // stuck row is found again by the next arrange
+        if (!(e.Action == NotifyCollectionChangedAction.Add && e.NewStartingIndex > _stuck)) Unstick();
         // Rows added after the held one (the conversation growing at its end) leave it where it is; any other change of
         // the rows ends holding it through a width change
         if (_widthHold is { } hold && !(e.Action == NotifyCollectionChangedAction.Add && e.NewStartingIndex > hold.Row)) _widthHold = null;

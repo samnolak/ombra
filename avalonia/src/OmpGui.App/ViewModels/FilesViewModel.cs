@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
@@ -135,7 +136,7 @@ public sealed partial class FilesViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ExpandTip))]
     private bool _isViewerExpanded;
 
-    public string ExpandTip => IsViewerExpanded ? "Show the file list again" : "Use the whole pane for the file";
+    public string ExpandTip => IsViewerExpanded ? Loc.T("Show the file list again") : Loc.T("Use the whole pane for the file");
 
     [RelayCommand]
     private void ToggleViewerExpanded() => IsViewerExpanded = !IsViewerExpanded;
@@ -162,16 +163,16 @@ public sealed partial class FilesViewModel : ObservableObject
     public bool IsAllMode => Mode == FilesMode.All;
     public bool IsChangedMode => Mode == FilesMode.Changed;
     public bool IsSessionMode => Mode == FilesMode.Session;
-    public string ChangedLabel => ChangedCount > 0 ? $"Changed {ChangedCount}" : "Changed";
-    public string SessionLabel => SessionCount > 0 ? $"This session {SessionCount}" : "This session";
+    public string ChangedLabel => ChangedCount > 0 ? Loc.F("Changed {0}", ChangedCount) : Loc.T("Changed");
+    public string SessionLabel => SessionCount > 0 ? Loc.F("This session {0}", SessionCount) : Loc.T("This session");
 
     /// <summary>Editors found on PATH (VS Code, Cursor…): offered only when present.</summary>
     public ObservableCollection<EditorApp> Editors { get; } = [];
     [ObservableProperty] private bool _hasEditors;
 
     /// <summary>What the project menu calls the file manager ("Show in Finder").</summary>
-    public string FileManagerLabel => OperatingSystem.IsMacOS() ? "Show in Finder" : OperatingSystem.IsWindows() ? "Show in Explorer" : "Open in file manager";
-    public string RevealLabel => OperatingSystem.IsMacOS() ? "Reveal in Finder" : OperatingSystem.IsWindows() ? "Reveal in Explorer" : "Reveal in file manager";
+    public string FileManagerLabel => OperatingSystem.IsMacOS() ? Loc.T("Show in Finder") : OperatingSystem.IsWindows() ? Loc.T("Show in Explorer") : Loc.T("Open in file manager");
+    public string RevealLabel => OperatingSystem.IsMacOS() ? Loc.T("Reveal in Finder") : OperatingSystem.IsWindows() ? Loc.T("Reveal in Explorer") : Loc.T("Reveal in file manager");
 
     /// <summary>The projects of the sidebar, newest first (at most 6), to start a new session in.</summary>
     public ObservableCollection<SessionGroupViewModel> RecentProjects { get; } = [];
@@ -253,12 +254,12 @@ public sealed partial class FilesViewModel : ObservableObject
             node.Children = [.. entries.Select(e => FileNodeViewModel.Child(node, e))];
             _rootNode = node;
             SyncFlat();
-            TreeMessage = entries.Count == 0 ? "This folder is empty." : "";
+            TreeMessage = entries.Count == 0 ? Loc.T("This folder is empty.") : "";
         }
         catch (OperationCanceledException) { return; }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            TreeMessage = "Can't read this folder: " + e.Message;
+            TreeMessage = Loc.F("Can't read this folder: {0}", e.Message);
         }
         finally
         {
@@ -324,7 +325,7 @@ public sealed partial class FilesViewModel : ObservableObject
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
         {
             node.Children = [];
-            Notice = $"Can't read {node.Name}: {e.Message}";
+            Notice = Loc.F("Can't read {0}: {1}", node.Name, e.Message);
         }
         finally
         {
@@ -488,7 +489,7 @@ public sealed partial class FilesViewModel : ObservableObject
             if (!IsGitRepo && Mode == FilesMode.Changed) Mode = FilesMode.All;
             foreach (var (node, entries) in listings)
                 if (entries is not null) Merge(node, entries);
-            if (listings[_rootNode] is { } top) TreeMessage = top.Count == 0 ? "This folder is empty." : "";
+            if (listings[_rootNode] is { } top) TreeMessage = top.Count == 0 ? Loc.T("This folder is empty.") : "";
             _index = null; // the search reads the project again next time
             SyncFlat();
             UpdateSessionChanges();
@@ -678,8 +679,8 @@ public sealed partial class FilesViewModel : ObservableObject
                     }
                     var index = _index;
                     list = await Task.Run(() => ProjectFiles.Search(index, query, MaxResults, ct).Select(h => FileNodeViewModel.Result(root, h.RelativePath)).ToList(), ct);
-                    note = list.Count >= MaxResults ? $"Showing the first {MaxResults} matches" : _indexTruncated ? $"Searched the first {ProjectFiles.MaxIndexedFiles:N0} files" : "";
-                    empty = $"No files match “{query}”.";
+                    note = list.Count >= MaxResults ? Loc.F("Showing the first {0} matches", MaxResults) : _indexTruncated ? Loc.F("Searched the first {0:N0} files", ProjectFiles.MaxIndexedFiles) : "";
+                    empty = Loc.F("No files match “{0}”.", query);
                     break;
                 case FilesMode.Changed:
                     var changes = _git?.Changes.ToList() ?? [];
@@ -689,7 +690,7 @@ public sealed partial class FilesViewModel : ObservableObject
                         .OrderBy(x => x.rel, Comparer<string?>.Create((a, b) => ProjectFiles.NaturalCompare(a!, b!)))
                         .Select(x => FileNodeViewModel.Result(root, x.rel!, isDirectory: x.c.Path.EndsWith(Path.DirectorySeparatorChar)))
                         .ToList(), ct);
-                    empty = query.Length > 0 ? $"No changed files match “{query}”." : "No uncommitted changes.";
+                    empty = query.Length > 0 ? Loc.F("No changed files match “{0}”.", query) : Loc.T("No uncommitted changes.");
                     break;
                 default:
                     var files = _sessionChanged.ToList();
@@ -699,7 +700,7 @@ public sealed partial class FilesViewModel : ObservableObject
                         .OrderBy(x => x.rel ?? x.f, Comparer<string>.Create(ProjectFiles.NaturalCompare))
                         .Select(x => x.rel is { Length: > 0 } rel ? FileNodeViewModel.Result(root, rel) : FileNodeViewModel.Outside(x.f))
                         .ToList(), ct);
-                    empty = query.Length > 0 ? $"No files omp changed match “{query}”." : "omp has not changed any files in this session yet.";
+                    empty = query.Length > 0 ? Loc.F("No files omp changed match “{0}”.", query) : Loc.T("omp has not changed any files in this session yet.");
                     break;
             }
             if (ct.IsCancellationRequested) return;
@@ -873,7 +874,7 @@ public sealed partial class FilesViewModel : ObservableObject
     [RelayCommand(AllowConcurrentExecutions = true)]
     private async Task OpenInDefaultAppAsync(object? target)
     {
-        if (PathOf(target) is { } full) await StartAsync(FileOpeners.OpenWithSystem(full), "open " + Path.GetFileName(full));
+        if (PathOf(target) is { } full) await StartAsync(FileOpeners.OpenWithSystem(full), Loc.F("open {0}", Path.GetFileName(full)));
     }
 
     [RelayCommand(AllowConcurrentExecutions = true)]
@@ -883,9 +884,9 @@ public sealed partial class FilesViewModel : ObservableObject
         if (OperatingSystem.IsLinux())
         {
             // The FileManager1 service selects the file; without it, the folder opens
-            if (!await Launch(FileOpeners.Reveal(full), true)) await StartAsync(FileOpeners.RevealFallback(full), "open the folder");
+            if (!await Launch(FileOpeners.Reveal(full), true)) await StartAsync(FileOpeners.RevealFallback(full), Loc.T("open the folder"));
         }
-        else await StartAsync(FileOpeners.Reveal(full), "show it in " + FileOpeners.FileManagerName);
+        else await StartAsync(FileOpeners.Reveal(full), Loc.F("show it in {0}", FileOpeners.FileManagerName));
     }
 
     /// <summary>Opens the viewer's file (at its line) or the selected row in <paramref name="editor"/>.</summary>
@@ -894,13 +895,13 @@ public sealed partial class FilesViewModel : ObservableObject
     {
         if (editor is null || PathOf(null) is not { } full) return;
         var line = Viewer is { } v && SamePath(v.FullPath, full) ? v.TargetLine : null;
-        await StartAsync(editor.Open(full, line), "open " + editor.Name);
+        await StartAsync(editor.Open(full, line), Loc.F("open {0}", editor.Name));
     }
 
     private async Task StartAsync(ProcessStartInfo psi, string what)
     {
         Notice = "";
-        if (!await Launch(psi, false)) Report($"Could not {what}: {Path.GetFileName(psi.FileName)} did not start.");
+        if (!await Launch(psi, false)) Report(Loc.F("Could not {0}: {1} did not start.", what, Path.GetFileName(psi.FileName)));
     }
 
     /// <summary>A failed action is said in the pane, or above the message box when the pane is closed.</summary>
@@ -919,6 +920,13 @@ public sealed partial class FilesViewModel : ObservableObject
     private async Task OpenProjectInFileManagerAsync()
     {
         if (Owner.ProjectFolder is { } root) await StartAsync(FileOpeners.OpenWithSystem(root), "open the folder");
+    }
+
+    /// <summary>Any folder (a sidebar project's) in Finder / Explorer / the file manager.</summary>
+    [RelayCommand(AllowConcurrentExecutions = true)]
+    private async Task OpenFolderInFileManagerAsync(string? folder)
+    {
+        if (folder is { Length: > 0 }) await StartAsync(FileOpeners.OpenWithSystem(folder), "open the folder");
     }
 
     [RelayCommand(AllowConcurrentExecutions = true)]

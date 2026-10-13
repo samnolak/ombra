@@ -1,17 +1,18 @@
 <!-- Settings › Advanced › Network privacy (NetworkPrivacyViewModel, ClientCore/Network/NetworkPrivacy): what omp may contact,
      the known limitation omp leaves, and strict network privacy with its allowed and refused addresses. -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:OmpGui.App.Localization"
+        xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              x:Class="OmpGui.App.Views.Settings.NetworkPrivacySettings"
              x:DataType="vm:MainViewModel">
   <Border x:Name="PrivacyCard" Classes="section-card" DataContext="{Binding PrivacySettings}" x:DataType="vm:NetworkPrivacyViewModel">
     <StackPanel Spacing="12">
-      <TextBlock Classes="section" Text="Network privacy" />
+      <TextBlock Classes="section" Text="{loc:T 'Network privacy'}" />
 
       <!-- Always on: providers the user has not added are off for omp -->
       <StackPanel Spacing="2">
-        <TextBlock Classes="ws-title" Text="Model providers" />
+        <TextBlock Classes="ws-title" Text="{loc:T 'Model providers'}" />
         <SelectableTextBlock x:Name="PrivacyGate" Text="{Binding GateText}" TextWrapping="Wrap" FontSize="13" />
       </StackPanel>
       <Border Classes="ws-note warning" IsVisible="{Binding HasGateWarning}">
@@ -24,9 +25,9 @@
       <!-- Strict network privacy -->
       <Grid ColumnDefinitions="*,Auto">
         <StackPanel Spacing="2" Margin="0,0,16,0" VerticalAlignment="Center">
-          <TextBlock Classes="ws-title" Text="Strict network privacy" />
+          <TextBlock Classes="ws-title" Text="{loc:T 'Strict network privacy'}" />
           <TextBlock Classes="muted" TextWrapping="Wrap"
-                     Text="omp and the tools it runs go through the app's filter, which lets through only the providers you added, sign-in while you add one, and the addresses you allow. Not covered: programs that ignore proxy settings, and addresses on this computer or in private network ranges (10.x, 172.16–31.x, 192.168.x), which omp always reaches directly." />
+                     Text="{loc:T 'omp and the tools it runs go through the app’s filter, which lets through only the providers you added, sign-in while you add one, and the addresses you allow. Not covered: programs that ignore proxy settings, and addresses on this computer or in private network ranges (10.x, 172.16–31.x, 192.168.x), which omp always reaches directly.'}" />
         </StackPanel>
         <Button x:Name="PrivacyStrictToggle" Grid.Column="1" Classes="md" Classes.accent="{Binding !IsStrict}" Classes.flat="{Binding IsStrict}"
                 Content="{Binding StrictButtonLabel}" Command="{Binding ToggleStrictCommand}" VerticalAlignment="Center" />
@@ -53,7 +54,7 @@
         </ItemsControl>
 
         <!-- The user's own addresses -->
-        <TextBlock Classes="ws-title" Text="Also allowed" />
+        <TextBlock Classes="ws-title" Text="{loc:T 'Also allowed'}" />
         <ItemsControl x:Name="PrivacyUserHosts" ItemsSource="{Binding UserHosts}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
@@ -63,20 +64,20 @@
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="x:String">
               <Button Classes="md flat" Content="{Binding StringFormat='{}{0}  ✕'}" CommandParameter="{Binding}"
-                      ToolTip.Tip="No longer allow"
+                      ToolTip.Tip="{loc:T 'No longer allow'}"
                       Command="{Binding $parent[ItemsControl].((vm:NetworkPrivacyViewModel)DataContext).RemoveHostCommand}" />
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
         <Grid ColumnDefinitions="*,Auto">
-          <TextBox x:Name="PrivacyNewHost" Classes="sm" Text="{Binding NewHost}" PlaceholderText="pypi.org or *.example.com"
-                   AutomationProperties.Name="Address to allow" Margin="0,0,8,0" />
-          <Button x:Name="PrivacyAddHost" Grid.Column="1" Classes="md" Content="Allow" Command="{Binding AddHostCommand}" />
+          <TextBox x:Name="PrivacyNewHost" Classes="sm" Text="{Binding NewHost}" PlaceholderText="{loc:T 'pypi.org or *.example.com'}"
+                   AutomationProperties.Name="{loc:T 'Address to allow'}" Margin="0,0,8,0" />
+          <Button x:Name="PrivacyAddHost" Grid.Column="1" Classes="md" Content="{loc:T 'Allow'}" Command="{Binding AddHostCommand}" />
         </Grid>
 
         <!-- Refused destinations, newest first -->
         <StackPanel Spacing="6" IsVisible="{Binding HasBlocked}">
-          <TextBlock Classes="ws-title" Text="Refused recently" />
+          <TextBlock Classes="ws-title" Text="{loc:T 'Refused recently'}" />
           <ItemsControl x:Name="PrivacyBlocked" ItemsSource="{Binding Blocked}">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate>
@@ -87,7 +88,7 @@
               <DataTemplate x:DataType="vm:PrivacyBlockedRow">
                 <Grid ColumnDefinitions="*,Auto">
                   <TextBlock Text="{Binding Detail}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                  <Button Grid.Column="1" Classes="md flat" Content="Allow" CommandParameter="{Binding}"
+                  <Button Grid.Column="1" Classes="md flat" Content="{loc:T 'Allow'}" CommandParameter="{Binding}"
                           Command="{Binding $parent[ItemsControl].((vm:NetworkPrivacyViewModel)DataContext).AllowBlockedCommand}" />
                 </Grid>
               </DataTemplate>

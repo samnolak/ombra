@@ -1,6 +1,7 @@
 <!-- The header's branch chip (as Claude Code shows the session's branch): the project's branch, a worktree mark when the
      folder is a linked worktree; hidden outside git. Its menu: copy the name, a new worktree from here, Git settings. -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:OmpGui.App.Localization"
+             xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
@@ -17,7 +18,7 @@
         <ctl:Icon DockPanel.Dock="Right" Classes="project-chevron" Data="{StaticResource IconChevronDown}" Size="14" Margin="3,0,0,0" VerticalAlignment="Center" />
         <!-- In a slot the narrow header can hide (a style cannot override the mark's own binding) -->
         <Panel DockPanel.Dock="Right" Classes="worktree-slot">
-          <TextBlock x:Name="WorktreeMark" Classes="worktree-mark" Text="· worktree" IsVisible="{Binding IsWorktree}" Margin="5,0,0,0" VerticalAlignment="Center" />
+          <TextBlock x:Name="WorktreeMark" Classes="worktree-mark" Text="{loc:T '· worktree'}" IsVisible="{Binding IsWorktree}" Margin="5,0,0,0" VerticalAlignment="Center" />
         </Panel>
         <TextBlock x:Name="BranchLabel" Text="{Binding Branch}" MaxWidth="300" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
       </DockPanel>
@@ -25,25 +26,25 @@
         <Flyout Placement="BottomEdgeAlignedLeft">
           <StackPanel x:Name="BranchMenu" Width="272" Spacing="2">
             <Button x:Name="CopyBranchItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding CopyBranchCommand}"
-                    AutomationProperties.Name="Copy branch name">
+                    AutomationProperties.Name="{loc:T 'Copy branch name'}">
               <Grid ColumnDefinitions="Auto,*">
                 <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
                 <TextBlock Grid.Column="1" Text="{Binding CopyLabel}" VerticalAlignment="Center" />
               </Grid>
             </Button>
             <Button x:Name="NewWorktreeItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding NewWorktreeCommand}"
-                    AutomationProperties.Name="New worktree from here">
+                    AutomationProperties.Name="{loc:T 'New worktree from here'}">
               <Grid ColumnDefinitions="Auto,*">
                 <ctl:Icon Data="{StaticResource IconPlus}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="New worktree from here…" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'New worktree from here…'}" VerticalAlignment="Center" />
               </Grid>
             </Button>
             <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="4,3" />
             <Button x:Name="GitSettingsItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding OpenGitSettingsCommand}"
-                    AutomationProperties.Name="Git settings">
+                    AutomationProperties.Name="{loc:T 'Git settings'}">
               <Grid ColumnDefinitions="Auto,*">
                 <ctl:Icon Data="{StaticResource IconSettings}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Git and worktree settings" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Git and worktree settings'}" VerticalAlignment="Center" />
               </Grid>
             </Button>
           </StackPanel>

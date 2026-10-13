@@ -1,6 +1,7 @@
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -24,10 +25,10 @@ public sealed partial class MainViewModel
     /// <summary>The header's project menu: a project's name, or "No project" for a chat.</summary>
     public bool HasProjectChip => IsProjectless || ProjectName.Length > 0;
 
-    public string ProjectChipLabel => IsProjectless ? "No project" : ProjectName.Length > 0 ? ProjectName : "Choose a folder";
+    public string ProjectChipLabel => IsProjectless ? Loc.T("No project") : ProjectName.Length > 0 ? ProjectName : Loc.T("Choose a folder");
 
     /// <summary>A chat's folder is the app's own, of no interest to the reader: the tip says what choosing a project does.</summary>
-    public string ProjectChipTip => IsProjectless ? "This chat isn't in a project. Choose one to work on its files." : ShownProjectPath;
+    public string ProjectChipTip => IsProjectless ? Loc.T("This chat isn’t in a project. Choose one to work on its files.") : ShownProjectPath;
 
     partial void OnProjectPathChanged(string value) => OnPropertyChanged(nameof(ProjectChipTip));
 
@@ -40,9 +41,9 @@ public sealed partial class MainViewModel
     /// <summary>A chat's starters: nothing in them needs a project's files.</summary>
     public IReadOnlyList<string> ChatStarterPrompts { get; } =
     [
-        "Explain a concept in simple terms",
-        "Write a script that automates a task",
-        "Help me plan something step by step",
+        Loc.T("Explain a concept in simple terms"),
+        Loc.T("Write a script that automates a task"),
+        Loc.T("Help me plan something step by step"),
     ];
 
     public IReadOnlyList<string> GreetingStarters => IsProjectless ? ChatStarterPrompts : StarterPrompts;
@@ -75,7 +76,7 @@ public sealed partial class MainViewModel
         try { folder = Chats.Create(); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            ShowBrief("IconAlert", "Couldn't start a new chat", "Its folder could not be made: " + e.Message, Chats.Root);
+            ShowBrief("IconAlert", Loc.T("Couldn’t start a new chat"), Loc.T("Its folder could not be made: ") + e.Message, Chats.Root);
             return;
         }
         var start = StartNewSessionAsync(NewLaunch(folder)); // MainViewModel.OpenSessions.cs

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using OmpGui.App.Localization;
 
 namespace OmpGui.App.Services;
 
@@ -84,18 +85,18 @@ public sealed class UpdateChecker(HttpClient http, string feedUrl, string curren
         var (status, bytes) = await FetchSmallAsync(feedUrl, 1 << 20, ct).ConfigureAwait(false);
         if (bytes is null)
             return new UpdateCheck(false, Current, null, null, null, status == 404
-                ? "No release is published yet." : $"No update information available (HTTP {status}).");
+                ? Loc.T("No release is published yet.") : Loc.F("No update information available (HTTP {0}).", status));
         var (sigStatus, sig) = await FetchSmallAsync(feedUrl + ".sig", 16 << 10, ct).ConfigureAwait(false);
         if (sig is null) throw new InvalidDataException($"the update manifest is not signed (no {Path.GetFileName(new Uri(feedUrl).AbsolutePath)}.sig, HTTP {sigStatus})");
         if (!Verify(bytes, sig, publicKey!)) throw new InvalidDataException("the update manifest's signature does not match the release key: not trusted");
         var manifest = JsonSerializer.Deserialize<UpdateManifest>(bytes, Json) ?? throw new InvalidDataException("empty update manifest");
         if (manifest.Schema is not (1 or 2) || string.IsNullOrWhiteSpace(manifest.Version)) throw new InvalidDataException("unknown update manifest format");
         if (CompareVersions(manifest.Version, Current) <= 0)
-            return new UpdateCheck(false, Current, manifest.Version, manifest.Notes, null, $"OMP GUI {Current} is up to date.", manifest.Runtime);
+            return new UpdateCheck(false, Current, manifest.Version, manifest.Notes, null, Loc.F("OMP GUI {0} is up to date.", Current), manifest.Runtime);
         if (manifest.Assets is null || !manifest.Assets.TryGetValue(Rid, out var asset) || asset is null)
-            return new UpdateCheck(false, Current, manifest.Version, manifest.Notes, null, $"Version {manifest.Version} exists, but not for this platform ({Rid}).", manifest.Runtime);
+            return new UpdateCheck(false, Current, manifest.Version, manifest.Notes, null, Loc.F("Version {0} exists, but not for this platform ({1}).", manifest.Version, Rid), manifest.Runtime);
         Validate(asset);
-        return new UpdateCheck(true, Current, manifest.Version, manifest.Notes, asset, $"Version {manifest.Version} is available (you have {Current}).", manifest.Runtime);
+        return new UpdateCheck(true, Current, manifest.Version, manifest.Notes, asset, Loc.F("Version {0} is available (you have {1}).", manifest.Version, Current), manifest.Runtime);
     }
 
     /// <summary>A small file, read to at most <paramref name="max"/> bytes; null bytes when the server said no.</summary>

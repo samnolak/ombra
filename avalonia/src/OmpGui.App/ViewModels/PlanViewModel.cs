@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -21,15 +22,15 @@ public sealed partial class PlanTaskViewModel(string content, string status, str
     /// <summary>The task the agent works on now (the first in progress): emphasized, with the live activity under it.</summary>
     public bool IsCurrent { get; } = isCurrent;
 
-    public string BlockerText => Blocker is { Length: > 0 } b ? "Waiting on: " + b : "Blocked";
+    public string BlockerText => Blocker is { Length: > 0 } b ? Loc.T("Waiting on: ") + b : Loc.T("Blocked");
 
     public string StatusName => Status switch
     {
-        "completed" or "done" => "Done",
-        "in_progress" or "active" => "In progress",
-        "abandoned" or "cancelled" or "canceled" => "Dropped",
-        "blocked" => "Blocked",
-        _ => "To do",
+        "completed" or "done" => Loc.T("Done"),
+        "in_progress" or "active" => Loc.T("In progress"),
+        "abandoned" or "cancelled" or "canceled" => Loc.T("Dropped"),
+        "blocked" => Loc.T("Blocked"),
+        _ => Loc.T("To do"),
     };
 
     public string AccessibleName => $"{Content} — {StatusName}";
@@ -120,7 +121,7 @@ public sealed partial class PlanViewModel : ObservableObject
     [ObservableProperty] private double _progress;
     [ObservableProperty] private bool _isHistoryOpen;
     [ObservableProperty] private bool _hasHistory;
-    [ObservableProperty] private string _historyTitle = "History";
+    [ObservableProperty] private string _historyTitle = Loc.T("History");
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowEmptyHint))]
@@ -220,28 +221,28 @@ public sealed partial class PlanViewModel : ObservableObject
             if (i == 0 && at is null) { before = after; continue; } // already there when this window came in
             if (was.Count > 0 && now.Count == 0)
             {
-                Retire(before, "Cleared" + When(at));
-                Log(time, "Plan cleared", "");
+                Retire(before, Loc.T("Cleared") + When(at));
+                Log(time, Loc.T("Plan cleared"), "");
             }
             else if (was.Count > 0 && !now.Any(a => was.Any(b => b.Content == a.Content)))
             {
                 // Nothing in common: the agent wrote a new plan; the old one stays readable below
-                Retire(before, "Replaced" + When(at));
-                Log(time, $"New plan · {Tasks(now.Count)}", "");
+                Retire(before, Loc.T("Replaced") + When(at));
+                Log(time, Loc.F("New plan · {0}", Tasks(now.Count)), "");
             }
             else if (was.Count == 0)
             {
-                if (now.Count > 0) Log(time, $"New plan · {Tasks(now.Count)}", "");
+                if (now.Count > 0) Log(time, Loc.F("New plan · {0}", Tasks(now.Count)), "");
             }
             else
             {
                 foreach (var a in now)
                 {
                     var b = was.FirstOrDefault(x => x.Content == a.Content);
-                    if (b is null) Log(time, "Added", a.Content);
-                    else if (b.Status != a.Status) Log(time, Verb(a.Status, b.Status), a.Content + (a.Status == "blocked" && a.Blocker is { Length: > 0 } w ? $" (waiting on: {w})" : ""));
+                    if (b is null) Log(time, Loc.T("Added"), a.Content);
+                    else if (b.Status != a.Status) Log(time, Verb(a.Status, b.Status), a.Content + (a.Status == "blocked" && a.Blocker is { Length: > 0 } w ? Loc.F(" (waiting on: {0})", w) : ""));
                 }
-                foreach (var b in was.Where(b => now.All(a => a.Content != b.Content))) Log(time, "Removed", b.Content);
+                foreach (var b in was.Where(b => now.All(a => a.Content != b.Content))) Log(time, Loc.T("Removed"), b.Content);
             }
             before = after;
         }
@@ -258,18 +259,18 @@ public sealed partial class PlanViewModel : ObservableObject
             : local.ToString("MMM d HH:mm", CultureInfo.InvariantCulture);
     }
 
-    private static string When(DateTimeOffset? at) => at is null ? "" : " at " + Time(at);
+    private static string When(DateTimeOffset? at) => at is null ? "" : Loc.T(" at ") + Time(at);
 
     private static string Verb(string now, string was) => now switch
     {
-        "completed" or "done" => "Completed",
-        "in_progress" or "active" => was == "blocked" ? "Unblocked" : "Started",
-        "abandoned" or "cancelled" or "canceled" => "Dropped",
-        "blocked" => "Blocked",
-        _ => was == "blocked" ? "Unblocked" : "Reopened",
+        "completed" or "done" => Loc.T("Completed"),
+        "in_progress" or "active" => was == "blocked" ? Loc.T("Unblocked") : Loc.T("Started"),
+        "abandoned" or "cancelled" or "canceled" => Loc.T("Dropped"),
+        "blocked" => Loc.T("Blocked"),
+        _ => was == "blocked" ? Loc.T("Unblocked") : Loc.T("Reopened"),
     };
 
-    private static string Tasks(int n) => n == 1 ? "1 task" : $"{n} tasks";
+    private static string Tasks(int n) => n == 1 ? Loc.T("1 task") : Loc.F("{0} tasks", n);
 
     private void Log(string time, string what, string content)
     {
@@ -280,7 +281,7 @@ public sealed partial class PlanViewModel : ObservableObject
     private void Retire(List<TodoPhase> plan, string when)
     {
         var (done, total) = Count(plan);
-        EarlierPlans.Insert(0, new EarlierPlanViewModel(when, $"{done} of {total} done", Build(plan, current: false)));
+        EarlierPlans.Insert(0, new EarlierPlanViewModel(when, Loc.F("{0} of {1} done", done, total), Build(plan, current: false)));
         while (EarlierPlans.Count > MaxEarlierPlans) EarlierPlans.RemoveAt(EarlierPlans.Count - 1);
     }
 
@@ -293,14 +294,14 @@ public sealed partial class PlanViewModel : ObservableObject
         DoneCount = done;
         TotalCount = total;
         HasPlan = _current.Any(p => p.Tasks.Count > 0);
-        ProgressText = !HasPlan ? "" : $"{done} of {total} done";
+        ProgressText = !HasPlan ? "" : Loc.F("{0} of {1} done", done, total);
         ShortProgress = !HasPlan ? "" : string.Create(CultureInfo.InvariantCulture, $"{done}/{total}");
         Progress = total == 0 ? 0 : 100.0 * done / total;
         HasEarlierPlans = EarlierPlans.Count > 0;
         // Nothing current: the last plan is open (a finished plan omp cleared is still there to read)
         if (!HasPlan && EarlierPlans.Count > 0 && EarlierPlans.All(e => !e.IsExpanded)) EarlierPlans[0].IsExpanded = true;
         HasHistory = Changes.Count > 0;
-        HistoryTitle = Changes.Count == 0 ? "History" : $"History · {(Changes.Count == 1 ? "1 change" : $"{Changes.Count} changes")}";
+        HistoryTitle = Changes.Count == 0 ? Loc.T("History") : Loc.F("History · {0}", Changes.Count == 1 ? Loc.T("1 change") : Loc.F("{0} changes", Changes.Count));
         UpdateActivity();
     }
 

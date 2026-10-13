@@ -1,6 +1,7 @@
 <!-- Settings page "Git and worktrees": the project's git state (git CLI), GitHub (gh CLI, github.enabled), worktrees
      (git worktree list; new ones through omp's /wt), worktree.* and task.isolation.* (omp config). -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:OmpGui.App.Localization"
+        xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
@@ -18,7 +19,7 @@
           </Panel>
           <SelectableTextBlock x:Name="GitMessage" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" />
           <Button Grid.Column="2" Classes="icon" Width="24" Height="24" Margin="8,-4,-6,-4" VerticalAlignment="Top" Command="{Binding DismissMessageCommand}"
-                  ToolTip.Tip="Dismiss" AutomationProperties.Name="Dismiss">
+                  ToolTip.Tip="{loc:T 'Dismiss'}" AutomationProperties.Name="{loc:T 'Dismiss'}">
             <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
           </Button>
         </Grid>
@@ -26,7 +27,7 @@
       <Border Classes="ws-note" IsVisible="{Binding NeedsRestart}">
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock Text="{Binding RestartHint}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0" />
-          <Button Grid.Column="1" Content="Restart omp" Command="{Binding RestartOmpCommand}" IsVisible="{Binding IsOmpRunning}" VerticalAlignment="Center" />
+          <Button Grid.Column="1" Content="{loc:T 'Restart omp'}" Command="{Binding RestartOmpCommand}" IsVisible="{Binding IsOmpRunning}" VerticalAlignment="Center" />
         </Grid>
       </Border>
 
@@ -34,54 +35,54 @@
       <Border Classes="section-card">
         <StackPanel Spacing="12">
           <Grid ColumnDefinitions="*,Auto">
-            <TextBlock Classes="section" Text="This project" VerticalAlignment="Center" />
+            <TextBlock Classes="section" Text="{loc:T 'This project'}" VerticalAlignment="Center" />
             <Button Grid.Column="1" x:Name="GitRefresh" Classes="icon" Command="{Binding RefreshCommand}" IsEnabled="{Binding !IsLoading}"
-                    ToolTip.Tip="Read again" AutomationProperties.Name="Refresh">
+                    ToolTip.Tip="{loc:T 'Read again'}" AutomationProperties.Name="{loc:T 'Refresh'}">
               <ctl:Icon Data="{StaticResource IconReload}" Size="16" />
             </Button>
           </Grid>
-          <TextBlock Classes="muted" Text="Open a project folder to see its git state." IsVisible="{Binding !HasProject}" />
+          <TextBlock Classes="muted" Text="{loc:T 'Open a project folder to see its git state.'}" IsVisible="{Binding !HasProject}" />
           <StackPanel Spacing="8" IsVisible="{Binding HasProject}">
             <Grid ColumnDefinitions="96,*">
-              <TextBlock Classes="muted" Text="Folder" />
+              <TextBlock Classes="muted" Text="{loc:T 'Folder'}" />
               <SelectableTextBlock Grid.Column="1" Classes="ws-value" Text="{Binding Folder}" TextWrapping="Wrap" />
             </Grid>
             <StackPanel Spacing="8" IsVisible="{Binding IsRepo}">
               <Grid ColumnDefinitions="96,*">
-                <TextBlock Classes="muted" Text="Branch" />
+                <TextBlock Classes="muted" Text="{loc:T 'Branch'}" />
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
                   <SelectableTextBlock x:Name="GitBranch" Classes="ws-value" Text="{Binding BranchLabel}" FontWeight="Medium" />
                   <Border Classes="tag" IsVisible="{Binding IsLinkedWorktree}">
-                    <TextBlock Text="Worktree" FontSize="11" FontWeight="Medium" />
+                    <TextBlock Text="{loc:T 'Worktree'}" FontSize="11" FontWeight="Medium" />
                   </Border>
                 </StackPanel>
               </Grid>
               <Grid ColumnDefinitions="96,*" IsVisible="{Binding IsLinkedWorktree}">
-                <TextBlock Classes="muted" Text="Worktree of" />
+                <TextBlock Classes="muted" Text="{loc:T 'Worktree of'}" />
                 <TextBlock Grid.Column="1" Classes="ws-value" Text="{Binding WorktreeOf}" TextWrapping="Wrap" />
               </Grid>
               <Grid ColumnDefinitions="96,*">
-                <TextBlock Classes="muted" Text="Changes" />
+                <TextBlock Classes="muted" Text="{loc:T 'Changes'}" />
                 <TextBlock x:Name="GitChanges" Grid.Column="1" Classes="ws-value" Text="{Binding ChangesLabel}" TextWrapping="Wrap" />
               </Grid>
               <Grid ColumnDefinitions="96,*">
-                <TextBlock Classes="muted" Text="Upstream" />
+                <TextBlock Classes="muted" Text="{loc:T 'Upstream'}" />
                 <TextBlock x:Name="GitUpstream" Grid.Column="1" Classes="ws-value" Text="{Binding UpstreamLabel}" TextWrapping="Wrap" />
               </Grid>
               <Grid ColumnDefinitions="96,*">
-                <TextBlock Classes="muted" Text="Remote" />
+                <TextBlock Classes="muted" Text="{loc:T 'Remote'}" />
                 <SelectableTextBlock x:Name="GitRemote" Grid.Column="1" Classes="ws-value" Text="{Binding RemoteLabel}" TextWrapping="Wrap" />
               </Grid>
             </StackPanel>
             <Border Classes="ws-note" IsVisible="{Binding IsNotRepo}">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock x:Name="GitNotRepo" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0"
-                           Text="This folder is not a git repository. Worktrees and omp's branch features need one: git init starts one." />
-                <Button Grid.Column="1" Classes="accent" Content="Open terminal" Command="{Binding OpenTerminalCommand}" VerticalAlignment="Center" />
+                           Text="{loc:T 'This folder is not a git repository. Worktrees and omp’s branch features need one: git init starts one.'}" />
+                <Button Grid.Column="1" Classes="accent" Content="{loc:T 'Open terminal'}" Command="{Binding OpenTerminalCommand}" VerticalAlignment="Center" />
               </Grid>
             </Border>
             <Border Classes="ws-note error" IsVisible="{Binding GitMissing}">
-              <TextBlock TextWrapping="Wrap" Text="git was not found on this computer. Install git, then refresh." />
+              <TextBlock TextWrapping="Wrap" Text="{loc:T 'git was not found on this computer. Install git, then refresh.'}" />
             </Border>
             <Border Classes="ws-note error" IsVisible="{Binding HasRepoError}">
               <SelectableTextBlock Text="{Binding RepoError}" TextWrapping="Wrap" FontSize="13" />
@@ -105,15 +106,15 @@
               <Border Classes="status done" IsVisible="{Binding GhSignedIn}">
                 <StackPanel Orientation="Horizontal" Spacing="6">
                   <Ellipse />
-                  <TextBlock Text="Connected" VerticalAlignment="Center" />
+                  <TextBlock Text="{loc:T 'Connected'}" VerticalAlignment="Center" />
                 </StackPanel>
               </Border>
-              <Button x:Name="GitHubSignIn" Classes="accent" Content="Sign in…" Command="{Binding SignInToGitHubCommand}" IsVisible="{Binding GhSignedOut}"
-                      ToolTip.Tip="Runs gh auth login in a terminal" />
-              <Button Classes="accent" Content="Sign in again…" Command="{Binding SignInToGitHubCommand}" IsVisible="{Binding GhProblem}" ToolTip.Tip="Runs gh auth login in a terminal" />
-              <Button x:Name="GitHubInstall" Classes="accent" Content="Get GitHub CLI" Command="{Binding InstallGhCommand}" IsVisible="{Binding GhNotInstalled}"
+              <Button x:Name="GitHubSignIn" Classes="accent" Content="{loc:T 'Sign in…'}" Command="{Binding SignInToGitHubCommand}" IsVisible="{Binding GhSignedOut}"
+                      ToolTip.Tip="{loc:T 'Runs gh auth login in a terminal'}" />
+              <Button Classes="accent" Content="{loc:T 'Sign in again…'}" Command="{Binding SignInToGitHubCommand}" IsVisible="{Binding GhProblem}" ToolTip.Tip="{loc:T 'Runs gh auth login in a terminal'}" />
+              <Button x:Name="GitHubInstall" Classes="accent" Content="{loc:T 'Get GitHub CLI'}" Command="{Binding InstallGhCommand}" IsVisible="{Binding GhNotInstalled}"
                       ToolTip.Tip="cli.github.com" />
-              <Button Classes="icon" Command="{Binding CheckGitHubAgainCommand}" IsVisible="{Binding !GhChecking}" ToolTip.Tip="Check again" AutomationProperties.Name="Check GitHub again">
+              <Button Classes="icon" Command="{Binding CheckGitHubAgainCommand}" IsVisible="{Binding !GhChecking}" ToolTip.Tip="{loc:T 'Check again'}" AutomationProperties.Name="{loc:T 'Check GitHub again'}">
                 <ctl:Icon Data="{StaticResource IconReload}" Size="16" />
               </Button>
             </StackPanel>
@@ -121,12 +122,12 @@
           <Border Classes="ws-sep" />
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2" Margin="0,0,16,0" VerticalAlignment="Center">
-              <TextBlock Classes="ws-title" Text="Let omp use GitHub" />
+              <TextBlock Classes="ws-title" Text="{loc:T 'Let omp use GitHub'}" />
               <TextBlock Classes="muted" TextWrapping="Wrap"
-                         Text="Adds omp's github tool: issues, pull requests, diffs, code search, checkouts, pushes and Actions runs, as your GitHub CLI account." />
+                         Text="{loc:T 'Adds omp’s github tool: issues, pull requests, diffs, code search, checkouts, pushes and Actions runs, as your GitHub CLI account.'}" />
             </StackPanel>
             <ToggleButton Grid.Column="1" x:Name="GitHubSwitch" Classes="switch" IsChecked="{Binding GithubEnabled}" IsEnabled="{Binding SettingsLoaded}"
-                          AutomationProperties.Name="Let omp use GitHub" VerticalAlignment="Center" />
+                          AutomationProperties.Name="{loc:T 'Let omp use GitHub'}" VerticalAlignment="Center" />
           </Grid>
         </StackPanel>
       </Border>
@@ -135,21 +136,21 @@
       <Border Classes="section-card" IsVisible="{Binding IsRepo}">
         <StackPanel Spacing="12">
           <Grid ColumnDefinitions="*,Auto">
-            <TextBlock Classes="section" Text="Worktrees" VerticalAlignment="Center" />
-            <Button Grid.Column="1" x:Name="NewWorktreeButton" Content="New worktree…" Command="{Binding BeginCreateCommand}" IsVisible="{Binding !IsCreating}"
+            <TextBlock Classes="section" Text="{loc:T 'Worktrees'}" VerticalAlignment="Center" />
+            <Button Grid.Column="1" x:Name="NewWorktreeButton" Content="{loc:T 'New worktree…'}" Command="{Binding BeginCreateCommand}" IsVisible="{Binding !IsCreating}"
                     IsEnabled="{Binding CanCreateWorktree}" />
           </Grid>
           <TextBlock Classes="muted" TextWrapping="Wrap"
-                     Text="A worktree is another folder of this repository with its own branch. A conversation working there leaves this folder's files alone." />
+                     Text="{loc:T 'A worktree is another folder of this repository with its own branch. A conversation working there leaves this folder’s files alone.'}" />
           <TextBlock Classes="muted" Text="{Binding CreateUnavailableHint}" TextWrapping="Wrap" IsVisible="{Binding !CanCreateWorktree}" />
 
           <!-- New worktree: omp's /wt -->
           <Border x:Name="NewWorktreeForm" Classes="ws-form" IsVisible="{Binding IsCreating}">
             <StackPanel Spacing="10">
-              <TextBlock Classes="ws-title" Text="New worktree for this conversation" />
+              <TextBlock Classes="ws-title" Text="{loc:T 'New worktree for this conversation'}" />
               <StackPanel Spacing="4">
-                <TextBlock Classes="label" Text="Branch name" />
-                <TextBox x:Name="NewWorktreeBranch" Classes="sm" Text="{Binding NewBranch}" PlaceholderText="wt/date-time" AutomationProperties.Name="Branch name" />
+                <TextBlock Classes="label" Text="{loc:T 'Branch name'}" />
+                <TextBox x:Name="NewWorktreeBranch" Classes="sm" Text="{Binding NewBranch}" PlaceholderText="wt/date-time" AutomationProperties.Name="{loc:T 'Branch name'}" />
               </StackPanel>
               <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasNewBranchProblem}">
                 <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" Margin="0,0,8,0" VerticalAlignment="Top" />
@@ -157,9 +158,9 @@
               </Grid>
               <TextBlock x:Name="NewWorktreeHint" Classes="muted" Text="{Binding CreateHint}" TextWrapping="Wrap" />
               <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button x:Name="CreateWorktreeButton" Classes="accent" Content="Create and move here" Command="{Binding CreateWorktreeCommand}"
+                <Button x:Name="CreateWorktreeButton" Classes="accent" Content="{loc:T 'Create and move here'}" Command="{Binding CreateWorktreeCommand}"
                         IsEnabled="{Binding CanSubmitWorktree}" />
-                <Button Content="Cancel" Classes="flat" Command="{Binding CancelCreateCommand}" />
+                <Button Content="{loc:T 'Cancel'}" Classes="flat" Command="{Binding CancelCreateCommand}" />
               </StackPanel>
             </StackPanel>
           </Border>
@@ -181,8 +182,8 @@
                         <TextBlock Classes="tertiary" Text="{Binding Location}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Path}" />
                       </StackPanel>
                       <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0" VerticalAlignment="Center">
-                        <Button Content="Open" Command="{Binding OpenCommand}" IsEnabled="{Binding CanOpen}" IsVisible="{Binding !IsCurrent}"
-                                ToolTip.Tip="A new session in this worktree" AutomationProperties.Name="{Binding Title, StringFormat='Open {0} in a new session'}" />
+                        <Button Content="{loc:T 'Open'}" Command="{Binding OpenCommand}" IsEnabled="{Binding CanOpen}" IsVisible="{Binding !IsCurrent}"
+                                ToolTip.Tip="{loc:T 'A new session in this worktree'}" AutomationProperties.Name="{Binding Title, StringFormat='Open {0} in a new session'}" />
                         <Button Classes="flat" Content="{Binding RemoveLabel}" Command="{Binding AskRemoveCommand}" IsVisible="{Binding CanRemove}"
                                 IsEnabled="{Binding !Busy}" AutomationProperties.Name="{Binding Title, StringFormat='Remove worktree {0}'}" />
                       </StackPanel>
@@ -192,14 +193,14 @@
                         <TextBlock Text="{Binding ConfirmText}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0" />
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                           <Button Content="{Binding RemoveLabel}" Command="{Binding ConfirmRemoveCommand}" IsEnabled="{Binding !Busy}" />
-                          <Button Content="Cancel" Classes="flat" Command="{Binding CancelRemoveCommand}" />
+                          <Button Content="{loc:T 'Cancel'}" Classes="flat" Command="{Binding CancelRemoveCommand}" />
                         </StackPanel>
                       </Grid>
                     </Border>
                     <Border Classes="ws-note error" IsVisible="{Binding HasProblem}">
                       <Grid ColumnDefinitions="*,Auto">
                         <SelectableTextBlock Text="{Binding Problem}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" Margin="0,0,12,0" />
-                        <Button Grid.Column="1" Content="OK" Classes="flat" Command="{Binding CancelRemoveCommand}" VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Content="{loc:T 'OK'}" Classes="flat" Command="{Binding CancelRemoveCommand}" VerticalAlignment="Center" />
                       </Grid>
                     </Border>
                   </StackPanel>
@@ -213,37 +214,37 @@
       <!-- Worktree options: worktree.base, worktree.clone, worktree.cleanSource -->
       <Border Classes="section-card">
         <StackPanel Spacing="14">
-          <TextBlock Classes="section" Text="Worktree options" />
+          <TextBlock Classes="section" Text="{loc:T 'Worktree options'}" />
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2" Margin="0,0,16,0" VerticalAlignment="Center">
-              <TextBlock Classes="ws-title" Text="Worktree folder" />
+              <TextBlock Classes="ws-title" Text="{loc:T 'Worktree folder'}" />
               <TextBlock Classes="muted" TextWrapping="Wrap"
-                         Text="Where omp puts worktrees: new ones for a conversation, isolated subagents and pull-request checkouts. A full path, or one starting with ~." />
+                         Text="{loc:T 'Where omp puts worktrees: new ones for a conversation, isolated subagents and pull-request checkouts. A full path, or one starting with ~.'}" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-              <TextBox x:Name="WorktreeBaseBox" Classes="sm" Width="200" Text="{Binding WorktreeBase}" PlaceholderText="{Binding DefaultBase}" AutomationProperties.Name="Worktree folder" />
-              <Button Content="Save" Command="{Binding SaveBaseCommand}" IsVisible="{Binding BaseChanged}" />
+              <TextBox x:Name="WorktreeBaseBox" Classes="sm" Width="200" Text="{Binding WorktreeBase}" PlaceholderText="{Binding DefaultBase}" AutomationProperties.Name="{loc:T 'Worktree folder'}" />
+              <Button Content="{loc:T 'Save'}" Command="{Binding SaveBaseCommand}" IsVisible="{Binding BaseChanged}" />
             </StackPanel>
           </Grid>
           <Border Classes="ws-sep" />
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2" Margin="0,0,16,0" VerticalAlignment="Center">
-              <TextBlock Classes="ws-title" Text="Start worktrees as a copy" />
+              <TextBlock Classes="ws-title" Text="{loc:T 'Start worktrees as a copy'}" />
               <TextBlock Classes="muted" TextWrapping="Wrap"
-                         Text="A new worktree starts as a quick copy of this folder, ignored files such as node_modules and build output included, when the disk can clone files. Otherwise it is a plain checkout." />
+                         Text="{loc:T 'A new worktree starts as a quick copy of this folder, ignored files such as node_modules and build output included, when the disk can clone files. Otherwise it is a plain checkout.'}" />
             </StackPanel>
             <ToggleButton Grid.Column="1" Classes="switch" IsChecked="{Binding WorktreeClone}" IsEnabled="{Binding SettingsLoaded}"
-                          AutomationProperties.Name="Start worktrees as a copy" VerticalAlignment="Center" />
+                          AutomationProperties.Name="{loc:T 'Start worktrees as a copy'}" VerticalAlignment="Center" />
           </Grid>
           <Border Classes="ws-sep" />
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2" Margin="0,0,16,0" VerticalAlignment="Center">
-              <TextBlock Classes="ws-title" Text="Clean this folder after moving" />
+              <TextBlock Classes="ws-title" Text="{loc:T 'Clean this folder after moving'}" />
               <TextBlock Classes="muted" TextWrapping="Wrap"
-                         Text="When a conversation moves to a new worktree, reset this folder to its last commit and delete untracked files. The changes live on in the worktree." />
+                         Text="{loc:T 'When a conversation moves to a new worktree, reset this folder to its last commit and delete untracked files. The changes live on in the worktree.'}" />
             </StackPanel>
             <ToggleButton Grid.Column="1" Classes="switch" IsChecked="{Binding WorktreeCleanSource}" IsEnabled="{Binding SettingsLoaded}"
-                          AutomationProperties.Name="Clean this folder after moving" VerticalAlignment="Center" />
+                          AutomationProperties.Name="{loc:T 'Clean this folder after moving'}" VerticalAlignment="Center" />
           </Grid>
         </StackPanel>
       </Border>
@@ -251,41 +252,41 @@
       <!-- Subagents in their own copy: task.isolation.* -->
       <Border Classes="section-card">
         <StackPanel Spacing="14">
-          <TextBlock Classes="section" Text="Subagents" />
+          <TextBlock Classes="section" Text="{loc:T 'Subagents'}" />
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Spacing="2" Margin="0,0,16,0" VerticalAlignment="Center">
-              <TextBlock Classes="ws-title" Text="Give each subagent its own copy" />
+              <TextBlock Classes="ws-title" Text="{loc:T 'Give each subagent its own copy'}" />
               <TextBlock Classes="muted" TextWrapping="Wrap"
-                         Text="Subagents work in an isolated copy of the project, and their changes come back when they finish, so subagents running at once never edit the same files." />
+                         Text="{loc:T 'Subagents work in an isolated copy of the project, and their changes come back when they finish, so subagents running at once never edit the same files.'}" />
             </StackPanel>
             <ToggleButton Grid.Column="1" x:Name="IsolationSwitch" Classes="switch" IsChecked="{Binding IsolationEnabled}" IsEnabled="{Binding SettingsLoaded}"
-                          AutomationProperties.Name="Give each subagent its own copy" VerticalAlignment="Center" />
+                          AutomationProperties.Name="{loc:T 'Give each subagent its own copy'}" VerticalAlignment="Center" />
           </Grid>
           <Border Classes="ws-sep" />
           <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding IsolationEnabled}">
             <StackPanel Spacing="2" Margin="0,0,16,0" VerticalAlignment="Center">
-              <TextBlock Classes="ws-title" Text="Bring changes back as" />
+              <TextBlock Classes="ws-title" Text="{loc:T 'Bring changes back as'}" />
               <TextBlock Classes="muted" TextWrapping="Wrap"
-                         Text="Patch: the subagents' diffs are combined and applied. Branch: a commit per task, merged into yours." />
+                         Text="{loc:T 'Patch: the subagents’ diffs are combined and applied. Branch: a commit per task, merged into yours.'}" />
             </StackPanel>
             <Border Grid.Column="1" Classes="segmented" VerticalAlignment="Center">
               <StackPanel Orientation="Horizontal" Spacing="2">
-                <Button Classes="segment" Content="Patch" Command="{Binding SetIsolationMergeCommand}" CommandParameter="patch"
-                        Classes.selected="{Binding IsolationMerge, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=patch}" AutomationProperties.Name="Bring changes back as a patch" />
-                <Button Classes="segment" Content="Branch" Command="{Binding SetIsolationMergeCommand}" CommandParameter="branch"
-                        Classes.selected="{Binding IsolationMerge, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=branch}" AutomationProperties.Name="Bring changes back as a branch" />
+                <Button Classes="segment" Content="{loc:T 'Patch'}" Command="{Binding SetIsolationMergeCommand}" CommandParameter="patch"
+                        Classes.selected="{Binding IsolationMerge, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=patch}" AutomationProperties.Name="{loc:T 'Bring changes back as a patch'}" />
+                <Button Classes="segment" Content="{loc:T 'Branch'}" Command="{Binding SetIsolationMergeCommand}" CommandParameter="branch"
+                        Classes.selected="{Binding IsolationMerge, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=branch}" AutomationProperties.Name="{loc:T 'Bring changes back as a branch'}" />
               </StackPanel>
             </Border>
           </Grid>
           <Border Classes="ws-sep" />
           <Grid ColumnDefinitions="*,Auto" IsEnabled="{Binding IsolationEnabled}">
             <StackPanel Spacing="2" Margin="0,0,16,0" VerticalAlignment="Center">
-              <TextBlock Classes="ws-title" Text="Apply changes automatically" />
+              <TextBlock Classes="ws-title" Text="{loc:T 'Apply changes automatically'}" />
               <TextBlock Classes="muted" TextWrapping="Wrap"
-                         Text="On: a subagent's successful changes land in your folder. Off: omp keeps them as a patch or a branch for you to apply." />
+                         Text="{loc:T 'On: a subagent’s successful changes land in your folder. Off: omp keeps them as a patch or a branch for you to apply.'}" />
             </StackPanel>
             <ToggleButton Grid.Column="1" Classes="switch" IsChecked="{Binding IsolationApply}" IsEnabled="{Binding SettingsLoaded}"
-                          AutomationProperties.Name="Apply changes automatically" VerticalAlignment="Center" />
+                          AutomationProperties.Name="{loc:T 'Apply changes automatically'}" VerticalAlignment="Center" />
           </Grid>
           <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasSettingsError}">
             <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" Margin="0,0,8,0" VerticalAlignment="Top" />

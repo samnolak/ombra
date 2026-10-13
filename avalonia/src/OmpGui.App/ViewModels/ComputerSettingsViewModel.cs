@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text.Json;
@@ -63,17 +64,17 @@ public sealed partial class ComputerSettingsViewModel : WorkspacePageViewModel
     public string SessionLabel => Session switch
     {
         null => "",
-        { Enabled: true, Active: true } => "On in this session",
-        { Enabled: true } => "Can't run in this session",
-        _ when EvalActive == false => "Off · eval tool off",
-        _ => "Off in this session",
+        { Enabled: true, Active: true } => Loc.T("On in this session"),
+        { Enabled: true } => Loc.T("Can't run in this session"),
+        _ when EvalActive == false => Loc.T("Off · eval tool off"),
+        _ => Loc.T("Off in this session"),
     };
 
     public string SessionDetail => Session switch
     {
         null => "",
-        { Enabled: true, Active: false } => "Computer use runs through omp's eval tool, which is off in this session.",
-        _ => $"Screenshots: {(Session.Display is "all" or "" ? "all displays" : "display " + Session.Display)}, at most {Session.MaxWidth} × {Session.MaxHeight} px.",
+        { Enabled: true, Active: false } => Loc.T("Computer use runs through omp's eval tool, which is off in this session."),
+        _ => Loc.F("Screenshots: {0}, at most {1} × {2} px.", Session.Display is "all" or "" ? Loc.T("all displays") : Loc.T("display ") + Session.Display, Session.MaxWidth, Session.MaxHeight),
     };
 
     // ── Permission for computer actions (tools.approval.computer) ──
@@ -84,15 +85,15 @@ public sealed partial class ComputerSettingsViewModel : WorkspacePageViewModel
 
     public string PolicyDescription => Policy switch
     {
-        "prompt" => "omp asks before every computer action, screenshots included.",
-        "allow" => "omp takes screenshots, clicks and types without asking, whatever the permission mode.",
-        "deny" => "omp can't use the computer at all, even with computer use on.",
+        "prompt" => Loc.T("omp asks before every computer action, screenshots included."),
+        "allow" => Loc.T("omp takes screenshots, clicks and types without asking, whatever the permission mode."),
+        "deny" => Loc.T("omp can't use the computer at all, even with computer use on."),
         _ => Main.ApprovalMode switch
         {
-            "yolo" => "Follows the permission mode. Now “Bypass permissions”: omp clicks and types without asking.",
-            "always-ask" => "Follows the permission mode. Now “Ask permissions”: screenshots and reading run, clicks and typing ask first.",
-            "write" => "Follows the permission mode. Now “Accept edits”: screenshots and reading run, clicks and typing ask first.",
-            _ => "Follows the permission mode by the message box: screenshots and reading run; clicks and typing ask first, unless it is “Bypass permissions”.",
+            "yolo" => Loc.T("Follows the permission mode. Now “Bypass permissions”: omp clicks and types without asking."),
+            "always-ask" => Loc.T("Follows the permission mode. Now “Ask permissions”: screenshots and reading run, clicks and typing ask first."),
+            "write" => Loc.T("Follows the permission mode. Now “Accept edits”: screenshots and reading run, clicks and typing ask first."),
+            _ => Loc.T("Follows the permission mode by the message box: screenshots and reading run; clicks and typing ask first, unless it is “Bypass permissions”."),
         },
     };
 
@@ -135,7 +136,7 @@ public sealed partial class ComputerSettingsViewModel : WorkspacePageViewModel
         {
             var checks = CheckRequirementsAsync();
             var (config, error) = await WorkspaceConfig.LoadAsync(Main, ct);
-            if (config is null) LoadError = error ?? "Couldn't read omp's settings.";
+            if (config is null) LoadError = error ?? Loc.T("Couldn't read omp's settings.");
             else ApplyConfig(config);
             await ReadSessionAsync();
             await checks;
@@ -217,17 +218,17 @@ public sealed partial class ComputerSettingsViewModel : WorkspacePageViewModel
 
     private RequirementCheck EvalCheck()
     {
-        const string title = "omp's eval tool";
-        var fix = EvalJs ? null : "Turn on JavaScript eval";
+        var title = Loc.T("omp's eval tool");
+        var fix = EvalJs ? null : Loc.T("Turn on JavaScript eval");
         return EvalActive switch
         {
-            true => new(title, "On in this session. Computer use runs inside it: omp scripts the desktop from JavaScript or Python.", CheckState.Ok),
-            false => new(title, "Off in this session, and computer use runs inside it. " + (EvalJs
-                    ? "JavaScript eval is on in the settings: restart omp, or check the tool list omp is started with."
-                    : "Turn on JavaScript eval (eval.js), then restart omp."), CheckState.Failed, fix, fix is null ? null : RequirementCheck.TurnOnEvalAction),
-            null when EvalJs || EvalPy => new(title, "On in omp's settings (" + (EvalJs && EvalPy ? "JavaScript and Python" : EvalJs ? "JavaScript" : "Python")
-                    + "). Computer use runs inside it.", CheckState.Ok),
-            null => new(title, "JavaScript and Python eval are both off in omp's settings, and computer use runs inside eval.", CheckState.Failed, fix, RequirementCheck.TurnOnEvalAction),
+            true => new(title, Loc.T("On in this session. Computer use runs inside it: omp scripts the desktop from JavaScript or Python."), CheckState.Ok),
+            false => new(title, Loc.T("Off in this session, and computer use runs inside it. ") + (EvalJs
+                    ? Loc.T("JavaScript eval is on in the settings: restart omp, or check the tool list omp is started with.")
+                    : Loc.T("Turn on JavaScript eval (eval.js), then restart omp.")), CheckState.Failed, fix, fix is null ? null : RequirementCheck.TurnOnEvalAction),
+            null when EvalJs || EvalPy => new(title, Loc.T("On in omp's settings (") + (EvalJs && EvalPy ? Loc.T("JavaScript and Python") : EvalJs ? "JavaScript" : "Python")
+                    + Loc.T("). Computer use runs inside it."), CheckState.Ok),
+            null => new(title, Loc.T("JavaScript and Python eval are both off in omp's settings, and computer use runs inside eval."), CheckState.Failed, fix, RequirementCheck.TurnOnEvalAction),
         };
     }
 
@@ -260,7 +261,7 @@ public sealed partial class ComputerSettingsViewModel : WorkspacePageViewModel
             var (ok, value, error) = await WorkspaceConfig.SetAsync(Main, "computer.enabled", on ? "true" : "false", Main.Lifetime);
             if (!ok)
             {
-                Say("Not saved: " + error, error: true);
+                Say(Loc.T("Not saved: ") + error, error: true);
                 _applying = true;
                 Enabled = !on;
                 _applying = false;
@@ -269,13 +270,13 @@ public sealed partial class ComputerSettingsViewModel : WorkspacePageViewModel
             var overridden = value is { ValueKind: JsonValueKind.True or JsonValueKind.False } v && v.GetBoolean() != on;
             if (!Main.CanRunOmpCommands)
             {
-                Say(overridden ? WorkspaceConfig.OverriddenNote("computer use") : on ? "Saved. omp can use this computer from its next start." : "Saved: computer use is off.");
+                Say(overridden ? WorkspaceConfig.OverriddenNote(Loc.T("computer use")) : on ? Loc.T("Saved. omp can use this computer from its next start.") : Loc.T("Saved: computer use is off."));
                 return;
             }
             if (Main.IsRunning)
             {
                 _pendingSessionToggle = on;
-                Say("Saved. It applies to this conversation when the current reply ends.");
+                Say(Loc.T("Saved. It applies to this conversation when the current reply ends."));
                 return;
             }
             await ApplyToSessionAsync(on, overridden);
@@ -287,20 +288,20 @@ public sealed partial class ComputerSettingsViewModel : WorkspacePageViewModel
     private async Task ApplyToSessionAsync(bool on, bool overridden = false)
     {
         var r = await Main.RunOmpCommandAsync(on ? "/computer on" : "/computer off", TimeSpan.FromSeconds(30), Main.Lifetime);
-        if (!r.Ok) Say("Saved, but omp did not answer /computer: " + r.Error, error: true);
+        if (!r.Ok) Say(Loc.T("Saved, but omp did not answer /computer: ") + r.Error, error: true);
         else if (r.Output.Contains("unavailable", StringComparison.OrdinalIgnoreCase))
-            Say("Saved, but omp can't use the computer in this session: it runs through omp's eval tool, which is off here. " + EvalFix, error: true);
-        else if (overridden) Say(WorkspaceConfig.OverriddenNote("computer use") + " In this session it is " + (on ? "on." : "off."));
-        else Say(on ? "Computer use is on, saved for the next sessions too." : "Computer use is off, in this session and the next ones.");
+            Say(Loc.T("Saved, but omp can't use the computer in this session: it runs through omp's eval tool, which is off here. ") + EvalFix, error: true);
+        else if (overridden) Say(WorkspaceConfig.OverriddenNote(Loc.T("computer use")) + Loc.T(" In this session it is ") + (on ? Loc.T("on.") : Loc.T("off.")));
+        else Say(on ? Loc.T("Computer use is on, saved for the next sessions too.") : Loc.T("Computer use is off, in this session and the next ones."));
         // "/computer on" prints the new status with its confirmation; otherwise ask for it
         if (r.Ok && WorkspaceParsers.ParseComputerStatus(r.Output) is { } status) Session = status;
         else await ReadSessionAsync();
     }
 
     private string EvalFix => !EvalJs && !EvalPy
-        ? "Turn on JavaScript eval below, then restart omp."
-        : !EvalJs ? "JavaScript eval is off and Python isn't available to omp: turn on JavaScript eval below, then restart omp."
-        : "Check omp's tool settings, then restart omp.";
+        ? Loc.T("Turn on JavaScript eval below, then restart omp.")
+        : !EvalJs ? Loc.T("JavaScript eval is off and Python isn't available to omp: turn on JavaScript eval below, then restart omp.")
+        : Loc.T("Check omp's tool settings, then restart omp.");
 
     protected override void OnPhaseChanged()
     {
@@ -316,9 +317,9 @@ public sealed partial class ComputerSettingsViewModel : WorkspacePageViewModel
     private async Task TurnOnEvalAsync()
     {
         var (ok, _, error) = await WorkspaceConfig.SetAsync(Main, "eval.js", "true", Main.Lifetime);
-        if (!ok) { Say("Not saved: " + error, error: true); return; }
+        if (!ok) { Say(Loc.T("Not saved: ") + error, error: true); return; }
         EvalJs = true;
-        SavedForNextStart("JavaScript eval is on. omp turns its eval tool on when it starts: restart omp, then turn computer use on.");
+        SavedForNextStart(Loc.T("JavaScript eval is on. omp turns its eval tool on when it starts: restart omp, then turn computer use on."));
     }
 
     [RelayCommand]
@@ -328,12 +329,12 @@ public sealed partial class ComputerSettingsViewModel : WorkspacePageViewModel
         var ct = Main.Lifetime;
         // tools.approval is one record for every tool: keep the other tools' entries.
         var (config, error) = await WorkspaceConfig.LoadAsync(Main, ct);
-        if (config is null) { Say(error ?? "Couldn't read omp's settings.", error: true); return; }
+        if (config is null) { Say(error ?? Loc.T("Couldn't read omp's settings."), error: true); return; }
         var record = config.Record("tools.approval") ?? [];
         if (key == "default") record.Remove("computer");
         else record["computer"] = key;
         var (ok, _, setError) = await WorkspaceConfig.SetAsync(Main, "tools.approval", record.ToJsonString(), ct);
-        if (!ok) { Say("Not saved: " + setError, error: true); return; }
+        if (!ok) { Say(Loc.T("Not saved: ") + setError, error: true); return; }
         Policy = key;
         SavedForNextStart();
     }
@@ -344,18 +345,18 @@ public sealed partial class ComputerSettingsViewModel : WorkspacePageViewModel
         var display = Display.Trim();
         var width = MaxWidth.Trim();
         var height = MaxHeight.Trim();
-        if (display.Length == 0) { Say("Display: “all”, or the id of one display.", error: true); return; }
+        if (display.Length == 0) { Say(Loc.T("Display: “all”, or the id of one display."), error: true); return; }
         if (!int.TryParse(width, NumberStyles.None, CultureInfo.InvariantCulture, out var w) || w < 1
             || !int.TryParse(height, NumberStyles.None, CultureInfo.InvariantCulture, out var h) || h < 1)
         {
-            Say("Width and height are whole numbers of pixels, such as 1920 and 1080.", error: true);
+            Say(Loc.T("Width and height are whole numbers of pixels, such as 1920 and 1080."), error: true);
             return;
         }
         foreach (var (key, value, old) in new[] { ("computer.display", display, _saved.Display), ("computer.maxWidth", w.ToString(CultureInfo.InvariantCulture), _saved.MaxWidth), ("computer.maxHeight", h.ToString(CultureInfo.InvariantCulture), _saved.MaxHeight) })
         {
             if (value == old) continue;
             var (ok, _, error) = await WorkspaceConfig.SetAsync(Main, key, value, Main.Lifetime);
-            if (!ok) { Say("Not saved: " + error, error: true); return; }
+            if (!ok) { Say(Loc.T("Not saved: ") + error, error: true); return; }
         }
         _saved = new(display, w.ToString(CultureInfo.InvariantCulture), h.ToString(CultureInfo.InvariantCulture));
         _applying = true;

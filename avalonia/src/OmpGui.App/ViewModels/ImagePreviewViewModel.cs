@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using OmpGui.App.Services;
@@ -38,8 +39,8 @@ public sealed partial class ImagePreview(ImageAttachment model, Func<IReadOnlyLi
     private bool _failed = model.Data.Length == 0;
 
     public string Tooltip => !Failed ? Name
-        : Model.Data.Length == 0 ? "This image was not kept with the session"
-        : $"{Name}: can't be shown (not an image the app can read)";
+        : Model.Data.Length == 0 ? Loc.T("This image was not kept with the session")
+        : Loc.F("{0}: can't be shown (not an image the app can read)", Name);
 
     private async Task LoadAsync()
     {

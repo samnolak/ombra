@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using OmpGui.ClientCore.Browser;
 
@@ -96,10 +97,10 @@ public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableO
     /// <summary>What the tab strip shows: the page title, its host, or "New tab".</summary>
     public string Header => Title.Length > 0 ? Title
         : Url is { } u ? (u.IsDefaultPort ? u.Host : u.Host + ":" + u.Port)
-        : "New tab";
+        : Loc.T("New tab");
 
     /// <summary>What the tab's tooltip says: the whole title (the strip may trim it), then whose tab it is.</summary>
-    public string ToolTip => Header + "\n" + (IsPopup ? $"Pop-up from {Opener?.Header ?? "a page"}" : IsAgentTab ? "Opened by omp" : "Preview");
+    public string ToolTip => Header + "\n" + (IsPopup ? Loc.F("Pop-up from {0}", Opener?.Header ?? Loc.T("a page")) : IsAgentTab ? Loc.T("Opened by omp") : Loc.T("Preview"));
 
     // The rest of the page state, kept while another tab is active (the toolbar shows the active one's)
     internal string Address { get; set; } = "";

@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 
 namespace OmpGui.App.ViewModels;
 
@@ -24,18 +25,18 @@ public partial class MainViewModel
     /// <summary>Settings pages in the order they are listed, in groups. Each new page is a UserControl in Views/Settings.</summary>
     public IReadOnlyList<SettingsCategoryViewModel> SettingsCategories { get; } =
     [
-        new("general", "General", "IconSettings"),
-        new("permissions", "Permissions", "IconShield"),
-        new("providers", "Model providers", "IconKey", "omp"),
-        new("connectors", "Connectors", "IconPlug"),
-        new("plugins", "Plugins and skills", "IconGrid"),
-        new("computer", "Computer use", "IconMonitor"),
-        new("git", "Git and worktrees", "IconBranch"),
-        new("ssh", "SSH hosts", "IconServer"),
-        new("pets", "Pets", "IconPaw", "This app"),
-        new("updates", "Updates", "IconDownload"),
-        new("advanced", "Advanced", "IconCode", "Troubleshooting"),
-        new("diagnostics", "Diagnostics", "IconPulse"),
+        new("general", Loc.T("General"), "IconSettings"),
+        new("permissions", Loc.T("Permissions"), "IconShield"),
+        new("providers", Loc.T("Model providers"), "IconKey", "omp"),
+        new("connectors", Loc.T("Connectors"), "IconPlug"),
+        new("plugins", Loc.T("Plugins and skills"), "IconGrid"),
+        new("computer", Loc.T("Computer use"), "IconMonitor"),
+        new("git", Loc.T("Git and worktrees"), "IconBranch"),
+        new("ssh", Loc.T("SSH hosts"), "IconServer"),
+        new("pets", Loc.T("Pets"), "IconPaw", Loc.T("This app")),
+        new("updates", Loc.T("Updates"), "IconDownload"),
+        new("advanced", Loc.T("Advanced"), "IconCode", Loc.T("Troubleshooting")),
+        new("diagnostics", Loc.T("Diagnostics"), "IconPulse"),
     ];
 
     /// <summary>The settings page shown (a <see cref="SettingsCategoryViewModel.Key"/>).</summary>

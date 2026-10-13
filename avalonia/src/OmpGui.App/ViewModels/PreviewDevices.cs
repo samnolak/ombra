@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Globalization;
 using Avalonia;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -72,14 +73,14 @@ public sealed partial class PreviewViewModel
         ? string.Create(CultureInfo.InvariantCulture, $"{v.Width}×{v.Height}") + (DevicePlatform == DevicePlatform.Desktop ? "" : " · " + PlatformName(DevicePlatform))
         : DevicePlatform == DevicePlatform.Desktop ? "" : PlatformName(DevicePlatform);
 
-    public string DeviceTip => DeviceLabel.Length > 0 ? $"Device: {DeviceLabel} (Ctrl/⌘+Shift+M)" : "Device size and platform (Ctrl/⌘+Shift+M)";
+    public string DeviceTip => DeviceLabel.Length > 0 ? Loc.F("Device: {0} (Ctrl/⌘+Shift+M)", DeviceLabel) : Loc.T("Device size and platform (Ctrl/⌘+Shift+M)");
 
     public static string PlatformName(DevicePlatform p) => p switch
     {
         DevicePlatform.IPhone => "iPhone",
         DevicePlatform.IPad => "iPad",
         DevicePlatform.Android => "Android",
-        _ => "Desktop",
+        _ => Loc.T("Desktop"),
     };
 
     internal static string? UserAgentFor(DevicePlatform p) => p switch
@@ -165,7 +166,7 @@ public sealed partial class PreviewViewModel
             || !int.TryParse(CustomHeight.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var h)
             || w is < MinDeviceSide or > MaxDeviceSide || h is < MinDeviceSide or > MaxDeviceSide)
         {
-            Message = $"A device size is two whole numbers from {MinDeviceSide} to {MaxDeviceSide}.";
+            Message = Loc.F("A device size is two whole numbers from {0} to {1}.", MinDeviceSide, MaxDeviceSide);
             return;
         }
         Message = "";

@@ -206,15 +206,13 @@ public sealed class SidebarRefreshTests
         Assert.Same(before[renamed], Rows(w)[renamed]);
         Assert.Equal("Renamed", Rows(w)[renamed].GetVisualDescendants().OfType<TextBlock>().First().Text);
 
-        // Pinned: it leaves its project for Pinned (first); every other row stays as it was. The rescan the pin asks
-        // for finds nothing more to change (anything it did would show in the next step's log).
+        // Pinned: it moves to the top of its own project; every other row stays as it was. The rescan the pin asks for
+        // finds nothing more to change (anything it did would show in the next step's log).
         log.Changes.Clear();
         var pinned = vm.Sessions.Single(x => x.Title == "Session 1");
         await vm.TogglePinItemCommand.ExecuteAsync(pinned);
-        await Until(() => vm.SessionGroups[0].IsPinnedGroup && Rows(w).ContainsKey(pinned), "pinned");
-        // (Pinned fills its rows before it is listed, so the log only sees the group arrive)
-        Assert.Equal(["Sessions Move", "project-0 Remove Session 1", "Groups Add"], log.Changes);
-        Assert.Equal([pinned], vm.SessionGroups[0].Items);
+        await Until(() => vm.SessionGroups.Single(g => g.Items.Contains(pinned)).Items[0] == pinned, "pinned");
+        Assert.Equal(["Sessions Move", "project-0 Move Session 1"], log.Changes);
         Assert.All(before.Where(r => r.Key != pinned), r => Assert.Same(r.Value, Rows(w)[r.Key]));
         // Its actions are not left showing on any row (nothing is hovered or focused from the keyboard)
         Assert.All(Rows(w).Values.SelectMany(Actions), b => Assert.Equal(0, b.Opacity));
@@ -238,6 +236,45 @@ public sealed class SidebarRefreshTests
         await Until(() => !vm.Sessions.Contains(deleted), "deleted");
         Assert.Equal(["Sessions Remove", "project-1 Remove Session 5"], log.Changes);
         Assert.All(before.Where(r => r.Key != pinned && r.Key != deleted), r => Assert.Same(r.Value, Rows(w)[r.Key]));
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task A_pinned_project_goes_first_and_a_renamed_one_keeps_its_folder()
+    {
+        var (w, vm, _) = await OpenAsync(projects: 3, perProject: 1, height: 800);
+        Assert.Equal(["project-0", "project-1", "project-2"], vm.SessionGroups.Select(g => g.Name).Where(n => !n.StartsWith("sidebar-", StringComparison.Ordinal)));
+        var oldest = vm.SessionGroups.Single(g => g.Name == "project-2");
+
+        oldest.TogglePinCommand!.Execute(oldest);
+        Assert.Equal(["project-2", "project-0", "project-1"], vm.SessionGroups.Select(g => g.Name).Where(n => !n.StartsWith("sidebar-", StringComparison.Ordinal)));
+        Assert.True(oldest.IsPinned);
+        Assert.Equal("Unpin project", oldest.PinLabel);
+        // A newer message elsewhere does not move it down
+        vm.RequestCatalogRefresh();
+        await Until(() => vm.SessionGroups[0] == oldest, "still first");
+
+        oldest.StartRenameCommand.Execute(null);
+        Assert.Equal("project-2", oldest.RenameText);
+        oldest.RenameText = "  Backend  ";
+        oldest.CommitRenameCommand.Execute(null);
+        Assert.False(oldest.IsRenaming);
+        Assert.Equal("Backend", oldest.Name);
+        Assert.Equal("/work/project-2", oldest.Cwd);
+        // Esc keeps the name
+        oldest.StartRenameCommand.Execute(null);
+        oldest.RenameText = "Other";
+        oldest.CancelRenameCommand.Execute(null);
+        Assert.Equal("Backend", oldest.Name);
+        // Empty: the folder's name again
+        oldest.StartRenameCommand.Execute(null);
+        oldest.RenameText = "";
+        oldest.CommitRenameCommand.Execute(null);
+        Assert.Equal("project-2", oldest.Name);
+
+        oldest.TogglePinCommand!.Execute(oldest);
+        Assert.Equal(["project-0", "project-1", "project-2"], vm.SessionGroups.Select(g => g.Name).Where(n => !n.StartsWith("sidebar-", StringComparison.Ordinal)));
         await vm.DisposeAsync();
         w.Close();
     }

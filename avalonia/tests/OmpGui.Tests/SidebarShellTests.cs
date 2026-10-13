@@ -89,21 +89,20 @@ public sealed class SidebarShellTests
     }
 
     [AvaloniaFact]
-    public async Task A_pinned_session_is_listed_under_Pinned_and_its_project_keeps_its_header()
+    public async Task A_pinned_session_leads_its_own_project()
     {
         var (w, vm) = await OpenAsync();
         await TwoSessionsAsync(w, vm);
+        Assert.Equal(["second topic", "first topic"], vm.SessionGroups.Single().Items.Select(i => i.Title));
         var first = vm.Sessions.Single(x => x.Title == "first topic");
         await vm.TogglePinItemCommand.ExecuteAsync(first);
-        await Until(() => vm.SessionGroups.Count == 2 && vm.SessionGroups[0].IsPinnedGroup, "pinned group");
-        Assert.Equal(["first topic"], vm.SessionGroups[0].Items.Select(i => i.Title));
-        Assert.Equal(["second topic"], vm.SessionGroups[1].Items.Select(i => i.Title));
-        Assert.True(vm.SessionGroups[1].IsProject);
+        await Until(() => vm.SessionGroups.Single().Items[0].Title == "first topic", "pinned first in its project");
+        Assert.Equal(["first topic", "second topic"], vm.SessionGroups.Single().Items.Select(i => i.Title));
         Assert.Contains(first.Model.Id, SessionPins.Read(SessionPins.PathFor(first.Model.Path)));
         Assert.Equal("Unpin", vm.Sessions.Single(x => x.Title == "first topic").PinLabel);
 
         await vm.TogglePinItemCommand.ExecuteAsync(vm.Sessions.Single(x => x.Title == "first topic"));
-        await Until(() => vm.SessionGroups.Count == 1 && !vm.SessionGroups[0].IsPinnedGroup, "unpinned");
+        await Until(() => vm.SessionGroups.Single().Items[0].Title == "second topic", "unpinned");
         Assert.DoesNotContain(first.Model.Id, SessionPins.Read(SessionPins.PathFor(first.Model.Path)));
         await vm.DisposeAsync();
         w.Close();

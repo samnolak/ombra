@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
@@ -806,8 +807,8 @@ public sealed class MarkdownView : ContentControl
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Center,
             };
-            ToolTip.SetTip(copy, "Copy the code");
-            Avalonia.Automation.AutomationProperties.SetName(copy, "Copy code");
+            ToolTip.SetTip(copy, Loc.T("Copy the code"));
+            Avalonia.Automation.AutomationProperties.SetName(copy, Loc.T("Copy code"));
             copy.Click += (_, _) =>
             {
                 CopyRequested?.Invoke(_code);

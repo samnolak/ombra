@@ -296,6 +296,53 @@ public sealed class ChatLayoutTests
         Assert.Equal(("a\nb\nc", true), (row.ConsoleOutput, row.ShowConsoleMore)); // done: its first lines
     }
 
+    /// <summary>A tool line's tooltip is words, never the call's raw JSON: the whole command (none while its console
+    /// shows it), the file, or another tool's arguments one per line.</summary>
+    [Fact]
+    public void A_tool_lines_tooltip_says_what_it_did_in_words()
+    {
+        var command = new ToolRowViewModel(new ToolItem(1, "t", "bash", """{"command":"ls -la && make"}""", ToolStatus.Succeeded, "", "$ ls -la && make"));
+        Assert.Equal("ls -la && make", command.Tooltip);
+        command.Update(new ToolItem(1, "t", "bash", """{"command":"ls -la && make"}""", ToolStatus.Succeeded, "a\nb", "$ ls -la && make"));
+        Assert.Null(command.Tooltip); // the console under the line shows the command
+        var read = new ToolRowViewModel(new ToolItem(2, "r", "read", """{"path":"src/a.py"}""", ToolStatus.Succeeded, "x", "src/a.py"));
+        Assert.Equal("src/a.py", read.Tooltip);
+        var mcp = new ToolRowViewModel(new ToolItem(3, "m", "mcp__github__create_issue", """{"owner":"acme","repo":"weather","draft":true,"labels":["bug"]}""",
+            ToolStatus.Succeeded, "", "acme · weather"));
+        Assert.Equal("owner: acme\nrepo: weather\ndraft: true", mcp.Tooltip);
+        foreach (var row in new[] { command, read, mcp }) Assert.DoesNotContain("{", row.Tooltip ?? "");
+    }
+
+    /// <summary>A hovered tool line's fill has rounded corners: the line reaches 8 px past the reading column, and the
+    /// list item it sits in used to clip it into a square-cornered strip.</summary>
+    [AvaloniaFact]
+    public async Task A_hovered_tool_line_is_rounded_not_cut_square()
+    {
+        var (w, vm) = await Open("markdown");
+        vm.ComposerText = "explain the change";
+        vm.SendCommand.Execute(null);
+        await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.OfType<ToolRowViewModel>().Any(), "a tool line");
+        await Settle();
+        var row = w.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ToggleButton>().First(b => b.Classes.Contains("tool-row") && b.IsEffectivelyVisible);
+        var at = row.TranslatePoint(default, w)!.Value;
+        w.MouseMove(at + new Point(row.Bounds.Width / 2, row.Bounds.Height / 2), RawInputModifiers.None);
+        await Settle(150);
+        using var frame = w.CaptureRenderedFrame()!;
+        var size = frame.PixelSize;
+        var buf = new byte[size.Width * size.Height * 4];
+        var pin = System.Runtime.InteropServices.GCHandle.Alloc(buf, System.Runtime.InteropServices.GCHandleType.Pinned);
+        try { frame.CopyPixels(new PixelRect(size), pin.AddrOfPinnedObject(), buf.Length, size.Width * 4); }
+        finally { pin.Free(); }
+        uint Px(double x, double y) => BitConverter.ToUInt32(buf, ((int)y * size.Width + (int)x) * 4) | 0xFF000000;
+        var page = Px(at.X - 4, at.Y + row.Bounds.Height / 2);
+        var fill = Px(at.X + 3, at.Y + row.Bounds.Height / 2);
+        Assert.NotEqual(page, fill); // hovered: filled from its own left edge, not from the column's
+        Assert.Equal(page, Px(at.X, at.Y)); // its corners are rounded off: the page shows there
+        Assert.Equal(page, Px(at.X + row.Bounds.Width - 1, at.Y + row.Bounds.Height - 1));
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
     [Fact]
     public void Thinking_reads_live_then_says_how_long_it_took()
     {

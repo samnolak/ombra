@@ -1,6 +1,7 @@
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -38,9 +39,9 @@ public sealed partial class DialogViewModel : ObservableObject
 
     public string Caption => Kind switch
     {
-        DialogKind.Approval => "Permission needed",
-        DialogKind.Confirm => "Confirmation needed",
-        _ => "omp is asking",
+        DialogKind.Approval => Loc.T("Permission needed"),
+        DialogKind.Confirm => Loc.T("Confirmation needed"),
+        _ => Loc.T("omp is asking"),
     };
 
     public string Headline => Model.Headline;
@@ -89,14 +90,14 @@ public sealed partial class DialogViewModel : ObservableObject
     /// <summary>Claude Code's wording with omp as the subject: "omp wants to run a command".</summary>
     public static string ApprovalTitle(string tool) => tool switch
     {
-        "bash" => "omp wants to run a command",
-        "edit" or "ast_edit" => "omp wants to make changes",
-        "write" => "omp wants to write a file",
-        "read" => "omp wants to read a file",
-        "eval" => "omp wants to run code",
-        "fetch" or "browser" => "omp wants to open a web page",
-        "task" => "omp wants to start a subagent",
-        _ => $"omp wants to use {ToolRowViewModel.DisplayNameOf(tool)}",
+        "bash" => Loc.T("omp wants to run a command"),
+        "edit" or "ast_edit" => Loc.T("omp wants to make changes"),
+        "write" => Loc.T("omp wants to write a file"),
+        "read" => Loc.T("omp wants to read a file"),
+        "eval" => Loc.T("omp wants to run code"),
+        "fetch" or "browser" => Loc.T("omp wants to open a web page"),
+        "task" => Loc.T("omp wants to start a subagent"),
+        _ => Loc.F("omp wants to use {0}", ToolRowViewModel.DisplayNameOf(tool)),
     };
 
     public string Placeholder => Model.Placeholder ?? "";
@@ -113,7 +114,7 @@ public sealed partial class DialogViewModel : ObservableObject
     {
         if (Model.Deadline is not { } d) return;
         var left = d - now;
-        Remaining = left <= TimeSpan.Zero ? "closing…" : string.Create(CultureInfo.InvariantCulture, $"{Math.Ceiling(left.TotalSeconds):0}s left");
+        Remaining = left <= TimeSpan.Zero ? Loc.T("closing…") : Loc.F("{0}s left", Math.Ceiling(left.TotalSeconds).ToString("0", CultureInfo.InvariantCulture));
     }
 
     private async Task AnswerAsync(DialogAnswer a)
@@ -132,7 +133,7 @@ public sealed partial class DialogViewModel : ObservableObject
     public ApprovalRule? SuggestedRule { get; }
     public bool CanAllowWithRule => SuggestedRule is not null;
     /// <summary>"Don't ask again for commands starting with “npm test”".</summary>
-    public string AllowWithRuleText => SuggestedRule is { } r ? $"Don't ask again for {r.Description}" : "";
+    public string AllowWithRuleText => SuggestedRule is { } r ? Loc.F("Don't ask again for {0}", r.Description) : "";
     /// <summary>The rule as written in Settings → Permissions (the tooltip of the scope buttons).</summary>
     public string RuleText => SuggestedRule?.Text ?? "";
 

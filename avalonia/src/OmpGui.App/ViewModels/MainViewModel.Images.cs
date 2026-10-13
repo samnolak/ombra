@@ -1,6 +1,7 @@
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.App.Services;
 using OmpGui.ClientCore;
 
@@ -40,7 +41,7 @@ public sealed partial class MainViewModel
     public bool HasViewerNote => ViewerNote.Length > 0;
     /// <summary>What the zoom button does now: its tooltip and accessible name. An icon, not "100 %", which read as the
     /// zoom level shown rather than as a button.</summary>
-    public string ViewerZoomAction => IsViewerActualSize ? "Fit to window" : "Actual size";
+    public string ViewerZoomAction => IsViewerActualSize ? Loc.T("Fit to window") : Loc.T("Actual size");
     public bool HasViewerSiblings => _viewerImages.Count > 1;
     public ImageAttachment? ViewerAttachment => _viewerIndex < _viewerImages.Count ? _viewerImages[_viewerIndex] : null;
 
@@ -102,11 +103,11 @@ public sealed partial class MainViewModel
         try
         {
             var path = await Task.Run(() => ImageAttachments.SaveToTemp(image));
-            ViewerNote = await FileOpeners.StartAsync(FileOpeners.OpenWithSystem(path), waitForSuccess: false) ? "" : "Could not open the image";
+            ViewerNote = await FileOpeners.StartAsync(FileOpeners.OpenWithSystem(path), waitForSuccess: false) ? "" : Loc.T("Could not open the image");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            ViewerNote = "Could not save the image to open it: " + e.Message;
+            ViewerNote = Loc.T("Could not save the image to open it: ") + e.Message;
         }
     }
 
@@ -119,12 +120,12 @@ public sealed partial class MainViewModel
         ViewerTitle = image.Name;
         ViewerDetail = Position();
         ViewerNote = "";
-        ViewerProblem = image.Data.Length == 0 ? "This image was not kept with the session." : null;
+        ViewerProblem = image.Data.Length == 0 ? Loc.T("This image was not kept with the session.") : null;
         OnPropertyChanged(nameof(ViewerAttachment));
         if (image.Data.Length > 0) _ = DecodeViewerImageAsync(image, shown);
     }
 
-    private string Position() => _viewerImages.Count > 1 ? $"{_viewerIndex + 1} of {_viewerImages.Count}" : "";
+    private string Position() => _viewerImages.Count > 1 ? Loc.F("{0} of {1}", _viewerIndex + 1, _viewerImages.Count) : "";
 
     private async Task DecodeViewerImageAsync(ImageAttachment image, int shown)
     {
@@ -138,7 +139,7 @@ public sealed partial class MainViewModel
         IsViewerLoading = false;
         if (decoded is not { } d)
         {
-            ViewerProblem = "This image can't be shown: it is not an image the app can read.";
+            ViewerProblem = Loc.T("This image can’t be shown: it is not an image the app can read.");
             return;
         }
         SetViewerImage(d.Bitmap);
