@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 
 namespace OmpGui.App.ViewModels;
 
@@ -8,9 +9,9 @@ public partial class MainViewModel
     /// <summary>A new session's starter prompts (Claude Code's suggestions): one fills the message box to edit and send.</summary>
     public IReadOnlyList<string> StarterPrompts { get; } =
     [
-        "Explain how this project is organized",
-        "Find a bug and fix it",
-        "Add tests for the code I changed last",
+        Loc.T("Explain how this project is organized"),
+        Loc.T("Find a bug and fix it"),
+        Loc.T("Add tests for the code I changed last"),
     ];
 
     [RelayCommand]
@@ -42,14 +43,14 @@ public partial class MainViewModel
         var open = _open;
         var session = open.Controller;
         var occurrence = Rows.OfType<UserRowViewModel>().TakeWhile(r => r != row).Count(r => Same(r.Text, row.Text));
-        var card = new SessionCardViewModel("rewind", "IconRewind", "Rewinding…", "") { State = SessionCardState.Running };
+        var card = new SessionCardViewModel("rewind", "IconRewind", Loc.T("Rewinding…"), "") { State = SessionCardState.Running };
         ShowCard(card);
         var messages = await session.GetBranchMessagesAsync(open.Lifetime.Token);
         var matches = messages.Where(m => Same(m.Text, row.Text)).ToList();
         if (occurrence >= matches.Count)
         {
-            card.Finish(false, "Not rewound", "omp does not list this message as one to rewind to. Rewind… in the session menu shows the ones it can.",
-                secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
+            card.Finish(false, Loc.T("Not rewound"), Loc.T("omp does not list this message as one to rewind to. Rewind… in the session menu shows the ones it can."),
+                secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
             return;
         }
         var text = await session.RewindAsync(matches[occurrence].EntryId, open.Lifetime.Token);
@@ -57,13 +58,13 @@ public partial class MainViewModel
         RequestCatalogRefresh();
         if (text is null)
         {
-            card.Finish(false, "Not rewound", "omp did not start the new session; the conversation shows why.",
-                secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
+            card.Finish(false, Loc.T("Not rewound"), Loc.T("omp did not start the new session; the conversation shows why."),
+                secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
             return;
         }
         PutInComposer(open, text);
-        card.Finish(true, "Rewound", "A new session goes on from before that message; the earlier one is kept in the sessions list. " +
-            "Your message is back in the box.", secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
+        card.Finish(true, Loc.T("Rewound"), Loc.T("A new session goes on from before that message; the earlier one is kept in the sessions list. Your message is back in the box."),
+            secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
 
         static bool Same(string a, string b) => string.Equals(a.Trim().ReplaceLineEndings("\n"), b.Trim().ReplaceLineEndings("\n"), StringComparison.Ordinal);
     }

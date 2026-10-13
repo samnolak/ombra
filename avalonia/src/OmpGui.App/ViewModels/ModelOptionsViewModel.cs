@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -103,7 +104,7 @@ public sealed partial class ModelOptionsViewModel(MainViewModel owner) : Observa
     {
         var (enabled, error) = await owner.Session.SetFastModeAsync(on, owner.Closing);
         Quietly(() => FastMode = error is null ? enabled : !on);
-        FastNote = error is null ? "" : error == NoFastTier ? "Not available for this model: it has no priority tier." : error;
+        FastNote = error is null ? "" : error == NoFastTier ? Loc.T("Not available for this model: it has no priority tier.") : error;
     }
 
     partial void OnExtendedContextChanged(bool value)
@@ -116,7 +117,7 @@ public sealed partial class ModelOptionsViewModel(MainViewModel owner) : Observa
         var r = await owner.RunOmpCommandAsync(on ? "/extended-context on" : "/extended-context off");
         var now = r.Ok ? SessionOutputs.ParseOnOff(r.Output, "Extended context") : null;
         Quietly(() => ExtendedContext = now ?? !on);
-        ExtendedNote = now is null ? "Not changed: " + (r.Error ?? r.Output) : "";
+        ExtendedNote = now is null ? Loc.T("Not changed: ") + (r.Error ?? r.Output) : "";
     }
 
     partial void OnAdvisorChanged(bool value)
@@ -131,7 +132,7 @@ public sealed partial class ModelOptionsViewModel(MainViewModel owner) : Observa
         else
         {
             Quietly(() => Advisor = !on);
-            AdvisorNote = "Not changed: " + r.Error;
+            AdvisorNote = Loc.T("Not changed: ") + r.Error;
         }
     }
 
@@ -142,8 +143,8 @@ public sealed partial class ModelOptionsViewModel(MainViewModel owner) : Observa
         AdvisorNeedsModel = state == AdvisorState.NeedsModel;
         AdvisorNote = state switch
         {
-            AdvisorState.NeedsModel => "Needs a model for omp's advisor role.",
-            AdvisorState.On when SessionOutputs.AdvisorModel(text.Trim()) is { } m => "Reviewing with " + m,
+            AdvisorState.NeedsModel => Loc.T("Needs a model for omp's advisor role."),
+            AdvisorState.On when SessionOutputs.AdvisorModel(text.Trim()) is { } m => Loc.T("Reviewing with ") + m,
             _ => "",
         };
         if (!AdvisorNeedsModel) IsChoosingAdvisorModel = false;
@@ -161,7 +162,7 @@ public sealed partial class ModelOptionsViewModel(MainViewModel owner) : Observa
     {
         if (model is null) return;
         IsChoosingAdvisorModel = false;
-        AdvisorNote = "Setting the advisor's model…";
+        AdvisorNote = Loc.T("Setting the advisor's model…");
         var roles = await owner.RunOmpCliAsync(["config", "get", "modelRoles", "--json"], TimeSpan.FromSeconds(30), owner.Closing);
         JsonObject map;
         try
@@ -173,13 +174,13 @@ public sealed partial class ModelOptionsViewModel(MainViewModel owner) : Observa
         var set = await owner.RunOmpCliAsync(["config", "set", "modelRoles", map.ToJsonString(), "--json"], TimeSpan.FromSeconds(30), owner.Closing);
         if (!set.Ok)
         {
-            AdvisorNote = "omp did not take it: " + (set.Stderr.Trim() is { Length: > 0 } e ? e : "exit " + set.ExitCode);
+            AdvisorNote = Loc.T("omp did not take it: ") + (set.Stderr.Trim() is { Length: > 0 } e ? e : Loc.T("exit ") + set.ExitCode);
             return;
         }
         // omp reads model roles when it starts
         if (!await owner.RestartOmpToApplyAsync())
         {
-            AdvisorNote = $"Saved: {model.Name}. It applies once the current reply ends and omp restarts.";
+            AdvisorNote = Loc.F("Saved: {0}. It applies once the current reply ends and omp restarts.", model.Name);
             return;
         }
         var r = await owner.RunOmpCommandAsync("/advisor on");
@@ -205,6 +206,6 @@ public sealed partial class ModelOptionsViewModel(MainViewModel owner) : Observa
             return;
         }
         Quietly(() => revert(!on));
-        SettingsNote = "Not changed: " + error;
+        SettingsNote = Loc.T("Not changed: ") + error;
     }
 }

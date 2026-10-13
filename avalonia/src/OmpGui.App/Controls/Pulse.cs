@@ -40,6 +40,10 @@ public static class Pulse
     public static readonly AttachedProperty<TimeSpan> DurationProperty =
         AvaloniaProperty.RegisterAttached<Visual, TimeSpan>("Duration", typeof(Pulse), TimeSpan.FromSeconds(1.1));
 
+    /// <summary>A full turn takes this long (a spinner, stepped like the fade); zero (the default) does not turn.</summary>
+    public static readonly AttachedProperty<TimeSpan> SpinProperty =
+        AvaloniaProperty.RegisterAttached<Visual, TimeSpan>("Spin", typeof(Pulse), TimeSpan.Zero);
+
     /// <summary>The elements styled to pulse that are in a window (shown or not): few, so each visibility change anywhere
     /// looks at all of them.</summary>
     private static readonly HashSet<Visual> InTree = [];
@@ -54,8 +58,8 @@ public static class Pulse
     {
         LowProperty.Changed.AddClassHandler<Visual>((v, e) =>
         {
-            var was = e.OldValue is double old && old < 1;
-            var now = GetLow(v) < 1;
+            var was = e.OldValue is double old && (old < 1 || GetSpin(v) > TimeSpan.Zero);
+            var now = IsActive(v);
             if (now && !was)
             {
                 v.AttachedToVisualTree += OnAttached;
@@ -69,6 +73,22 @@ public static class Pulse
             Update(v, restart: true);
         });
         DurationProperty.Changed.AddClassHandler<Visual>((v, _) => Update(v, restart: true));
+        SpinProperty.Changed.AddClassHandler<Visual>((v, e) =>
+        {
+            var was = GetLow(v) < 1 || (e.OldValue is TimeSpan old && old > TimeSpan.Zero);
+            var now = IsActive(v);
+            if (now && !was)
+            {
+                v.AttachedToVisualTree += OnAttached;
+                v.DetachedFromVisualTree += OnDetached;
+            }
+            else if (was && !now)
+            {
+                v.AttachedToVisualTree -= OnAttached;
+                v.DetachedFromVisualTree -= OnDetached;
+            }
+            Update(v, restart: true);
+        });
         // Shown or hidden: Avalonia has no public event for IsEffectivelyVisible, but it follows IsVisible on the element
         // and its ancestors, and is already updated when the change is announced. Show only starts or stops pulses (the
         // set of elements in the window stays as it is), so it walks InTree as it is.
@@ -80,6 +100,9 @@ public static class Pulse
 
     public static double GetLow(Visual element) => element.GetValue(LowProperty);
     public static void SetLow(Visual element, double value) => element.SetValue(LowProperty, value);
+    public static TimeSpan GetSpin(Visual element) => element.GetValue(SpinProperty);
+    public static void SetSpin(Visual element, TimeSpan value) => element.SetValue(SpinProperty, value);
+    private static bool IsActive(Visual v) => GetLow(v) < 1 || GetSpin(v) > TimeSpan.Zero;
     public static TimeSpan GetDuration(Visual element) => element.GetValue(DurationProperty);
     public static void SetDuration(Visual element, TimeSpan value) => element.SetValue(DurationProperty, value);
 
@@ -101,6 +124,10 @@ public static class Pulse
         return Math.Round((1 - (1 - low) * fade) / Quantum) * Quantum;
     }
 
+    /// <summary>The angle of a spinner <paramref name="elapsed"/> into its turn, in whole degrees.</summary>
+    internal static double AngleAt(TimeSpan elapsed, TimeSpan period) =>
+        period <= TimeSpan.Zero ? 0 : Math.Round(elapsed.TotalSeconds % period.TotalSeconds / period.TotalSeconds * 360) % 360;
+
     private static void OnAttached(object? sender, VisualTreeAttachmentEventArgs e) => Update((Visual)sender!, restart: false);
 
     // Gone from the window: whatever the tree says while it is being taken apart
@@ -112,7 +139,7 @@ public static class Pulse
     /// </summary>
     private static void Update(Visual v, bool restart, bool detached = false)
     {
-        var inTree = GetLow(v) < 1 && !detached && v.IsAttachedToVisualTree();
+        var inTree = IsActive(v) && !detached && v.IsAttachedToVisualTree();
         if (inTree) InTree.Add(v);
         else InTree.Remove(v);
         Show(v, inTree && v.IsEffectivelyVisible, restart);
@@ -132,13 +159,27 @@ public static class Pulse
             return;
         }
         var top = TopLevel.GetTopLevel(v);
-        var pulsing = new Pulsing(GetLow(v), GetDuration(v), top);
+        var spin = GetSpin(v);
+        var pulsing = new Pulsing(GetLow(v), GetDuration(v), top, spin, spin > TimeSpan.Zero ? Rotate(v) : null);
         pulsing.Step(Now());
         pulsing.Binding = v.Bind(Visual.OpacityProperty, pulsing, BindingPriority.Animation);
         Shown[v] = pulsing;
         if (top is not null && Windows.Add(top)) top.LayoutUpdated += OnLayoutUpdated;
-        _timer ??= new DispatcherTimer(TimeSpan.FromSeconds(1.0 / OwnFps), DispatcherPriority.Normal, (_, _) => StepAll(Now()));
+        // Made for the UI dispatcher there is now (the headless test platform makes a new one for each test: a timer of
+        // the previous one would never tick)
+        if (_timer?.Dispatcher != Dispatcher.UIThread)
+            _timer = new DispatcherTimer(TimeSpan.FromSeconds(1.0 / OwnFps), DispatcherPriority.Normal, (_, _) => StepAll(Now()));
         _timer.Start();
+    }
+
+    /// <summary>The element's rotation (about its centre), made once.</summary>
+    private static Avalonia.Media.RotateTransform Rotate(Visual v)
+    {
+        if (v.RenderTransform is Avalonia.Media.RotateTransform r) return r;
+        r = new Avalonia.Media.RotateTransform();
+        v.RenderTransformOrigin = RelativePoint.Center;
+        v.RenderTransform = r;
+        return r;
     }
 
     private static bool HasPulses(TopLevel top)
@@ -171,7 +212,7 @@ public static class Pulse
 
     /// <summary>One element's pulse: the opacity it is drawn with, bound at animation priority (over what styles set, as a
     /// style animation is) until disposed; <see cref="Top"/>, the window it is in.</summary>
-    private sealed class Pulsing(double low, TimeSpan duration, TopLevel? top) : IObservable<double>, IDisposable
+    private sealed class Pulsing(double low, TimeSpan duration, TopLevel? top, TimeSpan spin, Avalonia.Media.RotateTransform? rotate) : IObservable<double>, IDisposable
     {
         private IObserver<double>? _observer;
         private double _value = double.NaN;
@@ -180,6 +221,7 @@ public static class Pulse
 
         public void Step(TimeSpan now)
         {
+            if (rotate is not null && AngleAt(now, spin) is var angle && angle != rotate.Angle) rotate.Angle = angle;
             var value = OpacityAt(now, low, duration);
             if (value == _value) return;
             _value = value;

@@ -2,7 +2,8 @@
      inputs on surface 1 with a hairline that turns focus blue, cards and menus radius 12, the composer 16, pills full.
      One yellow accent (the logo's) for the primary action, switches, checks and selection marks; blue only for links
      and focus. -->
-<Styles xmlns="https://github.com/avaloniaui"
+<Styles xmlns:loc="using:OmpGui.App.Localization"
+             xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ctl="using:OmpGui.App.Controls">
 
@@ -398,6 +399,11 @@
   <Style Selector="Border.terminal-panel">
     <Setter Property="Background" Value="{DynamicResource GuiSidebar}" />
   </Style>
+  <Style Selector="Border.terminal-surface">
+    <Setter Property="Margin" Value="8,0,8,8" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusControl}" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
   <Style Selector="Border.tab">
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
     <Setter Property="Padding" Value="8,0,2,0" />
@@ -458,11 +464,11 @@
   <Style Selector="TextBox">
     <Setter Property="ContextFlyout">
       <MenuFlyout Placement="Pointer">
-        <MenuItem Header="Cut" Command="{Binding $parent[TextBox].Cut}" IsEnabled="{Binding $parent[TextBox].CanCut}" InputGesture="{x:Static TextBox.CutGesture}" />
-        <MenuItem Header="Copy" Command="{Binding $parent[TextBox].Copy}" IsEnabled="{Binding $parent[TextBox].CanCopy}" InputGesture="{x:Static TextBox.CopyGesture}" />
-        <MenuItem Header="Paste" Command="{Binding $parent[TextBox].Paste}" IsEnabled="{Binding $parent[TextBox].CanPaste}" InputGesture="{x:Static TextBox.PasteGesture}" />
+        <MenuItem Header="{loc:T 'Cut'}" Command="{Binding $parent[TextBox].Cut}" IsEnabled="{Binding $parent[TextBox].CanCut}" InputGesture="{x:Static TextBox.CutGesture}" />
+        <MenuItem Header="{loc:T 'Copy'}" Command="{Binding $parent[TextBox].Copy}" IsEnabled="{Binding $parent[TextBox].CanCopy}" InputGesture="{x:Static TextBox.CopyGesture}" />
+        <MenuItem Header="{loc:T 'Paste'}" Command="{Binding $parent[TextBox].Paste}" IsEnabled="{Binding $parent[TextBox].CanPaste}" InputGesture="{x:Static TextBox.PasteGesture}" />
         <Separator />
-        <MenuItem Header="Select all" Command="{Binding $parent[TextBox].SelectAll}" InputGesture="{x:Static ctl:ContextMenus.SelectAllGesture}" />
+        <MenuItem Header="{loc:T 'Select all'}" Command="{Binding $parent[TextBox].SelectAll}" InputGesture="{x:Static ctl:ContextMenus.SelectAllGesture}" />
       </MenuFlyout>
     </Setter>
   </Style>

@@ -5,6 +5,7 @@ using System.Text;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.App.Services;
 using OmpGui.ClientCore;
 using OmpGui.Rpc;
@@ -104,7 +105,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private string? _signingIn;
 
     public bool IsSigningIn => SigningIn is not null;
-    public string SigningInText => $"Signing in to {SigningIn}… omp waits for the browser or the code; other actions wait too.";
+    public string SigningInText => Loc.F("Signing in to {0}… omp waits for the browser or the code; other actions wait too.", SigningIn);
 
     /// <summary>Raised on the UI thread when the user chose to open <see cref="PendingUrl"/>; the view launches it.</summary>
     public event Action<string>? OpenUrlRequested;
@@ -112,7 +113,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Raised on the UI thread when the user chose to copy <see cref="PendingUrl"/>.</summary>
     public event Action<string>? CopyTextRequested;
 
-    [ObservableProperty] private string _statusText = "Starting…";
+    [ObservableProperty] private string _statusText = Loc.T("Starting…");
     [ObservableProperty] private string _statusDetail = "";
     [ObservableProperty] private bool _isDebugVisible;
     [ObservableProperty] private bool _hasError;
@@ -123,12 +124,12 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsIdle => !IsRunning;
     public string ComposerHint => Phase switch
     {
-        SessionPhase.Running when HasDialog => "Answer the request above, or press Esc to stop",
-        SessionPhase.Running => $"Queue a message — {SendKeyHint} to queue, {KeyboardShortcuts.Steer} to steer",
-        SessionPhase.Aborting => "Stopping…",
-        SessionPhase.Ready => SendWithModifier ? $"Ask omp anything — {SendKeyHint} to send" : "Ask omp anything — Shift+Enter for a new line",
-        SessionPhase.Faulted => "omp is not running.",
-        _ => "Waiting for omp…",
+        SessionPhase.Running when HasDialog => Loc.T("Answer the request above, or press Esc to stop"),
+        SessionPhase.Running => Loc.F("Queue a message — {0} to queue, {1} to steer", SendKeyHint, KeyboardShortcuts.Steer),
+        SessionPhase.Aborting => Loc.T("Stopping…"),
+        SessionPhase.Ready => SendWithModifier ? Loc.F("Ask omp anything — {0} to send", SendKeyHint) : Loc.T("Ask omp anything — Shift+Enter for a new line"),
+        SessionPhase.Faulted => Loc.T("omp is not running."),
+        _ => Loc.T("Waiting for omp…"),
     };
 
     /// <summary>Raised on the UI thread after rows were added or the last row changed (for auto-scroll: followed only
@@ -265,7 +266,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Running: stop the run. Aborting (a second press): force-stop omp and resume the session.</summary>
     private bool CanAbort() => Phase is SessionPhase.Running or SessionPhase.Aborting;
 
-    public string StopLabel => Phase == SessionPhase.Aborting ? "Force stop" : "Stop";
+    public string StopLabel => Phase == SessionPhase.Aborting ? Loc.T("Force stop") : Loc.T("Stop");
 
     [RelayCommand(CanExecute = nameof(CanAbort))]
     private async Task AbortAsync()
@@ -553,7 +554,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         var first = s.Dialogs.Count > 0 ? s.Dialogs[0] : null;
         if (first?.Id != CurrentDialog?.Id) CurrentDialog = first is null ? null : new DialogViewModel(first, AnswerDialogAsync, _approvalActions);
-        if (CurrentDialog is { } d) d.QueueText = s.Dialogs.Count > 1 ? $"1 of {s.Dialogs.Count}" : "";
+        if (CurrentDialog is { } d) d.QueueText = s.Dialogs.Count > 1 ? Loc.F("{0} of {1}", 1, s.Dialogs.Count) : "";
         UpdateDialogTimer();
 
         // Core copies the same widget records into every snapshot: the lines are joined again only when one changed
@@ -601,23 +602,23 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         if (Phase != SessionPhase.Running) IsWaitingOnUser = false;
         StatusText = Phase switch
         {
-            SessionPhase.Starting => "Starting omp…",
-            SessionPhase.Ready => "Ready",
+            SessionPhase.Starting => Loc.T("Starting omp…"),
+            SessionPhase.Ready => Loc.T("Ready"),
             SessionPhase.Running => $"{Activity(s)} · {Elapsed(s)}",
-            SessionPhase.Aborting => "Stopping…",
-            SessionPhase.Stopping => "Shutting down…",
-            SessionPhase.Stopped => "Stopped",
-            SessionPhase.Faulted => "omp stopped: " + (s.LastError?.Split('\n')[0] ?? "unknown error"),
-            _ => "Starting…",
+            SessionPhase.Aborting => Loc.T("Stopping…"),
+            SessionPhase.Stopping => Loc.T("Shutting down…"),
+            SessionPhase.Stopped => Loc.T("Stopped"),
+            SessionPhase.Faulted => Loc.T("omp stopped: ") + (s.LastError?.Split('\n')[0] ?? Loc.T("unknown error")),
+            _ => Loc.T("Starting…"),
         };
         StatusDetail = string.Join("  ·  ", new[]
         {
-            s.Model ?? "no model",
+            s.Model ?? Loc.T("no model"),
             s.ExtensionStatus.Count > 0 ? string.Join("  ", s.ExtensionStatus.Values) : null,
             $"RPC v{s.ProtocolVersion}",
-            $"{s.FramesReceived:N0} events",
-            s.ContextPercent is { } pct ? string.Create(CultureInfo.InvariantCulture, $"context {pct:0}%") : null,
-            s.LastFrameAt is { } at ? $"last {at.ToLocalTime():HH:mm:ss}" : null,
+            Loc.F("{0:N0} events", s.FramesReceived),
+            s.ContextPercent is { } pct ? Loc.F("context {0:0}%", pct) : null,
+            s.LastFrameAt is { } at ? Loc.F("last {0:HH:mm:ss}", at.ToLocalTime()) : null,
         }.Where(x => x is not null));
     }
 
@@ -625,17 +626,17 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private string Activity(SessionSnapshot s)
     {
         IsWaitingOnUser = CurrentDialog is not null;
-        if (CurrentDialog is { } d) return d.IsApproval ? "Waiting for your approval" : "Waiting for your answer";
+        if (CurrentDialog is { } d) return d.IsApproval ? Loc.T("Waiting for your approval") : Loc.T("Waiting for your answer");
         for (var i = s.Items.Count - 1; i >= 0; i--)
         {
             switch (s.Items[i])
             {
-                case ToolItem { Status: ToolStatus.Running } t: return "Running " + t.Name;
-                case AssistantItem { Streaming: true } a: return a.Text.Length > 0 ? "Writing" : a.Thinking.Length > 0 ? "Thinking" : "Working";
-                case UserItem: return "Working";
+                case ToolItem { Status: ToolStatus.Running } t: return Loc.F("Running {0}", t.Name);
+                case AssistantItem { Streaming: true } a: return a.Text.Length > 0 ? Loc.T("Writing") : a.Thinking.Length > 0 ? Loc.T("Thinking") : Loc.T("Working");
+                case UserItem: return Loc.T("Working");
             }
         }
-        return "Working";
+        return Loc.T("Working");
     }
 
     /// <summary>How long the run has gone, as Claude Code writes it: "4s", "1m 05s", "1h 02m".</summary>
@@ -643,9 +644,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         var t = s.RunStartedAt is { } started ? DateTimeOffset.UtcNow - started : TimeSpan.Zero;
         if (t < TimeSpan.Zero) t = TimeSpan.Zero;
-        return t.TotalHours >= 1 ? string.Create(CultureInfo.InvariantCulture, $"{(int)t.TotalHours}h {t.Minutes:00}m")
-            : t.TotalMinutes >= 1 ? string.Create(CultureInfo.InvariantCulture, $"{(int)t.TotalMinutes}m {t.Seconds:00}s")
-            : string.Create(CultureInfo.InvariantCulture, $"{t.Seconds}s");
+        return t.TotalHours >= 1 ? Loc.F("{0}h {1:00}m", (int)t.TotalHours, t.Minutes)
+            : t.TotalMinutes >= 1 ? Loc.F("{0}m {1:00}s", (int)t.TotalMinutes, t.Seconds)
+            : Loc.F("{0}s", t.Seconds);
     }
 
     partial void OnPhaseChanged(SessionPhase value)

@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -49,7 +50,7 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
     [NotifyPropertyChangedFor(nameof(FileLabel))]
     private string _configFile = "";
 
-    public string FileLabel => ConfigFile.Length == 0 ? "" : "Saved in omp's " + System.IO.Path.GetFileName(_path ?? ModelsConfig.FileName) + ": " + ConfigFile;
+    public string FileLabel => ConfigFile.Length == 0 ? "" : Loc.F("Saved in omp's {0}: {1}", System.IO.Path.GetFileName(_path ?? ModelsConfig.FileName), ConfigFile);
 
     public bool HasCustomProviders => CustomProviders.Count > 0;
 
@@ -96,7 +97,7 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
             if (agentDir is null)
             {
                 _path = null;
-                LoadError = "Couldn't find omp's agent folder (omp config path did not answer), so models.yml can't be read here.";
+                LoadError = Loc.T("Couldn't find omp's agent folder (omp config path did not answer), so models.yml can't be read here.");
             }
             else
             {
@@ -110,7 +111,7 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
                 }
                 catch (ModelsConfigException e)
                 {
-                    LoadError = e.Message + $" Fix it in {ConfigFile}; the app doesn't change a file it can't read.";
+                    LoadError = e.Message + Loc.F(" Fix it in {0}; the app doesn't change a file it can't read.", ConfigFile);
                 }
             }
             OnPropertyChanged(nameof(CanChange));
@@ -140,18 +141,18 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
     /// </summary>
     internal async Task<string?> ChangeAsync(Func<ModelsConfig, string> edit, string done)
     {
-        if (_path is not { } path) return "omp's agent folder is not known, so models.yml can't be changed.";
+        if (_path is not { } path) return Loc.T("omp's agent folder is not known, so models.yml can't be changed.");
         Busy = true;
         try
         {
             try { await Task.Run(() => ModelsConfig.Save(path, edit(ModelsConfig.Load(path))), Main.Lifetime); }
             catch (ModelsConfigException e) { return e.Message; }
             await LoadAsync();
-            Say(done + " Restarting omp…");
+            Say(done + Loc.T(" Restarting omp…"));
             var now = await Main.RestartOmpToApplyAsync();
             Say(now
-                ? done + " omp restarted with it."
-                : done + " omp is replying: it restarts with the change when the reply ends.");
+                ? done + Loc.T(" omp restarted with it.")
+                : done + Loc.T(" omp is replying: it restarts with the change when the reply ends."));
             return null;
         }
         catch (OperationCanceledException) when (Main.Lifetime.IsCancellationRequested) { return null; }
@@ -159,7 +160,7 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
     }
 
     internal Task<string?> RemoveAsync(string id, string name) =>
-        ChangeAsync(c => c.WithoutProvider(id), $"Removed {name} from models.yml.");
+        ChangeAsync(c => c.WithoutProvider(id), Loc.F("Removed {0} from models.yml.", name));
 
     // ── Add or edit a custom provider ──
 
@@ -169,7 +170,7 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
 
     public bool IsEditing => EditingId is not null;
     public bool IsNew => EditingId is null;
-    public string FormTitle => EditingId is { } id ? "Edit " + id : "Add a custom provider";
+    public string FormTitle => EditingId is { } id ? Loc.F("Edit {0}", id) : Loc.T("Add a custom provider");
 
     [ObservableProperty] private bool _isFormOpen;
 
@@ -188,8 +189,8 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
     public bool FormApiIsAnthropic => FormApi == ModelApis.AnthropicMessages;
 
     public string BaseUrlHint => FormApiIsAnthropic
-        ? "The address before /v1, as https://api.anthropic.com"
-        : "Usually ends in /v1, as http://192.168.1.20:8000/v1";
+        ? Loc.T("The address before /v1, as https://api.anthropic.com")
+        : Loc.T("Usually ends in /v1, as http://192.168.1.20:8000/v1");
 
     [ObservableProperty] private string _formApiKey = "";
 
@@ -224,7 +225,7 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
     public bool HasTestResult => TestResult.Length > 0;
 
     /// <summary>The id omp will know the provider by (models are picked as id/model).</summary>
-    public string FormIdNote => IsEditing || FormName.Trim().Length == 0 ? "" : "omp will call it " + NewId() + ".";
+    public string FormIdNote => IsEditing || FormName.Trim().Length == 0 ? "" : Loc.F("omp will call it {0}.", NewId());
 
     private string NewId()
     {
@@ -272,12 +273,12 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
     /// <summary>The models.yml entry for the form, or what is missing.</summary>
     internal (ModelProviderEntry? Entry, string? Problem) BuildEntry()
     {
-        if (IsNew && FormName.Trim().Length == 0) return (null, "Give the provider a name, such as My server.");
+        if (IsNew && FormName.Trim().Length == 0) return (null, Loc.T("Give the provider a name, such as My server."));
         var url = FormBaseUrl.Trim();
         if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || u.Scheme is not ("http" or "https") || u.Host.Length == 0)
-            return (null, "Enter the address as a URL starting with http:// or https://.");
+            return (null, Loc.T("Enter the address as a URL starting with http:// or https://."));
         var models = ModelIds();
-        if (!FormDiscover && models.Count == 0) return (null, "List at least one model id, or let omp discover them from the server.");
+        if (!FormDiscover && models.Count == 0) return (null, Loc.T("List at least one model id, or let omp discover them from the server."));
         var key = FormApiKey.Trim();
         return (new ModelProviderEntry
         {
@@ -299,8 +300,7 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
         var (entry, problem) = BuildEntry();
         if (entry is null) { FormError = problem ?? ""; return; }
         FormError = "";
-        var verb = IsEditing ? "Saved" : "Added";
-        var error = await ChangeAsync(c => c.WithProvider(entry), $"{verb} {entry.Id}.");
+                var error = await ChangeAsync(c => c.WithProvider(entry), IsEditing ? Loc.F("Saved {0}.", entry.Id) : Loc.F("Added {0}.", entry.Id));
         if (error is not null) { FormError = error; return; }
         IsFormOpen = false;
     }
@@ -315,7 +315,7 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
         var url = FormBaseUrl.Trim();
         if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || u.Scheme is not ("http" or "https"))
         {
-            (TestOk, TestResult) = (false, "Enter the address as a URL starting with http:// or https://.");
+            (TestOk, TestResult) = (false, Loc.T("Enter the address as a URL starting with http:// or https://."));
             return;
         }
         Testing = true;
@@ -325,7 +325,7 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
             var headers = new Dictionary<string, string>();
             var note = "";
             var key = FormApiKey.Trim();
-            if (key.StartsWith('!')) note = " The key comes from a command, which omp runs when it starts: the test went without it.";
+            if (key.StartsWith('!')) note = Loc.T(" The key comes from a command, which omp runs when it starts: the test went without it.");
             else if (key.Length > 0)
             {
                 // omp's resolveConfigValue: an environment variable of that name, else the text itself
@@ -341,7 +341,7 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
                 var v1 = await ModelServerProbe.ListAsync(ModelServerProbe.WithV1(url) + "/models", headers, ct: Main.Lifetime);
                 if (v1.Ok)
                 {
-                    (TestOk, TestResult) = (false, $"Nothing at {modelsUrl}, but {ModelServerProbe.WithV1(url)} answers with {Count(v1.Models!.Count)}. Use {ModelServerProbe.WithV1(url)} as the address.");
+                    (TestOk, TestResult) = (false, Loc.F("Nothing at {0}, but {1} answers with {2}. Use {1} as the address.", modelsUrl, ModelServerProbe.WithV1(url), Count(v1.Models!.Count)));
                     return;
                 }
             }
@@ -352,19 +352,19 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
                 if (!FormDiscover && ModelIds().Count == 0 && models.Count > 0)
                 {
                     FormModels = string.Join('\n', models);
-                    filled = " They are in the model list below.";
+                    filled = Loc.T(" They are in the model list below.");
                 }
                 (TestOk, TestResult) = (true, models.Count == 0
-                    ? "Connected, but the server lists no models." + note
-                    : $"Connected: {Count(models.Count)} ({shown}).{filled}{note}");
+                    ? Loc.T("Connected, but the server lists no models.") + note
+                    : Loc.F("Connected: {0} ({1}).", Count(models.Count), shown) + filled + note);
             }
-            else (TestOk, TestResult) = (false, (answer.Problem ?? "No answer.") + note);
+            else (TestOk, TestResult) = (false, (answer.Problem ?? Loc.T("No answer.")) + note);
         }
         catch (OperationCanceledException) when (Main.Lifetime.IsCancellationRequested) { }
         finally { Testing = false; }
     }
 
-    internal static string Count(int n) => n == 1 ? "1 model" : $"{n} models";
+    internal static string Count(int n) => n == 1 ? Loc.T("1 model") : Loc.F("{0} models", n);
 }
 
 /// <summary>Ollama, LM Studio, llama.cpp or vLLM: whether it runs on this computer, and whether omp uses it.</summary>
@@ -395,12 +395,12 @@ public sealed partial class LocalServerRowViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(Detail))]
-    private string _status = "Checking…";
+    private string _status = Loc.T("Checking…");
 
     [ObservableProperty] private bool _isRunning;
     [ObservableProperty] private bool _checking;
 
-    public string Detail => Url + (Entry is null && Server.EnvironmentVariable is { } v && Url == Server.BaseUrl ? $" (from {v})" : "") + " · " + Status;
+    public string Detail => Url + (Entry is null && Server.EnvironmentVariable is { } v && Url == Server.BaseUrl ? Loc.F(" (from {0})", v) : "") + " · " + Status;
 
     /// <summary>The address panel of Add (the server may listen elsewhere).</summary>
     [ObservableProperty] private bool _isAddOpen;
@@ -413,21 +413,21 @@ public sealed partial class LocalServerRowViewModel : ObservableObject
 
     public bool HasProblem => Problem.Length > 0;
 
-    public string RemoveQuestion => $"Remove {Name} from omp's models.yml? omp stops using it; the server itself is not touched.";
+    public string RemoveQuestion => Loc.F("Remove {0} from omp's models.yml? omp stops using it; the server itself is not touched.", Name);
 
     /// <summary>Asks the server for its models (a short wait: it is on this computer or the local network).</summary>
     [RelayCommand]
     internal async Task CheckAsync()
     {
         Checking = true;
-        Status = "Checking…";
+        Status = Loc.T("Checking…");
         try
         {
             var answer = await ModelServerProbe.ListAsync(Server.ModelsUrl(Url), ct: _owner.MainLifetime);
             IsRunning = answer.Ok;
-            Status = answer.Models is { } m ? "Running · " + CustomProvidersViewModel.Count(m.Count)
-                : answer.Running ? "Answers, but " + LowerFirst(answer.Problem ?? "lists no models")
-                : "Not running";
+            Status = answer.Models is { } m ? Loc.T("Running · ") + CustomProvidersViewModel.Count(m.Count)
+                : answer.Running ? Loc.T("Answers, but ") + LowerFirst(answer.Problem ?? Loc.T("lists no models"))
+                : Loc.T("Not running");
         }
         catch (OperationCanceledException) { }
         finally { Checking = false; }
@@ -455,12 +455,12 @@ public sealed partial class LocalServerRowViewModel : ObservableObject
     {
         if (!Uri.TryCreate(Url.Trim(), UriKind.Absolute, out var u) || u.Scheme is not ("http" or "https"))
         {
-            Problem = "Enter the address as a URL starting with http:// or https://.";
+            Problem = Loc.T("Enter the address as a URL starting with http:// or https://.");
             return;
         }
         Problem = "";
         var entry = Server.Entry(Url);
-        if (await _owner.ChangeAsync(c => c.WithProvider(entry), $"Added {Name}.") is { } error) Problem = error;
+        if (await _owner.ChangeAsync(c => c.WithProvider(entry), Loc.F("Added {0}.", Name)) is { } error) Problem = error;
     }
 
     [RelayCommand]
@@ -499,13 +499,13 @@ public sealed partial class CustomProviderRowViewModel(CustomProvidersViewModel 
             { } other => other,
             null => null,
         },
-        Entry.Discovery is not null ? "models from the server" + (Entry.Models.Count > 0 ? " + " + CustomProvidersViewModel.Count(Entry.Models.Count) : "")
+        Entry.Discovery is not null ? Loc.T("models from the server") + (Entry.Models.Count > 0 ? " + " + CustomProvidersViewModel.Count(Entry.Models.Count) : "")
             : CustomProvidersViewModel.Count(Entry.Models.Count),
     }.Where(s => s is not null));
 
-    public string ReadOnlyNote => $"Edit models.yml to change it: {Entry.NotEditable}.";
+    public string ReadOnlyNote => Loc.F("Edit models.yml to change it: {0}.", Entry.NotEditable);
 
-    public string RemoveQuestion => $"Remove {Id} from omp's models.yml? omp stops using it" + (Entry.ApiKey is not null ? " and forgets the key written there." : ".");
+    public string RemoveQuestion => (Entry.ApiKey is not null ? Loc.F("Remove {0} from omp's models.yml? omp stops using it and forgets the key written there.", Id) : Loc.F("Remove {0} from omp's models.yml? omp stops using it.", Id));
 
     [ObservableProperty] private bool _isConfirmingRemove;
 

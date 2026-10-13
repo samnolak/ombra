@@ -127,7 +127,7 @@ public sealed class CorporateTrustTests
 
         var conflict = CorporateTrust.Inspect(new Dictionary<string, string?>(), Inh(CorporateTrust.NodeOptionsVariable, "--max-old-space-size=4096 --use-bundled-ca"));
         Assert.True(conflict.SystemCaConflict);
-        Assert.Equal("NODE_OPTIONS contains --use-bundled-ca (in the environment the app was started with)", conflict.NodeOptionsFlag!.Describe());
+        Assert.Equal("NODE_OPTIONS contains --use-bundled-ca (in the environment the app was started with)", NetworkTrustViewModel.Describe(conflict.NodeOptionsFlag!));
         Assert.True(CorporateTrust.Inspect(new Dictionary<string, string?> { [CorporateTrust.SystemCaVariable] = "0" }, Clean).SystemCaConflict);
         var already = CorporateTrust.Inspect(new Dictionary<string, string?>(), Inh(CorporateTrust.NodeOptionsVariable, "--use-system-ca"));
         Assert.True(already.SystemCaAlreadyOn);

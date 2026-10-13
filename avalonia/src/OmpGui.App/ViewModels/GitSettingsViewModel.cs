@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Collections.ObjectModel;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -58,7 +59,7 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
     public bool GhNotInstalled => Gh == GhState.NotInstalled;
     public bool GhProblem => Gh == GhState.Problem;
 
-    [ObservableProperty] private string _ghLabel = "Checking…";
+    [ObservableProperty] private string _ghLabel = Loc.T("Checking…");
     [ObservableProperty] private string _ghDetail = "";
     private string? _ghPath;
 
@@ -93,15 +94,15 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
     /// <summary>The form's Create button: omp can take /wt now, the name is usable, nothing is being created.</summary>
     public bool CanSubmitWorktree => CanCreateWorktree && !HasNewBranchProblem && !CreatingBusy;
 
-    public string CreateUnavailableHint => !IsRepo ? "" : !IsOmpRunning ? "omp isn't running: start it to make a worktree." : Main.IsRunning ? "omp is replying: you can make a worktree when the reply ends." : "";
+    public string CreateUnavailableHint => !IsRepo ? "" : !IsOmpRunning ? Loc.T("omp isn't running: start it to make a worktree.") : Main.IsRunning ? Loc.T("omp is replying: you can make a worktree when the reply ends.") : "";
 
     public string CreateHint
     {
         get
         {
             var branch = NewBranch.Trim() is { Length: > 0 } b ? b : "wt/<date-time>";
-            var clean = WorktreeCleanSource ? " Then omp resets this folder to its last commit (Clean the project folder is on)." : " This folder keeps its files and changes.";
-            return $"omp makes branch {branch} from the current commit in a new folder under {BaseLabel}, copies your uncommitted changes there, and moves this conversation into it.{clean}";
+            var clean = WorktreeCleanSource ? Loc.T(" Then omp resets this folder to its last commit (Clean the project folder is on).") : Loc.T(" This folder keeps its files and changes.");
+            return Loc.F("omp makes branch {0} from the current commit in a new folder under {1}, copies your uncommitted changes there, and moves this conversation into it.", branch, BaseLabel) + clean;
         }
     }
 
@@ -130,8 +131,8 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
     [ObservableProperty] private string _isolationMerge = "patch";
     [ObservableProperty] private bool _isolationApply = true;
 
-    public const string EnvironmentsNote =
-        "omp has no separate environments: a session works in a folder on this computer (the project, or one of its worktrees), and its SSH hosts are the other machines it can reach.";
+    public static string EnvironmentsNote =>
+        Loc.T("omp has no separate environments: a session works in a folder on this computer (the project, or one of its worktrees), and its SSH hosts are the other machines it can reach.");
 
     public override async Task LoadAsync()
     {
@@ -181,7 +182,7 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
         GitMissing = state == GitProbeState.GitMissing;
         IsNotRepo = state == GitProbeState.NotARepo;
         IsRepo = state == GitProbeState.Ok;
-        if (state == GitProbeState.Failed) RepoError = error ?? "git failed";
+        if (state == GitProbeState.Failed) RepoError = error ?? Loc.T("git failed");
         if (head is null)
         {
             Worktrees.Clear();
@@ -193,34 +194,32 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
         var status = await Main.RunTool(new ToolCommand("git", ["status", "--porcelain=v2", "--branch"], folder, TimeSpan.FromSeconds(20)), ct);
         if (!status.Ok)
         {
-            RepoError = "git status failed: " + status.Message;
+            RepoError = Loc.T("git status failed: ") + status.Message;
             return;
         }
         var s = WorkspaceParsers.ParseGitStatus(status.Stdout);
-        BranchLabel = s.Detached ? $"No branch (at {head.ShortCommit ?? s.Commit?[..Math.Min(7, s.Commit.Length)]})"
-            : s.Unborn ? $"{s.Branch} (no commits yet)" : s.Branch ?? head.Label ?? "";
+        BranchLabel = s.Detached ? Loc.F("No branch (at {0})", head.ShortCommit ?? s.Commit?[..Math.Min(7, s.Commit.Length)])
+            : s.Unborn ? Loc.F("{0} (no commits yet)", s.Branch) : s.Branch ?? head.Label ?? "";
         IsClean = s.Clean;
         ChangesLabel = ChangesText(s);
-        UpstreamLabel = s.Upstream is null ? "No upstream branch" : (s.Ahead, s.Behind) switch
+        UpstreamLabel = s.Upstream is null ? Loc.T("No upstream branch") : (s.Ahead, s.Behind) switch
         {
-            (0, 0) => $"Up to date with {s.Upstream}",
-            (var a, 0) => $"{a} {Commits(a)} ahead of {s.Upstream}",
-            (0, var b) => $"{b} {Commits(b)} behind {s.Upstream}",
-            var (a, b) => $"{a} ahead, {b} behind {s.Upstream}",
+            (0, 0) => Loc.F("Up to date with {0}", s.Upstream),
+            (var a, 0) => Loc.Plural(a, "{0} commit ahead of {1}", "{0} commits ahead of {1}", s.Upstream),
+            (0, var b) => Loc.Plural(b, "{0} commit behind {1}", "{0} commits behind {1}", s.Upstream),
+            var (a, b) => Loc.F("{0} ahead, {1} behind {2}", a, b, s.Upstream),
         };
         RemoteLabel = await RemoteAsync(folder, s.Upstream, ct);
         await LoadWorktreesAsync(folder, ct);
     }
 
-    private static string Commits(int n) => n == 1 ? "commit" : "commits";
-
     internal static string ChangesText(GitStatusInfo s)
     {
-        if (s.Clean) return "No uncommitted changes";
-        var parts = new List<string> { $"{s.ChangedFiles} {(s.ChangedFiles == 1 ? "file" : "files")} changed" };
-        if (s.Staged > 0) parts.Add($"{s.Staged} staged");
-        if (s.Untracked > 0) parts.Add($"{s.Untracked} untracked");
-        if (s.Conflicts > 0) parts.Add($"{s.Conflicts} with conflicts");
+        if (s.Clean) return Loc.T("No uncommitted changes");
+        var parts = new List<string> { Loc.Plural(s.ChangedFiles, "{0} file changed", "{0} files changed") };
+        if (s.Staged > 0) parts.Add(Loc.F("{0} staged", s.Staged));
+        if (s.Untracked > 0) parts.Add(Loc.F("{0} untracked", s.Untracked));
+        if (s.Conflicts > 0) parts.Add(Loc.F("{0} with conflicts", s.Conflicts));
         return string.Join(" · ", parts);
     }
 
@@ -228,19 +227,19 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
     private async Task<string> RemoteAsync(string folder, string? upstream, CancellationToken ct)
     {
         var r = await Main.RunTool(new ToolCommand("git", ["remote", "-v"], folder, GitProbe.Timeout), ct);
-        if (!r.Ok) return "Remotes unreadable: " + r.Message;
+        if (!r.Ok) return Loc.T("Remotes unreadable: ") + r.Message;
         var remotes = new List<(string Name, string Url)>();
         foreach (var line in r.Stdout.Split('\n'))
         {
             var parts = line.Split(['\t', ' '], StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length >= 2 && !remotes.Any(x => x.Name == parts[0])) remotes.Add((parts[0], parts[1]));
         }
-        if (remotes.Count == 0) return "No remote";
+        if (remotes.Count == 0) return Loc.T("No remote");
         var wanted = upstream?.Split('/')[0];
         var pick = remotes.FirstOrDefault(x => x.Name == wanted);
         if (pick.Name is null) pick = remotes.FirstOrDefault(x => x.Name == "origin");
         if (pick.Name is null) pick = remotes[0];
-        return $"{pick.Name}  {WorkspaceParsers.RedactRemoteUrl(pick.Url)}" + (remotes.Count > 1 ? $"  (+{remotes.Count - 1} more)" : "");
+        return $"{pick.Name}  {WorkspaceParsers.RedactRemoteUrl(pick.Url)}" + (remotes.Count > 1 ? Loc.F("  (+{0} more)", remotes.Count - 1) : "");
     }
 
     private async Task LoadWorktreesAsync(string folder, CancellationToken ct)
@@ -249,7 +248,7 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
         Worktrees.Clear();
         if (!r.Ok)
         {
-            RepoError = "git worktree list failed: " + r.Message;
+            RepoError = Loc.T("git worktree list failed: ") + r.Message;
             return;
         }
         foreach (var w in WorkspaceParsers.ParseWorktrees(r.Stdout).Where(w => !w.Bare))
@@ -261,21 +260,21 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
     private async Task LoadGitHubAsync(CancellationToken ct)
     {
         Gh = GhState.Checking;
-        GhLabel = "Checking…";
+        GhLabel = Loc.T("Checking…");
         GhDetail = "";
         _ghPath = await Task.Run(() => WorkspaceTools.Which("gh"), ct);
         var r = await Main.RunTool(new ToolCommand("gh", ["auth", "status"], Main.ProjectFolder, TimeSpan.FromSeconds(20)), ct);
         if (r.NotFound)
         {
             Gh = GhState.NotInstalled;
-            GhLabel = "GitHub CLI not installed";
-            GhDetail = "omp works with GitHub through the GitHub CLI (gh). Install it, then sign in.";
+            GhLabel = Loc.T("GitHub CLI not installed");
+            GhDetail = Loc.T("omp works with GitHub through the GitHub CLI (gh). Install it, then sign in.");
             return;
         }
         if (r.TimedOut)
         {
             Gh = GhState.Problem;
-            GhLabel = "No answer from gh";
+            GhLabel = Loc.T("No answer from gh");
             GhDetail = r.Stderr;
             return;
         }
@@ -283,20 +282,20 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
         if (info.Primary is { } a)
         {
             Gh = GhState.SignedIn;
-            GhLabel = $"Signed in as {a.Login}";
+            GhLabel = Loc.F("Signed in as {0}", a.Login);
             GhDetail = a.Host == "github.com" ? "GitHub CLI (gh), github.com" : $"GitHub CLI (gh), {a.Host}";
         }
         else if (info.Accounts.FirstOrDefault() is { } bad)
         {
             Gh = GhState.Problem;
-            GhLabel = $"Sign-in to {bad.Host} failed";
+            GhLabel = Loc.F("Sign-in to {0} failed", bad.Host);
             GhDetail = bad.Problem ?? r.Message;
         }
         else
         {
             Gh = GhState.SignedOut;
-            GhLabel = "Not signed in";
-            GhDetail = "Sign in with the GitHub CLI so omp can reach your repositories.";
+            GhLabel = Loc.T("Not signed in");
+            GhDetail = Loc.T("Sign in with the GitHub CLI so omp can reach your repositories.");
         }
     }
 
@@ -336,7 +335,7 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
         DefaultBase = DefaultWorktreeBase(_agentDir);
         if (config is null)
         {
-            SettingsError = error ?? "Couldn't read omp's settings.";
+            SettingsError = error ?? Loc.T("Couldn't read omp's settings.");
             SettingsLoaded = false;
             return;
         }
@@ -368,11 +367,11 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
         return "~/.omp/wt";
     }
 
-    partial void OnGithubEnabledChanged(bool value) => SaveBool("github.enabled", value, v => GithubEnabled = v, "the GitHub tool");
-    partial void OnWorktreeCloneChanged(bool value) => SaveBool("worktree.clone", value, v => WorktreeClone = v, "worktree cloning");
-    partial void OnWorktreeCleanSourceChanged(bool value) => SaveBool("worktree.cleanSource", value, v => WorktreeCleanSource = v, "this setting");
-    partial void OnIsolationEnabledChanged(bool value) => SaveBool("task.isolation.enabled", value, v => IsolationEnabled = v, "subagent isolation");
-    partial void OnIsolationApplyChanged(bool value) => SaveBool("task.isolation.apply", value, v => IsolationApply = v, "this setting");
+    partial void OnGithubEnabledChanged(bool value) => SaveBool("github.enabled", value, v => GithubEnabled = v, Loc.T("the GitHub tool"));
+    partial void OnWorktreeCloneChanged(bool value) => SaveBool("worktree.clone", value, v => WorktreeClone = v, Loc.T("worktree cloning"));
+    partial void OnWorktreeCleanSourceChanged(bool value) => SaveBool("worktree.cleanSource", value, v => WorktreeCleanSource = v, Loc.T("this setting"));
+    partial void OnIsolationEnabledChanged(bool value) => SaveBool("task.isolation.enabled", value, v => IsolationEnabled = v, Loc.T("subagent isolation"));
+    partial void OnIsolationApplyChanged(bool value) => SaveBool("task.isolation.apply", value, v => IsolationApply = v, Loc.T("this setting"));
 
     private void SaveBool(string key, bool value, Action<bool> revert, string what)
     {
@@ -392,7 +391,7 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
         {
             var (ok, echoed, error) = await WorkspaceConfig.SetAsync(Main, key, value, Main.Lifetime);
             done(ok);
-            if (!ok) Say("Not saved: " + error, error: true);
+            if (!ok) Say(Loc.T("Not saved: ") + error, error: true);
             else if (overridden(echoed)) Say(WorkspaceConfig.OverriddenNote(what), error: true);
             else SavedForNextStart();
         }
@@ -406,7 +405,7 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
         var old = IsolationMerge;
         IsolationMerge = merge;
         return SaveAsync("task.isolation.merge", merge, ok => { if (!ok) IsolationMerge = old; },
-            v => v is { ValueKind: JsonValueKind.String } e && e.GetString() != merge, "the merge strategy");
+            v => v is { ValueKind: JsonValueKind.String } e && e.GetString() != merge, Loc.T("the merge strategy"));
     }
 
     [RelayCommand]
@@ -415,7 +414,7 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
         var value = WorktreeBase.Trim();
         if (value.Length > 0 && !(value.StartsWith('~') || Path.IsPathRooted(value)))
         {
-            Say("Use a full path or one that starts with ~: omp ignores a relative worktree folder.", error: true);
+            Say(Loc.T("Use a full path or one that starts with ~: omp ignores a relative worktree folder."), error: true);
             return Task.CompletedTask;
         }
         return SaveBaseAsync(value);
@@ -427,11 +426,11 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
         var r = value.Length == 0
             ? await Main.RunOmpCliAsync(["config", "reset", "worktree.base", "--json"], TimeSpan.FromSeconds(45), Main.Lifetime)
             : null;
-        if (r is { Ok: false }) { Say("Not saved: " + WorkspaceConfig.CliError(r), error: true); return; }
+        if (r is { Ok: false }) { Say(Loc.T("Not saved: ") + WorkspaceConfig.CliError(r), error: true); return; }
         if (value.Length > 0)
         {
             var (ok, _, error) = await WorkspaceConfig.SetAsync(Main, "worktree.base", value, Main.Lifetime);
-            if (!ok) { Say("Not saved: " + error, error: true); return; }
+            if (!ok) { Say(Loc.T("Not saved: ") + error, error: true); return; }
         }
         _savedBase = value;
         WorktreeBase = value;
@@ -473,7 +472,7 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
             }
             IsCreating = false;
             Say(WorkspaceParsers.ParseMovedToWorktree(message) is { } m
-                ? $"This conversation now works in {GitProbe.Tilde(m.Path)}, on branch {m.Branch}."
+                ? Loc.F("This conversation now works in {0}, on branch {1}.", GitProbe.Tilde(m.Path), m.Branch)
                 : message);
             Main.BranchChip.Refresh();
             await LoadAsync();
@@ -490,23 +489,24 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
     /// <summary>Before asking: a worktree with changes, a locked one or this session's folder is never removed.</summary>
     internal async Task<string?> RemoveProblemAsync(WorktreeRowViewModel row)
     {
-        if (row.IsMain) return "This is the repository's main folder.";
-        if (row.IsCurrent) return "This conversation works in it. Open another folder first.";
-        if (row.Info.Locked) return "It is locked" + (row.Info.LockReason is { Length: > 0 } why ? $" ({why})" : "") + ". Unlock it first: git worktree unlock.";
+        if (row.IsMain) return Loc.T("This is the repository's main folder.");
+        if (row.IsCurrent) return Loc.T("This conversation works in it. Open another folder first.");
+        if (row.Info.Locked) return (row.Info.LockReason is { Length: > 0 } why ? Loc.F("It is locked ({0}). Unlock it first: git worktree unlock.", why) : Loc.T("It is locked. Unlock it first: git worktree unlock."));
         if (row.Info.Prunable) return null;
         var r = await Main.RunTool(new ToolCommand("git", ["status", "--porcelain"], row.Path, TimeSpan.FromSeconds(20)), Main.Lifetime);
-        if (!r.Ok) return "git can't read it: " + r.Message;
+        if (!r.Ok) return Loc.T("git can't read it: ") + r.Message;
         var changes = r.Stdout.Split('\n').Count(l => l.Trim().Length > 0);
-        return changes == 0 ? null : $"It has {changes} uncommitted {(changes == 1 ? "change" : "changes")}. Commit or discard {(changes == 1 ? "it" : "them")} first.";
+        return changes == 0 ? null : Loc.Plural(changes, "It has {0} uncommitted change. Commit or discard it first.",
+            "It has {0} uncommitted changes. Commit or discard them first.");
     }
 
     internal async Task<string?> RemoveWorktreeAsync(WorktreeRowViewModel row)
     {
-        if (Main.ProjectFolder is not { } folder) return "No project folder.";
+        if (Main.ProjectFolder is not { } folder) return Loc.T("No project folder.");
         var args = row.Info.Prunable ? new[] { "worktree", "prune" } : ["worktree", "remove", row.Path];
         var r = await Main.RunTool(new ToolCommand("git", args, folder, TimeSpan.FromSeconds(60)), Main.Lifetime);
         if (!r.Ok) return r.Message;
-        Say(row.Info.Prunable ? "Cleaned up the missing worktree." : $"Removed the worktree {GitProbe.Tilde(row.Path)}." + (row.Info.Branch is { } b ? $" Branch {b} is still there." : ""));
+        Say(row.Info.Prunable ? Loc.T("Cleaned up the missing worktree.") : Loc.F("Removed the worktree {0}.", GitProbe.Tilde(row.Path)) + (row.Info.Branch is { } b ? Loc.F(" Branch {0} is still there.", b) : ""));
         await LoadAsync();
         return null;
     }
@@ -520,17 +520,17 @@ public sealed partial class WorktreeRowViewModel(GitSettingsViewModel owner, Git
     public bool IsCurrent { get; } = isCurrent;
     public bool IsMain => Info.IsMain;
 
-    public string Title => Info.Branch ?? (Info.Head is { Length: >= 7 } h ? $"No branch (at {h[..7]})" : "No branch");
+    public string Title => Info.Branch ?? (Info.Head is { Length: >= 7 } h ? Loc.F("No branch (at {0})", h[..7]) : Loc.T("No branch"));
     public string Location => GitProbe.Tilde(Info.Path);
-    public string? Tag => IsCurrent ? "This session" : IsMain ? "Main folder" : Info.Prunable ? "Folder missing" : Info.Locked ? "Locked" : null;
+    public string? Tag => IsCurrent ? Loc.T("This session") : IsMain ? Loc.T("Main folder") : Info.Prunable ? Loc.T("Folder missing") : Info.Locked ? Loc.T("Locked") : null;
     public bool HasTag => Tag is not null;
 
     public bool CanOpen => owner.CanOpenWorktree(this);
     public bool CanRemove => !IsMain && !IsCurrent;
-    public string RemoveLabel => Info.Prunable ? "Clean up" : "Remove";
+    public string RemoveLabel => Info.Prunable ? Loc.T("Clean up") : Loc.T("Remove");
     public string ConfirmText => Info.Prunable
-        ? "Its folder is gone. Remove git's record of it?"
-        : "Delete this worktree's folder?" + (Info.Branch is { } b ? $" Branch {b} stays." : "");
+        ? Loc.T("Its folder is gone. Remove git's record of it?")
+        : Loc.T("Delete this worktree's folder?") + (Info.Branch is { } b ? Loc.F(" Branch {0} stays.", b) : "");
 
     [ObservableProperty] private bool _isConfirming;
     [ObservableProperty] private bool _busy;

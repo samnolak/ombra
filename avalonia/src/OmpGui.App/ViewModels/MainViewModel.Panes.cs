@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -27,9 +28,9 @@ public partial class MainViewModel
 
     public string SidePaneTitle => ActivePane switch
     {
-        SidePane.Plan => "Plan",
-        SidePane.Tasks => "Background tasks",
-        SidePane.Files => "Files",
+        SidePane.Plan => Loc.T("Plan"),
+        SidePane.Tasks => Loc.T("Background tasks"),
+        SidePane.Files => Loc.T("Files"),
         _ => "",
     };
 
@@ -80,11 +81,11 @@ public partial class MainViewModel
     public static string BrowserShortcut { get; } = CommandShortcut("B");
     public static string TerminalShortcut { get; } = "Ctrl+`";
 
-    public static string FilesTip { get; } = $"Files ({FilesShortcut})";
-    public static string PlanTip { get; } = $"Plan ({PlanShortcut})";
-    public static string TasksTip { get; } = $"Background tasks ({TasksShortcut})";
-    public static string TerminalTip { get; } = $"Terminal ({TerminalShortcut})";
-    public static string BrowserTip { get; } = $"Browser preview ({BrowserShortcut})";
+    public static string FilesTip { get; } = Loc.F("Files ({0})", FilesShortcut);
+    public static string PlanTip { get; } = Loc.F("Plan ({0})", PlanShortcut);
+    public static string TasksTip { get; } = Loc.F("Background tasks ({0})", TasksShortcut);
+    public static string TerminalTip { get; } = Loc.F("Terminal ({0})", TerminalShortcut);
+    public static string BrowserTip { get; } = Loc.F("Browser preview ({0})", BrowserShortcut);
 
     private static string CommandShortcut(string key) => OperatingSystem.IsMacOS() ? "⇧⌘" + key : "Ctrl+Shift+" + key;
 
@@ -115,7 +116,7 @@ public partial class MainViewModel
 
     internal async Task<(IReadOnlyList<SubagentMessage> Messages, string? Error)> GetSubagentMessagesAsync(string id)
     {
-        try { return IsClosing ? ([], "the window is closing") : await Session.GetSubagentMessagesAsync(id, _cts.Token); }
-        catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException) { return ([], "the window is closing"); }
+        try { return IsClosing ? ([], Loc.T("the window is closing")) : await Session.GetSubagentMessagesAsync(id, _cts.Token); }
+        catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException) { return ([], Loc.T("the window is closing")); }
     }
 }

@@ -3,6 +3,7 @@ using System.Globalization;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.App.Services.Speech;
 
 namespace OmpGui.App.ViewModels;
@@ -89,8 +90,8 @@ public sealed partial class MainViewModel
     /// <summary>The waveform and the elapsed time show (opening the microphone, recording).</summary>
     public bool ShowDictationWaveform => IsStartingMicrophone || IsRecording;
 
-    public string ModelSizeText => string.Create(CultureInfo.InvariantCulture, $"{SpeechModel.TotalBytes / 1_000_000.0:0} MB");
-    public string DictationTip => IsRecording ? "Stop and insert the text (Enter)" : "Dictate on this computer (Ctrl/⌘+Shift+Space)";
+    public string ModelSizeText => Loc.F("{0} MB", (SpeechModel.TotalBytes / 1_000_000.0).ToString("0", CultureInfo.InvariantCulture));
+    public string DictationTip => IsRecording ? Loc.T("Stop and insert the text (Enter)") : Loc.T("Dictate on this computer (Ctrl/⌘+Shift+Space)");
 
     /// <summary>The toolbar mic button: starts dictation, or finishes it while recording.</summary>
     [RelayCommand]
@@ -182,11 +183,11 @@ public sealed partial class MainViewModel
             var text = (await decode).Trim();
             if (take != _dictationTake) return; // cancelled meanwhile: discarded
             if (text.Length > 0) InsertDictatedText(text);
-            else DictationError = "No speech recognized.";
+            else DictationError = Loc.T("No speech recognized.");
         }
         catch (Exception e) when (e is InvalidOperationException or IOException or DllNotFoundException or EntryPointNotFoundException or TypeInitializationException or ArgumentException or PortAudioSharp.PortAudioException)
         {
-            if (take == _dictationTake) DictationError = "Dictation failed: " + e.Message;
+            if (take == _dictationTake) DictationError = Loc.T("Dictation failed: ") + e.Message;
         }
         finally
         {
@@ -267,10 +268,10 @@ public sealed partial class MainViewModel
             var missing = System.Text.RegularExpressions.Regex.Matches(text, @"([\w.+-]+\.(?:so[.\d]*|dylib|dll)): cannot open shared object file")
                 .Select(m => m.Groups[1].Value).FirstOrDefault(n => !n.Contains("portaudio", StringComparison.OrdinalIgnoreCase));
             return missing is not null
-                ? $"the audio library needs {missing}, which is not installed on this system (for example libjack0 / jack-audio-connection-kit)."
-                : "the audio library could not be loaded on this system.";
+                ? Loc.F("the audio library needs {0}, which is not installed on this system (for example libjack0 / jack-audio-connection-kit).", missing)
+                : Loc.T("the audio library could not be loaded on this system.");
         }
-        return "the microphone could not be opened (" + e.Message.Split('\n')[0] + ").";
+        return Loc.F("the microphone could not be opened ({0}).", e.Message.Split('\n')[0]);
     }
 
     [RelayCommand]
@@ -280,20 +281,20 @@ public sealed partial class MainViewModel
         IsDownloadingModel = true;
         _downloadCts = new CancellationTokenSource();
         var progress = new Progress<(long Done, long Total)>(p =>
-            DownloadText = string.Create(CultureInfo.InvariantCulture, $"{p.Done / 1_000_000.0:0} of {p.Total / 1_000_000.0:0} MB"));
+            DownloadText = Loc.F("{0} of {1} MB", (p.Done / 1_000_000.0).ToString("0", CultureInfo.InvariantCulture), (p.Total / 1_000_000.0).ToString("0", CultureInfo.InvariantCulture)));
         try
         {
             await DownloaderFactory(SpeechModelDirectory).DownloadAsync(progress, _downloadCts.Token);
             IsDictationOfferOpen = false;
-            ComposerMessage = "Speech model ready. Press the microphone to dictate.";
+            ComposerMessage = Loc.T("Speech model ready. Press the microphone to dictate.");
         }
         catch (OperationCanceledException)
         {
-            DownloadText = "Download cancelled.";
+            DownloadText = Loc.T("Download cancelled.");
         }
         catch (Exception e) when (e is HttpRequestException or IOException or InvalidDataException or UnauthorizedAccessException)
         {
-            DownloadText = "Download failed: " + e.Message;
+            DownloadText = Loc.T("Download failed: ") + e.Message;
         }
         finally
         {

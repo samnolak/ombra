@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Globalization;
 using System.Text;
 using Avalonia.Media.Imaging;
@@ -101,7 +102,7 @@ public sealed partial class FileViewerViewModel : ObservableObject
     public bool CanShowHead => State == ViewerState.TooLarge;
     public bool CanToggleSource => IsMarkdown && State == ViewerState.Text;
     public bool HasNotice => Notice.Length > 0;
-    public string SourceTip => ShowSource ? "Show it rendered" : "Show the Markdown source";
+    public string SourceTip => ShowSource ? Loc.T("Show it rendered") : Loc.T("Show the Markdown source");
 
     [RelayCommand]
     private void ToggleSource() => ShowSource = !ShowSource;
@@ -158,12 +159,12 @@ public sealed partial class FileViewerViewModel : ObservableObject
         {
             fi = new FileInfo(path);
             if (!fi.Exists)
-                return new(ViewerState.Missing, Title: "This file is not there any more",
-                    Detail: "It was deleted or moved. If git still has it, it shows in the list struck through.");
+                return new(ViewerState.Missing, Title: Loc.T("This file is not there any more"),
+                    Detail: Loc.T("It was deleted or moved. If git still has it, it shows in the list struck through."));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            return new(ViewerState.Error, Title: "Can't read this file", Detail: e.Message);
+            return new(ViewerState.Error, Title: Loc.T("Can't read this file"), Detail: e.Message);
         }
         var size = fi.Length;
         var stamp = fi.LastWriteTimeUtc;
@@ -186,21 +187,21 @@ public sealed partial class FileViewerViewModel : ObservableObject
                 if (read < want) Array.Resize(ref bytes, read);
             }
             if (IsBinary(bytes))
-                return new(ViewerState.Binary, Title: "Binary file", Detail: $"{ProjectFiles.Size(size)}. It isn't text, so it can't be shown here.", Size: size, Stamp: stamp,
+                return new(ViewerState.Binary, Title: Loc.T("Binary file"), Detail: Loc.F("{0}. It isn't text, so it can't be shown here.", ProjectFiles.Size(size)), Size: size, Stamp: stamp,
                     Info: ProjectFiles.Size(size));
             if (size > MaxTextBytes && !head)
-                return new(ViewerState.TooLarge, Title: "Too large to show here", Detail: $"{ProjectFiles.Size(size).Replace(' ', ' ')}. Show its first {HeadBytes / 1024} KB here, or open it in an app.",
+                return new(ViewerState.TooLarge, Title: Loc.T("Too large to show here"), Detail: Loc.F("{0}. Show its first {1} KB here, or open it in an app.", ProjectFiles.Size(size).Replace(' ', ' '), HeadBytes / 1024),
                     Size: size, Stamp: stamp, Info: ProjectFiles.Size(size));
             var (text, lines, notes) = Decode(bytes, cutLast: size > bytes.Length);
-            if (size > bytes.Length) notes.Insert(0, $"Showing the first {ProjectFiles.Size(bytes.Length)} of {ProjectFiles.Size(size)}");
-            if (size == 0) notes.Add("This file is empty");
-            var info = size == 0 ? "Empty file" : string.Create(CultureInfo.InvariantCulture, $"{(lines == 1 ? "1 line" : $"{lines:N0} lines")} · {ProjectFiles.Size(size)}");
+            if (size > bytes.Length) notes.Insert(0, Loc.F("Showing the first {0} of {1}", ProjectFiles.Size(bytes.Length), ProjectFiles.Size(size)));
+            if (size == 0) notes.Add(Loc.T("This file is empty"));
+            var info = size == 0 ? Loc.T("Empty file") : (lines == 1 ? Loc.T("1 line") : Loc.F("{0:N0} lines", lines)) + " · " + ProjectFiles.Size(size);
             return new(ViewerState.Text, text, info, string.Join(" · ", notes), Size: size, Stamp: stamp, Head: size > bytes.Length);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            return new(ViewerState.Error, Title: "Can't read this file", Detail: e.Message, Size: size, Stamp: stamp);
+            return new(ViewerState.Error, Title: Loc.T("Can't read this file"), Detail: e.Message, Size: size, Stamp: stamp);
         }
     }
 
@@ -208,7 +209,7 @@ public sealed partial class FileViewerViewModel : ObservableObject
     {
         var size = fi.Length;
         if (size > MaxImageBytes)
-            return new(ViewerState.TooLarge, Title: "Too large to show here", Detail: $"{ProjectFiles.Size(size)}. Open it in an app instead.", Size: size, Stamp: fi.LastWriteTimeUtc);
+            return new(ViewerState.TooLarge, Title: Loc.T("Too large to show here"), Detail: Loc.F("{0}. Open it in an app instead.", ProjectFiles.Size(size)), Size: size, Stamp: fi.LastWriteTimeUtc);
         try
         {
             using var s = new FileStream(fi.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -225,7 +226,7 @@ public sealed partial class FileViewerViewModel : ObservableObject
         }
         catch (Exception e) when (e is not OperationCanceledException and not OutOfMemoryException)
         {
-            return new(ViewerState.Error, Title: "Can't show this image", Detail: $"{ProjectFiles.Size(size)}. The image could not be decoded ({e.Message.Split('\n')[0]}).",
+            return new(ViewerState.Error, Title: Loc.T("Can't show this image"), Detail: Loc.F("{0}. The image could not be decoded ({1}).", ProjectFiles.Size(size), e.Message.Split('\n')[0]),
                 Size: size, Stamp: fi.LastWriteTimeUtc);
         }
     }
@@ -258,7 +259,7 @@ public sealed partial class FileViewerViewModel : ObservableObject
         if (cutLast && count > 1) count--;
         var notes = new List<string>();
         var shown = Math.Min(count, MaxLines);
-        if (count > MaxLines) notes.Add(string.Create(CultureInfo.InvariantCulture, $"Showing the first {MaxLines:N0} of {count:N0} lines"));
+        if (count > MaxLines) notes.Add(Loc.F("Showing the first {0:N0} of {1:N0} lines", MaxLines, count));
         var sb = new StringBuilder(Math.Min(text.Length + 16, 4 * 1024 * 1024));
         var cut = false;
         for (var i = 0; i < shown; i++)
@@ -272,7 +273,7 @@ public sealed partial class FileViewerViewModel : ObservableObject
             if (i > 0) sb.Append('\n');
             sb.Append(line);
         }
-        if (cut) notes.Add(string.Create(CultureInfo.InvariantCulture, $"Lines longer than {MaxLineChars:N0} characters are cut"));
+        if (cut) notes.Add(Loc.F("Lines longer than {0:N0} characters are cut", MaxLineChars));
         return (sb.ToString(), Math.Max(shown, 1), notes);
     }
 }

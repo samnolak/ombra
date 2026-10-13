@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
@@ -28,12 +29,12 @@ public static class ContextMenus
 {
     /// <summary>Copy code, for a code block whose text <paramref name="code"/> returns.</summary>
     public static Flyout ForCodeBlock(Func<string> code) =>
-        Menu(new MenuAction("Copy code", "IconCopy", target => CopyText(target, code())));
+        Menu(new MenuAction(Loc.T("Copy code"), "IconCopy", target => CopyText(target, code())));
 
     /// <summary>Open a link in the browser, or copy it.</summary>
     public static Flyout ForLink(string url) => Menu(
-        new MenuAction("Open link", "IconExternal", target => OpenLink(target, url)),
-        new MenuAction("Copy link", "IconLink", target => CopyText(target, url)));
+        new MenuAction(Loc.T("Open link"), "IconExternal", target => OpenLink(target, url)),
+        new MenuAction(Loc.T("Copy link"), "IconLink", target => CopyText(target, url)));
 
     /// <summary>The platform's Select all keys, shown in the text fields' menu (TextBox has Cut/Copy/Paste ones only).</summary>
     public static KeyGesture? SelectAllGesture => Application.Current?.PlatformSettings?.HotkeyConfiguration.SelectAll.FirstOrDefault();

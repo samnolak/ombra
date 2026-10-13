@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Collections.ObjectModel;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -52,11 +53,11 @@ public sealed partial class PermissionRulesViewModel : WorkspacePageViewModel
         try
         {
             Main.ApprovalRules.Remove(row.Grant);
-            Say($"Removed. omp asks again for {row.Grant.Rule.Description}.");
+            Say(Loc.F("Removed. omp asks again for {0}.", row.Grant.Rule.Description));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            Say("Not removed: " + e.Message, error: true);
+            Say(Loc.T("Not removed: ") + e.Message, error: true);
         }
         Refresh();
     }
@@ -74,17 +75,17 @@ public sealed partial class PermissionRuleRowViewModel(ApprovalGrant grant, Perm
 
     public string ScopeLabel => Grant.Scope switch
     {
-        ApprovalScope.Session => Grant.Session == session ? "This session" : "Earlier session",
-        ApprovalScope.Project => SessionCatalog.SamePath(Grant.Project, cwd) ? "This project" : "Project",
-        _ => "All projects",
+        ApprovalScope.Session => Grant.Session == session ? Loc.T("This session") : Loc.T("Earlier session"),
+        ApprovalScope.Project => SessionCatalog.SamePath(Grant.Project, cwd) ? Loc.T("This project") : Loc.T("Project"),
+        _ => Loc.T("All projects"),
     };
 
     /// <summary>Where it applies, in words.</summary>
     public string Detail => Grant.Scope switch
     {
-        ApprovalScope.Session => "Until the app quits",
+        ApprovalScope.Session => Loc.T("Until the app quits"),
         ApprovalScope.Project => GitProbe.ShownPath(Grant.Project ?? ""),
-        _ => "Every project",
+        _ => Loc.T("Every project"),
     };
 
     [RelayCommand] private void Remove() => owner.Remove(this);

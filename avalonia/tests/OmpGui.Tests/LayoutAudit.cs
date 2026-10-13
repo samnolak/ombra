@@ -23,7 +23,7 @@ internal static class LayoutAudit
     /// <summary>Buttons whose content is a left-aligned row on purpose (lists, menus, links).</summary>
     private static readonly string[] LeftAligned =
         ["menu-item", "session", "sidebar-action", "option", "tool-row", "link", "title", "todo-head", "thinking-toggle", "chip", "flat", "segment", "settings-nav",
-         "turn-files-toggle", "turn-file"];
+         "turn-files-toggle", "turn-file", "card-header"];
 
     public static List<Finding> Run(Window w, Control? scope = null)
     {
@@ -249,7 +249,11 @@ internal static class LayoutAudit
             found.Add(new("clipped", Name(t), $"needs {need.DesiredSize.Width:0} px, has {t.Bounds.Width:0}", Box(w, t)));
     }
 
-    /// <summary>Stacked siblings must not overlap (overlapping is only for layers: Panel, a Grid cell).</summary>
+    /// <summary>
+    /// Stacked siblings must not overlap (overlapping is only for layers: Panel, a Grid cell). A sticky header that is
+    /// stuck (class <c>stuck</c>, see StickyHeader) covers the content scrolling under it on purpose: a pair with one side
+    /// that is, or is inside, a stuck element is not an overlap.
+    /// </summary>
     private static void CheckOverlap(Window w, Panel p, List<Finding> found)
     {
         var kids = p.Children.OfType<Control>().Where(Shown).Select(k => (k, r: Box(w, k))).ToList();
@@ -257,10 +261,13 @@ internal static class LayoutAudit
             for (var j = i + 1; j < kids.Count; j++)
             {
                 var o = kids[i].r.Intersect(kids[j].r);
-                if (o.Width > 1 && o.Height > 1)
+                if (o.Width > 1 && o.Height > 1 && !Stuck(kids[i].k) && !Stuck(kids[j].k))
                     found.Add(new("overlap", Name(kids[i].k) + " ⟷ " + Name(kids[j].k), $"{o.Width:0}×{o.Height:0} px overlap", o));
             }
     }
+
+    private static bool Stuck(Control k) =>
+        k.Classes.Contains("stuck") || k.GetVisualAncestors().OfType<Control>().Any(a => a.Classes.Contains("stuck"));
 
     /// <summary>A card above the message box keeps a clear gap from it (the approval card was glued to it).</summary>
     private static void CheckComposerGap(Window w, List<Finding> found)

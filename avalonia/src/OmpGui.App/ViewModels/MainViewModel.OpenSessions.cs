@@ -3,6 +3,7 @@ using System.Globalization;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -251,8 +252,8 @@ public sealed partial class MainViewModel
         _ = CloseSessionAsync(failed);
         var title = _catalog.FirstOrDefault(c => SessionCatalog.SamePath(c.Path, file))?.Title ?? Path.GetFileName(file);
         var card = new SessionCardViewModel("open-failed", "IconAlert", "", "");
-        card.Finish(false, $"Couldn't open “{title}”", OmpError(s.LastError), detail: file,
-            secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
+        card.Finish(false, Loc.F("Couldn't open “{0}”", title), OmpError(s.LastError), detail: file,
+            secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
         ShowCard(card);
         UpdateSessionStatuses();
         RequestCatalogRefresh();
@@ -264,7 +265,7 @@ public sealed partial class MainViewModel
     {
         var lines = (failure ?? "").Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         return lines.FirstOrDefault(l => l.StartsWith("error: ", StringComparison.Ordinal)) is { } e ? e["error: ".Length..]
-            : lines.FirstOrDefault() ?? "omp stopped before it was ready.";
+            : lines.FirstOrDefault() ?? Loc.T("omp stopped before it was ready.");
     }
 
     /// <summary>A saved session from the sidebar: shown as it is when a chat has it open, else opened in an omp of its own
@@ -563,8 +564,8 @@ public sealed partial class MainViewModel
                 // Exited meanwhile
             }
         }
-        OmpProcessesText = (pids.Count == 1 ? "1 omp process" : $"{pids.Count} omp processes")
-            + (bytes > 0 ? string.Create(CultureInfo.InvariantCulture, $" · {bytes / 1048576} MB") : "");
+        OmpProcessesText = (pids.Count == 1 ? Loc.T("1 omp process") : Loc.F("{0} omp processes", pids.Count))
+            + (bytes > 0 ? string.Create(CultureInfo.InvariantCulture, $" · {bytes / 1048576} ") + Loc.T("MB") : "");
     }
 
     // ───────────── The minimized window ─────────────

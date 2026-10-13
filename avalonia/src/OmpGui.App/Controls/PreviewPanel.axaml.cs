@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
@@ -672,7 +673,7 @@ public partial class PreviewPanel : UserControl
         var mimes = request.Accept.Where(a => a.Contains('/')).ToList();
         var options = new Avalonia.Platform.Storage.FilePickerOpenOptions { AllowMultiple = request.Multiple };
         if (patterns.Count > 0 || mimes.Count > 0)
-            options.FileTypeFilter = [new("Accepted files") { Patterns = patterns.Count > 0 ? patterns : null, MimeTypes = mimes.Count > 0 ? mimes : null }];
+            options.FileTypeFilter = [new(Loc.T("Accepted files")) { Patterns = patterns.Count > 0 ? patterns : null, MimeTypes = mimes.Count > 0 ? mimes : null }];
         var files = await storage.OpenFilePickerAsync(options);
         return [.. files.Select(f => f.TryGetLocalPath()).OfType<string>()];
     }
@@ -738,23 +739,23 @@ public partial class PreviewPanel : UserControl
         try
         {
             if (top?.TryGetPlatformHandle() is not { Handle: not 0 } handle)
-                return new(false, engine, "This window has no native surface to host a web page in.");
+                return new(false, engine, Loc.T("This window has no native surface to host a web page in."));
             if (OperatingSystem.IsLinux())
             {
                 if (handle.HandleDescriptor != "XID")
-                    return new(false, engine, "The embedded browser works in X11 windows only.");
+                    return new(false, engine, Loc.T("The embedded browser works in X11 windows only."));
                 var gtk = WebViewAdapterInfo.GetAdapterInfo(WebViewAdapterType.WebKitGtk);
                 return gtk.IsInstalled
                     ? new(true, engine, "")
-                    : new(false, engine, "Install the libwebkit2gtk-4.1-0 package (Debian, Ubuntu) or webkit2gtk4.1 (Fedora), then press Reload.");
+                    : new(false, engine, Loc.T("Install the libwebkit2gtk-4.1-0 package (Debian, Ubuntu) or webkit2gtk4.1 (Fedora), then press Reload."));
             }
             if (OperatingSystem.IsWindows())
             {
                 if (WebViewAdapterInfo.GetAdapterInfo(WebViewAdapterType.WebView2).IsInstalled) return new(true, engine, "");
-                return new(false, engine, "Install the Microsoft Edge WebView2 Runtime from microsoft.com, then press Reload.");
+                return new(false, engine, Loc.T("Install the Microsoft Edge WebView2 Runtime from microsoft.com, then press Reload."));
             }
             if (OperatingSystem.IsMacOS()) return new(true, engine, "");
-            return new(false, engine, "This platform has no embedded browser.");
+            return new(false, engine, Loc.T("This platform has no embedded browser."));
         }
         catch (Exception e)
         {

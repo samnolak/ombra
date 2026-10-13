@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using OmpGui.App.Localization;
 
 namespace OmpGui.App.ViewModels;
 
@@ -31,7 +32,7 @@ public sealed partial class TerminalViewModel(TerminalKind kind, string title, s
     public void OnExited(int code)
     {
         HasExited = true;
-        Status = $"exited ({code})";
+        Status = Loc.F("exited ({0})", code);
         Lease?.Dispose();
     }
 }

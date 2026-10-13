@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -19,11 +20,11 @@ public sealed partial class CommandSuggestionViewModel(string insert, string lab
     /// commands and the window's have none.</summary>
     public string Tag { get; } = source switch
     {
-        "skill" => "Skill",
-        "extension" => "Extension",
-        "custom" => "Custom",
+        "skill" => Loc.T("Skill"),
+        "extension" => Loc.T("Extension"),
+        "custom" => Loc.T("Custom"),
         "mcp_prompt" => "MCP",
-        "file" => "Prompt file",
+        "file" => Loc.T("Prompt file"),
         _ => "",
     };
     public bool HasTag => Tag.Length > 0;
@@ -143,14 +144,14 @@ public sealed partial class MainViewModel
         _selectedSuggestion = 0;
         if (list.Count > 0) list[0].IsSelected = true;
         ShowNoCommandMatch = noMatch;
-        NoMatchText = "No matching commands";
+        NoMatchText = Loc.T("No matching commands");
         IsCommandMenuOpen = list.Count > 0 || noMatch;
     }
 
     /// <summary>The menu's "No matching commands" (or files) row.</summary>
     [ObservableProperty] private bool _showNoCommandMatch;
 
-    [ObservableProperty] private string _noMatchText = "No matching commands";
+    [ObservableProperty] private string _noMatchText = Loc.T("No matching commands");
 
     /// <summary>0: name starts with the text; 1: an alias does; 2: the name contains it; -1: no match.</summary>
     private static int Rank(SlashCommand c, string typed)
@@ -220,7 +221,7 @@ public sealed partial class MainViewModel
         var phases = s.Todos.Where(p => p.Tasks.Count > 0).ToList();
         // Done of what is still to do, dropped tasks left out (the Plan pane and the Views menu agree)
         var (done, total) = PlanViewModel.Count(phases.SelectMany(p => p.Tasks));
-        var summary = total == 0 ? "" : string.Create(CultureInfo.InvariantCulture, $"Tasks {done}/{total}");
+        var summary = total == 0 ? "" : Loc.F("Tasks {0}/{1}", done, total);
         if (summary != TodoSummary || TodoPhases.Count != phases.Count || !TodoPhases.Select(p => p.Tasks.Count).SequenceEqual(phases.Select(p => p.Tasks.Count)) || TodoChanged(phases))
         {
             TodoPhases.Clear();
@@ -231,7 +232,7 @@ public sealed partial class MainViewModel
             var current = tasks.FirstOrDefault(t => t.Status is "in_progress" or "active") ?? tasks.FirstOrDefault(t => t.Status is "pending" or "todo" or "")
                 ?? tasks.FirstOrDefault(t => t.Status is "blocked"); // a blocked task is open work, not "all done"
             IsTodoAllDone = HasTodos && current is null;
-            TodoCurrent = current?.Content ?? "All tasks done";
+            TodoCurrent = current?.Content ?? Loc.T("All tasks done");
             TodoProgress = string.Create(CultureInfo.InvariantCulture, $"{done}/{total}");
         }
     }

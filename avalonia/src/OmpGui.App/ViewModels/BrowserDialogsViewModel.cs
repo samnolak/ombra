@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -163,69 +164,70 @@ public sealed partial class BrowserDialogCardViewModel : ObservableObject
         switch (r)
         {
             case CredentialRequest c:
-                Title = c.IsProxy ? $"The proxy {HostPort(c.Host, c.Port, r.PageUrl)} wants you to sign in" : $"{HostPort(c.Host, c.Port, r.PageUrl)} wants you to sign in";
-                Detail = c.Realm is { Length: > 0 } realm ? $"Realm: {realm}" : null;
-                Error = c.FailedBefore ? "That username or password didn't work" : null;
-                Warning = !c.IsProxy && r.PageUrl?.Scheme == "http" ? "This site doesn't use a secure connection." : null;
-                Note = r.CausedByAgent ? "omp opened this page. Only you can sign in; omp doesn't see your password." : null;
+                Title = c.IsProxy ? Loc.F("The proxy {0} wants you to sign in", HostPort(c.Host, c.Port, r.PageUrl)) : Loc.F("{0} wants you to sign in", HostPort(c.Host, c.Port, r.PageUrl));
+                Detail = c.Realm is { Length: > 0 } realm ? Loc.F("Realm: {0}", realm) : null;
+                Error = c.FailedBefore ? Loc.T("That username or password didn't work") : null;
+                Warning = !c.IsProxy && r.PageUrl?.Scheme == "http" ? Loc.T("This site doesn't use a secure connection.") : null;
+                Note = r.CausedByAgent ? Loc.T("omp opened this page. Only you can sign in; omp doesn't see your password.") : null;
                 UserName = c.UserName ?? "";
-                PrimaryLabel = "Sign in";
-                SecondaryLabel = "Cancel";
+                PrimaryLabel = Loc.T("Sign in");
+                SecondaryLabel = Loc.T("Cancel");
                 break;
             case AlertRequest a:
-                Title = $"{site} says";
+                Title = Loc.F("{0} says", site);
                 Message = a.Message;
-                PrimaryLabel = "OK";
+                PrimaryLabel = Loc.T("OK");
                 break;
             case ConfirmRequest cf:
-                Title = $"{site} says";
+                Title = Loc.F("{0} says", site);
                 Message = cf.Message;
-                PrimaryLabel = "OK";
-                SecondaryLabel = "Cancel";
+                PrimaryLabel = Loc.T("OK");
+                SecondaryLabel = Loc.T("Cancel");
                 break;
             case PromptRequest p:
-                Title = $"{site} says";
+                Title = Loc.F("{0} says", site);
                 Message = p.Message;
                 PromptText = p.Default ?? "";
-                PrimaryLabel = "OK";
-                SecondaryLabel = "Cancel";
+                PrimaryLabel = Loc.T("OK");
+                SecondaryLabel = Loc.T("Cancel");
                 break;
             case BeforeUnloadRequest:
                 // Browsers show their own words, never the page's (it could say anything)
-                Title = "Leave this page?";
-                Message = "Changes you made may not be saved.";
-                PrimaryLabel = "Leave";
-                SecondaryLabel = "Stay";
+                Title = Loc.T("Leave this page?");
+                Message = Loc.T("Changes you made may not be saved.");
+                PrimaryLabel = Loc.T("Leave");
+                SecondaryLabel = Loc.T("Stay");
                 break;
             case FileChooserRequest f:
-                Title = f.AllowDirectories ? $"{site} wants you to choose a folder"
-                    : f.Multiple ? $"{site} wants you to choose files" : $"{site} wants you to choose a file";
-                Detail = f.Accept.Count > 0 ? $"Accepted types: {string.Join(", ", f.Accept)}" : null;
-                PrimaryLabel = f.AllowDirectories ? "Choose folder…" : f.Multiple ? "Choose files…" : "Choose file…";
-                SecondaryLabel = "Cancel";
+                Title = f.AllowDirectories ? Loc.F("{0} wants you to choose a folder", site)
+                    : f.Multiple ? Loc.F("{0} wants you to choose files", site) : Loc.F("{0} wants you to choose a file", site);
+                Detail = f.Accept.Count > 0 ? Loc.F("Accepted types: {0}", string.Join(", ", f.Accept)) : null;
+                PrimaryLabel = f.AllowDirectories ? Loc.T("Choose folder…") : f.Multiple ? Loc.T("Choose files…") : Loc.T("Choose file…");
+                SecondaryLabel = Loc.T("Cancel");
                 break;
             case DownloadRequest d:
-                Title = $"Download {d.FileName}?";
-                Detail = (d.Size is { } size ? FormatSize(size) + " from " : "From ") + (d.Url is { } u ? Site(u) : site);
-                PrimaryLabel = "Save";
-                TertiaryLabel = "Save as…";
-                SecondaryLabel = "Cancel";
+                Title = Loc.F("Download {0}?", d.FileName);
+                var from = d.Url is { } u ? Site(u) : site;
+                Detail = d.Size is { } size ? Loc.F("{0} from {1}", FormatSize(size), from) : Loc.F("From {0}", from);
+                PrimaryLabel = Loc.T("Save");
+                TertiaryLabel = Loc.T("Save as…");
+                SecondaryLabel = Loc.T("Cancel");
                 break;
             case PermissionRequest pm:
-                Title = $"{Site(pm.Origin)} wants to {Wants(pm.Permission)}";
-                PrimaryLabel = "Allow once";
-                TertiaryLabel = "Always allow on this site";
-                SecondaryLabel = "Don't allow";
+                Title = Loc.F("{0} wants to {1}", Site(pm.Origin), Wants(pm.Permission));
+                PrimaryLabel = Loc.T("Allow once");
+                TertiaryLabel = Loc.T("Always allow on this site");
+                SecondaryLabel = Loc.T("Don't allow");
                 break;
             case PopupNoticeRequest pop:
-                Title = $"{site} wants to open a new window";
+                Title = Loc.F("{0} wants to open a new window", site);
                 Detail = pop.Url is { } pu ? PreviewViewModel.Display(pu) : null;
-                PrimaryLabel = "Open";
-                SecondaryLabel = "Don't open";
+                PrimaryLabel = Loc.T("Open");
+                SecondaryLabel = Loc.T("Don't open");
                 break;
             default:
-                Title = $"{site} is asking something this version can't show";
-                PrimaryLabel = "Close";
+                Title = Loc.F("{0} is asking something this version can't show", site);
+                PrimaryLabel = Loc.T("Close");
                 break;
         }
     }
@@ -241,7 +243,7 @@ public sealed partial class BrowserDialogCardViewModel : ObservableObject
     public string? Error { get; }
     public string? Warning { get; }
     public string? Note { get; }
-    public string PrimaryLabel { get; } = "OK";
+    public string PrimaryLabel { get; } = Loc.T("OK");
     public string? SecondaryLabel { get; }
     public string? TertiaryLabel { get; }
 
@@ -265,7 +267,7 @@ public sealed partial class BrowserDialogCardViewModel : ObservableObject
     private int _queued;
 
     public bool HasQueue => Queued > 0;
-    public string QueueText => Queued == 1 ? "1 more" : $"{Queued} more";
+    public string QueueText => Loc.F("{0} more", Queued);
 
     /// <summary>Which field takes the keyboard when the card opens: the user name (empty), else the password, the prompt, or the main button.</summary>
     public string FirstFocus => Kind switch
@@ -349,10 +351,10 @@ public sealed partial class BrowserDialogCardViewModel : ObservableObject
     /// <summary>"localhost:3000", "studio.example.com": who asks, as the address box shows the site.</summary>
     internal static string Site(Uri? url) => url is { IsAbsoluteUri: true, Host.Length: > 0 }
         ? url.IsDefaultPort ? url.Host : $"{url.Host}:{url.Port}"
-        : "This page";
+        : Loc.T("This page");
 
     private static string Site(string origin) =>
-        Uri.TryCreate(origin, UriKind.Absolute, out var u) ? Site(u) : origin.Length > 0 ? origin : "This page";
+        Uri.TryCreate(origin, UriKind.Absolute, out var u) ? Site(u) : origin.Length > 0 ? origin : Loc.T("This page");
 
     private static string HostPort(string host, int port, Uri? page)
     {
@@ -362,20 +364,20 @@ public sealed partial class BrowserDialogCardViewModel : ObservableObject
 
     private static string Wants(PermissionKind kind) => kind switch
     {
-        PermissionKind.Camera => "use your camera",
-        PermissionKind.Microphone => "use your microphone",
-        PermissionKind.CameraAndMicrophone => "use your camera and microphone",
-        PermissionKind.Geolocation => "know your location",
-        PermissionKind.Notifications => "show notifications",
-        PermissionKind.Fullscreen => "go full screen",
-        PermissionKind.StorageAccess => "use its cookies on this page",
-        PermissionKind.Clipboard => "read your clipboard",
-        _ => "use a feature of your computer",
+        PermissionKind.Camera => Loc.T("use your camera"),
+        PermissionKind.Microphone => Loc.T("use your microphone"),
+        PermissionKind.CameraAndMicrophone => Loc.T("use your camera and microphone"),
+        PermissionKind.Geolocation => Loc.T("know your location"),
+        PermissionKind.Notifications => Loc.T("show notifications"),
+        PermissionKind.Fullscreen => Loc.T("go full screen"),
+        PermissionKind.StorageAccess => Loc.T("use its cookies on this page"),
+        PermissionKind.Clipboard => Loc.T("read your clipboard"),
+        _ => Loc.T("use a feature of your computer"),
     };
 
     internal static string FormatSize(long bytes) => bytes switch
     {
-        < 1024 => $"{bytes} bytes",
+        < 1024 => Loc.F("{0} bytes", bytes),
         < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
         < 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024):0.#} MB",
         _ => $"{bytes / (1024.0 * 1024 * 1024):0.##} GB",

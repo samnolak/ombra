@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 
 namespace OmpGui.App.ViewModels;
 
@@ -20,7 +21,7 @@ public sealed partial class CodeCommentViewModel(string path, int? line, bool re
     /// <summary>"app.py:41" on the chip.</summary>
     public string Where => System.IO.Path.GetFileName(Path) + (Line is { } n ? ":" + n.ToString(CultureInfo.InvariantCulture) : "");
 
-    public string Tooltip => $"{Path}{(Line is { } n ? $", line {n}" : "")}{(IsRemovedLine ? " (removed)" : "")}\n{LineText.Trim()}\n\n{Comment}";
+    public string Tooltip => $"{Path}{(Line is { } n ? ", " + Loc.F("line {0}", n) : "")}{(IsRemovedLine ? " (" + Loc.T("removed") + ")" : "")}\n{LineText.Trim()}\n\n{Comment}";
 
     [RelayCommand] private void Remove() => owner.RemoveCodeComment(this);
 }
@@ -45,7 +46,7 @@ public sealed partial class MainViewModel
     {
         if (CodeComments.Count >= MaxCodeComments)
         {
-            ComposerMessage = $"At most {MaxCodeComments} comments on the code at a time: send or remove some first.";
+            ComposerMessage = Loc.F("At most {0} comments on the code at a time: send or remove some first.", MaxCodeComments);
             return false;
         }
         CodeComments.Add(new CodeCommentViewModel(path, line, removedLine, lineText, comment, this));

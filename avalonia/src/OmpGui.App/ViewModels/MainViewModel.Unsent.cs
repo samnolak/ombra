@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -13,7 +14,7 @@ public sealed partial class MainViewModel
     {
         ComposerText = ComposerText.Length == 0 ? content.Text : content.Text + "\n" + ComposerText;
         foreach (var image in content.Images) TryAddImage(image, image.Name);
-        ComposerMessage = "omp is restarting, so the message wasn't sent. It is back in the box: send it again once omp is ready.";
+        ComposerMessage = Loc.T("omp is restarting, so the message wasn't sent. It is back in the box: send it again once omp is ready.");
         CaretToEndRequested?.Invoke();
         FocusComposerRequested?.Invoke();
     }

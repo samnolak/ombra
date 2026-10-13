@@ -2,7 +2,8 @@
      open it in the file manager, an editor found on PATH or a terminal, copy its path, or start a new session in another
      project. A chat outside any project reads "No project", and its menu offers only the projects and a folder to open.
      DataContext: MainViewModel (the header's). -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:OmpGui.App.Localization"
+             xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
@@ -10,7 +11,7 @@
              x:Class="OmpGui.App.Views.Panes.ProjectMenuButton"
              x:DataType="vm:MainViewModel">
   <Button x:Name="MenuButton" Classes="header-project" ToolTip.Tip="{Binding ProjectChipTip}"
-          AutomationProperties.Name="{Binding ProjectChipLabel, StringFormat='Project: {0}'}">
+          AutomationProperties.Name="{Binding ProjectChipLabel, StringFormat={loc:T 'Project: {0}'}}">
     <!-- A dock, not a grid: in a narrow header the name and chevron are hidden, and a grid's Auto column kept the hidden
          chevron's width (the bare folder icon sat off the middle of a too-wide button) -->
     <DockPanel>
@@ -26,17 +27,17 @@
             <TextBlock Classes="tertiary" Text="{Binding ShownProjectPath}" TextTrimming="PrefixCharacterEllipsis" />
           </StackPanel>
           <StackPanel Margin="10,4,10,6" Spacing="2" IsVisible="{Binding IsProjectless}">
-            <TextBlock Classes="project-menu-name" Text="No project" />
-            <TextBlock Classes="tertiary" Text="This chat has an empty folder of its own." TextWrapping="Wrap" />
+            <TextBlock Classes="project-menu-name" Text="{loc:T 'No project'}" />
+            <TextBlock Classes="tertiary" Text="{loc:T 'This chat has an empty folder of its own.'}" TextWrapping="Wrap" />
           </StackPanel>
           <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="6,2,6,4" />
           <!-- What acts on the project's folder: not for a chat -->
           <StackPanel Spacing="2" IsVisible="{Binding !IsProjectless}">
             <Button x:Name="BrowseFilesItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                    Command="{Binding Files.BrowseFilesCommand}" AutomationProperties.Name="Browse files">
+                    Command="{Binding Files.BrowseFilesCommand}" AutomationProperties.Name="{loc:T 'Browse files'}">
               <Grid ColumnDefinitions="Auto,*">
                 <ctl:Icon Data="{StaticResource IconFiles}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Browse files" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Browse files'}" VerticalAlignment="Center" />
               </Grid>
             </Button>
             <Button x:Name="FileManagerItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
@@ -63,22 +64,22 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
             <Button x:Name="TerminalItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                    Command="{Binding Files.OpenProjectTerminalCommand}" AutomationProperties.Name="Open terminal here">
+                    Command="{Binding Files.OpenProjectTerminalCommand}" AutomationProperties.Name="{loc:T 'Open terminal here'}">
               <Grid ColumnDefinitions="Auto,*">
                 <ctl:Icon Data="{StaticResource IconTerminal}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Open terminal here" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Open terminal here'}" VerticalAlignment="Center" />
               </Grid>
             </Button>
             <Button x:Name="CopyPathItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                    Command="{Binding Files.CopyProjectPathCommand}" AutomationProperties.Name="Copy path">
+                    Command="{Binding Files.CopyProjectPathCommand}" AutomationProperties.Name="{loc:T 'Copy path'}">
               <Grid ColumnDefinitions="Auto,*">
                 <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
-                <TextBlock Grid.Column="1" Text="Copy path" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Copy path'}" VerticalAlignment="Center" />
               </Grid>
             </Button>
             <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="6,4" />
           </StackPanel>
-          <TextBlock Classes="caps" Text="New session in" Margin="10,4,0,4" IsVisible="{Binding Files.HasRecentProjects}" />
+          <TextBlock Classes="caps" Text="{loc:T 'New session in'}" Margin="10,4,0,4" IsVisible="{Binding Files.HasRecentProjects}" />
           <ItemsControl x:Name="RecentProjectItems" ItemsSource="{Binding Files.RecentProjects}" IsVisible="{Binding Files.HasRecentProjects}">
             <ItemsControl.ItemsPanel>
               <ItemsPanelTemplate><StackPanel Spacing="2" /></ItemsPanelTemplate>
@@ -88,7 +89,7 @@
                 <Button Classes="menu-item" Classes.current="{Binding IsCurrentProject}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                         IsVisible="{Binding IsProject}"
                         Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).NewSessionInProjectCommand}" CommandParameter="{Binding}"
-                        AutomationProperties.Name="{Binding Name, StringFormat='New session in {0}'}" ToolTip.Tip="{Binding ShownCwd}">
+                        AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'New session in {0}'}}" ToolTip.Tip="{Binding ShownCwd}">
                   <Grid ColumnDefinitions="Auto,*">
                     <ctl:Icon Data="{StaticResource IconFolder}" Size="16" Margin="0,0,10,0" VerticalAlignment="Top" />
                     <StackPanel Grid.Column="1" Spacing="1">
@@ -101,10 +102,10 @@
             </ItemsControl.ItemTemplate>
           </ItemsControl>
           <Button x:Name="OpenFolderItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
-                  Command="{Binding OpenFolderCommand}" AutomationProperties.Name="Open folder">
+                  Command="{Binding OpenFolderCommand}" AutomationProperties.Name="{loc:T 'Open folder'}">
             <Grid ColumnDefinitions="Auto,*">
               <ctl:Icon Data="{StaticResource IconPlus}" Size="16" Margin="0,0,10,0" />
-              <TextBlock Grid.Column="1" Text="Open folder…" VerticalAlignment="Center" />
+              <TextBlock Grid.Column="1" Text="{loc:T 'Open folder…'}" VerticalAlignment="Center" />
             </Grid>
           </Button>
         </StackPanel>

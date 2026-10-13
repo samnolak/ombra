@@ -62,13 +62,18 @@ project yet), so the OS warns on first start:
 
 ## Daily use
 
+- **Language** — Settings › General › Language: English or Русский (until you choose, the system's language if the app
+  has it). The folder button next to it opens `languages/` in the settings folder with `template.json` (every text of
+  the app in English): copy it to `<code>.json` (e.g. `de.json`), set `"name"` and translate the values; it is offered
+  after reopening Settings, and a file named like a built-in language (`ru.json`) overrides only the texts it has.
+  The new language shows after the app is restarted.
 - **Sessions** — the sidebar lists omp's sessions of all your projects, grouped by project folder, and the chats
-  that belong to no project under **Chats** (after *Pinned*, before the projects). Sessions are
+  that belong to no project under **Chats** (after pinned projects, before the other projects). Sessions are
   ordered by their last message (yours or the agent's), newest first, and groups by their newest session; opening a
   session does not reorder the list. Each row shows how long ago its last message was (*now*, *5m*, *3h*, *2d*, then
-  the date), or a dot for a chat that is open: green and pulsing while omp works in it, amber when it waits for your
-  approval or answer, yellow for a reply you have not seen yet, red when its omp stopped with an error. **Pinned** sessions are listed on their
-  own at the top (pins are omp's own, so `/pin` and omp's session picker agree). **Search** filters by title or
+  the date), or a dot for a chat that is open: green and pulsing while omp works in it, an amber raised hand when it
+  waits for your approval or answer, yellow for a reply you have not seen yet, red when its omp stopped with an error. A **pinned** session stays in its own
+  project (or Chats), at its top, marked with a pin (pins are omp's own, so `/pin` and omp's session picker agree). **Search** filters by title or
   folder. Click a session to continue it; the list updates in place as omp writes, so a hover, an open row menu and
   the scroll position stay put.
   **Several chats at once**: every chat you open runs its own omp, and it keeps working while you read or write in
@@ -98,7 +103,10 @@ project yet), so the OS warns on first start:
   (the session file) and **Delete…**, after a confirmation; deleting the open session works like the session menu's
   Delete (a new session starts), and deleting a chat that works in the background says so and stops its omp first.
   The folder button at the top of the sidebar **adds a project folder** to the list;
-  hover a project's header (or right-click it) to **remove it from the sidebar** (⊖). A project without chats goes at
+  right-click a project's header for **New session here**, **Rename** (the name the sidebar and the header show; the
+  folder is not renamed, an empty name brings the folder's back), **Pin project** (pinned projects stay first, in the
+  order pinned), **Show in Finder** / **Show in Explorer** / **Open in file manager**, **Copy path**; hover it (or
+  right-click) to **remove it from the sidebar** (⊖). A project without chats goes at
   once (**Undo** brings it back). One with chats asks first: **Remove from sidebar** keeps its chats on disk (adding or
   opening the folder again lists them), **Delete N chats too** deletes their files as well (cannot be undone; an open
   chat is closed first). The folder itself is never deleted. The open chat's project goes too. Drag the
@@ -175,14 +183,18 @@ project yet), so the OS warns on first start:
   its newest lines while it runs, its first three lines and **… +N lines** when it is done (a failed one has a red
   edge); a command with no output stays one line. Two or more reads and searches in a row fold into one line,
   *Explored 2 files, 2 searches* (*Exploring…* with the current step while they run); click it for the steps. Click a
-  line to open the whole output. *Thinking…* counts the seconds while the model thinks, then reads *Thought for 4s*;
-  click it for the thoughts.
+  line to open the whole output: an open console or output starts with a bar that says what it is (**Terminal** and the
+  command, **Output** and what the call read) and folds it again. *Thinking…* counts the seconds while the model
+  thinks, then reads *Thought for 4s*; click it for the thoughts. While an open block is longer than the view, its
+  header (the bar, a file card's header, the *Explored* line, the *Thought for* line) stays at the top of the
+  conversation until the block ends, so it can be folded from anywhere in it.
 - **File changes** — a change shows as it happens, one card per file (a patch that changes several files has a card
   for each). The card's header has the file's folder and name, a badge for a **New file**, a **Deleted** one (folded
   to *Show N deleted lines*), a **Renamed** or **Moved** one (`old → new`), and +N −M. Changed lines have a coloured
   bar on their left edge and a tinted background, with the words that changed inside a line marked more strongly;
   two line-number columns give the line in the old file and in the new one. Click the path to open the file in the
-  Files pane at its first change, double-click a line to open it there. The end of a run (*Worked for 1m · 13 tools ·
+  Files pane at its first change, double-click a line to open it there; the chevron at the header's end folds the
+  change back into its tool line. The end of a run (*Worked for 1m · 13 tools ·
   7 files changed ›*) lists the files the run changed, with their +N −M and New / Deleted / Renamed / Moved marks (open when
   the run changed two or more files); click one to open it. The Files pane's *Changes* review uses the same colours,
   bars, word marks and line numbers.

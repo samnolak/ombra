@@ -5,6 +5,7 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.App.Pets;
 using OmpGui.ClientCore;
 
@@ -21,7 +22,7 @@ public sealed partial class PetCardViewModel(string id, string name, PetLook loo
     /// <summary>A built-in pet the user renamed or recoloured (can be reset).</summary>
     public bool IsChanged { get; } = isChanged;
     public string Species => Look.Body.Species;
-    public string Detail => IsCustom ? "Yours · " + Species : Species;
+    public string Detail => IsCustom ? Loc.T("Yours · ") + Species : Species;
     [ObservableProperty] private bool _isChosen;
 }
 
@@ -100,8 +101,8 @@ public sealed partial class PetsViewModel : ObservableObject
         };
         MoodOptions =
         [
-            new(PetMood.Idle, "Idle"), new(PetMood.Thinking, "Thinking"), new(PetMood.Working, "Working"),
-            new(PetMood.Waiting, "Waiting"), new(PetMood.Done, "Done"), new(PetMood.Error, "Oops"), new(PetMood.Sleeping, "Asleep"),
+            new(PetMood.Idle, Loc.T("Idle")), new(PetMood.Thinking, Loc.T("Thinking")), new(PetMood.Working, Loc.T("Working")),
+            new(PetMood.Waiting, Loc.T("Waiting")), new(PetMood.Done, Loc.T("Done")), new(PetMood.Error, Loc.T("Oops")), new(PetMood.Sleeping, Loc.T("Asleep")),
         ];
         MoodOptions[0].IsSelected = true;
         BodyOptions = [.. PetArt.Bodies.Select(b => new PetBodyOptionViewModel(b))];
@@ -208,10 +209,10 @@ public sealed partial class PetsViewModel : ObservableObject
 
     public string PlaceText => (IsRoaming, IsRoamDesktop) switch
     {
-        (true, true) => "Where you dropped it, over your other apps. Drag it anywhere on your screens.",
-        (true, false) => "Where you dropped it. Drag it anywhere in the window.",
-        (false, true) => "On the top edge of the message box. Drag it anywhere on your screens.",
-        (false, false) => "On the top edge of the message box. Drag it anywhere in the window.",
+        (true, true) => Loc.T("Where you dropped it, over your other apps. Drag it anywhere on your screens."),
+        (true, false) => Loc.T("Where you dropped it. Drag it anywhere in the window."),
+        (false, true) => Loc.T("On the top edge of the message box. Drag it anywhere on your screens."),
+        (false, false) => Loc.T("On the top edge of the message box. Drag it anywhere in the window."),
     };
 
     /// <summary>The pet was dropped in the window: <paramref name="fraction"/> as in <see cref="Position"/>.</summary>
@@ -297,19 +298,19 @@ public sealed partial class PetsViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(AccessibleName), nameof(PetTip))]
     private PetMood _mood = PetMood.Idle;
 
-    public string AccessibleName => $"{ChosenName}, your pet: " + Mood switch
+    public string AccessibleName => Loc.F("{0}, your pet: ", ChosenName) + Mood switch
     {
-        PetMood.Sleeping => "asleep",
-        PetMood.Thinking => "thinking",
-        PetMood.Working => "working",
-        PetMood.Waiting => "waiting for you",
-        PetMood.Done => "done",
-        PetMood.Error => "something went wrong",
-        _ => "idle",
+        PetMood.Sleeping => Loc.T("asleep"),
+        PetMood.Thinking => Loc.T("thinking"),
+        PetMood.Working => Loc.T("working"),
+        PetMood.Waiting => Loc.T("waiting for you"),
+        PetMood.Done => Loc.T("done"),
+        PetMood.Error => Loc.T("something went wrong"),
+        _ => Loc.T("idle"),
     };
 
     /// <summary>The pet's tooltip: how it is, and what it does.</summary>
-    public string PetTip => AccessibleName + "\nClick to message omp · drag to move";
+    public string PetTip => AccessibleName + "\n" + Loc.T("Click to message omp · drag to move");
 
     /// <summary>From each snapshot the window applies: the agent's state, a finished run, a failed tool.</summary>
     internal void OnSnapshot(SessionSnapshot s)
@@ -402,7 +403,7 @@ public sealed partial class PetsViewModel : ObservableObject
         var wasAsleep = Mood == PetMood.Sleeping;
         Poke();
         _bubbleIsActivity = false;
-        BubbleText = wasAsleep ? "*yawns* I'm up!" : Say();
+        BubbleText = wasAsleep ? Loc.T("*yawns* I'm up!") : Say();
         IsBubbleOpen = true;
         if (!_shutDown) _bubbleTimer.Start();
     }
@@ -412,13 +413,13 @@ public sealed partial class PetsViewModel : ObservableObject
         if (Mood == PetMood.Waiting || _host.HasDialog)
         {
             // On the desktop the question is in the app's window, not just above the pet
-            var where = IsOnDesktop ? "in its window" : "just above";
-            return _host.CurrentDialog?.IsApproval == true ? $"omp needs your approval, {where}." : $"omp is asking you something, {where}.";
+            var where = IsOnDesktop ? Loc.T("in its window") : Loc.T("just above");
+            return _host.CurrentDialog?.IsApproval == true ? Loc.F("omp needs your approval, {0}.", where) : Loc.F("omp is asking you something, {0}.", where);
         }
         if (_host.HasError) return Activity();
-        if (Mood == PetMood.Error && _lastFailedTool is { } tool) return $"Oops, {tool} failed. omp is on it.";
+        if (Mood == PetMood.Error && _lastFailedTool is { } tool) return Loc.F("Oops, {0} failed. omp is on it.", tool);
         if (_host.IsRunning) return Activity();
-        if (Mood == PetMood.Done) return "All done!";
+        if (Mood == PetMood.Done) return Loc.T("All done!");
         var quips = ChosenLook.Body.Quips;
         return quips[_quip++ % quips.Length];
     }
@@ -447,7 +448,7 @@ public sealed partial class PetsViewModel : ObservableObject
     /// <summary>What is typed in it; kept when it closes without sending.</summary>
     [ObservableProperty] private string _chatText = "";
 
-    public string ChatPlaceholder => _host.IsRunning ? "Queue a message — Enter to send" : "Message omp — Enter to send";
+    public string ChatPlaceholder => _host.IsRunning ? Loc.T("Queue a message — Enter to send") : Loc.T("Message omp — Enter to send");
 
     partial void OnChatTextChanged(string value) => Poke();
 
@@ -481,12 +482,12 @@ public sealed partial class PetsViewModel : ObservableObject
         var queued = _host.IsRunning;
         if (!_host.SendFromPet(text))
         {
-            ShowBubble("omp can't take a message right now.");
+            ShowBubble(Loc.T("omp can't take a message right now."));
             return;
         }
         ChatText = "";
         IsChatOpen = false;
-        ShowBubble(queued ? "Queued for after this run." : "Sent!");
+        ShowBubble(queued ? Loc.T("Queued for after this run.") : Loc.T("Sent!"));
     }
 
     private void OnHostChanged(object? sender, PropertyChangedEventArgs e)
@@ -552,7 +553,7 @@ public sealed partial class PetsViewModel : ObservableObject
         foreach (var c in _custom)
         {
             if (PetArt.Body(c.Id) is not null || PetArt.Body(c.Body) is not { } body) continue; // an override, or a body this version lacks
-            Gallery.Add(new PetCardViewModel(c.Id, CleanName(c.Name) ?? "My " + body.Species.ToLowerInvariant(),
+            Gallery.Add(new PetCardViewModel(c.Id, CleanName(c.Name) ?? Loc.F("My {0}", body.Species.ToLowerInvariant()),
                 new PetLook(body, PetArt.Coat(c.Coat), PetArt.Accessory(c.Accessory)), true, false));
         }
         var chosen = Gallery.FirstOrDefault(c => c.Id == chosenId) ?? Gallery[0];
@@ -612,13 +613,13 @@ public sealed partial class PetsViewModel : ObservableObject
     [ObservableProperty] private PetMood _previewMood = PetMood.Idle;
 
     public PetLook DraftLook => new(DraftBody, DraftCoat, DraftAccessory);
-    public string EditorTitle => IsCreating ? "Create a pet" : "Customize " + ChosenName;
-    public string CustomizeTitle => "Customize " + ChosenName;
-    public string EditorSaveLabel => IsCreating ? "Create pet" : "Save changes";
+    public string EditorTitle => IsCreating ? Loc.T("Create a pet") : Loc.F("Customize {0}", ChosenName);
+    public string CustomizeTitle => Loc.F("Customize {0}", ChosenName);
+    public string EditorSaveLabel => IsCreating ? Loc.T("Create pet") : Loc.T("Save changes");
     public bool CanChangeBody => IsCreating || Chosen?.IsCustom == true;
     public bool CanDelete => IsEditorOpen && !IsCreating && Chosen?.IsCustom == true;
     public bool CanReset => IsEditorOpen && !IsCreating && Chosen is { IsCustom: false, IsChanged: true };
-    public string NamePlaceholder => "My " + DraftBody.Species.ToLowerInvariant();
+    public string NamePlaceholder => Loc.F("My {0}", DraftBody.Species.ToLowerInvariant());
 
     partial void OnDraftBodyChanged(PetBody value)
     {
@@ -650,7 +651,7 @@ public sealed partial class PetsViewModel : ObservableObject
     {
         CoatOptions.Clear();
         var natural = DraftBody.Palette['2'];
-        CoatOptions.Add(new PetCoatOptionViewModel(null, "Natural", natural) { IsSelected = DraftCoat is null });
+        CoatOptions.Add(new PetCoatOptionViewModel(null, Loc.T("Natural"), natural) { IsSelected = DraftCoat is null });
         foreach (var c in PetArt.Coats)
             if (c == DraftCoat || Distance(c.Mid, natural) > 48)
                 CoatOptions.Add(new PetCoatOptionViewModel(c, c.Name, c.Mid) { IsSelected = DraftCoat == c });

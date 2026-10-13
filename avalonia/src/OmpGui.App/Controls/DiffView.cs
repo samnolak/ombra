@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Avalonia;
@@ -20,7 +21,9 @@ namespace OmpGui.App.Controls;
 /// number, an added line only its new one, an unchanged line both. One gutter had shown a removed and an added line as
 /// "2" and "2", and context lines after an insertion carry numbers that no longer match the file. A new file shows only
 /// the new gutter (and a lighter fill: every line is added, the bar says it), a deleted one only the old gutter and is
-/// folded to its header, since its lines are gone. Long changes show their first lines and "Show N more lines".
+/// folded to its header, since its lines are gone. Long changes show their first lines and "Show N more lines". With
+/// <see cref="CollapseCommand"/> set (the tool row it opened under), the header ends in a chevron that folds it away; the
+/// header stays at the top of the conversation while the card is on screen (<see cref="StickyHeader"/>).
 /// </para>
 /// Reads omp's own format (<c>+12|code</c>, <c>-7|code</c>, <c> 10|code</c>: removed and unchanged lines numbered in
 /// the old file, added lines in the new one) and unified diffs (<c>@@ -1,2 +1,2 @@</c>). Brushes are resolved when built;
@@ -32,6 +35,8 @@ public sealed partial class DiffView : ContentControl
     public static readonly StyledProperty<FileChange?> ChangeProperty = AvaloniaProperty.Register<DiffView, FileChange?>(nameof(Change));
     public static readonly StyledProperty<System.Windows.Input.ICommand?> OpenFileCommandProperty =
         AvaloniaProperty.Register<DiffView, System.Windows.Input.ICommand?>(nameof(OpenFileCommand));
+    public static readonly StyledProperty<System.Windows.Input.ICommand?> CollapseCommandProperty =
+        AvaloniaProperty.Register<DiffView, System.Windows.Input.ICommand?>(nameof(CollapseCommand));
 
     /// <summary>Rows shown before "Show N more lines".</summary>
     public const int FoldAt = 16;
@@ -47,6 +52,8 @@ public sealed partial class DiffView : ContentControl
     public FileChange? Change { get => GetValue(ChangeProperty); set => SetValue(ChangeProperty, value); }
     /// <summary>Opens the changed file (the Files pane); its parameter is a <see cref="FileLink"/>.</summary>
     public System.Windows.Input.ICommand? OpenFileCommand { get => GetValue(OpenFileCommandProperty); set => SetValue(OpenFileCommandProperty, value); }
+    /// <summary>Folds the card away (its tool row's line); a chevron at the header's end while set.</summary>
+    public System.Windows.Input.ICommand? CollapseCommand { get => GetValue(CollapseCommandProperty); set => SetValue(CollapseCommandProperty, value); }
 
     private bool _unfolded;
     private Avalonia.Styling.ThemeVariant? _builtTheme;
@@ -176,9 +183,11 @@ public sealed partial class DiffView : ContentControl
         }
         // The command arrives with the row's other bindings: the path turns into a link without building it all again
         else if (change.Property == OpenFileCommandProperty && _link is not null) _link.IsHitTestVisible = OpenFileCommand is not null;
+        else if (change.Property == CollapseCommandProperty && _collapse is not null) _collapse.IsVisible = CollapseCommand is not null;
     }
 
     private Button? _link;
+    private Button? _collapse;
 
     private void Rebuild()
     {
@@ -190,20 +199,24 @@ public sealed partial class DiffView : ContentControl
                 if (OpenFileCommand is { } command && command.CanExecute(link)) command.Execute(link);
             }
             : null;
-        Content = Change is { } change ? Build(change, _unfolded, () => { _unfolded = !_unfolded; Rebuild(); }, open, out _link) : null;
+        Content = Change is { } change
+            ? Build(change, _unfolded, () => { _unfolded = !_unfolded; Rebuild(); }, open, () => CollapseCommand?.Execute(null), out _link, out _collapse)
+            : null;
         if (_link is not null) _link.IsHitTestVisible = OpenFileCommand is not null;
+        if (_collapse is not null) _collapse.IsVisible = CollapseCommand is not null;
         _builtTheme = Application.Current?.ActualThemeVariant;
     }
 
     /// <param name="openFile">Opens the file at a line (the first change for the header's path); the path becomes a link.</param>
     public static Control Build(FileChange change, bool unfolded = true, Action? toggleFold = null, Action<int?>? openFile = null) =>
-        Build(change, unfolded, toggleFold, openFile, out _);
+        Build(change, unfolded, toggleFold, openFile, null, out _, out _);
 
-    private static Control Build(FileChange change, bool unfolded, Action? toggleFold, Action<int?>? openFile, out Button? pathLink)
+    /// <param name="collapse">Folds the card away: a chevron at the header's end.</param>
+    private static Control Build(FileChange change, bool unfolded, Action? toggleFold, Action<int?>? openFile, Action? collapse, out Button? pathLink, out Button? collapseButton)
     {
         var rows = string.IsNullOrEmpty(change.Diff) ? new List<Line>() : Parse(change.Diff);
         var deleted = change.Kind == FileChangeKind.Deleted;
-        var card = new StackPanel { Children = { Header(change, rows, openFile, out pathLink) } };
+        var card = new StackPanel { Children = { Header(change, rows, openFile, collapse, out pathLink, out collapseButton) } };
         if (rows.Count > 0)
         {
             // A deleted file's lines are gone: its card is the header until asked
@@ -216,8 +229,8 @@ public sealed partial class DiffView : ContentControl
                 var more = new Button
                 {
                     Classes = { "link", "diff-more" },
-                    Content = deleted ? (unfolded ? "Hide deleted lines" : $"Show {Count(rows.Count, "deleted line")}")
-                        : unfolded ? "Show less" : $"Show {rows.Count - FoldAt} more lines",
+                    Content = deleted ? (unfolded ? Loc.T("Hide deleted lines") : Loc.Plural(rows.Count, "Show {0} deleted line", "Show {0} deleted lines"))
+                        : unfolded ? Loc.T("Show less") : Loc.Plural(rows.Count - FoldAt, "Show {0} more line", "Show {0} more lines"),
                     HorizontalAlignment = HorizontalAlignment.Left,
                 };
                 more.Click += (_, _) => toggleFold();
@@ -232,13 +245,16 @@ public sealed partial class DiffView : ContentControl
         return border;
     }
 
-    private static string Count(int n, string noun) => n == 1 ? $"1 {noun}" : $"{n} {noun}s";
-
-    /// <summary>The file icon, the path (folder quiet, name strong; a move: old → new), what happened, and +/−.</summary>
-    private static Grid Header(FileChange change, List<Line> rows, Action<int?>? openFile, out Button? pathLink)
+    /// <summary>
+    /// The file icon, the path (folder quiet, name strong; a move: old → new), what happened, +/−, and with
+    /// <paramref name="collapse"/> a chevron that folds the card away; on the card's own surface, as it stays at the top of
+    /// the view over the card's lines (<see cref="StickyHeader"/>).
+    /// </summary>
+    private static Border Header(FileChange change, List<Line> rows, Action<int?>? openFile, Action? collapse, out Button? pathLink, out Button? collapseButton)
     {
         pathLink = null;
-        var header = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto"), Classes = { "diff-header" } };
+        collapseButton = null;
+        var header = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto,Auto"), Classes = { "diff-header" } };
         if (Application.Current?.TryGetResource("IconFile", null, out var icon) == true && icon is Geometry g)
             header.Children.Add(new Icon { Data = g, Size = 14, Classes = { "diff-file-icon" }, VerticalAlignment = VerticalAlignment.Center });
 
@@ -258,8 +274,8 @@ public sealed partial class DiffView : ContentControl
         {
             var first = FirstChange(rows);
             var link = new Button { Classes = { "diff-path-link" }, Content = pathText, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
-            ToolTip.SetTip(link, "Open in the Files pane");
-            Avalonia.Automation.AutomationProperties.SetName(link, "Open " + change.Path);
+            ToolTip.SetTip(link, Loc.T("Open in the Files pane"));
+            Avalonia.Automation.AutomationProperties.SetName(link, Loc.F("Open {0}", change.Path));
             link.Click += (_, _) => openFile(first);
             path = link;
             pathLink = link;
@@ -281,7 +297,21 @@ public sealed partial class DiffView : ContentControl
         if (removed > 0) stats.Children.Add(new TextBlock { Text = $"−{removed}", Classes = { "mono", "diff-removed" } });
         Grid.SetColumn(stats, 3);
         header.Children.Add(stats);
-        return header;
+        if (collapse is not null && Application.Current?.TryGetResource("IconChevronDown", null, out var chevron) == true && chevron is Geometry down)
+        {
+            var fold = new Button { Classes = { "diff-collapse" }, Content = new Icon { Data = down, Size = 14 }, VerticalAlignment = VerticalAlignment.Center };
+            ToolTip.SetTip(fold, Loc.T("Collapse"));
+            Avalonia.Automation.AutomationProperties.SetName(fold, Loc.T("Collapse"));
+            fold.Click += (_, _) => collapse();
+            Grid.SetColumn(fold, 4);
+            header.Children.Add(fold);
+            collapseButton = fold;
+        }
+        // The bar draws the card's top (hairline and rounded corners) itself, so held at the top of the view it is still
+        // the top of a rounded card; what it moves in shows the window around those corners (diff-head.stuck)
+        var bar = new Border { Classes = { "diff-head" }, Child = new Border { Classes = { "diff-head-bar" }, Child = header } };
+        StickyHeader.SetIsSticky(bar, true);
+        return bar;
     }
 
     /// <summary>"New file", "Deleted", "Renamed" (same folder) or "Moved"; nothing for a changed file.</summary>
@@ -289,10 +319,10 @@ public sealed partial class DiffView : ContentControl
     {
         var (text, kind) = change.Kind switch
         {
-            FileChangeKind.Created => ("New file", "created"),
-            FileChangeKind.Deleted => ("Deleted", "deleted"),
-            FileChangeKind.Moved when change.IsRename => ("Renamed", "moved"),
-            FileChangeKind.Moved => ("Moved", "moved"),
+            FileChangeKind.Created => (Loc.T("New file"), "created"),
+            FileChangeKind.Deleted => (Loc.T("Deleted"), "deleted"),
+            FileChangeKind.Moved when change.IsRename => (Loc.T("Renamed"), "moved"),
+            FileChangeKind.Moved => (Loc.T("Moved"), "moved"),
             _ => ("", ""),
         };
         if (text.Length == 0) return null;

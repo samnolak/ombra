@@ -1,5 +1,6 @@
 using PortAudioSharp;
 using PaStream = PortAudioSharp.Stream;
+using OmpGui.App.Localization;
 
 namespace OmpGui.App.Services.Speech;
 
@@ -40,7 +41,7 @@ public sealed class Microphone : IMicrophone
             _initialized = true;
         }
         var device = PortAudio.DefaultInputDevice;
-        if (device == PortAudio.NoDevice) throw new InvalidOperationException("No microphone found.");
+        if (device == PortAudio.NoDevice) throw new InvalidOperationException(Loc.T("No microphone found."));
         var info = PortAudio.GetDeviceInfo(device);
         _rate = info.defaultSampleRate;
         var parameters = new StreamParameters
@@ -241,7 +242,7 @@ public sealed class AutoMicrophone(Func<IMicrophone>? primary = null, Func<IRead
                     reasons.Add(why.Message);
                 }
             }
-            throw new InvalidOperationException("No microphone could be opened: " + string.Join("; ", reasons), e);
+            throw new InvalidOperationException(Loc.T("No microphone could be opened: ") + string.Join("; ", reasons), e);
         }
         catch
         {

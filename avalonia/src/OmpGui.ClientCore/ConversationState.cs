@@ -679,7 +679,7 @@ public sealed partial class ConversationState
         // An edit's input: omp's hashline sections or an apply_patch envelope name the files
         if (Str(args, "input") is { Length: > 0 } input && EditedFiles(input) is { Count: > 0 } files)
             return files.Count == 1 ? Truncate(files[0], 200) : Count(files.Count, "file");
-        // Otherwise the first short words it was given (never raw JSON on the line; the tooltip has the arguments)
+        // Otherwise the first short words it was given (never raw JSON on the line; the tooltip lists the arguments)
         var words = args.EnumerateObject().Select(p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() : null)
             .Where(v => v is { Length: > 0 and <= 80 } && !v.Contains('\n')).Take(2).ToArray();
         return string.Join(" · ", words);

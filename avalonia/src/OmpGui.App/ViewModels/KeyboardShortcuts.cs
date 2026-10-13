@@ -1,3 +1,5 @@
+using OmpGui.App.Localization;
+
 namespace OmpGui.App.ViewModels;
 
 /// <summary>One row of the shortcut sheet: what it does, its keys (one keycap each) and when it applies.</summary>
@@ -51,11 +53,11 @@ public static class KeyboardShortcuts
     /// <param name="sendWithModifier">Settings → General sends with ⌘/Ctrl+Enter: Enter then adds a line.</param>
     public static IReadOnlyList<KeyboardShortcutGroup> For(bool mac, bool sendWithModifier = false)
     {
-        KeyboardShortcut S(string action, Mod mods, string key, string? note = null) => new(action, Keys(mac, mods, key), note);
+        KeyboardShortcut S(string action, Mod mods, string key, string? note = null) => new(Loc.T(action), Keys(mac, mods, key), note is null ? null : Loc.T(note));
         var send = sendWithModifier ? Mod.Command : Mod.None;
         return
         [
-            new("General",
+            new(Loc.T("General"),
             [
                 S("New chat", Mod.Command, "N"),
                 S("Show or hide the sidebar", Mod.Command, "B"),
@@ -67,7 +69,7 @@ public static class KeyboardShortcuts
                 S("Terminal", Mod.Control, "`"),
                 S("Events (for bug reports)", Mod.None, "F12"),
             ]),
-            new("Message",
+            new(Loc.T("Message"),
             [
                 S("Send", send, "Enter"),
                 S("New line", sendWithModifier ? Mod.None : Mod.Shift, "Enter"),
@@ -79,12 +81,12 @@ public static class KeyboardShortcuts
                 S("Dictate", Mod.Command | Mod.Shift, "Space"),
                 S("Stop omp", Mod.None, "Esc"),
             ]),
-            new("Requests",
+            new(Loc.T("Requests"),
             [
                 S("Choose an answer", Mod.None, "1–9"),
                 S("Dismiss the request", Mod.None, "Esc", "when the request has focus"),
             ]),
-            new("Panels",
+            new(Loc.T("Panels"),
             [
                 // In the Views menu's order
                 S("Files", Mod.Command | Mod.Shift, "F"),

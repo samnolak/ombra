@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Styling;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 using OmpGui.Rpc;
 
@@ -39,7 +40,7 @@ public sealed partial class ModelItemViewModel(OmpModel model) : ObservableObjec
     public string Name => Kind switch
     {
         ModelRowKind.Family => Family,
-        ModelRowKind.Back => "All models",
+        ModelRowKind.Back => Loc.T("All models"),
         ModelRowKind.Provider => Model.Provider,
         _ => Model.Name,
     };
@@ -47,12 +48,12 @@ public sealed partial class ModelItemViewModel(OmpModel model) : ObservableObjec
     public string Provider => Model.Provider;
     public string Detail => Kind switch
     {
-        ModelRowKind.Family => string.Join(" · ", new[] { UnderProvider ? null : Model.Provider, $"{Versions} versions", $"newest {Model.Name}" }.Where(s => s is not null)),
+        ModelRowKind.Family => string.Join(" · ", new[] { UnderProvider ? null : Model.Provider, Loc.F("{0} versions", Versions), Loc.F("newest {0}", Model.Name) }.Where(s => s is not null)),
         ModelRowKind.Back => $"{Model.Provider} · {Family}",
         // A closed provider with the current model (IsCurrent) names it: the one to open
-        ModelRowKind.Provider => (Count == 1 ? "1 model" : $"{Count} models") + (IsCurrent ? $" · current {Model.Name}" : ""),
+        ModelRowKind.Provider => (Count == 1 ? Loc.T("1 model") : Loc.F("{0} models", Count)) + (IsCurrent ? " · " + Loc.F("current {0}", Model.Name) : ""),
         _ => string.Join(" · ", new[] { UnderProvider ? null : Model.Provider, ShowId ? Model.Id : null,
-            Model.ContextWindow > 0 ? $"{Model.ContextWindow / 1000:N0}k context" : null }.Where(s => s is not null)),
+            Model.ContextWindow > 0 ? Loc.F("{0:N0}k context", Model.ContextWindow / 1000) : null }.Where(s => s is not null)),
     };
     [ObservableProperty] private bool _isCurrent;
 
@@ -110,7 +111,7 @@ public sealed class LogoutAccountViewModel(LoginProviderViewModel owner, OmpLogo
     public LoginProviderViewModel Owner { get; } = owner;
     public OmpLogoutAccount Account { get; } = account;
     public string Label => Account.Label;
-    public string Detail => !Account.Active ? Account.Detail : Account.Detail.Length > 0 ? $"In use · {Account.Detail}" : "In use";
+    public string Detail => !Account.Active ? Account.Detail : Account.Detail.Length > 0 ? Loc.F("In use · {0}", Account.Detail) : Loc.T("In use");
 }
 
 /// <summary>Model and thinking level, approval mode, settings page, recovery.</summary>
@@ -120,9 +121,9 @@ public sealed partial class MainViewModel
     [
         // omp 18.2.0 tiers (tools/approval.ts): each mode auto-approves up to a tier and asks above it.
         // Named as Claude Code names its permission modes (Ask permissions, Accept edits, Bypass permissions)
-        new("always-ask", "Ask permissions", "omp reads on its own and asks before it edits a file or runs a command."),
-        new("write", "Accept edits", "omp reads and edits files on its own and asks before it runs a command. Recommended."),
-        new("yolo", "Bypass permissions", "omp runs every tool without asking, shell commands included. Only for trusted, sandboxed work."),
+        new("always-ask", Loc.T("Ask permissions"), Loc.T("omp reads on its own and asks before it edits a file or runs a command.")),
+        new("write", Loc.T("Accept edits"), Loc.T("omp reads and edits files on its own and asks before it runs a command. Recommended.")),
+        new("yolo", Loc.T("Bypass permissions"), Loc.T("omp runs every tool without asking, shell commands included. Only for trusted, sandboxed work.")),
     ];
 
     /// <summary>All of omp's thinking levels: the menu when omp cannot say which the model accepts (omp before 18.8.0).</summary>
@@ -173,7 +174,7 @@ public sealed partial class MainViewModel
     [ObservableProperty] private string _modelFilter = "";
     [ObservableProperty] private bool _isModelMenuOpen;
     [ObservableProperty] private bool _modelsLoading;
-    [ObservableProperty] private string _currentModel = "no model";
+    [ObservableProperty] private string _currentModel = Loc.T("no model");
     [ObservableProperty] private string? _selectedThinking;
     [ObservableProperty] private bool _showThinking = true;
 
@@ -188,10 +189,10 @@ public sealed partial class MainViewModel
 
     /// <summary>The mode the menu ticks: the one waiting for the run to end, else the current one.</summary>
     public string? ShownApprovalMode => PendingApprovalMode ?? ApprovalMode;
-    public string ApprovalLabel => ApprovalModes.FirstOrDefault(m => m.Mode == ShownApprovalMode)?.Label ?? "Default permissions";
+    public string ApprovalLabel => ApprovalModes.FirstOrDefault(m => m.Mode == ShownApprovalMode)?.Label ?? Loc.T("Default permissions");
     public bool IsYolo => ShownApprovalMode == "yolo";
     public bool IsAcceptEdits => ShownApprovalMode == "write";
-    public string? ApprovalPendingNote => PendingApprovalMode is null || !IsRunning ? null : "Takes effect when the current run ends (omp restarts).";
+    public string? ApprovalPendingNote => PendingApprovalMode is null || !IsRunning ? null : Loc.T("Takes effect when the current run ends (omp restarts).");
 
     /// <summary>"Bypass permissions" waits for an explicit second confirmation.</summary>
     [ObservableProperty] private bool _confirmYolo;
@@ -211,7 +212,7 @@ public sealed partial class MainViewModel
     private string _providersMessage = "";
     public bool HasProvidersMessage => ProvidersMessage.Length > 0;
 
-    public string SettingsPath => _settings?.Path ?? "(not saved: settings file unavailable)";
+    public string SettingsPath => _settings?.Path ?? Loc.T("(not saved: settings file unavailable)");
     public static IReadOnlyList<string> Themes => ["system", "light", "dark"];
 
     /// <summary>omp stopped (crash or failed start) and can be started again on the same session.</summary>
@@ -219,20 +220,20 @@ public sealed partial class MainViewModel
 
     public string RecoverTitle => StartProblem switch
     {
-        StartProblem.NotFound => "Install omp to get started",
-        StartProblem.NoModel => "Connect a model provider",
-        _ => _open.Last?.StartFailed == true ? "omp didn't start" : "omp stopped",
+        StartProblem.NotFound => Loc.T("Install omp to get started"),
+        StartProblem.NoModel => Loc.T("Connect a model provider"),
+        _ => _open.Last?.StartFailed == true ? Loc.T("omp didn't start") : Loc.T("omp stopped"),
     };
 
     public string RecoverHint => StartProblem switch
     {
         StartProblem.NotFound when ShowInstallRuntime => RuntimeOffer,
-        StartProblem.NotFound => "omp was not found on this computer. Set where it is in Settings → Advanced, then try again.",
+        StartProblem.NotFound => Loc.T("omp was not found on this computer. Set where it is in Settings → Advanced, then try again."),
         // omp's own setup opens on its provider step: Sign in with the keys (the terminal takes the keyboard)
-        StartProblem.NoModel => "omp needs an AI provider before it can work. Open omp's setup, choose Sign in and a provider (or add an API key), then try again.",
+        StartProblem.NoModel => Loc.T("omp needs an AI provider before it can work. Open omp's setup, choose Sign in and a provider (or add an API key), then try again."),
         _ => _open.Last?.StartFailed == true
-            ? "Check the omp command in Settings → Advanced, then try again. The error is under Show details."
-            : "It can pick this conversation up where it stopped.",
+            ? Loc.T("Check the omp command in Settings → Advanced, then try again. The error is under Show details.")
+            : Loc.T("It can pick this conversation up where it stopped."),
     };
 
     /// <summary>A new session that cannot start: the setup screen takes the page (no greeting, no message box).</summary>
@@ -252,7 +253,7 @@ public sealed partial class MainViewModel
 
     [ObservableProperty] private bool _isErrorDetailOpen;
 
-    public string RecoverLabel => _open.Last?.StartFailed == true ? "Try again" : "Restart omp";
+    public string RecoverLabel => _open.Last?.StartFailed == true ? Loc.T("Try again") : Loc.T("Restart omp");
 
     /// <summary>Getting started (omp not installed, no provider yet) is onboarding, not an error: the app mark, no warning.</summary>
     public bool IsOnboarding => StartProblem is StartProblem.NotFound or StartProblem.NoModel;
@@ -260,7 +261,7 @@ public sealed partial class MainViewModel
     /// <summary>"Try again" next to Install would retry what cannot work yet.</summary>
     public bool ShowRecoverButton => !ShowInstallRuntime;
 
-    public string RecoverSettingsLabel => StartProblem == StartProblem.NotFound ? "Use my own omp…" : "Settings";
+    public string RecoverSettingsLabel => StartProblem == StartProblem.NotFound ? Loc.T("Use my own omp…") : Loc.T("Settings");
 
     /// <summary>
     /// The notices the new-session page lists above its greeting: the rows while <see cref="ShowGreeting"/> (all notices
@@ -296,6 +297,53 @@ public sealed partial class MainViewModel
         if (_applyingThinking || value is null || value == _open.Last?.ThinkingLevel || Phase != SessionPhase.Ready) return;
         var open = _open;
         _ = open.Controller.SetThinkingLevelAsync(value, _cts.Token).ContinueWith(_ => PostToUi(() => ApplyIfShown(open)), TaskScheduler.Default);
+    }
+
+    // ───────────── Language (Localization/Loc.cs): set at start, so a change shows after a restart ─────────────
+
+    /// <summary>The languages to choose from: English, the built-in ones, the user's own files.</summary>
+    [ObservableProperty] private IReadOnlyList<Localization.LanguageInfo> _languages = [];
+    [ObservableProperty] private Localization.LanguageInfo? _settingsLanguage;
+    /// <summary>Said under the choice once it differs from the language shown.</summary>
+    [ObservableProperty] private string _languageNote = "";
+    private bool _loadingLanguages;
+
+    private void LoadLanguages(OmpRuntimeOptions o)
+    {
+        if (_settings is null) return;
+        _loadingLanguages = true;
+        Languages = Localization.Loc.Available(_settings.Path);
+        var code = Localization.Loc.Resolve(o.Language, _settings.Path);
+        SettingsLanguage = Languages.FirstOrDefault(l => l.Code.Equals(code, StringComparison.OrdinalIgnoreCase)) ?? Languages[0];
+        _loadingLanguages = false;
+        UpdateLanguageNote();
+    }
+
+    partial void OnSettingsLanguageChanged(Localization.LanguageInfo? value)
+    {
+        if (_loadingLanguages || value is null) return;
+        Persist(o => o with { Language = value.Code });
+        UpdateLanguageNote();
+    }
+
+    private void UpdateLanguageNote() =>
+        LanguageNote = SettingsLanguage is { } l && !l.Code.Equals(Localization.Loc.Current, StringComparison.OrdinalIgnoreCase)
+            ? Localization.Loc.T("The new language shows after the app is restarted.") : "";
+
+    /// <summary>Opens the folder for one's own languages, with <c>template.json</c> (every text, in English) to start from.</summary>
+    [RelayCommand]
+    private async Task OpenLanguagesFolderAsync()
+    {
+        if (_settings is null) return;
+        string folder;
+        try { folder = Localization.Loc.WriteTemplate(_settings.Path); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            SettingsMessage = e.Message;
+            return;
+        }
+        await Files.OpenFolderInFileManagerCommand.ExecuteAsync(folder);
+        LoadLanguages(LoadSettingsOrDefault());
     }
 
     partial void OnSettingsThemeChanged(string value)
@@ -569,8 +617,8 @@ public sealed partial class MainViewModel
             if (working == 0 || told) continue;
             told = true;
             ShowBrief(ApprovalModeIcons.IconKey(_chosenApprovalMode), ApprovalLabel,
-                working == 1 ? "A chat that is working (marked in the sidebar) switches when its run ends: omp restarts then."
-                    : $"{working} chats that are working (marked in the sidebar) switch when their runs end: omp restarts then.");
+                working == 1 ? Loc.T("A chat that is working (marked in the sidebar) switches when its run ends: omp restarts then.")
+                    : Loc.F("{0} chats that are working (marked in the sidebar) switch when their runs end: omp restarts then.", working));
         }
     }
 
@@ -594,6 +642,7 @@ public sealed partial class MainViewModel
             // Edits not saved yet stay as they were left (Back or Esc must not throw them away); else what is on disk
             if (!HasUnsavedRuntime) ShowSavedRuntime(o);
             SettingsTheme = o.Theme ?? "system";
+            LoadLanguages(o);
             NotificationsEnabled = o.Notifications ?? true;
             AgentUsesGuiBrowser = o.AgentUsesGuiBrowser ?? true;
             SettingsMessage = "";
@@ -659,7 +708,7 @@ public sealed partial class MainViewModel
             var accounts = await Session.GetLogoutAccountsAsync(p.Id, _cts.Token);
             p.Accounts = [.. accounts.Select(a => new LogoutAccountViewModel(p, a))];
             p.SignOutNote = accounts.Count > 0 ? ""
-                : $"omp has no stored sign-in for {p.Name}: it comes from an API key in the environment or omp's settings. Remove that key to sign out.";
+                : Loc.F("omp has no stored sign-in for {0}: it comes from an API key in the environment or omp's settings. Remove that key to sign out.", p.Name);
         }
         catch (Exception e) when (e is RpcCommandException or TimeoutException or RpcConnectionClosedException or OmpNotRunningException)
         {
@@ -691,8 +740,8 @@ public sealed partial class MainViewModel
             ApplyIfShown(open);
             await LoadLoginProvidersAsync();
             ProvidersMessage = remaining is null
-                ? $"Signed out of {p.Name} ({a.Label})."
-                : $"Signed out of {p.Name} ({a.Label}). omp still signs in to it with {remaining}.";
+                ? Loc.F("Signed out of {0} ({1}).", p.Name, a.Label)
+                : Loc.F("Signed out of {0} ({1}). omp still signs in to it with {2}.", p.Name, a.Label, remaining);
             _ = ProviderUsage.LoadAsync(force: true);
             // Without any sign-in left the provider is no longer added: omp stops contacting it from its next start
             if (remaining is null) _ = RestartOmpToApplyAsync();
@@ -711,8 +760,8 @@ public sealed partial class MainViewModel
     /// <summary>An omp without sign-out over RPC (18.2.0 had none): its terminal's <c>/logout</c> still works.</summary>
     private static string SignOutFailure(Exception e) =>
         e is RpcCommandException { Error: var error } && error.StartsWith("Unknown command", StringComparison.Ordinal)
-            ? "This omp can't sign out from here. Use /logout in omp's terminal."
-            : e is RpcCommandException r ? "Could not sign out: " + r.Error : "Could not sign out: " + e.Message;
+            ? Loc.T("This omp can't sign out from here. Use /logout in omp's terminal.")
+            : Loc.F("Could not sign out: {0}", e is RpcCommandException r ? r.Error : e.Message);
 
     /// <summary>Saves the runtime fields and restarts every chat's omp with them (one that is working once its run ends).</summary>
     [RelayCommand]
@@ -731,11 +780,11 @@ public sealed partial class MainViewModel
                 return;
             ShowSavedRuntime(LoadSettingsOrDefault());
             RefreshRuntimeStatus();
-            SettingsMessage = "Saved. Restarting omp…";
+            SettingsMessage = Loc.T("Saved. Restarting omp…");
             if (!await RestartAllSessionsAsync())
-                SettingsMessage = "Saved. omp is replying: it restarts with the new settings when the reply ends.";
+                SettingsMessage = Loc.T("Saved. omp is replying: it restarts with the new settings when the reply ends.");
             else
-                SettingsMessage = Phase == SessionPhase.Ready ? "Saved. omp restarted with the new settings." : "Saved, but omp did not start: see the conversation for the error.";
+                SettingsMessage = Phase == SessionPhase.Ready ? Loc.T("Saved. omp restarted with the new settings.") : Loc.T("Saved, but omp did not start: see the conversation for the error.");
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested)
         {
@@ -801,7 +850,7 @@ public sealed partial class MainViewModel
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            SettingsMessage = "Settings not saved: " + e.Message;
+            SettingsMessage = Loc.F("Settings not saved: {0}", e.Message);
             return false;
         }
     }
@@ -820,7 +869,7 @@ public sealed partial class MainViewModel
     /// <summary>Header state from a snapshot; called from Apply.</summary>
     private void ApplyModelInfo(SessionSnapshot s)
     {
-        CurrentModel = s.Model ?? "no model";
+        CurrentModel = s.Model ?? Loc.T("no model");
         ApprovalMode = s.ApprovalMode;
         _applyingThinking = true;
         SelectedThinking = s.ThinkingLevel is { } t && ThinkingOptions.Contains(t) ? t : null;
@@ -873,7 +922,7 @@ public sealed partial class MainViewModel
             try { store.Update(o => o.WorkingDirectory is null ? o with { LastWorkingDirectory = cwd } : o); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
             {
-                PostToUi(() => SettingsMessage = "Settings not saved: " + e.Message);
+                PostToUi(() => SettingsMessage = Loc.F("Settings not saved: {0}", e.Message));
             }
         });
     }

@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 
 namespace OmpGui.App.ViewModels;
 
@@ -77,7 +78,7 @@ public abstract partial class WorkspacePageViewModel : ObservableObject
     protected void SavedForNextStart(string? note = null)
     {
         NeedsRestart = true;
-        Say(note ?? "Saved.");
+        Say(note ?? Loc.T("Saved."));
     }
 
     /// <summary>Reads the page's data again (git, gh, omp's settings and builtins).</summary>
@@ -94,11 +95,11 @@ public abstract partial class WorkspacePageViewModel : ObservableObject
     {
         if (!await Main.RestartOmpToApplyAsync())
         {
-            Say("omp is replying: it restarts with the new settings when the reply ends.");
+            Say(Loc.T("omp is replying: it restarts with the new settings when the reply ends."));
             return;
         }
         NeedsRestart = false;
-        Say("omp restarted with the new settings.");
+        Say(Loc.T("omp restarted with the new settings."));
         if (Main.CanRunOmpCommands) await LoadAsync(); // else the page reloads when omp reports it is ready
     }
 }

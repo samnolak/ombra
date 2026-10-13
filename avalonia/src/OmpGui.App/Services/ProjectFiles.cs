@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.Services;
@@ -369,13 +370,13 @@ public sealed class GitSnapshot
 
     public static string Describe(GitMark m) => m switch
     {
-        GitMark.Modified => "Modified (not committed)",
-        GitMark.Added => "Added to git (not committed)",
-        GitMark.Untracked => "New file (not in git yet)",
-        GitMark.Deleted => "Deleted (not committed)",
-        GitMark.Renamed => "Renamed (not committed)",
-        GitMark.Conflicted => "Merge conflict",
-        GitMark.Ignored => "Ignored by .gitignore",
+        GitMark.Modified => Loc.T("Modified (not committed)"),
+        GitMark.Added => Loc.T("Added to git (not committed)"),
+        GitMark.Untracked => Loc.T("New file (not in git yet)"),
+        GitMark.Deleted => Loc.T("Deleted (not committed)"),
+        GitMark.Renamed => Loc.T("Renamed (not committed)"),
+        GitMark.Conflicted => Loc.T("Merge conflict"),
+        GitMark.Ignored => Loc.T("Ignored by .gitignore"),
         _ => "",
     };
 }

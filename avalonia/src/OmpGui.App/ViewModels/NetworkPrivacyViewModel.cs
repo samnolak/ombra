@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -36,9 +37,8 @@ public sealed partial class NetworkPrivacyViewModel : ObservableObject
     }
 
     /// <summary>What omp does that no setting stops (UPSTREAM OMP ISSUE: docs/upstream/omp-discovery-opt-in.md).</summary>
-    public const string CatalogLimitation =
-        "Known limitation: omp downloads its public model catalog from catalog.stencil.so (a copy of models.dev) in the background. "
-        + "The request carries no keys and no chat content, and omp has no setting that turns it off. Strict network privacy blocks it.";
+    public static string CatalogLimitation =>
+        Loc.T("Known limitation: omp downloads its public model catalog from catalog.stencil.so (a copy of models.dev) in the background. The request carries no keys and no chat content, and omp has no setting that turns it off. Strict network privacy blocks it.");
 
     // ── State ──
 
@@ -57,10 +57,10 @@ public sealed partial class NetworkPrivacyViewModel : ObservableObject
     private bool _isStrict;
 
     public string StrictStatus => IsStrict
-        ? "On: omp and the tools it runs reach only the addresses below. Anything else is refused and listed here."
-        : "Off: omp reaches the providers you added, and whatever its tools and your connectors need.";
+        ? Loc.T("On: omp and the tools it runs reach only the addresses below. Anything else is refused and listed here.")
+        : Loc.T("Off: omp reaches the providers you added, and whatever its tools and your connectors need.");
 
-    public string StrictButtonLabel => IsStrict ? "Turn off" : "Turn on strict network privacy";
+    public string StrictButtonLabel => IsStrict ? Loc.T("Turn off") : Loc.T("Turn on strict network privacy");
 
     public ObservableCollection<PrivacyProviderRow> Providers { get; } = [];
 
@@ -105,7 +105,7 @@ public sealed partial class NetworkPrivacyViewModel : ObservableObject
     {
         if (_main.Privacy is not { } privacy)
         {
-            GateText = "The app checks which providers you added each time omp starts.";
+            GateText = Loc.T("The app checks which providers you added each time omp starts.");
             return;
         }
         GateWarning = privacy.GateUnavailable ?? "";
@@ -113,10 +113,10 @@ public sealed partial class NetworkPrivacyViewModel : ObservableObject
         {
             var off = gate.Disabled.Count;
             GateText = gate.Added.Count == 0
-                ? $"No provider is added, so omp contacts none: all {off} providers it knows, local model servers included, are off for omp. Sign in under Model providers to add one."
-                : $"omp may contact only the providers you added: {string.Join(", ", gate.Added)}. The other {off} providers it knows, local model servers included, are off for omp until you add them.";
+                ? Loc.F("No provider is added, so omp contacts none: all {0} providers it knows, local model servers included, are off for omp. Sign in under Model providers to add one.", off)
+                : Loc.F("omp may contact only the providers you added: {0}. The other {1} providers it knows, local model servers included, are off for omp until you add them.", string.Join(", ", gate.Added), off);
         }
-        else GateText = "The app checks which providers you added each time omp starts.";
+        else GateText = Loc.T("The app checks which providers you added each time omp starts.");
         Replace(Providers, privacy.AddedProviderHosts().Select(p => new PrivacyProviderRow(p.Key, string.Join(", ", p.Value.Api), string.Join(", ", p.Value.SignIn))));
         var blocked = privacy.Blocked;
         Replace(Blocked, blocked.Select(b => new PrivacyBlockedRow(b.Host, $"{b.Host}:{b.Port} · {b.At.ToLocalTime():HH:mm}")));
@@ -142,11 +142,11 @@ public sealed partial class NetworkPrivacyViewModel : ObservableObject
         {
             if (!Save(o => o with { StrictNetworkPrivacy = on ? true : null })) return;
             IsStrict = on;
-            Say((on ? "Strict network privacy is on." : "Strict network privacy is off.") + " Restarting omp…");
+            Say((on ? Loc.T("Strict network privacy is on.") : Loc.T("Strict network privacy is off.")) + Loc.T(" Restarting omp…"));
             await _main.RestartEnginesAsync();
-            Say((on ? "Strict network privacy is on" : "Strict network privacy is off")
-                + (_main.PendingEngineRestarts == 0 ? " for every chat." : "; chats that are working switch when their run ends.")
-                + (_main.OpenOmpTerminals > 0 ? " omp terminal tabs already open keep the previous setting." : ""));
+            Say((on ? Loc.T("Strict network privacy is on") : Loc.T("Strict network privacy is off"))
+                + (_main.PendingEngineRestarts == 0 ? Loc.T(" for every chat.") : Loc.T("; chats that are working switch when their run ends."))
+                + (_main.OpenOmpTerminals > 0 ? Loc.T(" omp terminal tabs already open keep the previous setting.") : ""));
         }
         finally
         {
@@ -172,7 +172,7 @@ public sealed partial class NetworkPrivacyViewModel : ObservableObject
         {
             Replace(UserHosts, hosts);
             _main.Privacy?.SetUserHosts(hosts);
-            Say($"{host} is no longer allowed.");
+            Say(Loc.F("{0} is no longer allowed.", host));
         }
     }
 
@@ -180,12 +180,12 @@ public sealed partial class NetworkPrivacyViewModel : ObservableObject
     {
         if (!HostAllowlist.IsValidEntry(host))
         {
-            Say("Type an address such as pypi.org or *.example.com (no https://, path or port).", error: true);
+            Say(Loc.T("Type an address such as pypi.org or *.example.com (no https://, path or port)."), error: true);
             return;
         }
         if (UserHosts.Contains(host, StringComparer.OrdinalIgnoreCase))
         {
-            Say($"{host} is already allowed.");
+            Say(Loc.F("{0} is already allowed.", host));
             return;
         }
         var hosts = UserHosts.Append(host).ToList();
@@ -193,14 +193,14 @@ public sealed partial class NetworkPrivacyViewModel : ObservableObject
         Replace(UserHosts, hosts);
         _main.Privacy?.SetUserHosts(hosts);
         NewHost = "";
-        Say($"{host} is allowed from now on.");
+        Say(Loc.F("{0} is allowed from now on.", host));
     }
 
     private bool Save(Func<OmpRuntimeOptions, OmpRuntimeOptions> change)
     {
         if (_main.SettingsStore is not { } store)
         {
-            Say("Settings not saved: this window has no settings file.", error: true);
+            Say(Loc.T("Settings not saved: this window has no settings file."), error: true);
             return false;
         }
         try
@@ -210,7 +210,7 @@ public sealed partial class NetworkPrivacyViewModel : ObservableObject
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            Say("Settings not saved: " + e.Message, error: true);
+            Say(Loc.T("Settings not saved: ") + e.Message, error: true);
             return false;
         }
     }

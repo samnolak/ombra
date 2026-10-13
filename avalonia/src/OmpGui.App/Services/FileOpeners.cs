@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using OmpGui.App.Localization;
 
 namespace OmpGui.App.Services;
 
@@ -8,7 +9,7 @@ public sealed record EditorApp(string Name, string Executable, EditorApp.Style S
     /// <summary>How the editor takes a line: VS Code and its forks <c>-g file:line</c>, others <c>file:line</c>.</summary>
     public enum Style { Goto, Suffix }
 
-    public string Label => "Open in " + Name;
+    public string Label => Loc.F("Open in {0}", Name);
 
     /// <summary>The command that opens <paramref name="path"/> (a file at <paramref name="line"/>, or a folder).</summary>
     public ProcessStartInfo Open(string path, int? line = null)
@@ -79,7 +80,7 @@ public static class FileOpeners
 
     /// <summary>What the file manager is called here ("Finder", "Explorer", "file manager").</summary>
     public static string FileManagerName =>
-        OperatingSystem.IsMacOS() ? "Finder" : OperatingSystem.IsWindows() ? "Explorer" : "file manager";
+        OperatingSystem.IsMacOS() ? "Finder" : OperatingSystem.IsWindows() ? "Explorer" : Loc.T("file manager");
 
     /// <summary>Opens <paramref name="path"/> (file or folder) with the app the system uses for it.</summary>
     public static ProcessStartInfo OpenWithSystem(string path)

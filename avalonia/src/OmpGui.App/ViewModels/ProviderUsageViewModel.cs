@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -108,17 +109,17 @@ public sealed partial class ProviderUsageViewModel : ObservableObject
             var name = ProviderUsage.ProviderName(report.Provider);
             var meters = report.Limits.Select(l => new UsageMeterViewModel(ProviderUsage.DisplayLabel(l, name), l.UsedFraction, ProviderUsage.Amount(l),
                 l.ResetsAt is { } at ? ProviderUsage.ResetsIn(at, now, l.ResetVerb) : "", l.Status == "exhausted")).ToList();
-            var plan = report.Plan is { Length: > 0 } p ? CultureInfo.InvariantCulture.TextInfo.ToTitleCase(p) + " plan" : "";
+            var plan = report.Plan is { Length: > 0 } p ? Loc.F("{0} plan", CultureInfo.InvariantCulture.TextInfo.ToTitleCase(p)) : "";
             var account = string.Join(" · ", new[] { report.Account ?? "", plan }.Where(s => s.Length > 0));
             Groups.Add(new ProviderUsageGroupViewModel(report.Provider, name, account, meters));
         }
         HasGroups = Groups.Count > 0;
         var oldest = _reports.Select(r => r.FetchedAt).OfType<DateTimeOffset>().DefaultIfEmpty(now).Min();
-        Note = HasGroups && now - oldest >= TimeSpan.FromMinutes(1) ? $"Updated {Age(now - oldest)} ago" : "";
+        Note = HasGroups && now - oldest >= TimeSpan.FromMinutes(1) ? Loc.F("Updated {0} ago", Age(now - oldest)) : "";
         Updated?.Invoke();
     }
 
-    private static string Age(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours}h" : $"{(int)t.TotalMinutes}m";
+    private static string Age(TimeSpan t) => t.TotalHours >= 1 ? Loc.F("{0}h", (int)t.TotalHours) : Loc.F("{0}m", (int)t.TotalMinutes);
 }
 
 public partial class MainViewModel

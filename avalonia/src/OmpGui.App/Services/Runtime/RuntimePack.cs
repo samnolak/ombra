@@ -4,6 +4,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.Services.Runtime;
@@ -202,12 +203,12 @@ public sealed class RuntimeInstaller
     public async Task<InstalledRuntime> InstallAsync(IProgress<RuntimeInstallProgress>? progress, CancellationToken ct)
     {
         if (Platform is null || !_builds.TryGetValue(Platform, out var build))
-            throw new NotSupportedException($"No pinned Bun {RuntimePack.BunVersion} build for this platform ({Platform ?? "unknown"}).");
+            throw new NotSupportedException(Loc.F("No pinned Bun {0} build for this platform ({1}).", RuntimePack.BunVersion, Platform ?? Loc.T("unknown")));
         Directory.CreateDirectory(Root);
         // One install at a time per root (two windows, or the app and --self-test): the other one says so.
         FileStream installLock;
         try { installLock = new FileStream(Path.Combine(Root, ".install.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
-        catch (IOException) { throw new IOException("Another installation of the omp runtime is running; try again when it has finished."); }
+        catch (IOException) { throw new IOException(Loc.T("Another installation of the omp runtime is running; try again when it has finished.")); }
         using var _ = installLock;
         // Leftovers of an earlier attempt that could not be removed then (a file still in use on Windows) — only
         // folders this installer made (they carry its marker; the root may be a folder the user shares with other things).
@@ -223,7 +224,7 @@ public sealed class RuntimeInstaller
             var layout = Layout(staging, Platform)!;
             await DownloadBunAsync(build, layout.Bun, progress, ct).ConfigureAwait(false);
 
-            progress?.Report(new RuntimeInstallProgress($"Installing omp {RuntimePack.OmpVersion} from the pinned lockfile"));
+            progress?.Report(new RuntimeInstallProgress(Loc.F("Installing omp {0} from the pinned lockfile", RuntimePack.OmpVersion)));
             var ompDir = Path.Combine(staging, "omp");
             Directory.CreateDirectory(ompDir);
             foreach (var name in RuntimePack.PackFiles)
@@ -244,7 +245,7 @@ public sealed class RuntimeInstaller
                 throw new IOException($"bun install failed (exit {result.ExitCode}):\n{Tail(result.Output, 12)}");
             TryDelete(cache);
 
-            progress?.Report(new RuntimeInstallProgress("Checking omp"));
+            progress?.Report(new RuntimeInstallProgress(Loc.T("Checking omp")));
             var version = new ProcessStartInfo(layout.Bun) { WorkingDirectory = ompDir };
             foreach (var a in new[] { "--no-install", layout.Cli, "--version" }) version.ArgumentList.Add(a);
             // Running omp fills Bun's transpiler cache: in the pack (it moves with it), never in ~/.bun.
@@ -284,7 +285,7 @@ public sealed class RuntimeInstaller
                 throw;
             }
             if (old is not null) TryDelete(old);
-            progress?.Report(new RuntimeInstallProgress("Installed"));
+            progress?.Report(new RuntimeInstallProgress(Loc.T("Installed")));
             return Layout(TargetDirectory, Platform)!;
         }
         finally
@@ -295,7 +296,7 @@ public sealed class RuntimeInstaller
 
     private async Task DownloadBunAsync(BunBuild build, string exePath, IProgress<RuntimeInstallProgress>? progress, CancellationToken ct)
     {
-        var stage = $"Downloading Bun {RuntimePack.BunVersion}";
+        var stage = Loc.F("Downloading Bun {0}", RuntimePack.BunVersion);
         progress?.Report(new RuntimeInstallProgress(stage));
         if (!build.Integrity.StartsWith("sha512-", StringComparison.Ordinal)) throw new InvalidDataException("only sha512 integrities are accepted");
         var expected = Convert.FromBase64String(build.Integrity["sha512-".Length..]);
@@ -331,7 +332,7 @@ public sealed class RuntimeInstaller
         }
         catch (Exception e) when (e is OperationCanceledException or IOException && stall.IsCancellationRequested && !ct.IsCancellationRequested)
         {
-            throw new TimeoutException($"The download stalled (no data for {StallTimeout.TotalSeconds:0} s). Check the connection and try again.");
+            throw new TimeoutException(Loc.F("The download stalled (no data for {0:0} s). Check the connection and try again.", StallTimeout.TotalSeconds));
         }
 
         // Only the verified tarball is opened, and only the Bun executable is taken out of it.

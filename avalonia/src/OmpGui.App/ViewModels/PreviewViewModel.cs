@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
 using Avalonia.Threading;
@@ -183,8 +184,8 @@ public sealed partial class PreviewViewModel : ObservableObject
     public bool ShowEmptyState => IsEmpty;
     /// <summary>With a server found already, the empty page points at it instead of asking for one.</summary>
     public string EmptyText => HasSuggestions
-        ? "Open the address found above, or type one"
-        : "Start a dev server and its address shows up here";
+        ? Loc.T("Open the address found above, or type one")
+        : Loc.T("Start a dev server and its address shows up here");
     public bool ShowSuggestionRow => IsEmpty && HasSuggestions;
     public bool ShowFallback => HasPage && IsEngineUnavailable;
     /// <summary>
@@ -199,10 +200,10 @@ public sealed partial class PreviewViewModel : ObservableObject
     public bool ShowWebView => HasPage && !IsEngineUnavailable && !Dialogs.CoversPage && !IsCrashed && LoadError is null && PageUnderPopup is null;
     public bool ShowCrashPage => HasPage && !IsEngineUnavailable && IsCrashed;
     public bool ShowErrorPage => HasPage && !IsEngineUnavailable && !IsCrashed && LoadError is not null;
-    public string FallbackText => $"The embedded browser needs {EngineName} on this system";
+    public string FallbackText => Loc.F("The embedded browser needs {0} on this system", EngineName);
 
     /// <summary>The error page's title: a certificate problem, or a page that could not be opened.</summary>
-    public string ErrorTitle => LoadError?.IsCertificateError == true ? "This connection isn't private" : "The page couldn't be opened";
+    public string ErrorTitle => LoadError?.IsCertificateError == true ? Loc.T("This connection isn't private") : Loc.T("The page couldn't be opened");
 
     /// <summary>The engine's reason and the address that failed.</summary>
     public string ErrorDetail => LoadError is not { } f ? ""
@@ -645,7 +646,7 @@ public sealed partial class PreviewViewModel : ObservableObject
         var s = text.Trim();
         if (s.Length == 0)
         {
-            error = "Type an address, such as localhost:3000.";
+            error = Loc.T("Type an address, such as localhost:3000.");
             return false;
         }
         if (!s.Contains("://", StringComparison.Ordinal))
@@ -655,18 +656,18 @@ public sealed partial class PreviewViewModel : ObservableObject
                 s = (IsLocalHost(m.Groups["host"].Value.Trim('[', ']')) ? "http://" : "https://") + s;
             else if (SchemeRegex().IsMatch(s))
             {
-                error = $"Only http and https pages open in the preview (not \"{s.Split(':')[0]}:\").";
+                error = Loc.F("Only http and https pages open in the preview (not \"{0}:\").", s.Split(':')[0]);
                 return false;
             }
         }
         if (!Uri.TryCreate(s, UriKind.Absolute, out var parsed) || (parsed.Scheme is "http" or "https" && parsed.Host.Length == 0))
         {
-            error = "That is not a web address.";
+            error = Loc.T("That is not a web address.");
             return false;
         }
         if (!IsAllowed(parsed))
         {
-            error = $"Only http and https pages open in the preview (not \"{parsed.Scheme}:\").";
+            error = Loc.F("Only http and https pages open in the preview (not \"{0}:\").", parsed.Scheme);
             return false;
         }
         uri = ForBrowser(parsed);
@@ -746,7 +747,7 @@ public sealed partial class PreviewViewModel : ObservableObject
             tab.Url = uri;
             tab.Address = Display(uri!);
         }
-        tab.Message = success ? "" : $"{(uri is null ? "The page" : Display(uri))} did not load. Is the server running?";
+        tab.Message = success ? "" : Loc.F("{0} did not load. Is the server running?", uri is null ? Loc.T("The page") : Display(uri));
     }
 
     /// <summary>The web view started loading <paramref name="uri"/> (also for links clicked in the page).</summary>
@@ -780,7 +781,7 @@ public sealed partial class PreviewViewModel : ObservableObject
             LoadError = null;
             IsCrashed = false;
         }
-        Message = success ? "" : $"{(uri is null ? "The page" : Display(uri))} did not load. Is the server running?";
+        Message = success ? "" : Loc.F("{0} did not load. Is the server running?", uri is null ? Loc.T("The page") : Display(uri));
     }
 
     /// <summary>

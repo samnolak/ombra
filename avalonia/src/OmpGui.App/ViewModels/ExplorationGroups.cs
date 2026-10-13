@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -39,7 +40,7 @@ public sealed partial class ExplorationGroupRowViewModel : RowViewModel
         Steps = [.. span.OfType<ToolRowViewModel>()];
         var running = Steps.LastOrDefault(s => s.IsRunning);
         IsRunning = running is not null;
-        Verb = IsRunning ? "Exploring" : "Explored";
+        Verb = IsRunning ? Loc.T("Exploring") : Loc.T("Explored");
         Summary = running is not null ? $"{running.Verb} {running.ArgText}".Trim() : Counts(Steps);
         OnPropertyChanged(nameof(IsDone));
     }
@@ -52,10 +53,10 @@ public sealed partial class ExplorationGroupRowViewModel : RowViewModel
         var listings = steps.Count(s => s.Name == "ls");
         var lookups = steps.Count(s => s.Name == "lsp");
         var parts = new List<string>(4);
-        if (files > 0) parts.Add(files == 1 ? "1 file" : $"{files} files");
-        if (searches > 0) parts.Add(searches == 1 ? "1 search" : $"{searches} searches");
-        if (listings > 0) parts.Add(listings == 1 ? "1 listing" : $"{listings} listings");
-        if (lookups > 0) parts.Add(lookups == 1 ? "1 lookup" : $"{lookups} lookups");
+        if (files > 0) parts.Add(files == 1 ? Loc.T("1 file") : Loc.F("{0} files", files));
+        if (searches > 0) parts.Add(searches == 1 ? Loc.T("1 search") : Loc.F("{0} searches", searches));
+        if (listings > 0) parts.Add(listings == 1 ? Loc.T("1 listing") : Loc.F("{0} listings", listings));
+        if (lookups > 0) parts.Add(lookups == 1 ? Loc.T("1 lookup") : Loc.F("{0} lookups", lookups));
         return string.Join(", ", parts);
     }
 

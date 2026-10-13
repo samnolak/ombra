@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 
 namespace OmpGui.App.ViewModels;
 
@@ -18,8 +19,8 @@ public sealed partial class MainViewModel
         var tabs = liveTerminals switch
         {
             0 => "",
-            1 => "the shell in the terminal tab",
-            _ => $"the shells in {liveTerminals} terminal tabs",
+            1 => Loc.T("the shell in the terminal tab"),
+            _ => Loc.F("the shells in {0} terminal tabs", liveTerminals),
         };
         var working = WorkingSessions(); // MainViewModel.OpenSessions.cs
         var running = working.Count(w => w.Snapshot.Dialogs.Count == 0);
@@ -28,27 +29,30 @@ public sealed partial class MainViewModel
         {
             var what = (running, asking) switch
             {
-                (0, _) => $"cancels the requests omp waits on in {asking} chats",
-                (_, 0) => $"stops the runs in {running} chats",
-                _ => $"stops the runs in {Chats(running)} and cancels the requests omp waits on in {Chats(asking)}",
+                (0, _) => Loc.F("cancels the requests omp waits on in {0} chats", asking),
+                (_, 0) => Loc.F("stops the runs in {0} chats", running),
+                _ => Loc.F("stops the runs {0} and cancels the requests omp waits on {1}", Chats(running), Chats(asking)),
             };
-            return new($"omp is working in {working.Count} chats", "Quitting " + what + (tabs.Length > 0 ? $", and ends {tabs}." : "."));
+            return new(Loc.F("omp is working in {0} chats", working.Count),
+                tabs.Length > 0 ? Loc.F("Quitting {0}, and ends {1}.", what, tabs) : Loc.F("Quitting {0}.", what));
         }
         if (working.Count == 1)
         {
             var (open, s) = working[0];
             // In the background: which chat, since it is not on screen
-            var where = open == _open ? "" : $" in “{ChatTitle(s)}”";
+            var title = s.Dialogs.Count == 0
+                ? open == _open ? Loc.T("omp is still working") : Loc.F("omp is still working in “{0}”", ChatTitle(s))
+                : open == _open ? Loc.T("omp is waiting for your answer") : Loc.F("omp is waiting for your answer in “{0}”", ChatTitle(s));
             if (s.Dialogs.Count == 0)
-                return new("omp is still working" + where, "Quitting stops the current run" + (tabs.Length > 0 ? $" and ends {tabs}." : "."));
-            return new("omp is waiting for your answer" + where, "Quitting cancels its request and stops omp" + (tabs.Length > 0 ? $", and ends {tabs}." : "."));
+                return new(title, tabs.Length > 0 ? Loc.F("Quitting stops the current run and ends {0}.", tabs) : Loc.T("Quitting stops the current run."));
+            return new(title, tabs.Length > 0 ? Loc.F("Quitting cancels its request and stops omp, and ends {0}.", tabs) : Loc.T("Quitting cancels its request and stops omp."));
         }
         if (liveTerminals > 0)
-            return new(liveTerminals == 1 ? "A terminal tab is still running" : $"{liveTerminals} terminal tabs are still running",
-                $"Quitting ends {tabs} and whatever runs there.");
+            return new(liveTerminals == 1 ? Loc.T("A terminal tab is still running") : Loc.F("{0} terminal tabs are still running", liveTerminals),
+                Loc.F("Quitting ends {0} and whatever runs there.", tabs));
         return null;
 
-        static string Chats(int n) => n == 1 ? "one chat" : $"{n} chats";
+        static string Chats(int n) => n == 1 ? Loc.T("in one chat") : Loc.F("in {0} chats", n);
     }
 
     /// <summary>
@@ -75,8 +79,8 @@ public sealed partial class MainViewModel
             if (previous is not null) SessionCard = previous;
             else CloseSessionCard();
         });
-        card.Primary = new SessionCardAction("Quit", new RelayCommand(quit));
-        card.Secondary = new SessionCardAction("Keep working", keep);
+        card.Primary = new SessionCardAction(Loc.T("Quit"), new RelayCommand(quit));
+        card.Secondary = new SessionCardAction(Loc.T("Keep working"), keep);
         card.DismissCommand = keep;
         ShowCard(card);
     }

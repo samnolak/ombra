@@ -1,7 +1,8 @@
 <!-- The session card above the message box: what a session action will do (and the one field it may need), that it
      runs, and what came of it, with the next step as buttons (SessionCardViewModel). Also the answer to a command that
      runs only in omp's terminal. -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:OmpGui.App.Localization"
+             xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
@@ -18,7 +19,7 @@
         </Border>
         <TextBlock Grid.Column="1" Classes="card-title" Text="{Binding Title}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="12,0,8,0" />
         <Button Grid.Column="2" Classes="icon" Width="26" Height="26" VerticalAlignment="Center" Command="{Binding DismissCommand}"
-                ToolTip.Tip="Close (a running action goes on in omp)" AutomationProperties.Name="Close">
+                ToolTip.Tip="{loc:T 'Close (a running action goes on in omp)'}" AutomationProperties.Name="{loc:T 'Close'}">
           <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
         </Button>
       </Grid>
@@ -42,11 +43,11 @@
                   <TextBlock Classes="tertiary" Text="{Binding Path}" TextTrimming="PrefixCharacterEllipsis" />
                 </StackPanel>
                 <Border Grid.Column="2" Classes="tag" IsVisible="{Binding IsWorkingDirectory}" VerticalAlignment="Center" Margin="8,0,0,0">
-                  <TextBlock Text="project" FontSize="11" FontWeight="Medium" />
+                  <TextBlock Text="{loc:T 'project'}" FontSize="11" FontWeight="Medium" />
                 </Border>
                 <Button Grid.Column="2" Classes="icon" Width="28" Height="28" Command="{Binding Remove}" IsVisible="{Binding CanRemove}"
-                        VerticalAlignment="Center" Margin="8,0,0,0" ToolTip.Tip="Take this folder out of the workspace (the files stay)"
-                        AutomationProperties.Name="{Binding Name, StringFormat='Remove {0} from the workspace'}">
+                        VerticalAlignment="Center" Margin="8,0,0,0" ToolTip.Tip="{loc:T 'Take this folder out of the workspace (the files stay)'}"
+                        AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Remove {0} from the workspace'}}">
                   <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
                 </Button>
               </Grid>

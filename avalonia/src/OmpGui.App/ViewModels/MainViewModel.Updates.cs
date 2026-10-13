@@ -1,6 +1,7 @@
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.App.Services;
 using OmpGui.ClientCore;
 
@@ -67,16 +68,16 @@ public sealed partial class MainViewModel
 
     public bool CanInstallUpdates => UpdateInstaller is not null;
 
-    public string UpdateActionLabel => UpdateInstaller is null ? "Download and verify" : "Download and install";
+    public string UpdateActionLabel => UpdateInstaller is null ? Loc.T("Download and verify") : Loc.T("Download and install");
 
     public string UpdateHowText => UpdateInstaller is null
-        ? $"This copy cannot replace itself ({UpdateInstallUnavailable ?? "not a package"}): a new version is downloaded to your Downloads folder, checked against the release's signed list, and you replace the app yourself. Settings, sessions and omp stay where they are."
-        : "A new version is downloaded, checked against the release's signed list and replaces this app when you restart or quit it — by itself when automatic updates are on, otherwise when you choose to. The version before stays next to the app until the next update. Settings, sessions and omp stay where they are.";
+        ? Loc.F("This copy cannot replace itself ({0}): a new version is downloaded to your Downloads folder, checked against the release's signed list, and you replace the app yourself. Settings, sessions and omp stay where they are.", UpdateInstallUnavailable ?? Loc.T("not a package"))
+        : Loc.T("A new version is downloaded, checked against the release's signed list and replaces this app when you restart or quit it — by itself when automatic updates are on, otherwise when you choose to. The version before stays next to the app until the next update. Settings, sessions and omp stay where they are.");
 
     /// <summary>The sidebar notice: an update to install or restart into, or how the last one went.</summary>
-    public string UpdatePill => IsInstallingRuntime && _ompTransition is { } t ? $"Updating omp to {t}…"
-        : UpdateReady ? $"Restart to update to {_stagedUpdate?.Version}"
-        : UpdateAvailable ? $"Update available: {_updateCheck?.Latest}"
+    public string UpdatePill => IsInstallingRuntime && _ompTransition is { } t ? Loc.F("Updating omp to {0}…", t)
+        : UpdateReady ? Loc.F("Restart to update to {0}", _stagedUpdate?.Version)
+        : UpdateAvailable ? Loc.F("Update available: {0}", _updateCheck?.Latest)
         : UpdateOutcome ?? "";
 
     public bool ShowUpdatePill => UpdatePill.Length > 0;
@@ -96,13 +97,13 @@ public sealed partial class MainViewModel
             {
                 if (last.Ok && Updates is { } u && last.To == u.Current)
                 {
-                    UpdateOutcome = $"Updated to {last.To}";
-                    UpdateText = $"Updated from {last.From} to {last.To}. The version before is kept in {last.Previous} until the next update.";
+                    UpdateOutcome = Loc.F("Updated to {0}", last.To);
+                    UpdateText = Loc.F("Updated from {0} to {1}. The version before is kept in {2} until the next update.", last.From, last.To, last.Previous);
                 }
                 else if (!last.Ok)
                 {
-                    UpdateOutcome = "Update not installed";
-                    UpdateText = $"The update to {last.To} was not installed: {last.Error}. Details: {Path.Combine(installer.StateDirectory, "apply.log")}";
+                    UpdateOutcome = Loc.T("Update not installed");
+                    UpdateText = Loc.F("The update to {0} was not installed: {1}. Details: {2}", last.To, last.Error, Path.Combine(installer.StateDirectory, "apply.log"));
                 }
             }
         }
@@ -130,7 +131,7 @@ public sealed partial class MainViewModel
     }
 
     /// <summary>Not while an update waits for the restart: it would only offer the same version again.</summary>
-    private const string AutoCheckFailed = "The automatic check at";
+    private static string AutoCheckFailed => Loc.T("The automatic check at");
 
     private bool CanCheckForUpdates() => Updates is not null && !IsUpdateBusy && !UpdateReady;
 
@@ -148,7 +149,7 @@ public sealed partial class MainViewModel
         {
             UpdateAvailable = false;
             DownloadedUpdate = null;
-            UpdateText = "Checking…";
+            UpdateText = Loc.T("Checking…");
         }
         try
         {
@@ -157,7 +158,7 @@ public sealed partial class MainViewModel
             UpdateAvailable = result.Available && !UpdateReady;
             UpdateNotes = result.Available ? result.Notes ?? "" : "";
             UpdateOmpText = result.Available && result.BringsNewOmp && result.Runtime is { } rt
-                ? $"This version moves omp to {rt.Omp} (Bun {rt.Bun}). After the restart it installs by itself (about 1.3 GB, verified like the first install); until then omp {Services.Runtime.RuntimePack.OmpVersion} keeps working."
+                ? Loc.F("This version moves omp to {0} (Bun {1}). After the restart it installs by itself (about 1.3 GB, verified like the first install); until then omp {2} keeps working.", rt.Omp, rt.Bun, Services.Runtime.RuntimePack.OmpVersion)
                 : "";
             // A quiet check that finds nothing keeps what the page said (for example "Updated to …").
             if (!quiet || result.Available) UpdateText = result.Message;
@@ -167,8 +168,8 @@ public sealed partial class MainViewModel
         catch (Exception e) when (e is HttpRequestException or InvalidDataException or System.Text.Json.JsonException or TaskCanceledException or TimeoutException)
         {
             UpdateText = quiet
-                ? (had.Length > 0 ? had + "\n" : "") + $"{AutoCheckFailed} {DateTime.Now:t} failed: {e.Message}"
-                : "Could not check for updates: " + e.Message;
+                ? (had.Length > 0 ? had + "\n" : "") + $"{AutoCheckFailed} {DateTime.Now:t} " + Loc.F("failed: {0}", e.Message)
+                : Loc.F("Could not check for updates: {0}", e.Message);
         }
         finally
         {
@@ -188,31 +189,31 @@ public sealed partial class MainViewModel
         var progress = new Progress<(long Done, long Total)>(p =>
         {
             UpdatePercent = p.Total > 0 ? 100.0 * p.Done / p.Total : 0;
-            UpdateText = string.Create(CultureInfo.InvariantCulture, $"Downloading {asset.File}: {p.Done / 1_000_000.0:0} / {p.Total / 1_000_000.0:0} MB");
+            UpdateText = string.Format(CultureInfo.InvariantCulture, Loc.T("Downloading {0}: {1:0} / {2:0} MB"), asset.File, p.Done / 1_000_000.0, p.Total / 1_000_000.0);
         });
         try
         {
             if (UpdateInstaller is { } installer)
             {
                 var package = await updates.DownloadAsync(asset, installer.StateDirectory, progress, _cts.Token);
-                UpdateText = $"Verified. Unpacking {version} next to the app…";
+                UpdateText = Loc.F("Verified. Unpacking {0} next to the app…", version);
                 _stagedUpdate = await installer.StageAsync(package, version, _cts.Token);
                 UpdateAvailable = false;
                 UpdateReady = true;
-                UpdateText = $"Version {version} is ready. It replaces this version when you restart OMP GUI, or when you quit it.";
+                UpdateText = Loc.F("Version {0} is ready. It replaces this version when you restart OMP GUI, or when you quit it.", version);
             }
             else
             {
                 DownloadedUpdate = await updates.DownloadAsync(asset, UpdateDownloadFolder, progress, _cts.Token);
-                UpdateText = $"Downloaded and verified (SHA-256 matches the release): {DownloadedUpdate}\n" +
-                             "Close OMP GUI and replace the app with this package. Your settings and sessions are kept.";
+                UpdateText = Loc.F("Downloaded and verified (SHA-256 matches the release): {0}", DownloadedUpdate) + "\n" +
+                             Loc.T("Close OMP GUI and replace the app with this package. Your settings and sessions are kept.");
             }
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
         catch (Exception e) when (e is HttpRequestException or InvalidDataException or IOException or UnauthorizedAccessException
                                    or TaskCanceledException or TimeoutException or System.ComponentModel.Win32Exception)
         {
-            UpdateText = (UpdateInstaller is null ? "Download failed, nothing was kept: " : "The update was not installed, nothing was changed: ") + e.Message;
+            UpdateText = UpdateInstaller is null ? Loc.F("Download failed, nothing was kept: {0}", e.Message) : Loc.F("The update was not installed, nothing was changed: {0}", e.Message);
         }
         finally
         {
@@ -231,8 +232,8 @@ public sealed partial class MainViewModel
     {
         if (WorkingSessions().Count > 0)
         {
-            UpdateText = IsRunning ? "Stop the current run first: restarting ends it."
-                : "omp is working in another chat (marked in the sidebar): restarting ends its run, so stop it first.";
+            UpdateText = IsRunning ? Loc.T("Stop the current run first: restarting ends it.")
+                : Loc.T("omp is working in another chat (marked in the sidebar): restarting ends its run, so stop it first.");
             return;
         }
         if (!ApplyUpdate(relaunch: true)) return;
@@ -252,7 +253,7 @@ public sealed partial class MainViewModel
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            UpdateText = "The update could not be started: " + e.Message;
+            UpdateText = Loc.F("The update could not be started: {0}", e.Message);
             return false;
         }
     }

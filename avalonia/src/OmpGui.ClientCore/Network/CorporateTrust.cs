@@ -84,17 +84,9 @@ public static class CorporateTrust
     }
 }
 
-/// <summary>One variable the user set: in the app's settings environment (a null value: removed for omp) or inherited.</summary>
-public sealed record UserCaSetting(string Variable, string? Value, bool InAppSettings)
-{
-    /// <summary>"NODE_USE_SYSTEM_CA=0 (in your environment)": for the settings page only, never for logs.</summary>
-    public string Describe() =>
-        (Variable == CorporateTrust.NodeOptionsVariable ? $"NODE_OPTIONS contains {Value}"
-            : Value is null ? Variable + " is removed"
-            : Variable == CorporateTrust.ExtraCaVariable ? Variable + " is set"
-            : $"{Variable}={Value}")
-        + (InAppSettings ? " (in the app's settings environment)" : " (in the environment the app was started with)");
-}
+/// <summary>One variable the user set: in the app's settings environment (a null value: removed for omp) or inherited.
+/// The settings page words it in the app's language (NetworkTrustViewModel.Describe).</summary>
+public sealed record UserCaSetting(string Variable, string? Value, bool InAppSettings);
 
 /// <summary>The user's own CA-trust variables, as <see cref="CorporateTrust.Inspect"/> found them.</summary>
 public sealed record UserTrustSettings(UserCaSetting? SystemCa, UserCaSetting? NodeOptionsFlag, UserCaSetting? ExtraCa)

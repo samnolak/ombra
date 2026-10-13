@@ -1,6 +1,7 @@
 <!-- Settings › Advanced › Network: corporate network certificates (NetworkTrustViewModel, ClientCore/Network/CorporateTrust)
      and a connection check that sends one request without a key. -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:OmpGui.App.Localization"
+        xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:OmpGui.App.ViewModels"
              xmlns:ctl="using:OmpGui.App.Controls"
@@ -9,19 +10,19 @@
   <Panel DataContext="{Binding NetworkTrust}">
     <Border x:Name="NetworkCard" Classes="section-card" x:DataType="vm:NetworkTrustViewModel">
       <StackPanel Spacing="12">
-        <TextBlock Classes="section" Text="Network" />
+        <TextBlock Classes="section" Text="{loc:T 'Network'}" />
 
         <!-- Corporate network certificates -->
         <Grid ColumnDefinitions="*,Auto">
           <StackPanel Spacing="2" Margin="0,0,16,0" VerticalAlignment="Center">
-            <TextBlock Classes="ws-title" Text="Corporate network certificates" />
+            <TextBlock Classes="ws-title" Text="{loc:T 'Corporate network certificates'}" />
             <TextBlock Classes="muted" TextWrapping="Wrap"
-                       Text="For networks that inspect HTTPS traffic, where omp fails with SELF_SIGNED_CERT_IN_CHAIN or “unable to get local issuer certificate”. Nothing changes until you set it up." />
+                       Text="{loc:T 'For networks that inspect HTTPS traffic, where omp fails with SELF_SIGNED_CERT_IN_CHAIN or “unable to get local issuer certificate”. Nothing changes until you set it up.'}" />
           </StackPanel>
           <Border Grid.Column="1" Classes="status done" IsVisible="{Binding IsOn}" VerticalAlignment="Center">
             <StackPanel Orientation="Horizontal" Spacing="6">
               <Ellipse />
-              <TextBlock Text="On" />
+              <TextBlock Text="{loc:T 'On'}" />
             </StackPanel>
           </Border>
         </Grid>
@@ -30,7 +31,7 @@
                    IsVisible="{Binding HasUserSettingsText}" />
         <WrapPanel ItemSpacing="8" LineSpacing="8" IsVisible="{Binding !IsExplaining}">
           <Button x:Name="NetworkTrustSetUp" Classes="md" Classes.accent="{Binding !IsOn}" Content="{Binding SetUpLabel}" Command="{Binding BeginSetupCommand}" />
-          <Button x:Name="NetworkTrustTurnOff" Classes="md flat" Content="Turn off" Command="{Binding TurnOffCommand}" IsVisible="{Binding IsOn}" />
+          <Button x:Name="NetworkTrustTurnOff" Classes="md flat" Content="{loc:T 'Turn off'}" Command="{Binding TurnOffCommand}" IsVisible="{Binding IsOn}" />
         </WrapPanel>
 
         <!-- What changes, before anything does -->
@@ -39,26 +40,26 @@
             <TextBlock Classes="ws-title" Text="{Binding ExplainTitle}" TextWrapping="Wrap" />
             <StackPanel Spacing="6" IsVisible="{Binding IsExplainingSystem}">
               <TextBlock TextWrapping="Wrap" FontSize="13"
-                         Text="• omp's engine will trust the certificate authorities that macOS trusts: those in your Keychain, with their trust settings. macOS evaluates them; nothing is copied or read by the app." />
+                         Text="{loc:T '• omp’s engine will trust the certificate authorities that macOS trusts: those in your Keychain, with their trust settings. macOS evaluates them; nothing is copied or read by the app.'}" />
             </StackPanel>
             <StackPanel Spacing="6" IsVisible="{Binding IsExplainingPem}">
               <TextBlock TextWrapping="Wrap" FontSize="13"
-                         Text="• omp's engine will also trust the certificate authorities in a file you choose (PEM, .crt or .cer, from your IT department). The app checks it first: certificate authorities only, no private keys, not expired." />
+                         Text="{loc:T '• omp’s engine will also trust the certificate authorities in a file you choose (PEM, .crt or .cer, from your IT department). The app checks it first: certificate authorities only, no private keys, not expired.'}" />
               <TextBlock TextWrapping="Wrap" FontSize="13"
-                         Text="• The app keeps its own copy, readable only by you, and points NODE_EXTRA_CA_CERTS at it. Your file is not changed." />
+                         Text="{loc:T '• The app keeps its own copy, readable only by you, and points NODE_EXTRA_CA_CERTS at it. Your file is not changed.'}" />
             </StackPanel>
-            <TextBlock TextWrapping="Wrap" FontSize="13" Text="• Certificate checks stay on: only connections signed by a trusted authority are accepted." />
+            <TextBlock TextWrapping="Wrap" FontSize="13" Text="{loc:T '• Certificate checks stay on: only connections signed by a trusted authority are accepted.'}" />
             <TextBlock TextWrapping="Wrap" FontSize="13"
-                       Text="• Applies to omp's HTTPS connections and to the Bun and Node.js programs omp starts (they inherit its environment): every chat, and omp terminal tabs opened from now on." />
-            <TextBlock TextWrapping="Wrap" FontSize="13" Text="• Unchanged: the system's trust store, VPN, proxies and network routes." />
+                       Text="{loc:T '• Applies to omp’s HTTPS connections and to the Bun and Node.js programs omp starts (they inherit its environment): every chat, and omp terminal tabs opened from now on.'}" />
+            <TextBlock TextWrapping="Wrap" FontSize="13" Text="{loc:T '• Unchanged: the system’s trust store, VPN, proxies and network routes.'}" />
             <TextBlock TextWrapping="Wrap" FontSize="13"
-                       Text="• Not covered: the built-in browser, and tools with their own network stack, such as curl, git or Python." />
+                       Text="{loc:T '• Not covered: the built-in browser, and tools with their own network stack, such as curl, git or Python.'}" />
             <TextBlock TextWrapping="Wrap" FontSize="13" Classes="muted"
-                       Text="Open chats restart omp to use it: idle ones now, working ones when their run ends." />
+                       Text="{loc:T 'Open chats restart omp to use it: idle ones now, working ones when their run ends.'}" />
 
             <!-- The file: chosen, then checked locally -->
             <StackPanel Spacing="8" IsVisible="{Binding IsExplainingPem}">
-              <Button x:Name="NetworkTrustChooseFile" Classes="md" Content="Choose file…" Command="{Binding ChooseFileCommand}" HorizontalAlignment="Left" />
+              <Button x:Name="NetworkTrustChooseFile" Classes="md" Content="{loc:T 'Choose file…'}" Command="{Binding ChooseFileCommand}" HorizontalAlignment="Left" />
               <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasChosenFile}">
                 <Panel Margin="0,1,8,0" VerticalAlignment="Top">
                   <ctl:Icon Classes="ok-mark" Data="{StaticResource IconCheckCircle}" Size="16" IsVisible="{Binding ChosenFileOk}" />
@@ -72,11 +73,11 @@
               <TextBlock x:Name="NetworkTrustBlocker" Text="{Binding Blocker}" TextWrapping="Wrap" FontSize="13" />
             </Border>
             <WrapPanel ItemSpacing="8" LineSpacing="8">
-              <Button x:Name="NetworkTrustEnable" Classes="md accent" Content="Enable" Command="{Binding EnableCommand}" IsEnabled="{Binding CanEnable}" />
-              <Button Classes="md flat" Content="Cancel" Command="{Binding CancelCommand}" />
-              <Button x:Name="NetworkTrustUseFile" Classes="md flat" Content="Use a certificate file instead…" Command="{Binding UseFileInsteadCommand}"
+              <Button x:Name="NetworkTrustEnable" Classes="md accent" Content="{loc:T 'Enable'}" Command="{Binding EnableCommand}" IsEnabled="{Binding CanEnable}" />
+              <Button Classes="md flat" Content="{loc:T 'Cancel'}" Command="{Binding CancelCommand}" />
+              <Button x:Name="NetworkTrustUseFile" Classes="md flat" Content="{loc:T 'Use a certificate file instead…'}" Command="{Binding UseFileInsteadCommand}"
                       IsVisible="{Binding IsExplainingSystem}" />
-              <Button Classes="md flat" Content="Use macOS certificates instead" Command="{Binding UseSystemInsteadCommand}">
+              <Button Classes="md flat" Content="{loc:T 'Use macOS certificates instead'}" Command="{Binding UseSystemInsteadCommand}">
                 <Button.IsVisible>
                   <MultiBinding Converter="{x:Static BoolConverters.And}">
                     <Binding Path="IsExplainingPem" />
@@ -99,9 +100,9 @@
 
         <!-- Connection check: separate, says what it sends -->
         <StackPanel Spacing="2">
-          <TextBlock Classes="ws-title" Text="Connection check" />
+          <TextBlock Classes="ws-title" Text="{loc:T 'Connection check'}" />
           <TextBlock Classes="muted" TextWrapping="Wrap"
-                     Text="Sends one request without a key, with the same runtime and settings as omp, and says whether HTTPS gets through." />
+                     Text="{loc:T 'Sends one request without a key, with the same runtime and settings as omp, and says whether HTTPS gets through.'}" />
         </StackPanel>
         <ItemsControl x:Name="NetworkCheckTargets" ItemsSource="{Binding CheckTargets}">
           <ItemsControl.ItemsPanel>

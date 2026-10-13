@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -39,11 +40,11 @@ public sealed partial class MainViewModel
     public bool ShowSidebar => !IsSettingsOpen && (IsNarrow ? SidebarShownWhileNarrow : IsSidebarVisible);
 
     // Shortcuts as the platform writes them (⌘ on macOS, Ctrl elsewhere), for tooltips and the sidebar's hints.
-    public static string HideSidebarTip { get; } = $"Hide sidebar ({CommandKey("B")})";
-    public static string ShowSidebarTip { get; } = $"Show sidebar ({CommandKey("B")})";
+    public static string HideSidebarTip { get; } = Loc.F("Hide sidebar ({0})", CommandKey("B"));
+    public static string ShowSidebarTip { get; } = Loc.F("Show sidebar ({0})", CommandKey("B"));
     public static string NewChatShortcut { get; } = CommandKey("N");
     public static string SettingsShortcut { get; } = CommandKey(",");
-    public static string SettingsTip { get; } = $"Settings ({SettingsShortcut})";
+    public static string SettingsTip { get; } = Loc.F("Settings ({0})", SettingsShortcut);
 
     private static string CommandKey(string key) => OperatingSystem.IsMacOS() ? "⌘" + key : "Ctrl+" + key;
 
@@ -133,7 +134,7 @@ public sealed partial class MainViewModel
     [RelayCommand]
     private async Task NewSessionInProjectAsync(SessionGroupViewModel? group)
     {
-        if (group is null || group.IsPinnedGroup) return;
+        if (group is null) return;
         if (group.IsChatsGroup) await NewChatAsync(); // MainViewModel.Chats.cs
         else if (group.IsCurrentProject) await NewSessionHereAsync();
         else await OpenProjectAsync(group.Cwd);
@@ -187,7 +188,7 @@ public sealed partial class MainViewModel
         SessionTitle = s.SessionName is { Length: > 0 } n ? n
             : firstUser is { Length: > 0 } u ? SessionCatalogTitle(u)
             : IsProjectless ? UntitledChat : UntitledSession;
-        ProjectName = IsProjectless ? "" : SessionItemViewModel.ProjectName(s.Cwd);
+        ProjectName = IsProjectless ? "" : ProjectDisplayName(s.Cwd) ?? SessionItemViewModel.ProjectName(s.Cwd);
         var projectChanged = ProjectPath != (s.Cwd ?? "");
         ProjectPath = s.Cwd ?? "";
         // The window has started once its first omp is ready: the spare for the next new chat follows (MainViewModel.Chats.cs)
@@ -203,9 +204,11 @@ public sealed partial class MainViewModel
     }
 
     /// <summary>What the header and the sidebar call a session nothing was said in yet.</summary>
-    private const string UntitledSession = "New session", UntitledChat = "New chat";
+    private static string UntitledSession => Loc.T("New session");
+    private static string UntitledChat => Loc.T("New chat");
 
-    private static bool IsUntitled(string title) => title is UntitledSession or UntitledChat;
+    /// <summary>Also the English names: the session catalog (ClientCore) calls an untitled session "New session".</summary>
+    private static bool IsUntitled(string title) => title == UntitledSession || title == UntitledChat || title is "New session" or "New chat";
 
     /// <summary>
     /// The shown chat's session file: the one it is switching to, else the one its omp reports, else the one it was
@@ -395,11 +398,12 @@ public sealed partial class MainViewModel
     private string? LiveTitleFor(SessionItemViewModel item) =>
         item.IsCurrent && !IsUntitled(SessionTitle) && SessionTitle != item.Model.Title ? SessionTitle : null;
 
-    private SessionGroupViewModel? _pinnedGroup;
     private SessionGroupViewModel? _chatsGroup;
 
-    /// <summary>Groups the listed sessions: pinned ones first, then the chats outside any project, then by project. The
-    /// groups and their rows that stay are kept (see <see cref="Reconcile{T}"/>), so a refresh changes only what moved.</summary>
+    /// <summary>Groups the listed sessions: pinned projects first (in the order they were pinned), then the chats outside
+    /// any project, then the other projects by their newest message. A pinned session stays in its own group, at its top
+    /// (<see cref="Sessions"/> lists pinned ones first). The groups and their rows that stay are kept (see
+    /// <see cref="Reconcile{T}"/>), so a refresh changes only what moved.</summary>
     private void RebuildSessionGroups()
     {
         var project = _open.Last?.Cwd ?? ProjectPath;
@@ -409,19 +413,19 @@ public sealed partial class MainViewModel
             if (g.IsProject) known[g.Cwd] = g;
         SessionGroupViewModel GroupFor(string cwd)
         {
-            if (!known.Remove(cwd, out var group)) return NewGroup(cwd, project);
+            if (!known.Remove(cwd, out var group)) group = NewGroup(cwd, project);
             group.IsCurrentProject = SessionCatalog.PathComparer.Equals(cwd, project);
+            group.IsPinned = PinnedIndex(cwd) >= 0;
+            group.Name = ProjectDisplayName(cwd) is { Length: > 0 } n ? n : group.FolderName;
             return group;
         }
         var groups = new List<(SessionGroupViewModel Group, List<SessionItemViewModel> Items, DateTimeOffset Newest)>();
-        var pinned = new List<SessionItemViewModel>();
         var chats = new List<SessionItemViewModel>();
         foreach (var item in Sessions)
         {
-            // A chat outside any project goes under Chats; pinned sessions are listed once, under Pinned
             if (Chats.Contains(item.Cwd))
             {
-                (item.IsPinned ? pinned : chats).Add(item);
+                chats.Add(item);
                 continue;
             }
             // A removed project stays out of the list, the open chat's too (it had stayed until the app restarted)
@@ -429,31 +433,31 @@ public sealed partial class MainViewModel
             var i = groups.FindIndex(x => SessionCatalog.PathComparer.Equals(x.Group.Cwd, item.Cwd));
             if (i < 0) groups.Add((GroupFor(item.Cwd), [], item.Model.LastMessageAt));
             else if (item.Model.LastMessageAt > groups[i].Newest) groups[i] = groups[i] with { Newest = item.Model.LastMessageAt };
-            if (item.IsPinned) pinned.Add(item);
-            else groups[i < 0 ? ^1 : i].Items.Add(item);
+            groups[i < 0 ? ^1 : i].Items.Add(item);
         }
         foreach (var g in groups) Reconcile(g.Group.Items, g.Items);
-        // By the newest message in each; a project whose sessions are all pinned keeps its header only while it is open
-        // or was added from the sidebar (its "+" stays in reach). Folders added from the sidebar that have no session
-        // yet go first, as just added.
-        var ordered = groups.Where(g => g.Items.Count > 0 || (g.Group.IsCurrentProject && !hidden.Contains(g.Group.Cwd)) || added.Contains(g.Group.Cwd, SessionCatalog.PathComparer))
-            .OrderByDescending(g => g.Newest).Select(g => g.Group).ToList();
+        var ordered = groups.OrderByDescending(g => g.Newest).Select(g => g.Group).ToList();
         if (SessionFilter.Trim().Length == 0)
-            foreach (var p in added)
+        {
+            // Folders added from the sidebar that have no session yet go first, as just added; pinned ones are listed
+            // even without a session
+            foreach (var p in added.Concat(_pinnedProjects!))
                 if (!hidden.Contains(p) && !ordered.Any(g => SessionCatalog.PathComparer.Equals(g.Cwd, p)))
                 {
                     var group = GroupFor(p);
                     Reconcile(group.Items, []);
                     ordered.Insert(0, group);
                 }
+        }
         // Chats keep their place under the top button that makes them; the group stays while one is shown, for its "+"
         _chatsGroup ??= new SessionGroupViewModel(Chats.Root, false, isChatsGroup: true) { NewSessionCommand = NewChatCommand };
         _chatsGroup.IsCurrentProject = IsProjectless;
         Reconcile(_chatsGroup.Items, chats);
         if (chats.Count > 0 || (IsProjectless && SessionFilter.Trim().Length == 0)) ordered.Insert(0, _chatsGroup);
-        _pinnedGroup ??= new SessionGroupViewModel("", false, isPinnedGroup: true);
-        Reconcile(_pinnedGroup.Items, pinned);
-        if (pinned.Count > 0) ordered.Insert(0, _pinnedGroup);
+        // Pinned projects above everything, in the order they were pinned
+        var pinnedGroups = ordered.Where(g => g.IsProject && g.IsPinned).OrderBy(g => PinnedIndex(g.Cwd)).ToList();
+        ordered.RemoveAll(g => g.IsProject && g.IsPinned);
+        ordered.InsertRange(0, pinnedGroups);
         Reconcile(SessionGroups, ordered);
         OnPropertyChanged(nameof(ShowNoSessionMatch));
     }
@@ -464,16 +468,21 @@ public sealed partial class MainViewModel
             NewSessionCommand = NewSessionInProjectCommand,
             RemoveCommand = RemoveProjectCommand,
             CopyPathCommand = CopyProjectPathCommand,
+            TogglePinCommand = TogglePinProjectCommand,
+            RevealCommand = RevealProjectCommand,
+            RenameCommand = RenameProjectCommand,
         };
 
-    // ───────────── Projects added to / removed from the sidebar (the client's settings file) ─────────────
+    // ───────────── Projects added, removed, pinned and named in the sidebar (the client's settings file) ─────────────
 
     private List<string>? _addedProjects;
     private HashSet<string>? _hiddenProjects;
+    private List<string>? _pinnedProjects;
+    private Dictionary<string, string>? _projectNames;
 
     private (List<string> Added, HashSet<string> Hidden) ProjectPrefs()
     {
-        if (_addedProjects is null || _hiddenProjects is null)
+        if (_addedProjects is null || _hiddenProjects is null || _pinnedProjects is null || _projectNames is null)
         {
             OmpRuntimeOptions? o = null;
             try { o = _settings?.Load(); }
@@ -483,8 +492,24 @@ public sealed partial class MainViewModel
             }
             _addedProjects = [.. o?.SidebarProjects ?? []];
             _hiddenProjects = new HashSet<string>(o?.HiddenProjects ?? [], SessionCatalog.PathComparer);
+            _pinnedProjects = [.. o?.PinnedProjects ?? []];
+            _projectNames = new Dictionary<string, string>(o?.ProjectNames ?? [], SessionCatalog.PathComparer);
         }
         return (_addedProjects, _hiddenProjects);
+    }
+
+    private int PinnedIndex(string cwd)
+    {
+        ProjectPrefs();
+        return _pinnedProjects!.FindIndex(p => SessionCatalog.PathComparer.Equals(p, cwd));
+    }
+
+    /// <summary>The name the user gave the project folder in the sidebar, if any.</summary>
+    private string? ProjectDisplayName(string? cwd)
+    {
+        if (string.IsNullOrEmpty(cwd)) return null;
+        ProjectPrefs();
+        return _projectNames!.GetValueOrDefault(Path.TrimEndingDirectorySeparator(cwd));
     }
 
     private void SaveProjectPrefs()
@@ -492,8 +517,43 @@ public sealed partial class MainViewModel
         var (added, hidden) = ProjectPrefs();
         string[]? addedOut = added.Count > 0 ? [.. added] : null;
         string[]? hiddenOut = hidden.Count > 0 ? [.. hidden.Order(StringComparer.Ordinal)] : null;
-        Persist(o => o with { SidebarProjects = addedOut, HiddenProjects = hiddenOut });
+        string[]? pinnedOut = _pinnedProjects!.Count > 0 ? [.. _pinnedProjects] : null;
+        Dictionary<string, string>? namesOut = _projectNames!.Count > 0 ? new(_projectNames, StringComparer.Ordinal) : null;
+        Persist(o => o with { SidebarProjects = addedOut, HiddenProjects = hiddenOut, PinnedProjects = pinnedOut, ProjectNames = namesOut });
         RebuildSessionGroups();
+        if (!IsProjectless) ProjectName = ProjectDisplayName(ProjectPath) ?? SessionItemViewModel.ProjectName(ProjectPath);
+    }
+
+    /// <summary>Group header: pin the project to the top of the sidebar, or unpin it.</summary>
+    [RelayCommand]
+    private void TogglePinProject(SessionGroupViewModel? group)
+    {
+        if (group is not { IsProject: true }) return;
+        var at = PinnedIndex(group.Cwd);
+        if (at >= 0) _pinnedProjects!.RemoveAt(at);
+        else _pinnedProjects!.Add(Path.TrimEndingDirectorySeparator(group.Cwd));
+        SaveProjectPrefs();
+    }
+
+    /// <summary>Group header: the name the sidebar and the header show for the project (the folder is not renamed); an
+    /// empty name or the folder's own goes back to the folder's name.</summary>
+    [RelayCommand]
+    private void RenameProject((SessionGroupViewModel Group, string Name) arg)
+    {
+        var (group, name) = arg;
+        if (group is not { IsProject: true }) return;
+        ProjectPrefs();
+        var key = Path.TrimEndingDirectorySeparator(group.Cwd);
+        if (name.Length == 0 || name == group.FolderName) _projectNames!.Remove(key);
+        else _projectNames![key] = name;
+        SaveProjectPrefs();
+    }
+
+    /// <summary>Group header: the project's folder in Finder / Explorer / the file manager.</summary>
+    [RelayCommand]
+    private async Task RevealProjectAsync(SessionGroupViewModel? group)
+    {
+        if (group is { IsProject: true }) await Files.OpenFolderInFileManagerCommand.ExecuteAsync(group.Cwd);
     }
 
     /// <summary>Sidebar header: pick a folder and list it as a project (its sessions, or an empty group with its
@@ -524,21 +584,21 @@ public sealed partial class MainViewModel
             HideProject(group);
             return;
         }
-        var card = new SessionCardViewModel("delete", "IconFolder", $"Remove “{group.Name}”?",
-            (chats.Count == 1 ? "It has 1 chat." : $"It has {chats.Count} chats.")
-            + " Remove it from the sidebar and keep the chats on disk, or delete the chats too (their files and artifacts; this cannot be undone). The folder itself is never deleted.")
+        var card = new SessionCardViewModel("delete", "IconFolder", Loc.F("Remove “{0}”?", group.Name),
+            (chats.Count == 1 ? Loc.T("It has 1 chat.") : Loc.F("It has {0} chats.", chats.Count))
+            + " " + Loc.T("Remove it from the sidebar and keep the chats on disk, or delete the chats too (their files and artifacts; this cannot be undone). The folder itself is never deleted."))
         {
             Detail = group.Cwd,
             State = SessionCardState.Ask,
         };
-        card.Primary = new SessionCardAction("Remove from sidebar", new RelayCommand(() =>
+        card.Primary = new SessionCardAction(Loc.T("Remove from sidebar"), new RelayCommand(() =>
         {
             CloseSessionCard();
             HideProject(group);
         }));
-        card.Tertiary = new SessionCardAction(chats.Count == 1 ? "Delete the chat too" : $"Delete {chats.Count} chats too",
+        card.Tertiary = new SessionCardAction(chats.Count == 1 ? Loc.T("Delete the chat too") : Loc.F("Delete {0} chats too", chats.Count),
             new AsyncRelayCommand(() => DeleteProjectChatsAsync(card, group, chats)));
-        card.Secondary = new SessionCardAction("Cancel", new RelayCommand(CloseSessionCard));
+        card.Secondary = new SessionCardAction(Loc.T("Cancel"), new RelayCommand(CloseSessionCard));
         ShowCard(card);
     }
 
@@ -546,7 +606,7 @@ public sealed partial class MainViewModel
     private async Task DeleteProjectChatsAsync(SessionCardViewModel card, SessionGroupViewModel group, List<SessionItemViewModel> chats)
     {
         card.State = SessionCardState.Running;
-        card.Message = "Deleting…";
+        card.Message = Loc.T("Deleting…");
         card.Primary = card.Secondary = card.Tertiary = null;
         var failed = new List<string>();
         foreach (var chat in chats)
@@ -562,8 +622,8 @@ public sealed partial class MainViewModel
         RequestCatalogRefresh();
         HideProject(group, announce: false);
         if (failed.Count > 0)
-            card.Finish(false, "Some chats were not deleted", string.Join("\n", failed), secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
-        else ShowBrief("IconTrash", $"“{group.Name}” removed", chats.Count == 1 ? "1 chat deleted" : $"{chats.Count} chats deleted");
+            card.Finish(false, Loc.T("Some chats were not deleted"), string.Join("\n", failed), secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
+        else ShowBrief("IconTrash", Loc.F("“{0}” removed", group.Name), chats.Count == 1 ? Loc.T("1 chat deleted") : Loc.F("{0} chats deleted", chats.Count));
     }
 
     /// <summary>Only the client's list changes (nothing on disk), so it is done at once, with Undo on the card that says so.</summary>
@@ -575,9 +635,9 @@ public sealed partial class MainViewModel
         hidden.Add(group.Cwd);
         SaveProjectPrefs();
         if (!announce) return;
-        var card = new SessionCardViewModel("brief", "IconFolder", $"“{group.Name}” removed from the sidebar",
-            "Nothing was deleted: add the folder again to list its sessions.");
-        card.Primary = new SessionCardAction("Undo", new RelayCommand(() =>
+        var card = new SessionCardViewModel("brief", "IconFolder", Loc.F("“{0}” removed from the sidebar", group.Name),
+            Loc.T("Nothing was deleted: add the folder again to list its sessions."));
+        card.Primary = new SessionCardAction(Loc.T("Undo"), new RelayCommand(() =>
         {
             var (a, h) = ProjectPrefs();
             h.Remove(group.Cwd);
@@ -598,7 +658,7 @@ public sealed partial class MainViewModel
     {
         if (group is not { IsProject: true }) return;
         CopyTextRequested?.Invoke(group.Cwd);
-        ShowBrief("IconCopy", "Project path copied", "", group.Cwd);
+        ShowBrief("IconCopy", Loc.T("Project path copied"), "", group.Cwd);
     }
 
     // ───────────── Row menu: rename, pin, copy path; cycling with Ctrl+Tab ─────────────
@@ -615,7 +675,7 @@ public sealed partial class MainViewModel
             if (_open.Last?.SessionFile != item.Model.Path) return;
         }
         if (StartRenameCommand.CanExecute(null)) StartRenameCommand.Execute(null);
-        else ShowBrief("IconPencil", "Not now", "Rename the session once omp has finished the current run.");
+        else ShowBrief("IconPencil", Loc.T("Not now"), Loc.T("Rename the session once omp has finished the current run."));
     }
 
     /// <summary>Pin or unpin in omp's own pin list, so omp's session picker agrees.</summary>
@@ -634,7 +694,7 @@ public sealed partial class MainViewModel
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            ShowBrief("IconPin", pin ? "Not pinned" : "Not unpinned", e.Message);
+            ShowBrief("IconPin", pin ? Loc.T("Not pinned") : Loc.T("Not unpinned"), e.Message);
             return;
         }
         if (item.Model.Path == _open.Last?.SessionFile) IsSessionPinned = pin;
@@ -647,7 +707,7 @@ public sealed partial class MainViewModel
     {
         if (item is null) return;
         CopyTextRequested?.Invoke(item.Model.Path);
-        ShowBrief("IconCopy", "Session file path copied", "omp keeps the whole conversation in this file (JSON lines).", item.Model.Path);
+        ShowBrief("IconCopy", Loc.T("Session file path copied"), Loc.T("omp keeps the whole conversation in this file (JSON lines)."), item.Model.Path);
     }
 
     /// <summary>Ctrl+Tab / Ctrl+Shift+Tab: the next or previous session in the sidebar's order (wrapping).</summary>
@@ -676,21 +736,21 @@ public sealed partial class MainViewModel
         if (item.Model.Path == ShownFile)
         {
             if (DeleteSessionCommand.CanExecute(null)) DeleteSessionCommand.Execute(null);
-            else ShowBrief("IconTrash", "Not now", "Stop the current run first; then the open session can be deleted.");
+            else ShowBrief("IconTrash", Loc.T("Not now"), Loc.T("Stop the current run first; then the open session can be deleted."));
             return;
         }
         var working = FindOpen(item.Model.Path) is { } open && !SessionHost.IsIdle(open.Controller.Snapshot());
-        var card = new SessionCardViewModel("delete", "IconTrash", $"Delete “{item.Title}”?",
-            working ? "omp is working in it: deleting stops its run, then the conversation's file and its artifacts are deleted. This cannot be undone."
-                : "The conversation's file and its artifacts are deleted. This cannot be undone.")
+        var card = new SessionCardViewModel("delete", "IconTrash", Loc.F("Delete “{0}”?", item.Title),
+            working ? Loc.T("omp is working in it: deleting stops its run, then the conversation's file and its artifacts are deleted. This cannot be undone.")
+                : Loc.T("The conversation's file and its artifacts are deleted. This cannot be undone."))
         {
             Detail = item.Model.Path,
             State = SessionCardState.Ask,
         };
-        card.Primary = new SessionCardAction(working ? "Stop and delete" : "Delete session", new AsyncRelayCommand(async () =>
+        card.Primary = new SessionCardAction(working ? Loc.T("Stop and delete") : Loc.T("Delete session"), new AsyncRelayCommand(async () =>
         {
             card.State = SessionCardState.Running;
-            card.Message = "Deleting…";
+            card.Message = Loc.T("Deleting…");
             card.Primary = null;
             card.Secondary = null;
             if (FindOpen(item.Model.Path) is { } still)
@@ -698,8 +758,8 @@ public sealed partial class MainViewModel
                 if (still == _open)
                 {
                     // Opened meanwhile: the shown chat is deleted from its own menu, where omp starts a new session after it
-                    card.Finish(false, "Not deleted", "The session is on screen now: use Delete session in its menu (the title).",
-                        secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
+                    card.Finish(false, Loc.T("Not deleted"), Loc.T("The session is on screen now: use Delete session in its menu (the title)."),
+                        secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
                     return;
                 }
                 await CloseSessionAsync(still); // MainViewModel.OpenSessions.cs
@@ -707,13 +767,13 @@ public sealed partial class MainViewModel
             try { await Task.Run(() => SessionCatalog.DeleteSession(item.Model.Path)); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
-                card.Finish(false, "Not deleted", e.Message, secondary: new SessionCardAction("Dismiss", new RelayCommand(CloseSessionCard)));
+                card.Finish(false, Loc.T("Not deleted"), e.Message, secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
                 return;
             }
             RequestCatalogRefresh();
-            ShowBrief("IconTrash", "Session deleted", item.Title);
+            ShowBrief("IconTrash", Loc.T("Session deleted"), item.Title);
         }));
-        card.Secondary = new SessionCardAction("Cancel", new RelayCommand(CloseSessionCard));
+        card.Secondary = new SessionCardAction(Loc.T("Cancel"), new RelayCommand(CloseSessionCard));
         ShowCard(card);
     }
 }

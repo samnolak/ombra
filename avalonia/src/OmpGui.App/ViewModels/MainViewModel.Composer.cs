@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.App.Services;
 using OmpGui.ClientCore;
 
@@ -22,7 +23,7 @@ public sealed partial class AttachmentViewModel : ObservableObject, IDisposable
     public ImageAttachment Model { get; }
     public ImagePreview Preview { get; }
     public string Name => Model.Name;
-    public string Size => Model.Data.Length >= 1024 ? $"{Model.Data.Length / 1024} KB" : $"{Model.Data.Length} B";
+    public string Size => Model.Data.Length >= 1024 ? Loc.F("{0} KB", Model.Data.Length / 1024) : Loc.F("{0} B", Model.Data.Length);
 
     [RelayCommand] private void Remove() => _owner.RemoveAttachment(this);
 
@@ -45,10 +46,10 @@ public sealed partial class QueuedItemViewModel : ObservableObject, IDisposable
     public IReadOnlyList<ImagePreview> Previews { get; }
     public bool HasImages => Previews.Count > 0;
     public string Text => Model.Text;
-    public string Kind => Model.Kind == QueueKind.Steer ? "Steer" : "Queued";
+    public string Kind => Model.Kind == QueueKind.Steer ? Loc.T("Steer") : Loc.T("Queued");
     public string Tooltip => Model.Kind == QueueKind.Steer
-        ? "omp reads this at its next step. ↑ in the empty message box edits it."
-        : "Sent when omp finishes its current work. ↑ in the empty message box edits it.";
+        ? Loc.T("omp reads this at its next step. ↑ in the empty message box edits it.")
+        : Loc.T("Sent when omp finishes its current work. ↑ in the empty message box edits it.");
 
     [RelayCommand] private Task Remove() => _owner.WithdrawQueuedAsync(this, edit: false);
 
@@ -64,8 +65,8 @@ public sealed partial class PastedTextViewModel(string text, MainViewModel owner
     public string Text { get; } = text;
     public int LineCount { get; } = MainViewModel.CountLines(text);
     public string Label => LineCount > 1
-        ? $"Pasted text +{LineCount} lines"
-        : string.Create(System.Globalization.CultureInfo.CurrentCulture, $"Pasted text +{Text.Length:N0} characters");
+        ? Loc.F("Pasted text +{0} lines", LineCount)
+        : Loc.F("Pasted text +{0:N0} characters", Text.Length);
 
     /// <summary>The first lines, for the chip's tooltip.</summary>
     public string Preview
@@ -86,26 +87,26 @@ public static class ThinkingLevelText
 {
     public static string Label(string? level) => level switch
     {
-        null => "Thinking",
-        "off" => "Off",
-        "minimal" => "Minimal",
-        "low" => "Low",
-        "medium" => "Medium",
-        "high" => "High",
-        "xhigh" => "Extra high",
-        "max" => "Max",
+        null => Loc.T("Thinking"),
+        "off" => Loc.T("Off"),
+        "minimal" => Loc.T("Minimal"),
+        "low" => Loc.T("Low"),
+        "medium" => Loc.T("Medium"),
+        "high" => Loc.T("High"),
+        "xhigh" => Loc.T("Extra high"),
+        "max" => Loc.T("Max"),
         _ => level.Length > 0 ? char.ToUpperInvariant(level[0]) + level[1..] : level,
     };
 
     public static string Description(string? level) => level switch
     {
-        "off" => "Answers straight away",
-        "minimal" => "A moment of thought",
-        "low" => "Quick reasoning for simple tasks",
-        "medium" => "Balanced speed and depth",
-        "high" => "Thinks longer on hard problems",
-        "xhigh" => "Deeper reasoning, slower",
-        "max" => "The model's longest reasoning",
+        "off" => Loc.T("Answers straight away"),
+        "minimal" => Loc.T("A moment of thought"),
+        "low" => Loc.T("Quick reasoning for simple tasks"),
+        "medium" => Loc.T("Balanced speed and depth"),
+        "high" => Loc.T("Thinks longer on hard problems"),
+        "xhigh" => Loc.T("Deeper reasoning, slower"),
+        "max" => Loc.T("The model’s longest reasoning"),
         _ => "",
     };
 
@@ -223,12 +224,12 @@ public sealed partial class MainViewModel
     {
         if (image is null)
         {
-            ComposerMessage = $"{source}: not an image omp can take, or too large even after scaling.";
+            ComposerMessage = Loc.F("{0}: not an image omp can take, or too large even after scaling.", source);
             return false;
         }
         if (Attachments.Count >= ImageAttachments.MaxImages)
         {
-            ComposerMessage = $"At most {ImageAttachments.MaxImages} images per message (omp takes one message of up to 1 MiB).";
+            ComposerMessage = Loc.F("At most {0} images per message (omp takes one message of up to 1 MiB).", ImageAttachments.MaxImages);
             return false;
         }
         Attachments.Add(new AttachmentViewModel(image, this));
@@ -260,7 +261,7 @@ public sealed partial class MainViewModel
             try { data = await File.ReadAllBytesAsync(path); }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
-                ComposerMessage = $"Could not read {Path.GetFileName(path)}: {e.Message}";
+                ComposerMessage = Loc.F("Could not read {0}: {1}", Path.GetFileName(path), e.Message);
                 continue;
             }
             var image = await Task.Run(() => ImageAttachments.FromBytes(Path.GetFileName(path), data));
@@ -365,13 +366,13 @@ public sealed partial class MainViewModel
             try { images = await Session.RemoveQueuedAsync(item.Model, _cts.Token); }
             catch (OmpGui.Rpc.RpcCommandException)
             {
-                ComposerMessage = "This omp can't take back queued messages (omp 18.4.4 or later can).";
+                ComposerMessage = Loc.T("This omp can’t take back queued messages (omp 18.4.4 or later can).");
                 return;
             }
             Apply(Session.Snapshot());
             if (images is null)
             {
-                ComposerMessage = "omp already has that message.";
+                ComposerMessage = Loc.T("omp already has that message.");
                 return;
             }
             ComposerMessage = "";

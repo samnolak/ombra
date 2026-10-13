@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -23,13 +24,13 @@ public static class GitProbe
         Func<ToolCommand, CancellationToken, Task<ToolResult>> run, string folder, CancellationToken ct)
     {
         var r = await run(new ToolCommand("git", ["rev-parse", "--show-toplevel", "--absolute-git-dir", "--git-common-dir"], folder, Timeout), ct);
-        if (r.NotFound) return (GitProbeState.GitMissing, null, "git was not found on this computer");
+        if (r.NotFound) return (GitProbeState.GitMissing, null, Loc.T("git was not found on this computer"));
         if (!r.Ok)
             return r.Stderr.Contains("not a git repository", StringComparison.OrdinalIgnoreCase)
                 ? (GitProbeState.NotARepo, null, null)
                 : (GitProbeState.Failed, null, r.Message);
         var lines = r.Stdout.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToArray();
-        if (lines.Length < 3) return (GitProbeState.Failed, null, "git printed something unexpected: " + r.Stdout.Trim());
+        if (lines.Length < 3) return (GitProbeState.Failed, null, Loc.T("git printed something unexpected: ") + r.Stdout.Trim());
         var top = Full(folder, lines[0]);
         var gitDir = Full(folder, lines[1]);
         var common = Full(folder, lines[2]);

@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -40,7 +41,7 @@ public sealed partial class DiffRowViewModel(FileViewerViewModel owner, DiffRowK
     public string OldNumberText => OldNumber?.ToString(CultureInfo.InvariantCulture) ?? "";
     public string NewNumberText => NewNumber?.ToString(CultureInfo.InvariantCulture) ?? "";
     public string Sign => Kind switch { DiffRowKind.Added => "+", DiffRowKind.Removed => "−", _ => "" };
-    public string CommentTip => Number is { } n ? $"Comment on line {n}" : "Comment on this line";
+    public string CommentTip => Number is { } n ? Loc.F("Comment on line {0}", n) : Loc.T("Comment on this line");
 
     [ObservableProperty] private bool _isCommenting;
     [ObservableProperty] private string _commentText = "";
@@ -97,16 +98,16 @@ public sealed partial class FileViewerViewModel
     public bool HasDiffMessage => DiffMessage.Length > 0;
     /// <summary>A new file's one hunk is the whole file: taking it out would delete the file without asking, so only Revert file applies.</summary>
     public bool CanRevertHunks => _diff is { IsBinary: false, IsNewFile: false, TooLarge: false };
-    public string RevertLabel => GitMark == GitMark.Untracked ? "Delete file…" : "Revert file…";
-    public string ConfirmRevertLabel => GitMark == GitMark.Untracked ? "Delete" : "Revert";
+    public string RevertLabel => GitMark == GitMark.Untracked ? Loc.T("Delete file…") : Loc.T("Revert file…");
+    public string ConfirmRevertLabel => GitMark == GitMark.Untracked ? Loc.T("Delete") : Loc.T("Revert");
 
     public string RevertQuestion => GitMark switch
     {
-        GitMark.Untracked => $"Delete {Name}? git does not have it, so it can't be brought back.",
-        GitMark.Added => $"Discard {Name}? It was added since the last commit, so it is deleted. This can't be undone.",
+        GitMark.Untracked => Loc.F("Delete {0}? git does not have it, so it can't be brought back.", Name),
+        GitMark.Added => Loc.F("Discard {0}? It was added since the last commit, so it is deleted. This can't be undone.", Name),
         GitMark.Renamed when RenamedFrom is { } from =>
-            $"Discard every change to {Name} since the last commit? It goes back to {from}. This can't be undone.",
-        _ => $"Discard every change to {Name} since the last commit? This can't be undone.",
+            Loc.F("Discard every change to {0} since the last commit? It goes back to {1}. This can't be undone.", Name, from),
+        _ => Loc.F("Discard every change to {0} since the last commit? This can't be undone.", Name),
     };
 
     partial void OnShowChangesChanged(bool value)
@@ -125,17 +126,17 @@ public sealed partial class FileViewerViewModel
         var cts = _diffCts = new CancellationTokenSource();
         if (Owner.GitTop is not { } top || ProjectFiles.Relative(top, FullPath) is not { Length: > 0 } rel)
         {
-            Clear("This file is not in a git repository.");
+            Clear(Loc.T("This file is not in a git repository."));
             return;
         }
-        if (DiffRows.Count == 0) DiffMessage = "Reading the changes…";
+        if (DiffRows.Count == 0) DiffMessage = Loc.T("Reading the changes…");
         FileDiff? diff;
         try { diff = await GitReview.ReadAsync(top, rel, GitMark == GitMark.Untracked, cts.Token); }
         catch (OperationCanceledException) { return; }
         if (cts.IsCancellationRequested) return;
         if (diff is null)
         {
-            Clear("git could not compare this file with the last commit.");
+            Clear(Loc.T("git could not compare this file with the last commit."));
             return;
         }
         if (_diff is { } shown && shown.Text == diff.Text && shown.TooLarge == diff.TooLarge) return;
@@ -193,10 +194,10 @@ public sealed partial class FileViewerViewModel
             }
         }
         DiffStats = string.Join(" ", new[] { added > 0 ? $"+{added}" : "", removed > 0 ? $"−{removed}" : "" }.Where(s => s.Length > 0));
-        DiffMessage = diff.TooLarge ? "These changes are too large to show here."
-            : diff.IsBinary ? "A binary file: its changes can't be shown here."
-            : diff.Hunks.Count == 0 ? "No changes since the last commit."
-            : cut ? string.Create(CultureInfo.InvariantCulture, $"Showing the first {MaxDiffRows:N0} lines of the changes.")
+        DiffMessage = diff.TooLarge ? Loc.T("These changes are too large to show here.")
+            : diff.IsBinary ? Loc.T("A binary file: its changes can't be shown here.")
+            : diff.Hunks.Count == 0 ? Loc.T("No changes since the last commit.")
+            : cut ? Loc.F("Showing the first {0:N0} lines of the changes.", MaxDiffRows)
             : "";
         if (writing is not null && DiffRows.Where(r => r.Kind == writing.Kind && r.Text == writing.Text)
                 .MinBy(r => Math.Abs((r.Number ?? 0) - (writing.Number ?? 0))) is { } same)
@@ -283,7 +284,7 @@ public sealed partial class FilesViewModel
         if (GitTop is not { } top) return;
         Notice = "";
         var error = await GitReview.RevertHunkAsync(Owner.RunTool, top, diff, hunk, Owner.Lifetime);
-        if (error is not null) Report("Could not revert that part: " + error);
+        if (error is not null) Report(Loc.F("Could not revert that part: {0}", error));
         await AfterRevertAsync(v);
     }
 
@@ -293,7 +294,7 @@ public sealed partial class FilesViewModel
         Notice = "";
         var untracked = v.GitMark == GitMark.Untracked;
         var error = await GitReview.RevertFileAsync(Owner.RunTool, top, rel, untracked, v.RenamedFrom, Owner.Lifetime);
-        if (error is not null) Report($"Could not revert {v.Name}: {error}");
+        if (error is not null) Report(Loc.F("Could not revert {0}: {1}", v.Name, error));
         // Deleted, added since the last commit, or renamed back: the file shown is gone
         else if (!File.Exists(v.FullPath) && ReferenceEquals(Viewer, v)) CloseViewer();
         await AfterRevertAsync(v);

@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Globalization;
 using System.Text;
 using Avalonia;
@@ -47,7 +48,7 @@ public sealed class CodeView : ContentControl
             Content = _surface,
         };
         Content = _scroll;
-        Avalonia.Automation.AutomationProperties.SetName(_surface, "File contents");
+        Avalonia.Automation.AutomationProperties.SetName(_surface, Loc.T("File contents"));
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
@@ -111,8 +112,8 @@ internal sealed class CodeSurface : Control, ILogicalScrollable
         ClipToBounds = true;
         Cursor = new Cursor(StandardCursorType.Ibeam);
         ContextFlyout = ContextMenus.Menu(
-            new MenuAction("Copy", "IconCopy", _ => Copy(), () => HasSelection),
-            new MenuAction("Select all", "IconSelect", _ => SelectAll()));
+            new MenuAction(Loc.T("Copy"), "IconCopy", _ => Copy(), () => HasSelection),
+            new MenuAction(Loc.T("Select all"), "IconSelect", _ => SelectAll()));
     }
 
     public int LineCount => _lines.Length;

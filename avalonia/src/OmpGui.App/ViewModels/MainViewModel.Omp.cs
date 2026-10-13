@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 using OmpGui.Rpc;
 
@@ -25,7 +26,7 @@ public partial class MainViewModel
     /// <summary>Runs <c>omp &lt;args&gt;</c> (e.g. "plugin", "list", "--json") in the project folder.</summary>
     public Task<OmpCliResult> RunOmpCliAsync(IReadOnlyList<string> args, TimeSpan? timeout = null, CancellationToken ct = default)
     {
-        if (OmpCliLaunch is not { } launch) return Task.FromResult(new OmpCliResult(-1, "", "The app couldn't start omp's command-line tool."));
+        if (OmpCliLaunch is not { } launch) return Task.FromResult(new OmpCliResult(-1, "", Loc.T("The app couldn't start omp's command-line tool.")));
         OmpLaunchSpec spec;
         try { spec = launch(args, ProjectFolder); }
         catch (OmpGui.ClientCore.Network.NetworkPrivacyException e) { return Task.FromResult(new OmpCliResult(-1, "", e.Message)); }

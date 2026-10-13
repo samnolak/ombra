@@ -1,4 +1,5 @@
 using Avalonia.Threading;
+using OmpGui.App.Localization;
 using OmpGui.App.Services;
 
 namespace OmpGui.App.ViewModels;
@@ -134,7 +135,7 @@ public sealed partial class MainViewModel
             await Task.Delay(FilesViewModel.SearchDelay, ct);
             if (ProjectFolder is not { } root)
             {
-                ShowMentions([], "Open a project folder to mention its files");
+                ShowMentions([], Loc.T("Open a project folder to mention its files"));
                 return;
             }
             var session = _mentionSession!.Token;
@@ -142,7 +143,7 @@ public sealed partial class MainViewModel
             var index = await indexTask.WaitAsync(ct);
             var hits = await Task.Run(() => SearchMentions(index, token.Query, MaxMentionResults, ct), ct);
             if (ct.IsCancellationRequested || _mention != token) return;
-            ShowMentions(hits, $"No files match “{token.Query}”");
+            ShowMentions(hits, Loc.F("No files match “{0}”", token.Query));
         }
         catch (OperationCanceledException) { }
     }

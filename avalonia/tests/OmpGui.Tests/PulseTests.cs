@@ -175,4 +175,40 @@ public sealed class PulseTests
         await vm.DisposeAsync();
         w.Close();
     }
+
+    [AvaloniaFact]
+    public async Task A_spinner_turns_and_keeps_its_opacity()
+    {
+        var mark = new Border { Width = 14, Height = 14 };
+        var w = new Window { Content = mark, Width = 100, Height = 100 };
+        w.Show();
+        Pulse.SetSpin(mark, TimeSpan.FromSeconds(0.9));
+        Assert.True(Pulse.IsPulsing(mark));
+        var turn = Assert.IsType<Avalonia.Media.RotateTransform>(mark.RenderTransform);
+        var seen = new HashSet<double> { turn.Angle };
+        // Samples until it has turned through four angles: a loaded run gets few timer ticks in a set time, so the time
+        // only bounds a spinner that does not turn at all
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (seen.Count < 4 && DateTime.UtcNow < deadline)
+        {
+            await Settle(30);
+            seen.Add(turn.Angle);
+            Assert.Equal(1, mark.Opacity); // it turns, it does not blink
+        }
+        Assert.True(seen.Count >= 4, $"angles seen: {string.Join(", ", seen)}");
+        await Settle(100);
+        Assert.Equal(1, mark.Opacity);
+        Pulse.SetSpin(mark, TimeSpan.Zero);
+        Assert.False(Pulse.IsPulsing(mark));
+        w.Close();
+    }
+
+    [Fact]
+    public void A_turn_goes_round_once_per_period()
+    {
+        var period = TimeSpan.FromSeconds(1);
+        Assert.Equal(0, Pulse.AngleAt(TimeSpan.Zero, period));
+        Assert.Equal(90, Pulse.AngleAt(TimeSpan.FromSeconds(0.25), period));
+        Assert.Equal(180, Pulse.AngleAt(TimeSpan.FromSeconds(2.5), period));
+    }
 }

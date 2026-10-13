@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -22,10 +23,9 @@ public sealed partial class MainViewModel
         if (t.StartsWith("!!", StringComparison.Ordinal) && t.Length > 2)
         {
             ComposerText = "";
-            var card = new SessionCardViewModel("explain", "IconTerminal", "!! runs in omp's terminal",
-                "omp keeps a !!command out of the model's context only in its terminal UI. Here, !command runs it and the output " +
-                "joins the context; for a plain shell, use the terminal panel.");
-            card.Primary = new SessionCardAction("Open a shell", new RelayCommand(() => { CloseSessionCard(); NewShellCommand.Execute(null); }));
+            var card = new SessionCardViewModel("explain", "IconTerminal", Loc.T("!! runs in omp's terminal"),
+                Loc.T("omp keeps a !!command out of the model's context only in its terminal UI. Here, !command runs it and the output joins the context; for a plain shell, use the terminal panel."));
+            card.Primary = new SessionCardAction(Loc.T("Open a shell"), new RelayCommand(() => { CloseSessionCard(); NewShellCommand.Execute(null); }));
             ShowCard(card);
             return true;
         }
@@ -56,8 +56,8 @@ public sealed partial class MainViewModel
                 _ = OpenSettingsAtAsync("providers");
                 return true;
             case GuiEquivalent.Plugins:
-                ShowCard(TerminalCard(cmd, "Plugins, skills and extensions are in Settings → Plugins and skills. omp's own dashboard is in its terminal.",
-                    new SessionCardAction("Open Plugins and skills", new RelayCommand(() => { CloseSessionCard(); _ = OpenSettingsAtAsync("plugins"); }))));
+                ShowCard(TerminalCard(cmd, Loc.T("Plugins, skills and extensions are in Settings → Plugins and skills. omp's own dashboard is in its terminal."),
+                    new SessionCardAction(Loc.T("Open Plugins and skills"), new RelayCommand(() => { CloseSessionCard(); _ = OpenSettingsAtAsync("plugins"); }))));
                 return true;
             case GuiEquivalent.NewSession:
                 _ = NewSessionHereAsync(); // MainViewModel.Chats.cs
@@ -73,11 +73,11 @@ public sealed partial class MainViewModel
                 return true;
             case GuiEquivalent.DeleteSession:
                 if (DeleteSessionCommand.CanExecute(null)) DeleteSessionCommand.Execute(null);
-                else ShowCard(ExplainCard(cmd, "Stop the current run first; then Delete session in the session menu (the title) deletes it after asking."));
+                else ShowCard(ExplainCard(cmd, Loc.T("Stop the current run first; then Delete session in the session menu (the title) deletes it after asking.")));
                 return true;
             case GuiEquivalent.Rewind:
                 if (RewindCommand.CanExecute(null)) _ = RewindCommand.ExecuteAsync(null);
-                else ShowCard(ExplainCard(cmd, "Stop the current run first; then Rewind… in the session menu (the title) picks the message to start over from."));
+                else ShowCard(ExplainCard(cmd, Loc.T("Stop the current run first; then Rewind… in the session menu (the title) picks the message to start over from.")));
                 return true;
             case GuiEquivalent.BackgroundTasks:
                 ShowPaneCommand.Execute(SidePane.Tasks);
@@ -89,8 +89,7 @@ public sealed partial class MainViewModel
                 ShowCard(ExplainCard(cmd, cmd.Explanation));
                 return true;
             default:
-                ShowCard(TerminalCard(cmd, $"{cmd.Description}. It has no place in this window yet: omp runs it in its own terminal UI, " +
-                    "which opens beside the conversation as a separate omp with its own session."));
+                ShowCard(TerminalCard(cmd, Loc.F("{0}. It has no place in this window yet: omp runs it in its own terminal UI, which opens beside the conversation as a separate omp with its own session.", cmd.Description)));
                 return true;
         }
     }
@@ -99,9 +98,9 @@ public sealed partial class MainViewModel
     private async Task RunShellAsync(string command)
     {
         var open = _open;
-        var card = new SessionCardViewModel("shell", "IconTerminal", "Running a shell command",
-            "omp runs it in the project; its output goes into the conversation and the context.") { Detail = command, State = SessionCardState.Running };
-        card.Primary = new SessionCardAction("Stop", new AsyncRelayCommand(() => open.Controller.StopShellCommandAsync(_cts.Token)));
+        var card = new SessionCardViewModel("shell", "IconTerminal", Loc.T("Running a shell command"),
+            Loc.T("omp runs it in the project; its output goes into the conversation and the context.")) { Detail = command, State = SessionCardState.Running };
+        card.Primary = new SessionCardAction(Loc.T("Stop"), new AsyncRelayCommand(() => open.Controller.StopShellCommandAsync(_cts.Token)));
         ShowCard(card);
         await open.Controller.RunShellCommandAsync(command, _cts.Token);
         ApplyIfShown(open);
@@ -116,7 +115,7 @@ public sealed partial class MainViewModel
         var open = _open;
         if (IsRunning)
         {
-            ShowCard(ExplainCard(cmd, "omp restarts once the current reply ends: stop it first, or type /restart again then."));
+            ShowCard(ExplainCard(cmd, Loc.T("omp restarts once the current reply ends: stop it first, or type /restart again then.")));
             return;
         }
         await open.Controller.RecoverAsync(_cts.Token);
@@ -125,8 +124,8 @@ public sealed partial class MainViewModel
 
     private SessionCardViewModel TerminalCard(TerminalOnlyCommand cmd, string message, SessionCardAction? gui = null)
     {
-        var card = new SessionCardViewModel("terminal", "IconTerminal", $"/{cmd.Name} runs in omp's terminal", message);
-        var open = new SessionCardAction("Open omp terminal", new RelayCommand(() => { CloseSessionCard(); OpenOmpTuiCommand.Execute(null); }));
+        var card = new SessionCardViewModel("terminal", "IconTerminal", Loc.F("/{0} runs in omp's terminal", cmd.Name), message);
+        var open = new SessionCardAction(Loc.T("Open omp terminal"), new RelayCommand(() => { CloseSessionCard(); OpenOmpTuiCommand.Execute(null); }));
         if (gui is null) card.Primary = open;
         else
         {
@@ -137,7 +136,7 @@ public sealed partial class MainViewModel
     }
 
     private static SessionCardViewModel ExplainCard(TerminalOnlyCommand cmd, string message) =>
-        new("explain", "IconSparkle", $"/{cmd.Name} in this window", message);
+        new("explain", "IconSparkle", Loc.F("/{0} in this window", cmd.Name), message);
 
     /// <summary>The source the slash menu gives commands that run only in omp's terminal UI.</summary>
     private const string TerminalOnlySource = "tui";

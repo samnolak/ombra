@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Security.Cryptography;
@@ -51,7 +52,7 @@ public sealed partial class AnnotationViewModel(string id, Uri page, string page
         get
         {
             var on = Element.Text.Length > 0 ? $"{Element.Tag} — {Element.Text}" : Element.Selector;
-            return Mark.Kind == PageMarkKind.Area ? $"Area {Mark.Width}×{Mark.Height} in {on}" : $"Point on {on}";
+            return Mark.Kind == PageMarkKind.Area ? Loc.F("Area {0}×{1} in {2}", Mark.Width, Mark.Height, on) : Loc.F("Point on {0}", on);
         }
     }
 
@@ -197,7 +198,7 @@ public sealed partial class PreviewViewModel
                 case "annotation":
                     if (Annotations.Count >= MaxAnnotations)
                     {
-                        Message = $"At most {MaxAnnotations} comments at a time: send or clear some first.";
+                        Message = Loc.F("At most {0} comments at a time: send or clear some first.", MaxAnnotations);
                         return null;
                     }
                     var comment = Str(j, "comment")?.Trim() ?? "";

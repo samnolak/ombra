@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -13,11 +14,11 @@ public sealed record SubagentMessageViewModel(string Role, string Text)
 {
     public string Label => Role switch
     {
-        "user" => "Instructions",
-        "assistant" => "Subagent",
-        "tool" => "Tool call",
-        "result" => "Result",
-        "error" => "Failed",
+        "user" => Loc.T("Instructions"),
+        "assistant" => Loc.T("Subagent"),
+        "tool" => Loc.T("Tool call"),
+        "result" => Loc.T("Result"),
+        "error" => Loc.T("Failed"),
         _ => Role,
     };
     public bool IsTool => Role is "tool" or "result" or "error";
@@ -95,7 +96,7 @@ public sealed partial class SubagentRowViewModel : ObservableObject
             Messages.Clear();
             foreach (var m in messages) Messages.Add(new SubagentMessageViewModel(m.Role, m.Text));
             MessagesLoaded = error is null;
-            MessagesNote = error is not null ? "Could not read its messages: " + error : messages.Count == 0 ? "No messages yet." : "";
+            MessagesNote = error is not null ? Loc.T("Could not read its messages: ") + error : messages.Count == 0 ? Loc.T("No messages yet.") : "";
             HasMessagesNote = MessagesNote.Length > 0;
         }
         finally
@@ -118,22 +119,22 @@ public sealed partial class SubagentRowViewModel : ObservableObject
         IsFailed = info.Status == "failed";
         StatusText = info.Status switch
         {
-            "running" => "Running",
-            "pending" => "Waiting",
-            "completed" => "Done",
-            "failed" => "Failed",
-            "aborted" => "Stopped",
-            "ended" => "Ended",
+            "running" => Loc.T("Running"),
+            "pending" => Loc.T("Waiting"),
+            "completed" => Loc.T("Done"),
+            "failed" => Loc.T("Failed"),
+            "aborted" => Loc.T("Stopped"),
+            "ended" => Loc.T("Ended"),
             var s => char.ToUpperInvariant(s[0]) + s[1..],
         };
         // Running: what it does now. Ended: what it last said it did — for a failure, its last words (the reason)
         ActivityText = info.IsRunning
-            ? info.CurrentTool is { Length: > 0 } tool ? tool + (info.CurrentToolArgs is { Length: > 0 } a ? ": " + OneLine(a) : "") : info.LastIntent ?? "Working…"
+            ? info.CurrentTool is { Length: > 0 } tool ? tool + (info.CurrentToolArgs is { Length: > 0 } a ? ": " + OneLine(a) : "") : info.LastIntent ?? Loc.T("Working…")
             : info.Status is "failed" or "aborted" && info.RecentOutput is [var last, ..] ? OneLine(last)
             : info.LastIntent ?? "";
         HasActivity = ActivityText.Length > 0;
         var meta = new List<string>();
-        if (info.ToolCount > 0) meta.Add(info.ToolCount == 1 ? "1 tool call" : $"{info.ToolCount} tool calls");
+        if (info.ToolCount > 0) meta.Add(info.ToolCount == 1 ? Loc.T("1 tool call") : Loc.F("{0} tool calls", info.ToolCount));
         if (info.Tokens > 0) meta.Add(TokensText(info.Tokens));
         if (info.Model is { Length: > 0 } model) meta.Add(model);
         MetaText = string.Join(" · ", meta);
@@ -161,8 +162,8 @@ public sealed partial class SubagentRowViewModel : ObservableObject
     }
 
     internal static string TokensText(long tokens) => tokens >= 1000
-        ? string.Create(CultureInfo.InvariantCulture, $"{tokens / 1000.0:0.#}k tokens")
-        : string.Create(CultureInfo.InvariantCulture, $"{tokens} tokens");
+        ? Loc.F("{0}k tokens", (tokens / 1000.0).ToString("0.#", CultureInfo.InvariantCulture))
+        : Loc.F("{0} tokens", tokens);
 
     private static string OneLine(string s) => Shorten(string.Join(' ', s.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)).Trim(), 200);
 
@@ -178,15 +179,15 @@ public sealed record JobRowViewModel(string Id, string Type, string Status, stri
     public string Title => Label.Length > 0 ? Label : $"{Type} {Id}";
     public string StatusText => Status switch
     {
-        "running" => "Running",
-        "completed" => "Done",
-        "failed" => "Failed",
-        "cancelled" => "Cancelled",
+        "running" => Loc.T("Running"),
+        "completed" => Loc.T("Done"),
+        "failed" => Loc.T("Failed"),
+        "cancelled" => Loc.T("Cancelled"),
         { Length: > 0 } s => char.ToUpperInvariant(s[0]) + s[1..],
-        _ => "Unknown",
+        _ => Loc.T("Unknown"),
     };
     /// <summary>"bash · running for 12s" / "task · started 5m ago".</summary>
-    public string Detail => IsRunningSection ? $"{Type} · running for {Ago}" : $"{Type} · started {Ago} ago";
+    public string Detail => IsRunningSection ? Loc.F("{0} · running for {1}", Type, Ago) : Loc.F("{0} · started {1} ago", Type, Ago);
     public string AccessibleName => $"{Title} — {StatusText}";
 }
 
@@ -297,7 +298,7 @@ public sealed partial class TasksViewModel : ObservableObject
             _jobsReadAt = DateTimeOffset.UtcNow;
             if (!r.Ok)
             {
-                JobsError = "Could not read the background jobs: " + (r.Error ?? "omp did not answer");
+                JobsError = Loc.T("Could not read the background jobs: ") + (r.Error ?? Loc.T("omp did not answer"));
                 HasJobsError = true;
                 return;
             }
@@ -392,13 +393,13 @@ public sealed partial class TasksViewModel : ObservableObject
         RunningCount = agents + Jobs.Count(j => j.IsRunning);
         var finished = Subagents.Count - agents + Jobs.Count(j => !j.IsRunning);
         Summary = RunningCount == 0 && finished == 0 ? "" : RunningCount > 0
-            ? finished > 0 ? $"{RunningCount} running · {finished} finished" : $"{RunningCount} running"
-            : $"{finished} finished";
+            ? finished > 0 ? Loc.F("{0} running · {1} finished", RunningCount, finished) : Loc.F("{0} running", RunningCount)
+            : Loc.F("{0} finished", finished);
         IsEmpty = !HasSubagents && !HasJobs && !HasJobsText;
     }
 
     internal Task<(IReadOnlyList<SubagentMessage> Messages, string? Error)> ReadMessagesAsync(string id) =>
-        _owner?.GetSubagentMessagesAsync(id) ?? Task.FromResult<(IReadOnlyList<SubagentMessage>, string?)>(([], "omp is not running"));
+        _owner?.GetSubagentMessagesAsync(id) ?? Task.FromResult<(IReadOnlyList<SubagentMessage>, string?)>(([], Loc.T("omp is not running")));
 
     // omp's /jobs (slash-commands/builtin-session.ts): "  [id] type (status) — 12s" then the label, indented.
     [GeneratedRegex(@"^\s*\[(?<id>[^\]]+)\]\s+(?<type>\S+)\s+\((?<status>[^)]*)\)\s+[—–-]\s+(?<ago>.+?)\s*$")]
@@ -435,8 +436,8 @@ public sealed partial class TasksViewModel : ObservableObject
     public static string Duration(TimeSpan t)
     {
         if (t < TimeSpan.Zero) t = TimeSpan.Zero;
-        return t.TotalHours >= 1 ? string.Create(CultureInfo.InvariantCulture, $"{(int)t.TotalHours}h {t.Minutes:00}m")
-            : t.TotalMinutes >= 1 ? string.Create(CultureInfo.InvariantCulture, $"{(int)t.TotalMinutes}m {t.Seconds:00}s")
-            : string.Create(CultureInfo.InvariantCulture, $"{(int)t.TotalSeconds}s");
+        return t.TotalHours >= 1 ? Loc.F("{0}h {1:00}m", (int)t.TotalHours, t.Minutes)
+            : t.TotalMinutes >= 1 ? Loc.F("{0}m {1:00}s", (int)t.TotalMinutes, t.Seconds)
+            : Loc.F("{0}s", (int)t.TotalSeconds);
     }
 }

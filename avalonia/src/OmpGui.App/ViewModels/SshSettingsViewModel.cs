@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -36,16 +37,16 @@ public sealed partial class SshSettingsViewModel : WorkspacePageViewModel
     [NotifyPropertyChangedFor(nameof(EmptyText), nameof(ReadOnlyNote))]
     private bool _readOnly;
 
-    public string EmptyText => ReadOnly ? "No SSH hosts saved yet." : "No SSH hosts yet. Add one, and omp can run commands on it.";
+    public string EmptyText => ReadOnly ? Loc.T("No SSH hosts saved yet.") : Loc.T("No SSH hosts yet. Add one, and omp can run commands on it.");
 
     public string ReadOnlyNote => Main.CanRunOmpCommands
-        ? "These are the saved hosts. This version of omp can't change them from the app; update omp to add or remove hosts here."
-        : "omp isn't running: these are the saved hosts. Start omp to add or remove them.";
+        ? Loc.T("These are the saved hosts. This version of omp can't change them from the app; update omp to add or remove hosts here.")
+        : Loc.T("omp isn't running: these are the saved hosts. Start omp to add or remove them.");
 
     [ObservableProperty] private string _userFile = "";
     [ObservableProperty] private string _projectFile = "";
 
-    public string FilesLabel => "Saved in omp's ssh.json files. All projects: " + UserFile + (ProjectFile.Length > 0 ? ". This project: " + ProjectFile + "." : ".");
+    public string FilesLabel => Loc.F("Saved in omp's ssh.json files. All projects: {0}", UserFile) + (ProjectFile.Length > 0 ? Loc.F(". This project: {0}.", ProjectFile) : ".");
 
     partial void OnUserFileChanged(string value) => OnPropertyChanged(nameof(FilesLabel));
     partial void OnProjectFileChanged(string value) => OnPropertyChanged(nameof(FilesLabel));
@@ -91,7 +92,7 @@ public sealed partial class SshSettingsViewModel : WorkspacePageViewModel
                 _agentDir = dir;
             var userPath = _agentDir is null ? null : Path.Combine(_agentDir, "ssh.json");
             var projectPath = Main.ProjectFolder is { } f ? Path.Combine(f, ".omp", "ssh.json") : null;
-            UserFile = userPath is null ? "omp's agent folder/ssh.json" : GitProbe.Tilde(userPath);
+            UserFile = userPath is null ? Loc.T("omp's agent folder/ssh.json") : GitProbe.Tilde(userPath);
             ProjectFile = projectPath is null ? "" : GitProbe.Tilde(projectPath);
             var files = await Task.Run(() => (User: ReadFile(userPath, "user"), Project: ReadFile(projectPath, "project")), ct);
 
@@ -106,7 +107,7 @@ public sealed partial class SshSettingsViewModel : WorkspacePageViewModel
                 ReadOnly = r.Unsupported;
                 var listed = r.Ok ? WorkspaceParsers.ParseSshList(r.Output) : null;
                 if (listed is null && !r.Unsupported)
-                    LoadError = r.Ok && r.Output.Length > 0 ? r.Output : "Couldn't read the SSH hosts from omp" + (r.Error is { Length: > 0 } why ? ": " + why + "." : ". Try again.");
+                    LoadError = r.Ok && r.Output.Length > 0 ? r.Output : Loc.T("Couldn't read the SSH hosts from omp") + (r.Error is { Length: > 0 } why ? ": " + why + "." : Loc.T(". Try again."));
                 hosts = listed ?? (r.Unsupported ? FromFiles() : []);
                 IsEmpty = listed is { Count: 0 } || r.Unsupported && hosts.Count == 0;
             }
@@ -180,18 +181,18 @@ public sealed partial class SshSettingsViewModel : WorkspacePageViewModel
         var user = NewUser.Trim();
         var port = NewPort.Trim();
         var key = NewKey.Trim();
-        if (name.Length == 0) return (null, "Give the host a name, such as build-box.");
-        if (name.Length > 100 || !Regex.IsMatch(name, "^[a-zA-Z0-9_.-]+$")) return (null, "The name can only use letters, digits, - _ and . (no spaces).");
-        if (host.Length == 0) return (null, "Enter the address: a host name or an IP address.");
-        if (host.StartsWith('-') || user.StartsWith('-')) return (null, "The address and the user can't start with “-”.");
+        if (name.Length == 0) return (null, Loc.T("Give the host a name, such as build-box."));
+        if (name.Length > 100 || !Regex.IsMatch(name, "^[a-zA-Z0-9_.-]+$")) return (null, Loc.T("The name can only use letters, digits, - _ and . (no spaces)."));
+        if (host.Length == 0) return (null, Loc.T("Enter the address: a host name or an IP address."));
+        if (host.StartsWith('-') || user.StartsWith('-')) return (null, Loc.T("The address and the user can't start with “-”."));
         if (port.Length > 0 && (!int.TryParse(port, NumberStyles.None, CultureInfo.InvariantCulture, out var p) || p is < 1 or > 65535))
-            return (null, "The port is a number from 1 to 65535.");
+            return (null, Loc.T("The port is a number from 1 to 65535."));
         var parts = new List<string> { "/ssh add", name, "--host", WorkspaceParsers.QuoteArg(host) ?? "" };
         if (user.Length > 0) parts.AddRange(["--user", WorkspaceParsers.QuoteArg(user) ?? ""]);
         if (port.Length > 0) parts.AddRange(["--port", port]);
         if (key.Length > 0)
         {
-            if (WorkspaceParsers.QuoteArg(key) is not { } quoted) return (null, "The key path can't hold both kinds of quotes.");
+            if (WorkspaceParsers.QuoteArg(key) is not { } quoted) return (null, Loc.T("The key path can't hold both kinds of quotes."));
             parts.AddRange(["--key", quoted]);
         }
         parts.AddRange(["--scope", NewScope]);
@@ -203,16 +204,16 @@ public sealed partial class SshSettingsViewModel : WorkspacePageViewModel
     {
         var (command, problem) = BuildAddCommand();
         if (command is null) { FormError = problem ?? ""; return; }
-        if (!Main.CanRunOmpCommands) { FormError = "omp isn't running: start it to add hosts."; return; }
+        if (!Main.CanRunOmpCommands) { FormError = Loc.T("omp isn't running: start it to add hosts."); return; }
         FormError = "";
         Adding = true;
         try
         {
             var r = await Main.RunOmpCommandAsync(command, TimeSpan.FromSeconds(20), Main.Lifetime);
-            if (!r.Ok) { FormError = "omp did not add it: " + r.Error; return; }
-            if (!r.Output.StartsWith("Added SSH host", StringComparison.Ordinal)) { FormError = r.Output.Length > 0 ? r.Output : "omp did not add it."; return; }
+            if (!r.Ok) { FormError = Loc.T("omp did not add it: ") + r.Error; return; }
+            if (!r.Output.StartsWith("Added SSH host", StringComparison.Ordinal)) { FormError = r.Output.Length > 0 ? r.Output : Loc.T("omp did not add it."); return; }
             IsAdding = false;
-            Say($"Added {NewName.Trim()} ({(NewScope == "user" ? "all projects" : "this project")}). omp can use it right away.");
+            Say(Loc.F("Added {0} ({1}). omp can use it right away.", NewName.Trim(), NewScope == "user" ? Loc.T("all projects") : Loc.T("this project")));
             await LoadAsync();
         }
         finally { Adding = false; }
@@ -220,11 +221,11 @@ public sealed partial class SshSettingsViewModel : WorkspacePageViewModel
 
     internal async Task<string?> RemoveAsync(SshHostRowViewModel row)
     {
-        if (!Main.CanRunOmpCommands) return "omp isn't running: start it to remove hosts.";
+        if (!Main.CanRunOmpCommands) return Loc.T("omp isn't running: start it to remove hosts.");
         var r = await Main.RunOmpCommandAsync($"/ssh remove {row.Name} --scope {row.Entry.Scope}", TimeSpan.FromSeconds(20), Main.Lifetime);
-        if (!r.Ok) return "omp did not remove it: " + r.Error;
-        if (!r.Output.StartsWith("Removed SSH host", StringComparison.Ordinal)) return r.Output.Length > 0 ? r.Output : "omp did not remove it.";
-        Say($"Removed {row.Name}.");
+        if (!r.Ok) return Loc.T("omp did not remove it: ") + r.Error;
+        if (!r.Output.StartsWith("Removed SSH host", StringComparison.Ordinal)) return r.Output.Length > 0 ? r.Output : Loc.T("omp did not remove it.");
+        Say(Loc.F("Removed {0}.", row.Name));
         await LoadAsync();
         return null;
     }
@@ -241,29 +242,29 @@ public sealed partial class SshSettingsViewModel : WorkspacePageViewModel
     {
         // omp's own guard (ssh/utils.ts buildSshTarget): a destination starting with "-" would be read as an ssh option
         if (host.Host.StartsWith('-') || host.User?.StartsWith('-') == true)
-            return (false, "omp refuses this host: an SSH address or user can't start with “-”.");
+            return (false, Loc.T("omp refuses this host: an SSH address or user can't start with “-”."));
         if (keyPath is { Length: > 0 })
         {
             var key = ExpandHome(keyPath);
-            if (!File.Exists(key)) return (false, $"SSH key not found: {keyPath}");
+            if (!File.Exists(key)) return (false, Loc.F("SSH key not found: {0}", keyPath));
             if (!OperatingSystem.IsWindows())
             {
                 var mode = File.GetUnixFileMode(key);
                 if ((mode & (UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute)) != 0)
-                    return (false, $"omp refuses this key: its permissions must be 600 or stricter (chmod 600 {keyPath}).");
+                    return (false, Loc.F("omp refuses this key: its permissions must be 600 or stricter (chmod 600 {0}).", keyPath));
             }
             keyPath = key;
         }
         var watch = Stopwatch.StartNew();
         var r = await Main.RunTool(new ToolCommand("ssh", SshCheck.Arguments(host, keyPath, ConnectTimeout), Main.ProjectFolder,
             SshCheck.ToolTimeout(ConnectTimeout)), Main.Lifetime);
-        if (r.NotFound) return (false, "ssh was not found on this computer. omp needs the OpenSSH client too.");
+        if (r.NotFound) return (false, Loc.T("ssh was not found on this computer. omp needs the OpenSSH client too."));
         var d = SshCheck.Diagnose(r);
-        var via = d.Route switch { SshRoute.ProxyJump => " through the jump host", SshRoute.ProxyCommand => " through the proxy command", _ => "" };
+        var via = d.Route switch { SshRoute.ProxyJump => Loc.T(" through the jump host"), SshRoute.ProxyCommand => Loc.T(" through the proxy command"), _ => "" };
         // A local or cached connection takes milliseconds: "0.0 s" had read like no time at all
         if (d.Connected) return (true, watch.Elapsed.TotalSeconds < 1
-            ? string.Create(CultureInfo.InvariantCulture, $"Connected{via} in {Math.Max(1, (int)watch.Elapsed.TotalMilliseconds)} ms.")
-            : string.Create(CultureInfo.InvariantCulture, $"Connected{via} in {watch.Elapsed.TotalSeconds:0.0} s."));
+            ? string.Format(CultureInfo.InvariantCulture, Loc.T("Connected{0} in {1} ms."), via, Math.Max(1, (int)watch.Elapsed.TotalMilliseconds))
+            : string.Format(CultureInfo.InvariantCulture, Loc.T("Connected{0} in {1:0.0} s."), via, watch.Elapsed.TotalSeconds));
         return (false, Describe(d, r.Message, r.ExitCode));
     }
 
@@ -274,106 +275,106 @@ public sealed partial class SshSettingsViewModel : WorkspacePageViewModel
     internal static string Describe(SshDiagnosis d, string sshMessage, int exitCode)
     {
         var secs = ((int)ConnectTimeout.TotalSeconds).ToString(CultureInfo.InvariantCulture);
-        var proxy = d.Route == SshRoute.ProxyJump ? "jump host" : "proxy command";
+        var proxy = d.Route == SshRoute.ProxyJump ? Loc.T("jump host") : Loc.T("proxy command");
         string Label(SshStage s) => s switch
         {
-            SshStage.Resolve => "Address",
-            SshStage.Tcp => "TCP connection",
-            SshStage.Banner => "Server's SSH greeting",
-            SshStage.Kex => "Protocol negotiation",
-            SshStage.HostKey => "Host key check",
-            _ => "Sign-in",
+            SshStage.Resolve => Loc.T("Address"),
+            SshStage.Tcp => Loc.T("TCP connection"),
+            SshStage.Banner => Loc.T("Server's SSH greeting"),
+            SshStage.Kex => Loc.T("Protocol negotiation"),
+            SshStage.HostKey => Loc.T("Host key check"),
+            _ => Loc.T("Sign-in"),
         };
         string Passed(SshStage s) => s switch
         {
-            SshStage.Resolve => "resolved",
-            SshStage.Tcp => "established",
-            SshStage.Banner => "received",
-            SshStage.Kex => "agreed",
-            SshStage.HostKey => "passed",
-            _ => "signed in",
+            SshStage.Resolve => Loc.T("resolved"),
+            SshStage.Tcp => Loc.T("established"),
+            SshStage.Banner => Loc.T("received"),
+            SshStage.Kex => Loc.T("agreed"),
+            SshStage.HostKey => Loc.T("passed"),
+            _ => Loc.T("signed in"),
         };
         var failed = d.Failure switch
         {
-            SshFailure.ResolveFailed => "the name does not resolve on this computer",
-            SshFailure.TcpRefused => "refused",
-            SshFailure.TcpTimeout => $"no answer within {secs} s",
-            SshFailure.TcpUnreachable => "no route to the address",
-            SshFailure.BannerTimeout => $"not received within {secs} s",
-            SshFailure.ClosedBeforeBanner => "the connection closed before it came",
-            SshFailure.NotSsh => "the answer is not SSH",
-            SshFailure.ProxyFailed => $"the {proxy} stopped before it came",
-            SshFailure.KexNoMatch => "no algorithm both sides support",
-            SshFailure.HostKeyChanged => "the key differs from the one in known_hosts",
-            SshFailure.HostKeyRejected => "ssh rejected the key",
-            SshFailure.KeyUnusable => "ssh could not use the key file",
-            SshFailure.AuthDenied => "the server refused the keys offered",
-            SshFailure.ConnectionClosed => "the connection closed",
-            SshFailure.NoAnswer => "ssh stopped answering",
-            _ => "failed",
+            SshFailure.ResolveFailed => Loc.T("the name does not resolve on this computer"),
+            SshFailure.TcpRefused => Loc.T("refused"),
+            SshFailure.TcpTimeout => Loc.F("no answer within {0} s", secs),
+            SshFailure.TcpUnreachable => Loc.T("no route to the address"),
+            SshFailure.BannerTimeout => Loc.F("not received within {0} s", secs),
+            SshFailure.ClosedBeforeBanner => Loc.T("the connection closed before it came"),
+            SshFailure.NotSsh => Loc.T("the answer is not SSH"),
+            SshFailure.ProxyFailed => Loc.F("the {0} stopped before it came", proxy),
+            SshFailure.KexNoMatch => Loc.T("no algorithm both sides support"),
+            SshFailure.HostKeyChanged => Loc.T("the key differs from the one in known_hosts"),
+            SshFailure.HostKeyRejected => Loc.T("ssh rejected the key"),
+            SshFailure.KeyUnusable => Loc.T("ssh could not use the key file"),
+            SshFailure.AuthDenied => Loc.T("the server refused the keys offered"),
+            SshFailure.ConnectionClosed => Loc.T("the connection closed"),
+            SshFailure.NoAnswer => Loc.T("ssh stopped answering"),
+            _ => Loc.T("failed"),
         };
         var stage = d.FailedAt is { } at ? Label(at).ToLowerInvariant() : "";
         var text = new List<string>
         {
             d.Failure switch
             {
-                SshFailure.ResolveFailed => "The server's name does not resolve on this computer.",
-                SshFailure.TcpRefused => "The TCP connection was refused.",
-                SshFailure.TcpTimeout => $"The TCP connection got no answer within {secs} s.",
-                SshFailure.TcpUnreachable => "This computer has no route to the server's address.",
-                SshFailure.TcpFailed => "The TCP connection failed.",
+                SshFailure.ResolveFailed => Loc.T("The server's name does not resolve on this computer."),
+                SshFailure.TcpRefused => Loc.T("The TCP connection was refused."),
+                SshFailure.TcpTimeout => Loc.F("The TCP connection got no answer within {0} s.", secs),
+                SshFailure.TcpUnreachable => Loc.T("This computer has no route to the server's address."),
+                SshFailure.TcpFailed => Loc.T("The TCP connection failed."),
                 SshFailure.BannerTimeout => d.Proxied
-                    ? $"The server's SSH greeting did not come through the {proxy} within {secs} s."
-                    : $"TCP connection established, but the server's SSH greeting did not arrive within {secs} s.",
-                SshFailure.ClosedBeforeBanner => "TCP connection established, but it closed before the server's SSH greeting.",
-                SshFailure.NotSsh => "Something answers on this port, but it does not speak SSH.",
-                SshFailure.ProxyFailed => $"The {proxy} stopped before the server's SSH greeting came through.",
-                SshFailure.KexNoMatch => "The server answers with SSH, but client and server share no algorithm.",
-                SshFailure.HostKeyChanged => "The server's host key differs from the one known_hosts has for it.",
-                SshFailure.HostKeyRejected => "ssh rejected the server's host key.",
-                SshFailure.KeyUnusable => "ssh could not use the key file, so the sign-in failed.",
-                SshFailure.AuthDenied => "The server answers, but refused the sign-in.",
-                SshFailure.ConnectionClosed => $"The connection closed during the {stage}.",
-                SshFailure.NoAnswer => d.FailedAt is null ? "ssh did not finish in time." : $"ssh did not finish in time; it stopped at the {stage}.",
-                SshFailure.RemoteCommandFailed => $"Signed in, but the test command (exit) ended with code {exitCode}.",
-                _ => "ssh could not connect.",
+                    ? Loc.F("The server's SSH greeting did not come through the {0} within {1} s.", proxy, secs)
+                    : Loc.F("TCP connection established, but the server's SSH greeting did not arrive within {0} s.", secs),
+                SshFailure.ClosedBeforeBanner => Loc.T("TCP connection established, but it closed before the server's SSH greeting."),
+                SshFailure.NotSsh => Loc.T("Something answers on this port, but it does not speak SSH."),
+                SshFailure.ProxyFailed => Loc.F("The {0} stopped before the server's SSH greeting came through.", proxy),
+                SshFailure.KexNoMatch => Loc.T("The server answers with SSH, but client and server share no algorithm."),
+                SshFailure.HostKeyChanged => Loc.T("The server's host key differs from the one known_hosts has for it."),
+                SshFailure.HostKeyRejected => Loc.T("ssh rejected the server's host key."),
+                SshFailure.KeyUnusable => Loc.T("ssh could not use the key file, so the sign-in failed."),
+                SshFailure.AuthDenied => Loc.T("The server answers, but refused the sign-in."),
+                SshFailure.ConnectionClosed => Loc.F("The connection closed during the {0}.", stage),
+                SshFailure.NoAnswer => d.FailedAt is null ? Loc.T("ssh did not finish in time.") : Loc.F("ssh did not finish in time; it stopped at the {0}.", stage),
+                SshFailure.RemoteCommandFailed => Loc.F("Signed in, but the test command (exit) ended with code {0}.", exitCode),
+                _ => Loc.T("ssh could not connect."),
             },
         };
         if (d.FailedAt is { } failedAt)
         {
             foreach (var s in Enum.GetValues<SshStage>())
             {
-                text.Add(d.Proxied && s is SshStage.Resolve or SshStage.Tcp ? $"– {Label(s)}: made by the {proxy}, not checked here"
+                text.Add(d.Proxied && s is SshStage.Resolve or SshStage.Tcp ? $"– {Label(s)}: " + Loc.F("made by the {0}, not checked here", proxy)
                     : s < failedAt ? $"✓ {Label(s)}: {Passed(s)}"
                     : s == failedAt ? $"✗ {Label(s)}: {failed}"
-                    : $"– {Label(s)}: not reached");
+                    : $"– {Label(s)}: " + Loc.T("not reached"));
             }
         }
         if (d.Route switch
             {
-                SshRoute.Direct => "Route: direct" + (d.Port is { } p ? string.Create(CultureInfo.InvariantCulture, $", port {p}.") : "."),
-                SshRoute.ProxyJump => "Route: through a jump host (ProxyJump in your SSH config).",
-                SshRoute.ProxyCommand => "Route: through a proxy command (ProxyCommand in your SSH config).",
+                SshRoute.Direct => Loc.T("Route: direct") + (d.Port is { } p ? Loc.F(", port {0}.", p) : "."),
+                SshRoute.ProxyJump => Loc.T("Route: through a jump host (ProxyJump in your SSH config)."),
+                SshRoute.ProxyCommand => Loc.T("Route: through a proxy command (ProxyCommand in your SSH config)."),
                 _ => null,
             } is { } route) text.Add(route);
-        if (d.ProxyMessage is { Length: > 0 } said) text.Add($"The {proxy} said: {said}");
+        if (d.ProxyMessage is { Length: > 0 } said) text.Add(Loc.F("The {0} said: {1}", proxy, said));
         if (d.Failure switch
             {
-                SshFailure.BannerTimeout when d.Proxied => $"Why no greeting came is not visible from this computer. Still to check: from the {proxy}'s side, whether the server answers on its SSH port; whether sshd runs on the server (the hosting provider's console).",
-                SshFailure.BannerTimeout => "Why the server stays silent is not visible from this computer. Still to check: whether sshd runs and logs this connection (the hosting provider's console), and the same test from another network.",
-                SshFailure.ClosedBeforeBanner => "Who closed it is not visible from this computer. Still to check: sshd's log on the server for this connection (the hosting provider's console).",
-                SshFailure.NotSsh => "Check the port: in this host's entry or in your SSH config.",
-                SshFailure.TcpRefused => "Check the address and the port, and whether sshd runs on the server.",
-                SshFailure.TcpTimeout or SshFailure.TcpUnreachable => "Check the address and the port; compare with the same test from another network.",
-                SshFailure.ResolveFailed => "Check the spelling, or whether the name needs another DNS server or a VPN.",
-                SshFailure.ProxyFailed => $"Check the {proxy} by itself first.",
-                SshFailure.HostKeyChanged => "If the server was reinstalled, confirm its new key with whoever runs it before changing known_hosts. The app doesn't change known_hosts.",
-                SshFailure.KeyUnusable => "omp signs in with keys only and can't type passphrases: check the key file's permissions (600) and format.",
-                SshFailure.AuthDenied => "omp signs in with keys only (no passwords): put your public key on the server, or choose the key file.",
+                SshFailure.BannerTimeout when d.Proxied => Loc.F("Why no greeting came is not visible from this computer. Still to check: from the {0}'s side, whether the server answers on its SSH port; whether sshd runs on the server (the hosting provider's console).", proxy),
+                SshFailure.BannerTimeout => Loc.T("Why the server stays silent is not visible from this computer. Still to check: whether sshd runs and logs this connection (the hosting provider's console), and the same test from another network."),
+                SshFailure.ClosedBeforeBanner => Loc.T("Who closed it is not visible from this computer. Still to check: sshd's log on the server for this connection (the hosting provider's console)."),
+                SshFailure.NotSsh => Loc.T("Check the port: in this host's entry or in your SSH config."),
+                SshFailure.TcpRefused => Loc.T("Check the address and the port, and whether sshd runs on the server."),
+                SshFailure.TcpTimeout or SshFailure.TcpUnreachable => Loc.T("Check the address and the port; compare with the same test from another network."),
+                SshFailure.ResolveFailed => Loc.T("Check the spelling, or whether the name needs another DNS server or a VPN."),
+                SshFailure.ProxyFailed => Loc.F("Check the {0} by itself first.", proxy),
+                SshFailure.HostKeyChanged => Loc.T("If the server was reinstalled, confirm its new key with whoever runs it before changing known_hosts. The app doesn't change known_hosts."),
+                SshFailure.KeyUnusable => Loc.T("omp signs in with keys only and can't type passphrases: check the key file's permissions (600) and format."),
+                SshFailure.AuthDenied => Loc.T("omp signs in with keys only (no passwords): put your public key on the server, or choose the key file."),
                 _ => null,
             } is { } next) text.Add(next);
         text.Add(sshMessage.StartsWith("ssh", StringComparison.Ordinal) ? sshMessage : "ssh: " + sshMessage);
-        text.Add("Code: " + d.Code);
+        text.Add(Loc.T("Code: ") + d.Code);
         return string.Join('\n', text);
     }
 
@@ -390,9 +391,9 @@ public sealed partial class SshHostRowViewModel(SshSettingsViewModel owner, SshH
     public string Name => Entry.Name;
     public string? KeyPath { get; } = keyPath;
     public string Address => (Entry.User is { Length: > 0 } u ? u + "@" : "") + Entry.Host + (Entry.Port != 22 ? ":" + Entry.Port.ToString(CultureInfo.InvariantCulture) : "");
-    public string Detail => KeyPath is { Length: > 0 } k ? $"{Address} · key {k}" : Address;
-    public string ScopeLabel => Entry.IsProject ? "This project" : "All projects";
-    public string RemoveQuestion => $"Remove {Name} from omp's hosts ({(Entry.IsProject ? "this project" : "all projects")})? Nothing changes on the machine itself.";
+    public string Detail => KeyPath is { Length: > 0 } k ? Loc.F("{0} · key {1}", Address, k) : Address;
+    public string ScopeLabel => Entry.IsProject ? Loc.T("This project") : Loc.T("All projects");
+    public string RemoveQuestion => Loc.F("Remove {0} from omp's hosts ({1})? Nothing changes on the machine itself.", Name, Entry.IsProject ? Loc.T("this project") : Loc.T("all projects"));
 
     [ObservableProperty] private bool _testing;
 

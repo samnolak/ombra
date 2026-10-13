@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -116,17 +117,17 @@ public sealed partial class UserRowViewModel(UserItem item) : RowViewModel(item)
             var hosts = block.Split('\n').Where(l => l.StartsWith(PreviewViewModel.PromptMarker, StringComparison.Ordinal))
                 .Select(l => Uri.TryCreate(l[PreviewViewModel.PromptMarker.Length..].Split(' ')[0].TrimEnd(','), UriKind.Absolute, out var u) ? u.Authority + u.AbsolutePath.TrimEnd('/') : "")
                 .Where(h => h.Length > 0).Distinct().ToList();
-            var what = n == 1 ? "1 comment" : $"{n} comments";
+            var what = n == 1 ? Loc.T("1 comment") : Loc.F("{0} comments", n);
             if (block.StartsWith(MainViewModel.CodeCommentsMarker, StringComparison.Ordinal))
-                return block.Contains("\n\n" + PreviewViewModel.PromptMarker, StringComparison.Ordinal) ? what : what + " on the code";
-            return hosts.Count == 1 ? $"{what} on {hosts[0]}" : hosts.Count > 1 ? $"{what} on {hosts.Count} pages" : what + " on the page";
+                return block.Contains("\n\n" + PreviewViewModel.PromptMarker, StringComparison.Ordinal) ? what : Loc.F("{0} on the code", what);
+            return hosts.Count == 1 ? Loc.F("{0} on {1}", what, hosts[0]) : hosts.Count > 1 ? Loc.F("{0} on {1} pages", what, hosts.Count) : Loc.F("{0} on the page", what);
         }
     }
 
     public bool HasOwnText => OwnText.Length > 0 || IsUnfolded;
     public bool IsLong => HasComments || OwnText.Length > FoldChars + 200 || OwnText.Count(c => c == '\n') > FoldLines + 4;
     public string DisplayText => IsUnfolded ? Text : HasComments ? OwnText : IsLong ? Head(OwnText) + "…" : OwnText;
-    public string FoldLabel => IsUnfolded ? (HasComments ? "Hide what was sent" : "Show less") : HasComments ? "Show what was sent" : "Show more";
+    public string FoldLabel => IsUnfolded ? (HasComments ? Loc.T("Hide what was sent") : Loc.T("Show less")) : HasComments ? Loc.T("Show what was sent") : Loc.T("Show more");
 
     private static string Head(string text)
     {
@@ -197,9 +198,9 @@ public sealed partial class AssistantRowViewModel : RowViewModel
     public bool IsThinkingLive => Streaming && HasThinking && !HasText;
     /// <summary>"Thinking… 4s" while it thinks, then "Thought for 4s" (Claude Code); loaded history just says "Thinking".</summary>
     public string ThinkingLabel => IsThinkingLive
-            ? _thinkingFrom is { } since && (DateTimeOffset.UtcNow - since).TotalSeconds >= 1 ? $"Thinking… {(int)(DateTimeOffset.UtcNow - since).TotalSeconds}s" : "Thinking…"
-        : _thinkingFrom is { } from && _thinkingTo is { } to ? $"Thought for {Math.Max(1, (int)Math.Round((to - from).TotalSeconds))}s"
-        : "Thinking";
+            ? _thinkingFrom is { } since && (DateTimeOffset.UtcNow - since).TotalSeconds >= 1 ? Loc.F("Thinking… {0}s", (int)(DateTimeOffset.UtcNow - since).TotalSeconds) : Loc.T("Thinking…")
+        : _thinkingFrom is { } from && _thinkingTo is { } to ? Loc.F("Thought for {0}s", Math.Max(1, (int)Math.Round((to - from).TotalSeconds)))
+        : Loc.T("Thinking");
     public bool ShowActions => HasFooter || (IsTurnEnd && HasText && !Streaming && !HasTurnEndRow);
 
     /// <summary>The once-a-second tick while a run goes on: the live thinking label counts up.</summary>
@@ -225,7 +226,7 @@ public sealed partial class AssistantRowViewModel : RowViewModel
         Thinking = a.Thinking;
         Streaming = a.Streaming;
         // An abort is the user's own stop, not an error, although omp also sets errorMessage ("Interrupted by user").
-        Footer = a.StopReason == "aborted" ? "Interrupted" : null;
+        Footer = a.StopReason == "aborted" ? Loc.T("Interrupted") : null;
         ErrorText = a.StopReason == "aborted" ? null : a.Error;
         // Thinking time as seen here: from its first delta to the first answer text (or the end of the message)
         if (a.Streaming && a.Thinking.Length > 0) _thinkingFrom ??= DateTimeOffset.UtcNow;
@@ -253,7 +254,10 @@ public sealed partial class ToolRowViewModel : RowViewModel
     /// <summary>A command's lines in its console before it is cut with an ellipsis (open, all of it).</summary>
     public const int CommandLines = 3;
 
-    [ObservableProperty] private string _title = "";
+    /// <summary>The line's tooltip in words, never the raw arguments: a command's whole command line (none while its
+    /// console shows it), the file, the search, or another tool's arguments one per line; null when there is nothing to say.
+    /// The view drops it while it only repeats text the line shows whole (Controls/TrimmedToolTip).</summary>
+    [ObservableProperty] private string? _tooltip;
     [ObservableProperty] private string _name = "";
     [ObservableProperty] private string _summary = "";
     [ObservableProperty] private string? _diff;
@@ -293,7 +297,7 @@ public sealed partial class ToolRowViewModel : RowViewModel
     private string _shownOutput = "";
     private string[] _lines = [];
     private string? _parsedArgs;
-    private string _pattern = "", _searchPath = "", _commandArg = "";
+    private string _pattern = "", _searchPath = "", _commandArg = "", _argLines = "";
 
     public ToolRowViewModel(ToolItem item) : base(item) => OnUpdated();
 
@@ -306,12 +310,12 @@ public sealed partial class ToolRowViewModel : RowViewModel
         {
             case "bash": return "Bash";
             case "shell": return "Shell";
-            case "grep": return "Search";
-            case "glob": return "Find files";
-            case "ast_grep": return "Search code";
-            case "ast_edit": return "Edit code";
-            case "todo": return "Update todos";
-            case "eval": return "Run code";
+            case "grep": return Loc.T("Search");
+            case "glob": return Loc.T("Find files");
+            case "ast_grep": return Loc.T("Search code");
+            case "ast_edit": return Loc.T("Edit code");
+            case "todo": return Loc.T("Update todos");
+            case "eval": return Loc.T("Run code");
             case "lsp": return "LSP";
         }
         // An MCP server's tool (mcp__server__tool): the tool, then its server
@@ -322,7 +326,7 @@ public sealed partial class ToolRowViewModel : RowViewModel
         static string Capitalized(string id)
         {
             var words = id.Replace('_', ' ').Replace('-', ' ').Trim();
-            return words.Length == 0 ? "Tool" : char.ToUpperInvariant(words[0]) + words[1..];
+            return words.Length == 0 ? Loc.T("Tool") : char.ToUpperInvariant(words[0]) + words[1..];
         }
     }
 
@@ -333,7 +337,7 @@ public sealed partial class ToolRowViewModel : RowViewModel
     /// </summary>
     public static string VerbOf(string tool, bool running, FileChangeKind? change = null, bool rename = false)
     {
-        string V(string doing, string done) => running ? doing : done;
+        string V(string doing, string done) => Loc.T(running ? doing : done);
         switch (tool)
         {
             case "bash" or "shell": return V("Running", "Ran");
@@ -366,7 +370,6 @@ public sealed partial class ToolRowViewModel : RowViewModel
     protected override void OnUpdated()
     {
         var t = (ToolItem)Model;
-        Title = $"{t.Name}  {t.Args}";
         Name = t.Name;
         Summary = t.Summary;
         Diff = t.Diff;
@@ -387,10 +390,10 @@ public sealed partial class ToolRowViewModel : RowViewModel
         }
         StatusText = t.Status switch
         {
-            ToolStatus.Running => "running…",
-            ToolStatus.Succeeded => "done",
-            ToolStatus.Failed => "failed",
-            _ => "interrupted",
+            ToolStatus.Running => Loc.T("running…"),
+            ToolStatus.Succeeded => Loc.T("done"),
+            ToolStatus.Failed => Loc.T("failed"),
+            _ => Loc.T("interrupted"),
         };
         Output = t.Output ?? "";
         IsRunning = t.Status == ToolStatus.Running;
@@ -401,14 +404,15 @@ public sealed partial class ToolRowViewModel : RowViewModel
         ParseArgs(t.Args);
         Verb = CurrentVerb();
         ArgText = ChangeKind == FileChangeKind.Moved && MovedFrom is { } from ? $"{from} → {FilePath}"
-            : Name is "grep" or "ast_grep" && _pattern.Length > 0 ? (_searchPath.Length > 0 ? $"{_pattern} in {_searchPath}" : _pattern)
+            : Name is "grep" or "ast_grep" && _pattern.Length > 0 ? (_searchPath.Length > 0 ? Loc.F("{0} in {1}", _pattern, _searchPath) : _pattern)
             : Summary.StartsWith("$ ", StringComparison.Ordinal) ? Summary[2..] : Summary;
         // omp ends a command's output with its own notes, which the line says its own way: the time, and an exit chip
         var (shown, exit, timedOut) = IsCommand ? SplitNotices(Output) : (Output, null, false);
         _shownOutput = shown;
         _lines = OutputLines(shown);
-        FailureText = !IsFailed ? null : exit is { } code ? $"exit {code}" : timedOut ? "timed out" : "failed";
+        FailureText = !IsFailed ? null : exit is { } code ? Loc.F("exit {0}", code) : timedOut ? Loc.T("timed out") : Loc.T("failed");
         Command = _commandArg.Length > 0 ? _commandArg.Trim() : ArgText;
+        Tooltip = TooltipText();
         UpdateResult(t);
         OnPropertyChanged(nameof(ShowArg));
         OnFailureTextChanged(FailureText);
@@ -424,7 +428,7 @@ public sealed partial class ToolRowViewModel : RowViewModel
     {
         if (args == _parsedArgs) return;
         _parsedArgs = args;
-        (_pattern, _searchPath, _commandArg) = ("", "", "");
+        (_pattern, _searchPath, _commandArg, _argLines) = ("", "", "", "");
         if (args.Length == 0) return;
         try
         {
@@ -434,12 +438,44 @@ public sealed partial class ToolRowViewModel : RowViewModel
             _pattern = Str(root, "pattern");
             _searchPath = Str(root, "path");
             _commandArg = Str(root, "command");
+            _argLines = ArgLines(root);
         }
         catch (JsonException)
         {
         }
 
         static string Str(JsonElement o, string key) => o.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+    }
+
+    /// <summary>A tool's plain arguments as "key: value" lines (a few, each on one line and cut), for its tooltip.</summary>
+    private static string ArgLines(JsonElement args)
+    {
+        const int MaxLines = 8, MaxValue = 160;
+        var lines = new List<string>(MaxLines);
+        foreach (var p in args.EnumerateObject())
+        {
+            var value = p.Value.ValueKind switch
+            {
+                JsonValueKind.String => p.Value.GetString() ?? "",
+                JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => p.Value.GetRawText(),
+                _ => "",
+            };
+            value = string.Join(' ', value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)).Trim();
+            if (value.Length == 0) continue;
+            if (value.Length > MaxValue) value = value[..(MaxValue - 1)] + "…";
+            lines.Add($"{p.Name.Replace('_', ' ')}: {value}");
+            if (lines.Count == MaxLines) break;
+        }
+        return string.Join('\n', lines);
+    }
+
+    /// <summary>What the line's tooltip says (see <see cref="Tooltip"/>).</summary>
+    private string? TooltipText()
+    {
+        if (IsCommand) return ShowConsole || Command.Length == 0 ? null : Command;
+        // A file, a move, a search: the line's own words, whole
+        if (HasFile || Name is "grep" or "ast_grep" || _argLines.Length == 0) return ArgText.Length > 0 ? ArgText : null;
+        return _argLines;
     }
 
     /// <summary>
@@ -486,8 +522,8 @@ public sealed partial class ToolRowViewModel : RowViewModel
         else if (IsRunning) (result, isOutput) = (string.Join('\n', lines.Skip(Math.Max(0, lines.Length - PreviewLines))), true);
         else if (HasDiff && !IsFailed) { }
         else if (t.ResultNote is { } note) meta = note.StartsWith("Found ", StringComparison.Ordinal) ? note[6..] : note;
-        else if (Name == "read" && !IsFailed && lines.Length > 0) meta = Count(lines.Length, "line");
-        else if (Name == "ls" && !IsFailed && lines.Length > 0) meta = lines.Length == 1 ? "1 entry" : $"{lines.Length} entries";
+        else if (Name == "read" && !IsFailed && lines.Length > 0) meta = lines.Length == 1 ? Loc.T("1 line") : Loc.F("{0} lines", lines.Length);
+        else if (Name == "ls" && !IsFailed && lines.Length > 0) meta = lines.Length == 1 ? Loc.T("1 entry") : Loc.F("{0} entries", lines.Length);
         else if (lines.Length > 0)
         {
             result = string.Join('\n', lines.Take(PreviewLines));
@@ -495,7 +531,7 @@ public sealed partial class ToolRowViewModel : RowViewModel
             // A command's output is mono; what a subagent, the todo list or a question answered is words
             isOutput = Name is not ("task" or "todo" or "ask");
         }
-        if (IsInterrupted && t.StartedAt is not null) meta = "Interrupted";
+        if (IsInterrupted && t.StartedAt is not null) meta = Loc.T("Interrupted");
         Result = result;
         ResultIsOutput = isOutput;
         MoreLines = more;
@@ -519,8 +555,6 @@ public sealed partial class ToolRowViewModel : RowViewModel
         OnPropertyChanged(nameof(ShowConsoleMore));
         OnPropertyChanged(nameof(CommandMaxLines));
     }
-
-    private static string Count(int n, string noun) => n == 1 ? $"1 {noun}" : $"{n} {noun}s";
 
     /// <summary>The output's lines without carriage returns and without the blank lines around it.</summary>
     private static string[] OutputLines(string text)
@@ -573,11 +607,15 @@ public sealed partial class ToolRowViewModel : RowViewModel
     /// <summary>The words or lines under the call, unless the whole output or the change is open in its place.</summary>
     public bool ShowResult => Result.Length > 0 && !ShowOutput && !ShowDiff;
     public bool ShowMore => MoreLines > 0 && ShowResult;
-    public string MoreText => MoreLines == 1 ? "… +1 line" : $"… +{MoreLines} lines";
+    public string MoreText => MoreLines == 1 ? Loc.T("… +1 line") : Loc.F("… +{0} lines", MoreLines);
 
     /// <summary>"… +N lines": the whole output.</summary>
     [RelayCommand]
     private void ShowAll() => IsExpanded = true;
+
+    /// <summary>The open output's own header (a console's, an output's, a changed file's): folds the call back to its line.</summary>
+    [RelayCommand]
+    private void Collapse() => IsExpanded = false;
 
     partial void OnIsExpandedChanged(bool value)
     {
@@ -593,7 +631,7 @@ public sealed partial class ToolRowViewModel : RowViewModel
 
     partial void OnAwaitsApprovalChanged(bool value) => Verb = CurrentVerb();
 
-    private string CurrentVerb() => AwaitsApproval && IsRunning ? "Waiting for approval"
+    private string CurrentVerb() => AwaitsApproval && IsRunning ? Loc.T("Waiting for approval")
         : VerbOf(Name, IsRunning, ChangeKind, Changes.Count == 1 && Changes[0].IsRename);
 
     partial void OnFailureTextChanged(string? value)
@@ -649,7 +687,7 @@ public sealed partial class TurnEndRowViewModel(TurnEndItem item) : RowViewModel
     /// (empty without a list: <see cref="Text"/> is the line then).</summary>
     public string LeadText => HasFiles && Line(withFiles: false) is { Length: > 0 } lead ? lead + " ·" : "";
     public bool HasLead => LeadText.Length > 0;
-    public string FilesText => FilesCount == 1 ? "1 file changed" : $"{FilesCount} files changed";
+    public string FilesText => FilesCount == 1 ? Loc.T("1 file changed") : Loc.F("{0} files changed", FilesCount);
 
     /// <summary>The files changed: as listed when the rows say which, else as omp's events counted them.</summary>
     private int FilesCount => HasFiles ? Files.Count : ((TurnEndItem)Model).FilesChanged;
@@ -659,12 +697,12 @@ public sealed partial class TurnEndRowViewModel(TurnEndItem item) : RowViewModel
         var e = (TurnEndItem)Model;
         var parts = new List<string>();
         // Under a tenth of a second says nothing ("Worked for 0.0s"); the counts still do
-        if (e.Took.TotalSeconds >= 0.1) parts.Add((e.Interrupted ? "Stopped after " : "Worked for ") + Duration(e.Took));
-        else if (e.Interrupted) parts.Add("Stopped");
-        if (e.Tools > 0) parts.Add(e.Tools == 1 ? "1 tool" : $"{e.Tools} tools");
+        if (e.Took.TotalSeconds >= 0.1) parts.Add(Loc.F(e.Interrupted ? "Stopped after {0}" : "Worked for {0}", Duration(e.Took)));
+        else if (e.Interrupted) parts.Add(Loc.T("Stopped"));
+        if (e.Tools > 0) parts.Add(e.Tools == 1 ? Loc.T("1 tool") : Loc.F("{0} tools", e.Tools));
         if (withFiles && FilesCount > 0) parts.Add(FilesText);
         var text = string.Join(" · ", parts);
-        return text.Length > 0 ? char.ToUpperInvariant(text[0]) + text[1..] : withFiles ? "Done" : "";
+        return text.Length > 0 ? char.ToUpperInvariant(text[0]) + text[1..] : withFiles ? Loc.T("Done") : "";
     }
 
     /// <summary>
@@ -729,10 +767,10 @@ public sealed partial class TurnEndRowViewModel(TurnEndItem item) : RowViewModel
     private void CopyReply() => Reply?.CopyCommand.Execute(null);
 
     public static string Duration(TimeSpan t) =>
-        t.TotalSeconds < 10 ? $"{t.TotalSeconds:0.0}s".Replace(',', '.')
-        : t.TotalMinutes < 1 ? $"{(int)t.TotalSeconds}s"
-        : t.TotalHours < 1 ? $"{(int)t.TotalMinutes}m {t.Seconds:00}s"
-        : $"{(int)t.TotalHours}h {t.Minutes:00}m";
+        t.TotalSeconds < 10 ? Loc.F("{0}s", $"{t.TotalSeconds:0.0}".Replace(',', '.'))
+        : t.TotalMinutes < 1 ? Loc.F("{0}s", (int)t.TotalSeconds)
+        : t.TotalHours < 1 ? Loc.F("{0}m {1:00}s", (int)t.TotalMinutes, t.Seconds)
+        : Loc.F("{0}h {1:00}m", (int)t.TotalHours, t.Minutes);
 
     protected override void OnUpdated()
     {
@@ -750,9 +788,9 @@ public sealed class TurnFileViewModel(string path, FileChangeKind kind, string? 
     public FileChangeKind Kind { get; } = kind;
     public string KindText { get; } = kind switch
     {
-        FileChangeKind.Created => "New",
-        FileChangeKind.Deleted => "Deleted",
-        FileChangeKind.Moved => movedFrom is not null && FileChange.SameFolder(movedFrom, path) ? "Renamed" : "Moved",
+        FileChangeKind.Created => Loc.T("New"),
+        FileChangeKind.Deleted => Loc.T("Deleted"),
+        FileChangeKind.Moved => movedFrom is not null && FileChange.SameFolder(movedFrom, path) ? Loc.T("Renamed") : Loc.T("Moved"),
         _ => "",
     };
     public bool HasKind => KindText.Length > 0;
@@ -760,12 +798,12 @@ public sealed class TurnFileViewModel(string path, FileChangeKind kind, string? 
     public bool IsDeleted => Kind == FileChangeKind.Deleted;
     public bool IsMoved => Kind == FileChangeKind.Moved;
     /// <summary>Where a moved file was: "from src/util.py".</summary>
-    public string MovedFromText { get; } = movedFrom is null ? "" : $"from {movedFrom}";
+    public string MovedFromText { get; } = movedFrom is null ? "" : Loc.F("from {0}", movedFrom);
     public string AddedText { get; } = added > 0 ? $"+{added}" : "";
     public string RemovedText { get; } = removed > 0 ? $"−{removed}" : "";
     /// <summary>The file at its first change, for the Files pane (a deleted file opens to say it is gone).</summary>
     public OmpGui.App.Controls.FileLink Link { get; } = new(path, kind == FileChangeKind.Deleted ? null : line);
-    public string OpenName => $"Open {Path}";
+    public string OpenName => Loc.F("Open {0}", Path);
 }
 
 public sealed partial class CommandOutputRowViewModel(CommandOutputItem item) : RowViewModel(item)
@@ -778,7 +816,7 @@ public sealed partial class CommandOutputRowViewModel(CommandOutputItem item) : 
     /// </summary>
     public string? Marker => Text.Trim() is var t && !t.Contains('\n') && t.StartsWith("Compaction complete", StringComparison.Ordinal)
         && SessionOutputs.ParseCompactEnd(t) is { Ok: true } r
-            ? r is { TokensBefore: { } b, TokensAfter: { } a } ? $"Conversation compacted · {SessionOutputs.Tokens(b)} → {SessionOutputs.Tokens(a)} tokens" : "Conversation compacted"
+            ? r is { TokensBefore: { } b, TokensAfter: { } a } ? Loc.F("Conversation compacted · {0} → {1} tokens", SessionOutputs.Tokens(b), SessionOutputs.Tokens(a)) : Loc.T("Conversation compacted")
             : null;
     public bool IsMarker => Marker is not null;
 

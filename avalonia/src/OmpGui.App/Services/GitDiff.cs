@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.Services;
@@ -120,14 +121,14 @@ public static class GitReview
             // staged). Neither means part of it was staged and then edited again: taking it out of the file alone would
             // hide the change from this view while the next commit still takes the staged part, so nothing is touched.
             var staged = await Apply("-R", "--cached", "--check");
-            if (staged.NotFound) return "git was not found on this computer.";
+            if (staged.NotFound) return Loc.T("git was not found on this computer.");
             if (!staged.Ok && !(await Apply("--cached", "--check")).Ok)
-                return "part of it is staged and was changed again since. Stage the file or unstage it in git first.";
+                return Loc.T("part of it is staged and was changed again since. Stage the file or unstage it in git first.");
             var r = await Apply("-R");
-            if (!r.Ok) return r.NotFound ? "git was not found on this computer." : r.Message;
+            if (!r.Ok) return r.NotFound ? Loc.T("git was not found on this computer.") : r.Message;
             if (!staged.Ok) return null;
             var cached = await Apply("-R", "--cached");
-            return cached.Ok ? null : "the file is back, but git's staging area still has it: " + cached.Message;
+            return cached.Ok ? null : Loc.T("the file is back, but git's staging area still has it: ") + cached.Message;
         }
         finally
         {

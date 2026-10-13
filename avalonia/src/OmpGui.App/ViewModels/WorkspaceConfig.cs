@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -18,7 +19,7 @@ public sealed class WorkspaceConfig
     public static async Task<(WorkspaceConfig? Config, string? Error)> LoadAsync(MainViewModel main, CancellationToken ct)
     {
         var r = await main.RunOmpCliAsync(["config", "list", "--json"], TimeSpan.FromSeconds(45), ct);
-        if (!r.Ok) return (null, "Couldn't read omp's settings: " + CliError(r));
+        if (!r.Ok) return (null, Loc.T("Couldn't read omp's settings: ") + CliError(r));
         try
         {
             using var doc = JsonDocument.Parse(r.Stdout);
@@ -29,7 +30,7 @@ public sealed class WorkspaceConfig
         }
         catch (JsonException e)
         {
-            return (null, "Couldn't read omp's settings: " + e.Message);
+            return (null, Loc.T("Couldn't read omp's settings: ") + e.Message);
         }
     }
 
@@ -64,11 +65,11 @@ public sealed class WorkspaceConfig
     public static string CliError(OmpCliResult r)
     {
         var lines = (r.Stderr.Trim().Length > 0 ? r.Stderr : r.Stdout).Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
-        var line = lines.Count == 0 ? $"omp exited with code {r.ExitCode}" : lines[^1];
+        var line = lines.Count == 0 ? Loc.F("omp exited with code {0}", r.ExitCode) : lines[^1];
         return line.StartsWith("Error: ", StringComparison.Ordinal) ? line[7..] : line;
     }
 
     /// <summary>A saved value that reads back differently: this project's .omp settings set it.</summary>
     public static string OverriddenNote(string what) =>
-        $"Saved, but this project's own omp settings (.omp/config.yml in the project) set {what} differently, and they win.";
+        Loc.F("Saved, but this project's own omp settings (.omp/config.yml in the project) set {0} differently, and they win.", what);
 }

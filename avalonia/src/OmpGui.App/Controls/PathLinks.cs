@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -109,9 +110,9 @@ public static partial class PathLinks
             Classes = { "tertiary" }, FontSize = 12,
             Text = target.Kind switch
             {
-                PathKind.Image => "Click to open in the image viewer",
-                PathKind.Folder => "Click to show in the Files pane",
-                _ => target.Line is null ? "Click to open in the Files pane" : "Click to open in the Files pane at this line",
+                PathKind.Image => Loc.T("Click to open in the image viewer"),
+                PathKind.Folder => Loc.T("Click to show in the Files pane"),
+                _ => target.Line is null ? Loc.T("Click to open in the Files pane") : Loc.T("Click to open in the Files pane at this line"),
             },
         });
         _ = FillAsync(target, detail, content);
@@ -136,7 +137,7 @@ public static partial class PathLinks
                 case PathKind.Folder:
                 {
                     var entries = await Task.Run(() => Services.ProjectFiles.List(target.FullPath));
-                    detail.Text = entries.Count == 1 ? "Folder · 1 item" : $"Folder · {entries.Count} items";
+                    detail.Text = entries.Count == 1 ? Loc.T("Folder · 1 item") : Loc.F("Folder · {0} items", entries.Count);
                     var list = new StringBuilder();
                     foreach (var e in entries.Take(PreviewEntries)) list.Append(e.Name).Append(e.IsDirectory ? "/\n" : "\n");
                     if (entries.Count > PreviewEntries) list.Append(CultureInfo.InvariantCulture, $"… {entries.Count - PreviewEntries} more");
@@ -146,7 +147,7 @@ public static partial class PathLinks
                 default:
                 {
                     var (size, lines, binary) = await Task.Run(() => ReadHead(target.FullPath, target.Line));
-                    detail.Text = binary ? $"Binary file · {Services.ProjectFiles.Size(size)}" : Services.ProjectFiles.Size(size);
+                    detail.Text = binary ? Loc.F("Binary file · {0}", Services.ProjectFiles.Size(size)) : Services.ProjectFiles.Size(size);
                     if (!binary && lines.Length > 0) content.Content = Mono(lines);
                     break;
                 }

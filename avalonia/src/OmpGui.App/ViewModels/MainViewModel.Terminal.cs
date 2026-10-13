@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -48,7 +49,7 @@ public sealed partial class MainViewModel
         try { spec = await launch(ProjectDirectory(), Lifetime); }
         catch (OmpGui.ClientCore.Network.NetworkPrivacyException e)
         {
-            ComposerMessage = "omp's terminal was not opened: " + e.Message;
+            ComposerMessage = Loc.F("omp's terminal was not opened: {0}", e.Message);
             return;
         }
         catch (OperationCanceledException) when (Lifetime.IsCancellationRequested) { return; }

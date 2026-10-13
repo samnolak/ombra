@@ -1,5 +1,6 @@
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
+using OmpGui.App.Localization;
 using OmpGui.ClientCore;
 
 namespace OmpGui.App.ViewModels;
@@ -47,11 +48,11 @@ public sealed partial class SessionItemViewModel(SessionSummary model) : Observa
 
     /// <summary>Pinned in omp's session list (<c>session-pins.json</c>, as omp's <c>/pin</c>): listed under Pinned.</summary>
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(PinLabel), nameof(PinTooltip))] private bool _isPinned;
-    public string PinLabel => IsPinned ? "Unpin" : "Pin";
-    public string PinTooltip => IsPinned ? "Unpin" : "Pin to the top";
+    public string PinLabel => IsPinned ? Loc.T("Unpin") : Loc.T("Pin");
+    public string PinTooltip => IsPinned ? Loc.T("Unpin") : Loc.T("Pin to the top");
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsActive), nameof(IsWaiting), nameof(IsUnread), nameof(IsFailed), nameof(HasStatus), nameof(StatusText))]
+    [NotifyPropertyChangedFor(nameof(IsActive), nameof(IsWaiting), nameof(IsUnread), nameof(IsFailed), nameof(HasStatus), nameof(HasDot), nameof(StatusText))]
     private SessionStatus _status;
 
     /// <summary>omp is working in this session right now.</summary>
@@ -60,12 +61,14 @@ public sealed partial class SessionItemViewModel(SessionSummary model) : Observa
     public bool IsUnread => Status == SessionStatus.Unread;
     public bool IsFailed => Status == SessionStatus.Error;
     public bool HasStatus => Status != SessionStatus.None;
+    /// <summary>A dot for every status but waiting on the user, which shows a raised hand.</summary>
+    public bool HasDot => HasStatus && !IsWaiting;
     public string StatusText => Status switch
     {
-        SessionStatus.Running => "omp is working",
-        SessionStatus.Waiting => "Needs your input",
-        SessionStatus.Unread => "New reply",
-        SessionStatus.Error => "omp stopped with an error",
+        SessionStatus.Running => Loc.T("omp is working"),
+        SessionStatus.Waiting => Loc.T("Needs your input"),
+        SessionStatus.Unread => Loc.T("New reply"),
+        SessionStatus.Error => Loc.T("omp stopped with an error"),
         _ => "",
     };
 
@@ -84,10 +87,10 @@ public sealed partial class SessionItemViewModel(SessionSummary model) : Observa
     public static string Relative(DateTimeOffset at, DateTimeOffset now)
     {
         var d = now - at;
-        if (d < TimeSpan.FromMinutes(1)) return "now";
-        if (d < TimeSpan.FromHours(1)) return string.Create(CultureInfo.InvariantCulture, $"{(int)d.TotalMinutes}m");
-        if (d < TimeSpan.FromDays(1)) return string.Create(CultureInfo.InvariantCulture, $"{(int)d.TotalHours}h");
-        if (d < TimeSpan.FromDays(7)) return string.Create(CultureInfo.InvariantCulture, $"{(int)d.TotalDays}d");
+        if (d < TimeSpan.FromMinutes(1)) return Loc.T("now");
+        if (d < TimeSpan.FromHours(1)) return Loc.F("{0}m", (int)d.TotalMinutes);
+        if (d < TimeSpan.FromDays(1)) return Loc.F("{0}h", (int)d.TotalHours);
+        if (d < TimeSpan.FromDays(7)) return Loc.F("{0}d", (int)d.TotalDays);
         var local = at.ToLocalTime();
         var culture = CultureInfo.CurrentCulture;
         return local.Year == now.ToLocalTime().Year

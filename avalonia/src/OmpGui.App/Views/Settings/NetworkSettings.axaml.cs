@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using Avalonia.Controls;
 using Avalonia.Platform.Storage;
 using OmpGui.App.ViewModels;
@@ -27,11 +28,11 @@ public partial class NetworkSettings : UserControl
         if (TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return null;
         var files = await storage.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Choose your organisation's certificate authority",
+            Title = Loc.T("Choose your organisation’s certificate authority"),
             AllowMultiple = false,
             FileTypeFilter =
             [
-                new FilePickerFileType("Certificates") { Patterns = ["*.pem", "*.crt", "*.cer"], MimeTypes = ["application/x-pem-file", "application/x-x509-ca-cert", "application/pkix-cert"] },
+                new FilePickerFileType(Loc.T("Certificates")) { Patterns = ["*.pem", "*.crt", "*.cer"], MimeTypes = ["application/x-pem-file", "application/x-x509-ca-cert", "application/pkix-cert"] },
                 FilePickerFileTypes.All,
             ],
         });

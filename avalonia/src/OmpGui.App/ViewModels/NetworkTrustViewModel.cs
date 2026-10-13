@@ -1,3 +1,4 @@
+using OmpGui.App.Localization;
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -9,7 +10,7 @@ namespace OmpGui.App.ViewModels;
 /// <summary>A connection check's address: "Network request to api.anthropic.com without a key".</summary>
 public sealed record ConnectionCheckTarget(string Host, string Url)
 {
-    public string Label => $"Network request to {Host} without a key";
+    public string Label => Loc.F("Network request to {0} without a key", Host);
 }
 
 /// <summary>
@@ -54,12 +55,12 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
 
     public bool IsOn => Mode is not null;
 
-    public string SetUpLabel => IsOn ? "Set up again…" : "Set up corporate network certificates…";
+    public string SetUpLabel => IsOn ? Loc.T("Set up again…") : Loc.T("Set up corporate network certificates…");
 
     /// <summary>"Off", "On: …", and what the user's own settings decide instead.</summary>
     [ObservableProperty] private string _statusText = OffText;
 
-    public const string OffText = "Off: omp trusts only the certificate authorities built into its runtime.";
+    public static string OffText => Loc.T("Off: omp trusts only the certificate authorities built into its runtime.");
 
     /// <summary>The user's own variables that decide instead of the app (shown, never changed).</summary>
     [ObservableProperty]
@@ -77,7 +78,7 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
     public bool IsExplainingSystem => Explaining == CorporateTrust.SystemMode;
     public bool IsExplainingPem => Explaining == CorporateTrust.PemMode;
 
-    public string ExplainTitle => IsExplainingSystem ? "Trust the certificate authorities macOS trusts" : "Trust the certificate authorities in a file";
+    public string ExplainTitle => IsExplainingSystem ? Loc.T("Trust the certificate authorities macOS trusts") : Loc.T("Trust the certificate authorities in a file");
 
     /// <summary>The file chosen on the card and what its check found.</summary>
     [ObservableProperty]
@@ -165,20 +166,20 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
         switch (o.CorporateTrust)
         {
             case CorporateTrust.SystemMode when !SystemModeAvailable:
-                return "Saved as \"macOS certificates\", which works on macOS only: nothing is added on this computer. Turn it off, or use a certificate file.";
+                return Loc.T("Saved as \"macOS certificates\", which works on macOS only: nothing is added on this computer. Turn it off, or use a certificate file.");
             case CorporateTrust.SystemMode when user.SystemCaConflict:
-                return "On, but your own setting decides, so the app adds nothing: " + string.Join("; ", user.SystemCaSettings.Select(s => s.Describe())) + ".";
+                return Loc.T("On, but your own setting decides, so the app adds nothing: ") + string.Join("; ", user.SystemCaSettings.Select(Describe)) + ".";
             case CorporateTrust.SystemMode when user.SystemCaAlreadyOn:
-                return "On. Your own environment already makes omp use the certificates macOS trusts, so the app adds nothing.";
+                return Loc.T("On. Your own environment already makes omp use the certificates macOS trusts, so the app adds nothing.");
             case CorporateTrust.SystemMode:
-                return "On: omp trusts the certificate authorities macOS trusts.";
+                return Loc.T("On: omp trusts the certificate authorities macOS trusts.");
             case CorporateTrust.PemMode when o.CorporateTrustBundle is not { } bundle || !File.Exists(bundle):
-                return "On, but the app's copy of your certificate file is missing: set it up again.";
+                return Loc.T("On, but the app's copy of your certificate file is missing: set it up again.");
             case CorporateTrust.PemMode when user.SetsExtraCa:
-                return "On, but your own NODE_EXTRA_CA_CERTS decides, so the app adds nothing.";
+                return Loc.T("On, but your own NODE_EXTRA_CA_CERTS decides, so the app adds nothing.");
             case CorporateTrust.PemMode:
                 var check = CorporateCaFile.Validate(o.CorporateTrustBundle!, Now());
-                return check.Ok ? "On: omp also trusts " + check.Message : "On, but the certificate file needs attention: " + check.Message;
+                return check.Ok ? Loc.T("On: omp also trusts ") + check.Message : Loc.T("On, but the certificate file needs attention: ") + check.Message;
             default:
                 return OffText;
         }
@@ -187,8 +188,19 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
     private string UserSettingsLine(OmpRuntimeOptions o)
     {
         var user = Inspect(o);
-        var set = user.SystemCaSettings.Concat(user.ExtraCa is { } e ? [e] : []).Select(s => s.Describe()).ToList();
-        return set.Count == 0 ? "" : "Set by you: " + string.Join("; ", set) + ".";
+        var set = user.SystemCaSettings.Concat(user.ExtraCa is { } e ? [e] : []).Select(Describe).ToList();
+        return set.Count == 0 ? "" : Loc.T("Set by you: ") + string.Join("; ", set) + ".";
+    }
+
+    /// <summary>"NODE_USE_SYSTEM_CA=0 (in the environment the app was started with)", in the app's language: for the
+    /// settings page only, never for logs.</summary>
+    internal static string Describe(UserCaSetting s)
+    {
+        var what = s.Variable == CorporateTrust.NodeOptionsVariable ? Loc.F("NODE_OPTIONS contains {0}", s.Value)
+            : s.Value is null ? Loc.F("{0} is removed", s.Variable)
+            : s.Variable == CorporateTrust.ExtraCaVariable ? Loc.F("{0} is set", s.Variable)
+            : $"{s.Variable}={s.Value}";
+        return what + (s.InAppSettings ? Loc.T(" (in the app's settings environment)") : Loc.T(" (in the environment the app was started with)"));
     }
 
     private void LoadTargets()
@@ -230,12 +242,12 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
         var user = Inspect(o);
         Blocker = mode == CorporateTrust.SystemMode
             ? user.SystemCaConflict
-                ? "Your own setting chooses another certificate store, so the app won't add anything: "
-                  + string.Join("; ", user.SystemCaSettings.Select(s => s.Describe())) + ". Change or remove it first if you want this."
+                ? Loc.T("Your own setting chooses another certificate store, so the app won't add anything: ")
+                  + string.Join("; ", user.SystemCaSettings.Select(Describe)) + Loc.T(". Change or remove it first if you want this.")
                 : ""
             : user.ExtraCa is { } extra
-                ? "You already use your own certificate file: " + extra.Describe()
-                  + ". The app won't replace or merge it; add your organisation's certificates to that file instead, or remove the variable first."
+                ? Loc.T("You already use your own certificate file: ") + Describe(extra)
+                  + Loc.T(". The app won't replace or merge it; add your organisation's certificates to that file instead, or remove the variable first.")
                 : "";
         // Set up again with a file: the app's copy is checked again and can be kept as it is
         if (mode == CorporateTrust.PemMode && o.CorporateTrust == CorporateTrust.PemMode && o.CorporateTrustBundle is { } bundle && File.Exists(bundle))
@@ -309,12 +321,12 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
             ChosenFile = null;
             _chosenPath = null;
             Load();
-            await RestartAsync(changed, changed ? "On." : "Already on with these settings: nothing changed.");
+            await RestartAsync(changed, changed ? Loc.T("On.") : Loc.T("Already on with these settings: nothing changed."));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             Console.Error.WriteLine("corp-trust: enable failed " + e.GetType().Name);
-            Say("The app could not save its copy of the certificates (" + e.GetType().Name + "). Nothing changed.", error: true);
+            Say(Loc.F("The app could not save its copy of the certificates ({0}). Nothing changed.", e.GetType().Name), error: true);
         }
         finally
         {
@@ -336,7 +348,7 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
             Console.Error.WriteLine("corp-trust: off");
             Cancel();
             Load();
-            await RestartAsync(true, "Off.");
+            await RestartAsync(true, Loc.T("Off."));
         }
         finally
         {
@@ -365,7 +377,7 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            Say("Settings not saved: " + e.Message, error: true);
+            Say(Loc.T("Settings not saved: ") + e.Message, error: true);
             return false;
         }
     }
@@ -384,9 +396,9 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
             Say(done);
             return;
         }
-        Say(done + " Restarting omp…");
+        Say(done + Loc.T(" Restarting omp…"));
         await _main.RestartEnginesAsync();
-        Say(done + (_main.PendingEngineRestarts == 0 ? " omp restarted with it; new chats start with it." : " New chats start with it."));
+        Say(done + (_main.PendingEngineRestarts == 0 ? Loc.T(" omp restarted with it; new chats start with it.") : Loc.T(" New chats start with it.")));
         UpdateRestartNote();
         _ = WatchPendingAsync();
     }
@@ -416,10 +428,10 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
         var notes = new List<string>();
         var pending = _main.PendingEngineRestarts;
         if (pending > 0)
-            notes.Add(pending == 1 ? "A chat that is working (marked in the sidebar) restarts omp with the change when its run ends."
-                : $"{pending} chats that are working (marked in the sidebar) restart omp with the change when their runs end.");
+            notes.Add(pending == 1 ? Loc.T("A chat that is working (marked in the sidebar) restarts omp with the change when its run ends.")
+                : Loc.F("{0} chats that are working (marked in the sidebar) restart omp with the change when their runs end.", pending));
         if (_main.OpenOmpTerminals > 0 && HasMessage)
-            notes.Add("omp terminal tabs that are already open keep the previous setting until you open them again.");
+            notes.Add(Loc.T("omp terminal tabs that are already open keep the previous setting until you open them again."));
         RestartNote = string.Join(" ", notes);
     }
 
@@ -432,20 +444,20 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
     {
         if (target is null) return;
         IsChecking = true;
-        CheckResult = "Checking " + target.Host + "…";
+        CheckResult = Loc.F("Checking {0}…", target.Host);
         CheckIsOk = false;
         try
         {
             ConnectionCheckResult result;
             if (_main.OmpCliLaunch is not { } launch)
-                result = new(ConnectionCheckKind.Unavailable, "no-launch", "The check needs omp's runtime, which is not set up here.");
+                result = new(ConnectionCheckKind.Unavailable, "no-launch", Loc.T("The check needs omp's runtime, which is not set up here."));
             else
                 result = await ConnectionCheck.RunAsync(launch([], null), target.Url, _main.Lifetime);
             Console.Error.WriteLine(result.LogLine);
             CheckIsOk = result.Kind == ConnectionCheckKind.Works;
             CheckResult = target.Host + ": " + result.Message
                 + (result.Kind == ConnectionCheckKind.Tls && IsOn
-                    ? " Corporate certificates are on: the certificate authority your network uses may be missing (try a certificate file from IT)."
+                    ? Loc.T(" Corporate certificates are on: the certificate authority your network uses may be missing (try a certificate file from IT).")
                     : "");
         }
         catch (OperationCanceledException) { }
