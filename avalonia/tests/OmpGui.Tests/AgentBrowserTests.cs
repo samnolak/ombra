@@ -650,10 +650,11 @@ public sealed class AgentBrowserTests
         var dropped = new List<PreviewTab>();
         vm.TabClosed += dropped.Add;
         vm.NavigateCommand.Execute("localhost:5173");
-        Assert.False(vm.ShowTabStrip);
+        Assert.False(vm.HasTabList);
+        Assert.True(vm.ShowTabStrip); // one tab with a page: "+ New tab" alone
 
         var a = vm.OpenAgentTab("A");
-        Assert.True(vm.ShowTabStrip);
+        Assert.True(vm.HasTabList);
         Assert.Same(a, vm.ActiveTab);
         Assert.True(a.IsActive);
         Assert.False(vm.Tabs[0].IsActive);
@@ -698,7 +699,7 @@ public sealed class AgentBrowserTests
         Assert.True(a.IsClosed);
         Assert.Same(vm.Tabs[0], vm.ActiveTab);
         Assert.Equal("http://localhost:5173/", vm.CurrentUrl!.AbsoluteUri);
-        Assert.False(vm.ShowTabStrip);
+        Assert.False(vm.HasTabList);
         vm.CloseTabCommand.Execute(vm.Tabs[0]);
         Assert.Single(vm.Tabs);
     }

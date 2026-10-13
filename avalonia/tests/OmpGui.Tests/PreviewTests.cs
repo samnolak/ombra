@@ -279,26 +279,78 @@ public sealed class PreviewTests
         Dispatcher.UIThread.RunJobs();
         Assert.True(Named<Border>(panel, "TabStrip").IsEffectivelyVisible);
         var tabs = Named<ItemsControl>(panel, "TabItems").GetVisualDescendants().OfType<Border>().Where(x => x.Classes.Contains("preview-tab")).ToList();
-        Assert.Equal(3, tabs.Count);
-        Assert.Equal([false, false, true], tabs.Select(x => x.Classes.Contains("active")));
-        // The user's own tab has no close button; omp's do
+        // The user's own tab, empty and not shown, is not listed (no "New tab" before omp's)
+        Assert.False(Named<ItemsControl>(panel, "TabItems").ContainerFromIndex(0)!.IsVisible);
+        Assert.Equal(2, tabs.Count);
+        Assert.Equal([false, true], tabs.Select(x => x.Classes.Contains("active")));
         var closers = tabs.Select(x => x.GetVisualDescendants().OfType<Button>().Any(c => c.IsVisible && AutomationProperties.GetName(c) == "Close tab")).ToList();
-        Assert.Equal([false, true, true], closers);
-        Assert.Contains(tabs[1].GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "localhost:3000");
+        Assert.Equal([true, true], closers);
+        Assert.Contains(tabs[0].GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "localhost:3000");
 
         // A click on a tab shows it; its close button drops it
-        var select = tabs[1].GetVisualDescendants().OfType<Button>().First(c => c.Classes.Contains("flat"));
+        var select = tabs[0].GetVisualDescendants().OfType<Button>().First(c => c.Classes.Contains("flat"));
         select.Command!.Execute(select.CommandParameter);
         Dispatcher.UIThread.RunJobs();
         Assert.Same(a, vm.ActiveTab);
         Assert.Equal("http://localhost:3000", vm.Address);
-        var close = tabs[2].GetVisualDescendants().OfType<Button>().First(c => AutomationProperties.GetName(c) == "Close tab");
+        var close = tabs[1].GetVisualDescendants().OfType<Button>().First(c => AutomationProperties.GetName(c) == "Close tab");
         close.Command!.Execute(close.CommandParameter);
         Dispatcher.UIThread.RunJobs();
         Assert.True(b.IsClosed);
         Assert.Equal(2, vm.Tabs.Count);
         using var frame = w.CaptureRenderedFrame();
         Assert.NotNull(frame);
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public void The_user_opens_tabs_with_plus_after_the_last_and_an_empty_one_left_goes()
+    {
+        var (w, panel, vm) = Show();
+        double Left(Visual v) => v.TranslatePoint(default, panel)!.Value.X;
+        vm.NavigateCommand.Execute("localhost:3000");
+        Dispatcher.UIThread.RunJobs();
+
+        // One tab with a page: the row has "+ New tab" alone
+        Assert.True(Named<Border>(panel, "TabStrip").IsEffectivelyVisible);
+        Assert.False(Named<ScrollViewer>(panel, "TabScroller").IsVisible);
+        var text = Named<Button>(panel, "NewTabTextButton");
+        Assert.True(text.IsEffectivelyVisible);
+        text.Command!.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+
+        // A new empty tab after the first, shown, closable, the keyboard in the address box; + right after the last tab
+        Assert.Equal(2, vm.Tabs.Count);
+        var mine = vm.Tabs[1];
+        Assert.Same(mine, vm.ActiveTab);
+        Assert.True(mine.CanClose);
+        Assert.Equal("", vm.Address);
+        Assert.True(Named<TextBox>(panel, "AddressBox").IsFocused);
+        Assert.False(text.IsVisible);
+        var plus = Named<Button>(panel, "NewTabButton");
+        Assert.True(plus.IsEffectivelyVisible);
+        var last = Named<ItemsControl>(panel, "TabItems").ContainerFromIndex(1)!;
+        Assert.InRange(Left(plus) - (Left(last) + last.Bounds.Width), 0, 8);
+        Assert.True(Left(plus) + plus.Bounds.Width < panel.Bounds.Width - 100); // after the tabs, not at the far end
+
+        // + again on the empty tab shown only puts the keyboard back; left empty, the tab goes
+        vm.NewTabCommand.Execute(null);
+        Assert.Equal(2, vm.Tabs.Count);
+        vm.SelectTabCommand.Execute(vm.Tabs[0]);
+        Assert.True(mine.IsClosed);
+        Assert.Single(vm.Tabs);
+        Assert.Equal("http://localhost:3000/", vm.CurrentUrl!.AbsoluteUri);
+
+        // A new tab given a page stays; its × shows the neighbour with a page
+        vm.NewTabCommand.Execute(null);
+        vm.NavigateCommand.Execute("localhost:4000");
+        var second = vm.ActiveTab;
+        vm.SelectTabCommand.Execute(vm.Tabs[0]);
+        Assert.Contains(second, vm.Tabs);
+        vm.SelectTabCommand.Execute(second);
+        vm.CloseTabCommand.Execute(second);
+        Assert.Same(vm.Tabs[0], vm.ActiveTab);
+        Assert.Equal("http://localhost:3000/", vm.CurrentUrl!.AbsoluteUri);
         w.Close();
     }
 
@@ -352,7 +404,7 @@ public sealed class PreviewTests
     public void Many_tabs_share_the_strip_and_keep_their_close_buttons()
     {
         var (w, panel, vm) = Show(); // 520 wide
-        for (var i = 0; i < 3; i++) vm.OpenAgentTab("t" + i).Title = i == 1 ? "Short" : "Merchant Dashboard — Orders and refunds";
+        for (var i = 0; i < 4; i++) vm.OpenAgentTab("t" + i).Title = i == 1 ? "Short" : "Merchant Dashboard — Orders and refunds";
         Dispatcher.UIThread.RunJobs();
         var scroller = Named<ScrollViewer>(panel, "TabScroller");
         Assert.Equal(ScrollBarVisibility.Hidden, scroller.HorizontalScrollBarVisibility);
@@ -362,11 +414,12 @@ public sealed class PreviewTests
 
         // They fit: the long titles shrink alike (but no further than needed), the short one keeps its width, nothing scrolls
         Assert.True(scroller.Extent.Width <= scroller.Viewport.Width + 0.5);
-        var tabs = Tabs();
-        Assert.Equal(tabs[1].Bounds.Width, tabs[3].Bounds.Width);
-        Assert.InRange(tabs[1].Bounds.Width, 120, 190); // under their own 200
-        Assert.True(tabs[2].Bounds.Width < tabs[1].Bounds.Width);
-        foreach (var tab in tabs.Skip(1))
+        var tabs = Tabs(); // omp's four (the user's own, empty, is not listed)
+        Assert.Equal(4, tabs.Count);
+        Assert.Equal(tabs[0].Bounds.Width, tabs[3].Bounds.Width);
+        Assert.InRange(tabs[0].Bounds.Width, 120, 190); // under their own 200
+        Assert.True(tabs[1].Bounds.Width < tabs[0].Bounds.Width);
+        foreach (var tab in tabs)
         {
             var close = CloseOf(tab)!;
             Assert.True(Left(close) + close.Bounds.Width <= Left(tab) + tab.Bounds.Width + 0.5); // inside its own tab
@@ -374,12 +427,14 @@ public sealed class PreviewTests
         }
 
         // Too many for even their narrowest: the strip scrolls, the active (newest) tab in view, close button and all
-        for (var i = 3; i < 12; i++) vm.OpenAgentTab("t" + i).Title = "Merchant Dashboard — Orders and refunds";
+        for (var i = 4; i < 12; i++) vm.OpenAgentTab("t" + i).Title = "Merchant Dashboard — Orders and refunds";
         Dispatcher.UIThread.RunJobs();
         tabs = Tabs();
         Assert.True(scroller.Extent.Width > scroller.Viewport.Width);
         var activeClose = CloseOf(tabs[^1])!;
         Assert.InRange(Left(activeClose), 0, scroller.Viewport.Width - activeClose.Bounds.Width);
+        var plus = Named<Button>(panel, "NewTabButton"); // + stays in sight at the end
+        Assert.InRange(plus.TranslatePoint(default, panel)!.Value.X + plus.Bounds.Width, scroller.Viewport.Width, panel.Bounds.Width + 0.5);
         vm.SelectTabCommand.Execute(vm.Tabs[0]);
         Dispatcher.UIThread.RunJobs();
         Assert.Equal(0, scroller.Offset.X);

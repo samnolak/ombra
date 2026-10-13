@@ -233,9 +233,15 @@ project yet), so the OS warns on first start:
   box. The comments go with your next message, each with its file, line and the line's text — on their own, too.
 - **Preview** — the 🌐 button in the header (Ctrl/⌘+Shift+B) opens the web app you are building beside the
   conversation, with back, forward, reload, an address box and *open in your browser*. Until a page is open, the
-  local addresses that appear in omp's tool output (dev servers it starts) are offered as chips. It uses the system's
+  local addresses that appear in omp's tool output (dev servers it starts) are offered as chips. Once a page is open,
+  **+ New tab** under the toolbar opens another tab of your own (the address box takes the keyboard); with several
+  tabs, **+** sits right after the last one. A tab you opened and left empty closes when you leave it; × closes the
+  ones you opened (the first stays). It uses the system's
   web engine: WebView2 on Windows, WebKit on macOS, WebKitGTK (`libwebkit2gtk-4.1`) on Linux; when the engine is
-  missing the panel says what to install and offers **Open in browser**.
+  missing the panel says what to install and offers **Open in browser**. On macOS, SVG icons that draw through a
+  `<mask>` of their own (common in Figma exports) look soft: WebKit, the engine Safari uses too, draws such a mask at
+  low resolution when the SVG is an image (`<img>`, CSS `mask-image` or `background`). The same icons inline in the
+  page, or exported without the mask, are sharp.
 - **omp browses in the preview** — when omp opens a web page with its browser tool, the page opens here rather
   than in a hidden browser: the preview opens by itself and you watch each step; a pulsing **omp** pill in its
   toolbar shows while omp reads, clicks or types on the page. Each page omp opens gets a tab of its own (a strip of

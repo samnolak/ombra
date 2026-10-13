@@ -164,43 +164,63 @@
       </WrapPanel>
     </Border>
 
-    <!-- ── Tabs (omp's pages, each with its own web view) ──
+    <!-- ── Tabs (each with its own web view: the user's, omp's, pop-ups) ──
          They share the width (TabStripPanel: long titles shrink, close buttons stay); past their narrowest the row
-         scrolls sideways without a bar (a bar would lie over the tabs): wheel or swipe, faded edges, the active tab in view. -->
+         scrolls sideways without a bar (a bar would lie over the tabs): wheel or swipe, faded edges, the active tab in view.
+         + opens a tab right after the last one (TabStripRow keeps it there, in sight); with one tab, "+ New tab" alone.
+         An empty tab of the user's is listed only while shown. -->
     <Border x:Name="TabStrip" DockPanel.Dock="Top" Classes="preview-tabs" IsVisible="{Binding ShowTabStrip}">
-      <ScrollViewer x:Name="TabScroller" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
-        <ItemsControl x:Name="TabItems" ItemsSource="{Binding Tabs}">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate>
-              <ctl:TabStripPanel Spacing="4" MinItemWidth="120" />
-            </ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate x:DataType="vm:PreviewTab">
-              <Border Classes="preview-tab" Classes.active="{Binding IsActive}">
-                <DockPanel>
-                  <Button DockPanel.Dock="Right" Classes="icon" Width="22" Height="22" Margin="0,0,3,0" IsVisible="{Binding CanClose}"
-                          Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).CloseTabCommand}" CommandParameter="{Binding}"
-                          ToolTip.Tip="Close tab" AutomationProperties.Name="Close tab">
-                    <ctl:Icon Data="{StaticResource IconClose}" Size="12" />
-                  </Button>
-                  <Button Classes="flat" Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).SelectTabCommand}" CommandParameter="{Binding}"
-                          ToolTip.Tip="{Binding ToolTip}" AutomationProperties.Name="{Binding Header}">
-                    <DockPanel>
-                      <Ellipse DockPanel.Dock="Left" Classes="state-dot running" IsVisible="{Binding IsLoading}" Margin="0,0,6,0" />
-                      <!-- A window the page opened (sign-in pop-ups): it closes itself when done -->
-                      <TextBlock DockPanel.Dock="Right" Classes="tertiary" Text="Pop-up" IsVisible="{Binding IsPopup}" VerticalAlignment="Center"
-                                 FontSize="{DynamicResource GuiFontXs}" Margin="6,0,0,0" />
-                      <TextBlock Text="{Binding Header}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
-                                 FontSize="{DynamicResource GuiFontS}" />
-                    </DockPanel>
-                  </Button>
-                </DockPanel>
-              </Border>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-      </ScrollViewer>
+      <ctl:TabStripRow>
+        <ScrollViewer x:Name="TabScroller" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" IsVisible="{Binding HasTabList}">
+          <ItemsControl x:Name="TabItems" ItemsSource="{Binding Tabs}">
+            <ItemsControl.Styles>
+              <Style Selector="ContentPresenter" x:DataType="vm:PreviewTab">
+                <Setter Property="IsVisible" Value="{Binding ShowsInStrip}" />
+              </Style>
+            </ItemsControl.Styles>
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <ctl:TabStripPanel Spacing="4" MinItemWidth="120" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:PreviewTab">
+                <Border Classes="preview-tab" Classes.active="{Binding IsActive}">
+                  <DockPanel>
+                    <Button DockPanel.Dock="Right" Classes="icon" Width="22" Height="22" Margin="0,0,3,0" IsVisible="{Binding CanClose}"
+                            Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).CloseTabCommand}" CommandParameter="{Binding}"
+                            ToolTip.Tip="Close tab" AutomationProperties.Name="Close tab">
+                      <ctl:Icon Data="{StaticResource IconClose}" Size="12" />
+                    </Button>
+                    <Button Classes="flat" Command="{Binding $parent[ItemsControl].((vm:PreviewViewModel)DataContext).SelectTabCommand}" CommandParameter="{Binding}"
+                            ToolTip.Tip="{Binding ToolTip}" AutomationProperties.Name="{Binding Header}">
+                      <DockPanel>
+                        <Ellipse DockPanel.Dock="Left" Classes="state-dot running" IsVisible="{Binding IsLoading}" Margin="0,0,6,0" />
+                        <!-- A window the page opened (sign-in pop-ups): it closes itself when done -->
+                        <TextBlock DockPanel.Dock="Right" Classes="tertiary" Text="Pop-up" IsVisible="{Binding IsPopup}" VerticalAlignment="Center"
+                                   FontSize="{DynamicResource GuiFontXs}" Margin="6,0,0,0" />
+                        <TextBlock Text="{Binding Header}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                                   FontSize="{DynamicResource GuiFontS}" />
+                      </DockPanel>
+                    </Button>
+                  </DockPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+        <Button x:Name="NewTabButton" Classes="icon" Width="28" Height="28" Margin="4,0,0,0" Command="{Binding NewTabCommand}"
+                IsVisible="{Binding HasTabList}" ToolTip.Tip="New tab" AutomationProperties.Name="New tab">
+          <ctl:Icon Data="{StaticResource IconPlus}" Size="14" />
+        </Button>
+        <Button x:Name="NewTabTextButton" Classes="flat" Height="28" MinHeight="0" Padding="8,0,10,0" Command="{Binding NewTabCommand}"
+                IsVisible="{Binding !HasTabList}" AutomationProperties.Name="New tab">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <ctl:Icon Data="{StaticResource IconPlus}" Size="14" VerticalAlignment="Center" />
+            <TextBlock Text="New tab" FontSize="{DynamicResource GuiFontS}" VerticalAlignment="Center" />
+          </StackPanel>
+        </Button>
+      </ctl:TabStripRow>
     </Border>
 
     <!-- ── Suggestions (local addresses from tool output) while nothing is open ── -->

@@ -51,6 +51,7 @@ public partial class PreviewPanel : UserControl
             old.NavigationRequested -= OnNavigationRequested;
             old.TabNavigationRequested -= NavigateTab;
             old.TabClosed -= OnTabClosed;
+            old.AddressFocusRequested -= FocusAddress;
             old.ReloadRequested -= OnReloadRequested;
             old.BackRequested -= OnBackRequested;
             old.ForwardRequested -= OnForwardRequested;
@@ -76,6 +77,7 @@ public partial class PreviewPanel : UserControl
             vm.NavigationRequested += OnNavigationRequested;
             vm.TabNavigationRequested += NavigateTab;
             vm.TabClosed += OnTabClosed;
+            vm.AddressFocusRequested += FocusAddress;
             vm.ReloadRequested += OnReloadRequested;
             vm.BackRequested += OnBackRequested;
             vm.ForwardRequested += OnForwardRequested;
@@ -279,6 +281,15 @@ public partial class PreviewPanel : UserControl
         _ = SyncAnnotationsAsync();
         RevealActiveTab();
     }
+
+    /// <summary>A new tab: the keyboard goes to the address box, its text selected (as browsers do).</summary>
+    private void FocusAddress() =>
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            var box = this.FindControl<TextBox>("AddressBox")!;
+            box.Focus();
+            box.SelectAll();
+        }, Avalonia.Threading.DispatcherPriority.Loaded);
 
     /// <summary>The active tab's place in the strip is shown (it can be scrolled out of view when there are many).</summary>
     private void RevealActiveTab() =>

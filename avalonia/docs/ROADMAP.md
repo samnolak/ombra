@@ -79,6 +79,9 @@ signing out is a compact icon beside *Signed in*. Preview comments stay on the p
 app routes included. Updates are checked at every start and once a day and, by default, downloaded and made ready by
 themselves: the new version goes in at the next restart or quit.
 
+In 0.0.7: the preview's tab strip ends with **+** (alone as *+ New tab* while there is one tab) to open tabs of your
+own, closable like omp's; the first tab, while empty, is no longer listed as *New tab* before omp's.
+
 ## M1 scope: the 15 features (fixed 2026-09-25)
 
 "Finished" = a daily-usable OMP desktop client on Windows, macOS and Linux. The list below is the release
