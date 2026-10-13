@@ -198,7 +198,7 @@ public sealed class UpdateTests
         var w = new MainWindow { DataContext = vm, Width = 1100, Height = 760 };
         w.Show();
         vm.OnWindowOpened();
-        Assert.Empty(server.Requests); // the automatic check waits UpdateCheckDelay (20 s) after start
+        Assert.Empty(server.Requests); // the automatic check waits UpdateCheckDelay (5 s) after start
         vm.OpenSettingsCommand.Execute(null);
         Assert.Equal("OMP GUI 0.1.0 (linux-x64)", vm.AppVersionText);
         vm.CheckForUpdatesCommand.Execute(null);

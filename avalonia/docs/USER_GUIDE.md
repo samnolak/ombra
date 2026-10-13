@@ -709,13 +709,15 @@ saved in its settings file (`pet`), and omp knows nothing about them.
 
 ## Updates
 
-OMP GUI updates itself from this project's GitHub releases. About 20 seconds after it starts, and then once a day,
-it asks the release feed whether a newer version exists (**Settings → Updates → Check automatically** turns this
-off; **Check for updates** asks at once). A newer version shows as **Update available** at the bottom of the
-sidebar; nothing is downloaded or installed until you choose to. Until the first release of this client is
-published, the check says *No release is published yet.*
+OMP GUI updates itself from this project's GitHub releases. A few seconds after every start, and then once a day,
+it asks the release feed whether a newer version exists and, when one does, downloads and gets it ready by itself:
+the bottom of the sidebar then says **Restart to update to …**, and the new version goes in when you restart or
+simply quit the app. **Settings → Updates → Update automatically** turns this off; then a newer version only shows
+as **Update available** and nothing is downloaded until you choose to (**Check for updates** asks at once either
+way). Until the first release of this client is published, the check says *No release is published yet.*
 
-- **Download and install** downloads this platform's package and checks it before anything changes: the release's
+- **Download and install** (done by itself with automatic updates) downloads this platform's package and checks it
+  before anything changes: the release's
   list of packages (`update.json`) must carry a valid signature from the project's release key, which is built into
   the app, and the package must match the size and SHA-256 that list gives. The package is then unpacked next to
   the app and started once to check it runs on this computer.

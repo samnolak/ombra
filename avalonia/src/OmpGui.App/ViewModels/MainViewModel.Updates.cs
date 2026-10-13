@@ -7,10 +7,11 @@ using OmpGui.ClientCore;
 namespace OmpGui.App.ViewModels;
 
 /// <summary>
-/// Settings → Updates and the sidebar notice. The release feed is checked shortly after start and once a day (unless
-/// turned off); a newer version is installed only when the user asks: downloaded and verified, unpacked next to the
-/// app, and swapped in when the app restarts or quits (<see cref="UpdateInstaller"/>). A copy that cannot replace
-/// itself (development build, read-only folder) downloads the verified package to Downloads instead.
+/// Settings → Updates and the sidebar notice. The release feed is checked at every start and once a day (unless turned
+/// off); a newer version found then is downloaded, verified and unpacked next to the app by itself, and swapped in when
+/// the app restarts or quits (<see cref="UpdateInstaller"/>) — the sidebar offers the restart. A copy that cannot
+/// replace itself (development build, read-only folder) only announces it; the user downloads the verified package to
+/// Downloads.
 /// </summary>
 public sealed partial class MainViewModel
 {
@@ -24,8 +25,8 @@ public sealed partial class MainViewModel
     public string UpdateDownloadFolder { get; init; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile, Environment.SpecialFolderOption.DoNotVerify), "Downloads");
 
-    /// <summary>First automatic check after start, and the time between two.</summary>
-    public TimeSpan UpdateCheckDelay { get; init; } = TimeSpan.FromSeconds(20);
+    /// <summary>First automatic check after start (the window and omp come first), and the time between two.</summary>
+    public TimeSpan UpdateCheckDelay { get; init; } = TimeSpan.FromSeconds(5);
     public TimeSpan UpdateCheckInterval { get; init; } = TimeSpan.FromHours(24);
 
     private UpdateCheck? _updateCheck;
@@ -70,7 +71,7 @@ public sealed partial class MainViewModel
 
     public string UpdateHowText => UpdateInstaller is null
         ? $"This copy cannot replace itself ({UpdateInstallUnavailable ?? "not a package"}): a new version is downloaded to your Downloads folder, checked against the release's signed list, and you replace the app yourself. Settings, sessions and omp stay where they are."
-        : "A new version is installed only when you choose to: it is downloaded, checked against the release's signed list, and replaces this app when you restart or quit it. The version before stays next to the app until the next update. Settings, sessions and omp stay where they are.";
+        : "A new version is downloaded, checked against the release's signed list and replaces this app when you restart or quit it — by itself when automatic updates are on, otherwise when you choose to. The version before stays next to the app until the next update. Settings, sessions and omp stay where they are.";
 
     /// <summary>The sidebar notice: an update to install or restart into, or how the last one went.</summary>
     public string UpdatePill => IsInstallingRuntime && _ompTransition is { } t ? $"Updating omp to {t}…"
@@ -85,7 +86,7 @@ public sealed partial class MainViewModel
         if (IsSettingsOpen) Persist(o => o with { CheckForUpdates = value });
     }
 
-    /// <summary>At window open: how the last update went, leftovers removed, then the daily check.</summary>
+    /// <summary>At window open: how the last update went, leftovers removed, then the check at start and once a day.</summary>
     private void StartUpdates()
     {
         if (UpdateInstaller is { } installer)
@@ -116,7 +117,12 @@ public sealed partial class MainViewModel
             await Task.Delay(UpdateCheckDelay, ct);
             while (!ct.IsCancellationRequested)
             {
-                if (CheckForUpdatesAutomatically && !IsUpdateBusy && !UpdateReady) await CheckAsync(quiet: true);
+                if (CheckForUpdatesAutomatically && !IsUpdateBusy && !UpdateReady)
+                {
+                    await CheckAsync(quiet: true);
+                    // Found one: get it ready for the next restart or quit, as a click on "Download and install" would.
+                    if (UpdateAvailable && UpdateInstaller is not null && !ct.IsCancellationRequested) await DownloadUpdateAsync();
+                }
                 await Task.Delay(UpdateCheckInterval, ct);
             }
         }
