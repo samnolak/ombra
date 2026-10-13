@@ -297,9 +297,9 @@ public sealed partial class DiffView : ContentControl
         if (removed > 0) stats.Children.Add(new TextBlock { Text = $"−{removed}", Classes = { "mono", "diff-removed" } });
         Grid.SetColumn(stats, 3);
         header.Children.Add(stats);
-        if (collapse is not null && Application.Current?.TryGetResource("IconChevronDown", null, out var chevron) == true && chevron is Geometry down)
+        if (collapse is not null && Application.Current?.TryGetResource("IconChevronUp", null, out var chevron) == true && chevron is Geometry up)
         {
-            var fold = new Button { Classes = { "diff-collapse" }, Content = new Icon { Data = down, Size = 14 }, VerticalAlignment = VerticalAlignment.Center };
+            var fold = new Button { Classes = { "diff-collapse" }, Content = new Icon { Data = up, Size = 14 }, VerticalAlignment = VerticalAlignment.Center };
             ToolTip.SetTip(fold, Loc.T("Collapse"));
             Avalonia.Automation.AutomationProperties.SetName(fold, Loc.T("Collapse"));
             fold.Click += (_, _) => collapse();
