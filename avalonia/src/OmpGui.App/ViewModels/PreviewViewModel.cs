@@ -42,7 +42,7 @@ public sealed partial class PreviewViewModel : ObservableObject
     /// <summary>The page shown (or being loaded); null while the panel is empty.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsEmpty), nameof(HasPage), nameof(ShowEmptyState), nameof(ShowSuggestionRow), nameof(ShowFallback), nameof(ShowWebView),
-        nameof(ShowCrashPage), nameof(ShowErrorPage))]
+        nameof(ShowCrashPage), nameof(ShowErrorPage), nameof(ShowTabStrip))]
     [NotifyCanExecuteChangedFor(nameof(ReloadCommand), nameof(OpenExternallyCommand), nameof(ToggleAnnotateCommand))]
     private Uri? _currentUrl;
 
@@ -93,14 +93,22 @@ public sealed partial class PreviewViewModel : ObservableObject
 
     private DispatcherTimer? _agentIdle;
 
-    /// <summary>The tabs: the user's own first (always there), then one per page omp's browser tool opened.</summary>
+    /// <summary>The tabs: the user's own first (always there), then the ones they opened with +, omp's and pop-ups.</summary>
     public ObservableCollection<PreviewTab> Tabs { get; }
 
     /// <summary>The tab the pane shows; the page properties of this model (address, title, loading…) are its.</summary>
-    [ObservableProperty] private PreviewTab _activeTab;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowTabStrip))]
+    private PreviewTab _activeTab;
 
-    /// <summary>The tab strip shows once omp opened a tab of its own.</summary>
-    public bool ShowTabStrip => Tabs.Count > 1;
+    /// <summary>More than one tab: the strip lists them, with + after the last.</summary>
+    public bool HasTabList => Tabs.Count > 1;
+
+    /// <summary>The strip row: the tabs, or "+ New tab" alone once the only tab shows a page.</summary>
+    public bool ShowTabStrip => HasTabList || CurrentUrl is not null;
+
+    /// <summary>The view puts the keyboard in the address box (a new tab).</summary>
+    public event Action? AddressFocusRequested;
 
     /// <summary>The tab omp used last.</summary>
     private PreviewTab? _agentTab;
@@ -136,7 +144,11 @@ public sealed partial class PreviewViewModel : ObservableObject
         Tabs = [Configure(new PreviewTab("", isAgentTab: false) { IsActive = true })];
         _activeTab = Tabs[0];
         Dialogs.Follow(_activeTab.Dialogs);
-        Tabs.CollectionChanged += (_, _) => OnPropertyChanged(nameof(ShowTabStrip));
+        Tabs.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasTabList));
+            OnPropertyChanged(nameof(ShowTabStrip));
+        };
         Suggestions.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(HasSuggestions));
@@ -377,7 +389,26 @@ public sealed partial class PreviewViewModel : ObservableObject
         FollowsAgent = tab == _agentTab || _agentTab is null;
     }
 
-    /// <summary>The user closes one of omp's tabs or a pop-up (their own tab stays); omp's requests for it are refused from now on.</summary>
+    /// <summary>
+    /// The strip's +: an empty tab of the user's after the last one, shown, with the keyboard in the address box. The
+    /// tab shown being empty already, only the address box is focused.
+    /// </summary>
+    [RelayCommand]
+    private void NewTab()
+    {
+        if (!ActiveTab.HasContent)
+        {
+            AddressFocusRequested?.Invoke();
+            return;
+        }
+        var tab = Configure(new PreviewTab("", isAgentTab: false) { IsOpenedByUser = true });
+        Tabs.Add(tab);
+        SelectTab(tab);
+        FollowsAgent = false;
+        AddressFocusRequested?.Invoke();
+    }
+
+    /// <summary>The user closes a tab they opened, one of omp's or a pop-up (their first tab stays); omp's requests for it are refused from now on.</summary>
     [RelayCommand]
     private void CloseTab(PreviewTab? tab)
     {
@@ -402,7 +433,11 @@ public sealed partial class PreviewViewModel : ObservableObject
         foreach (var popup in Tabs.Where(t => t.Opener == tab).ToList()) RemoveTab(popup);
         i = Tabs.IndexOf(tab);
         if (tab == ActiveTab)
-            ActiveTab = tab.Opener is { IsClosed: false } opener && Tabs.Contains(opener) ? opener : Tabs[i + 1 < Tabs.Count ? i + 1 : i - 1];
+        {
+            _closing = tab;
+            ActiveTab = tab.Opener is { IsClosed: false } opener && Tabs.Contains(opener) ? opener : Neighbour(i);
+            _closing = null;
+        }
         Tabs.RemoveAt(i);
         tab.MarkClosed();
         if (_agentTab == tab) _agentTab = null;
@@ -410,10 +445,22 @@ public sealed partial class PreviewViewModel : ObservableObject
         TabClosed?.Invoke(tab);
     }
 
+    /// <summary>The tab shown when the one at <paramref name="i"/> goes: the nearest with something in it (next first), else the user's first.</summary>
+    private PreviewTab Neighbour(int i)
+    {
+        for (var d = 1; d < Tabs.Count; d++)
+        {
+            if (i + d < Tabs.Count && Tabs[i + d].HasContent) return Tabs[i + d];
+            if (i - d >= 0 && Tabs[i - d].HasContent) return Tabs[i - d];
+        }
+        return Tabs[0];
+    }
+
     partial void OnActiveTabChanging(PreviewTab value)
     {
         // What the toolbar showed stays with the tab left behind
         var old = ActiveTab;
+        _leaving = old;
         old.Address = Address;
         old.CanGoBack = CanGoBack;
         old.CanGoForward = CanGoForward;
@@ -438,7 +485,17 @@ public sealed partial class PreviewViewModel : ObservableObject
         Message = value.Message;
         LoadError = value.LoadError;
         IsCrashed = value.Crashed;
+        // A tab the user opened and left empty goes (it would only be a "New tab" in the strip)
+        if (_leaving is { IsOpenedByUser: true, HasContent: false } empty && empty != value && empty != _closing)
+        {
+            _leaving = null;
+            RemoveTab(empty);
+        }
+        _leaving = null;
     }
+
+    /// <summary>The tab being left (<see cref="OnActiveTabChanging"/>) and the one being closed, while the active tab changes.</summary>
+    private PreviewTab? _leaving, _closing;
 
     // The active tab's page state is the model's: kept in step for the tab strip
     partial void OnCurrentUrlChanged(Uri? value) => ActiveTab.Url = value;

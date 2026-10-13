@@ -8,7 +8,8 @@ namespace OmpGui.App.Controls;
 /// A row of tabs that share the strip's width, as browsers do: while they all fit each keeps its own width; when they
 /// do not, the widest shrink alike (their titles trimmed, their close buttons kept) down to <see cref="MinItemWidth"/>,
 /// and only past that the row is wider than the strip and its <see cref="ScrollViewer"/> scrolls. Inside a ScrollViewer
-/// the row is measured with unlimited width, so the room is the ScrollViewer's viewport.
+/// the row is measured with unlimited width, so the room is the enclosing <see cref="TabStripRow"/>'s
+/// <see cref="TabStripRow.TabsRoom"/>, or else the ScrollViewer's viewport.
 /// </summary>
 public sealed class TabStripPanel : Panel
 {
@@ -34,6 +35,7 @@ public sealed class TabStripPanel : Panel
     }
 
     private ScrollViewer? _scroller;
+    private TabStripRow? _row;
     private double[] _widths = [];
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
@@ -41,6 +43,8 @@ public sealed class TabStripPanel : Panel
         base.OnAttachedToVisualTree(e);
         _scroller = this.FindAncestorOfType<ScrollViewer>();
         if (_scroller is not null) _scroller.PropertyChanged += OnScrollerPropertyChanged;
+        _row = this.FindAncestorOfType<TabStripRow>();
+        if (_row is not null) _row.Tabs = this;
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
@@ -48,6 +52,8 @@ public sealed class TabStripPanel : Panel
         base.OnDetachedFromVisualTree(e);
         if (_scroller is not null) _scroller.PropertyChanged -= OnScrollerPropertyChanged;
         _scroller = null;
+        if (_row?.Tabs == this) _row.Tabs = null;
+        _row = null;
     }
 
     // The strip got wider or narrower: the tabs share the new width
@@ -63,8 +69,11 @@ public sealed class TabStripPanel : Panel
         var n = children.Count;
         if (_widths.Length != n) _widths = new double[n];
         if (n == 0) return default;
-        var spacing = Spacing * (n - 1);
+        var shown = 0;
+        foreach (var c in children) if (c.IsVisible) shown++;
+        var spacing = Spacing * Math.Max(0, shown - 1); // a hidden tab takes no room, nor a gap
         var room = double.IsFinite(availableSize.Width) ? availableSize.Width
+            : _row is { TabsRoom: var r } && double.IsFinite(r) ? r
             : _scroller is { Viewport.Width: > 0 } s ? s.Viewport.Width : double.PositiveInfinity;
         var unlimited = new Size(double.PositiveInfinity, availableSize.Height);
         for (var i = 0; i < n; i++)
@@ -94,7 +103,7 @@ public sealed class TabStripPanel : Panel
         for (var i = 0; i < children.Count && i < _widths.Length; i++)
         {
             children[i].Arrange(new Rect(x, 0, _widths[i], finalSize.Height));
-            x += _widths[i] + Spacing;
+            if (children[i].IsVisible) x += _widths[i] + Spacing;
         }
         return finalSize;
     }

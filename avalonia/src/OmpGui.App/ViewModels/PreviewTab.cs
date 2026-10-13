@@ -5,9 +5,10 @@ namespace OmpGui.App.ViewModels;
 
 /// <summary>
 /// A tab of the browser preview (<see cref="PreviewViewModel.Tabs"/>), each with its own web view: the user's own tab
-/// (always there, <see cref="Id"/> empty), one per page omp's browser tool opened (its cmux surface id), and one per
-/// pop-up a page opened (<see cref="Popup"/>, next to its <see cref="Opener"/>). While a tab is the active one,
-/// <see cref="PreviewViewModel"/>'s page properties are its state; the others keep theirs here.
+/// (always there, <see cref="Id"/> empty), more the user opened with the strip's + (<see cref="IsOpenedByUser"/>), one
+/// per page omp's browser tool opened (its cmux surface id), and one per pop-up a page opened (<see cref="Popup"/>,
+/// next to its <see cref="Opener"/>). While a tab is the active one, <see cref="PreviewViewModel"/>'s page properties
+/// are its state; the others keep theirs here.
 /// </summary>
 public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableObject
 {
@@ -24,6 +25,9 @@ public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableO
     /// <summary>omp opened it (the user's own tab stays for good; agent tabs can be closed).</summary>
     public bool IsAgentTab { get; } = isAgentTab;
 
+    /// <summary>The user opened it with the strip's + (closable, unlike their first tab).</summary>
+    public bool IsOpenedByUser { get; init; }
+
     /// <summary>The engine hooks of this tab's web view (questions, loading events, downloads, pop-ups); configured by <see cref="PreviewViewModel"/>.</summary>
     public BrowserPageHooks Page { get; } = new();
 
@@ -39,8 +43,14 @@ public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableO
 
     public bool IsPopup => Popup is not null;
 
-    /// <summary>The user can close it: omp's tabs and pop-ups (their own tab stays).</summary>
-    public bool CanClose => IsAgentTab || IsPopup;
+    /// <summary>The user can close it: omp's tabs, pop-ups and the ones they opened (their first tab stays).</summary>
+    public bool CanClose => IsAgentTab || IsPopup || IsOpenedByUser;
+
+    /// <summary>It has something to show: a page, or it is omp's or a pop-up (those show while still blank).</summary>
+    public bool HasContent => Url is not null || IsAgentTab || IsPopup;
+
+    /// <summary>The strip lists it: an empty tab of the user's only while it is the one shown (no "New tab" left behind).</summary>
+    public bool ShowsInStrip => HasContent || IsActive;
 
     /// <summary>
     /// omp's browser tool acts on this page until the result is disposed (and <see cref="AgentGrace"/> after): what the
@@ -69,7 +79,7 @@ public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableO
     }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Header), nameof(ToolTip))]
+    [NotifyPropertyChangedFor(nameof(Header), nameof(ToolTip), nameof(HasContent), nameof(ShowsInStrip))]
     private Uri? _url;
 
     [ObservableProperty]
@@ -79,7 +89,9 @@ public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableO
     [ObservableProperty] private bool _isLoading;
 
     /// <summary>The tab the pane shows.</summary>
-    [ObservableProperty] private bool _isActive;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowsInStrip))]
+    private bool _isActive;
 
     /// <summary>What the tab strip shows: the page title, its host, or "New tab".</summary>
     public string Header => Title.Length > 0 ? Title
