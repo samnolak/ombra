@@ -112,7 +112,10 @@ project yet), so the OS warns on first start:
   again keeps the level it had. `"defaultThinkingLevel"` in the client's settings file (`omp-gui.local.json`; any of
   `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `auto`) sets another starting level. The model chip lists the models omp can use, one row per
   family (*Claude Sonnet*, *Claude Haiku*…) that opens to its versions, newest first (→ opens, ← or Esc goes back);
-  two entries under one name show their ids. Typing searches every model. The model options sit below the list. The
+  two entries under one name show their ids. With models from more than one provider they fold under the provider's
+  name (*anthropic · 18 models*): a click, Enter or → opens it, a click or ← closes it (← on a model goes to its
+  provider). The current model's provider is open when the menu opens; a closed provider with the current model is
+  marked and names it. Typing searches every model, flat. The model options sit below the list. The
   model menu opens above the message box, so what you are writing
   stays in view.
 - **Permissions** — the mode chip under the message box says when omp asks before running tools: *Ask permissions*

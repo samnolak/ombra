@@ -869,7 +869,14 @@ while (true)
                 {
                     new { provider = "fake", id = "model", name = "Fake Model", reasoning = scenario != "thinking-levels", input = new[] { "text" }, contextWindow = 128000 },
                     new { provider = "fake", id = "vision", name = "Fake Vision", reasoning = false, input = new[] { "text", "image" }, contextWindow = 32000 },
-                },
+                }.Concat(scenario != "many-providers" ? [] : new object[]
+                {
+                    // Two more providers, one with a family of versions (the model menu's accordion)
+                    new { provider = "anthropic", id = "claude-opus-5-1", name = "Claude Opus 5.1", reasoning = true, input = new[] { "text" }, contextWindow = 200000 },
+                    new { provider = "anthropic", id = "claude-opus-5-5", name = "Claude Opus 5.5", reasoning = true, input = new[] { "text" }, contextWindow = 200000 },
+                    new { provider = "anthropic", id = "claude-haiku-5-5", name = "Claude Haiku 5.5", reasoning = true, input = new[] { "text" }, contextWindow = 200000 },
+                    new { provider = "openai-codex", id = "gpt-5.6-luna", name = "GPT-5.6-Luna", reasoning = true, input = new[] { "text" }, contextWindow = 272000 },
+                }).ToArray(),
             });
             break;
         case "set_model":

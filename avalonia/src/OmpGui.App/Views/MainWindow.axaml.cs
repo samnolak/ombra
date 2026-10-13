@@ -772,12 +772,24 @@ public sealed partial class MainWindow : Window
                 FocusModelRow(0);
                 e.Handled = true;
                 break;
+            // A provider opens with → and closes with ←; ← on a row under it goes to its heading
+            case Key.Right when inList && ModelList.SelectedItem is ModelItemViewModel { IsProvider: true } provider:
+                vm.SetModelProviderOpen(provider, true);
+                e.Handled = true;
+                break;
+            case Key.Left when inList && ModelList.SelectedItem is ModelItemViewModel { IsProvider: true } provider:
+                vm.SetModelProviderOpen(provider, false);
+                e.Handled = true;
+                break;
             // A family opens with →, closes with ← (or Esc, before Esc closes the menu)
             case Key.Right when inList && ModelList.SelectedItem is ModelItemViewModel { IsFamily: true } family:
                 vm.OpenModelFamily(family);
                 e.Handled = true;
                 break;
             case Key.Left when inList && vm.CloseModelFamily():
+                e.Handled = true;
+                break;
+            case Key.Left when inList && ModelList.SelectedItem is ModelItemViewModel row && vm.FocusModelProviderOf(row):
                 e.Handled = true;
                 break;
             case Key.Escape when vm.CloseModelFamily():

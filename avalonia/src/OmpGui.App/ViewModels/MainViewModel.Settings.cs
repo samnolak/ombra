@@ -10,35 +10,48 @@ namespace OmpGui.App.ViewModels;
 
 public sealed record ApprovalModeOption(string Mode, string Label, string Description);
 
-public enum ModelRowKind { Model, Family, Back }
+public enum ModelRowKind { Model, Family, Back, Provider }
 
-/// <summary>A row of the model menu: a model, a family of models that opens to its versions, or the way back.</summary>
+/// <summary>A row of the model menu: a model, a family of models that opens to its versions, the way back, or a
+/// provider's heading that opens and closes its models (an accordion, while models come from more than one provider).</summary>
 public sealed partial class ModelItemViewModel(OmpModel model) : ObservableObject
 {
-    /// <summary>The model; on a family row its newest version, on the back row the open family's first.</summary>
+    /// <summary>The model; on a family row its newest version, on the back row the open family's first, on a provider
+    /// row its first model (or the current one).</summary>
     public OmpModel Model { get; } = model;
     public ModelRowKind Kind { get; init; }
     /// <summary>Family and back rows: the family's name ("Claude Sonnet").</summary>
     public string Family { get; init; } = "";
     public int Versions { get; init; }
+    /// <summary>A provider row: how many models it has; whether they are listed under it.</summary>
+    public int Count { get; init; }
+    public bool IsExpanded { get; init; }
+    /// <summary>Under its provider's heading: the detail leaves the provider out.</summary>
+    public bool UnderProvider { get; init; }
     /// <summary>A model listed under the same name as another (omp's aliases: "claude-haiku-4-5" and its dated id):
     /// its id tells them apart, as Claude's desktop app labels such duplicates.</summary>
     public bool ShowId { get; init; }
     public bool IsFamily => Kind == ModelRowKind.Family;
     public bool IsBack => Kind == ModelRowKind.Back;
+    public bool IsProvider => Kind == ModelRowKind.Provider;
+    public bool IsProviderOpen => IsProvider && IsExpanded;
+    public bool IsProviderClosed => IsProvider && !IsExpanded;
     public string Name => Kind switch
     {
         ModelRowKind.Family => Family,
         ModelRowKind.Back => "All models",
+        ModelRowKind.Provider => Model.Provider,
         _ => Model.Name,
     };
     public string Key => Model.Key;
     public string Provider => Model.Provider;
     public string Detail => Kind switch
     {
-        ModelRowKind.Family => $"{Model.Provider} · {Versions} versions · newest {Model.Name}",
+        ModelRowKind.Family => string.Join(" · ", new[] { UnderProvider ? null : Model.Provider, $"{Versions} versions", $"newest {Model.Name}" }.Where(s => s is not null)),
         ModelRowKind.Back => $"{Model.Provider} · {Family}",
-        _ => string.Join(" · ", new[] { Model.Provider, ShowId ? Model.Id : null,
+        // A closed provider with the current model (IsCurrent) names it: the one to open
+        ModelRowKind.Provider => (Count == 1 ? "1 model" : $"{Count} models") + (IsCurrent ? $" · current {Model.Name}" : ""),
+        _ => string.Join(" · ", new[] { UnderProvider ? null : Model.Provider, ShowId ? Model.Id : null,
             Model.ContextWindow > 0 ? $"{Model.ContextWindow / 1000:N0}k context" : null }.Where(s => s is not null)),
     };
     [ObservableProperty] private bool _isCurrent;
@@ -343,6 +356,8 @@ public sealed partial class MainViewModel
             ModelsLoading = true;
             _allModels = await Session.GetModelsAsync(_cts.Token);
             ModelsLoading = false;
+            // The current model's provider opens (the others stay as the user left them in this run of the app)
+            if (_allModels.FirstOrDefault(m => m.Key == _open.Last?.Model) is { } current) _expandedModelProviders.Add(current.Provider);
             ApplyModelFilter();
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested)
@@ -359,8 +374,9 @@ public sealed partial class MainViewModel
             if (item is null) return;
             if (item.Kind != ModelRowKind.Model)
             {
-                // A family opens to its versions, back returns to the families; the menu stays open
-                if (item.IsFamily) OpenModelFamily(item);
+                // A provider opens or closes, a family opens to its versions, back returns to the families; the menu stays open
+                if (item.IsProvider) ToggleModelProvider(item);
+                else if (item.IsFamily) OpenModelFamily(item);
                 else CloseModelFamily();
                 return;
             }
@@ -402,15 +418,44 @@ public sealed partial class MainViewModel
         return true;
     }
 
+    /// <summary>The providers whose models the menu lists under their heading (the others show the heading only).</summary>
+    private readonly HashSet<string> _expandedModelProviders = new(StringComparer.Ordinal);
+
+    /// <summary>A provider's heading opens or closes its models; the keyboard stays on the heading.</summary>
+    public void ToggleModelProvider(ModelItemViewModel provider) => SetModelProviderOpen(provider, !provider.IsExpanded);
+
+    /// <summary>Opens (→) or closes (←) a provider's heading; false when it already was.</summary>
+    public bool SetModelProviderOpen(ModelItemViewModel provider, bool open)
+    {
+        if (!provider.IsProvider || provider.IsExpanded == open) return false;
+        if (open) _expandedModelProviders.Add(provider.Provider);
+        else _expandedModelProviders.Remove(provider.Provider);
+        ApplyModelFilter();
+        ModelRowsNavigated?.Invoke(Math.Max(0, Models.ToList().FindIndex(m => m.IsProvider && m.Provider == provider.Provider)));
+        return true;
+    }
+
+    /// <summary>← on a model or family under a heading: the keyboard goes to the heading. False when there is none.</summary>
+    public bool FocusModelProviderOf(ModelItemViewModel row)
+    {
+        if (row.IsProvider || _openModelFamily is not null || !row.UnderProvider) return false;
+        var at = Models.ToList().FindIndex(m => m.IsProvider && m.Provider == row.Provider);
+        if (at < 0) return false;
+        ModelRowsNavigated?.Invoke(at);
+        return true;
+    }
+
     /// <summary>A search lists every matching model, flat. Otherwise one row per family ("Claude Sonnet"; a family
-    /// of one is just its model) that opens to its versions, newest first.</summary>
+    /// of one is just its model) that opens to its versions, newest first; with more than one provider, the families
+    /// sit under their provider's heading, which opens and closes them.</summary>
     private void ApplyModelFilter()
     {
         var f = ModelFilter.Trim();
         Models.Clear();
         // Two entries under one name (an alias and its dated id) show their ids
         var sharedNames = _allModels.GroupBy(m => (m.Provider, m.Name)).Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet();
-        ModelItemViewModel Row(OmpModel m) => new(m) { IsCurrent = m.Key == _open.Last?.Model, ShowId = sharedNames.Contains((m.Provider, m.Name)) };
+        ModelItemViewModel Row(OmpModel m, bool under = false) =>
+            new(m) { IsCurrent = m.Key == _open.Last?.Model, ShowId = sharedNames.Contains((m.Provider, m.Name)), UnderProvider = under };
         if (f.Length > 0)
         {
             _openModelFamily = null; // a search spans every family
@@ -427,12 +472,28 @@ public sealed partial class MainViewModel
             return;
         }
         _openModelFamily = null;
-        foreach (var (key, versions) in families)
-            Models.Add(versions.Count == 1 ? Row(versions[0]) : new ModelItemViewModel(versions[0])
+        var providers = families.GroupBy(g => g.Key.Provider).ToList(); // in omp's order
+        var headings = providers.Count > 1;
+        foreach (var provider in providers)
+        {
+            var expanded = !headings || _expandedModelProviders.Contains(provider.Key);
+            if (headings)
             {
-                Kind = ModelRowKind.Family, Family = key.Family, Versions = versions.Count,
-                IsCurrent = versions.Any(m => m.Key == _open.Last?.Model),
-            });
+                var current = provider.SelectMany(g => g.Versions).FirstOrDefault(m => m.Key == _open.Last?.Model);
+                Models.Add(new ModelItemViewModel(current ?? provider.First().Versions[0])
+                {
+                    Kind = ModelRowKind.Provider, Count = provider.Sum(g => g.Versions.Count), IsExpanded = expanded,
+                    IsCurrent = current is not null && !expanded, // closed over the current model: marked, the one to open
+                });
+            }
+            if (!expanded) continue;
+            foreach (var (key, versions) in provider)
+                Models.Add(versions.Count == 1 ? Row(versions[0], headings) : new ModelItemViewModel(versions[0])
+                {
+                    Kind = ModelRowKind.Family, Family = key.Family, Versions = versions.Count, UnderProvider = headings,
+                    IsCurrent = versions.Any(m => m.Key == _open.Last?.Model),
+                });
+        }
     }
 
     // Concurrent: a choice made while an earlier one waits (for the runs to end, or for Shift+Tab to pause) replaces it

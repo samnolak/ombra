@@ -19,10 +19,10 @@ public sealed class SettingsUiTests
 {
     private static readonly string ShotDir = Environment.GetEnvironmentVariable("OMPGUI_SHOT_DIR") ?? Path.Combine(AppContext.BaseDirectory, "screenshots");
 
-    private static async Task<(MainWindow w, MainViewModel vm, SessionController s, ClientSettingsStore store)> OpenAsync(double width = 1200, double height = 760)
+    private static async Task<(MainWindow w, MainViewModel vm, SessionController s, ClientSettingsStore store)> OpenAsync(double width = 1200, double height = 760, string scenario = "normal")
     {
         var store = new ClientSettingsStore(Path.Combine(TestProcesses.TempDir("ui-settings"), "omp-gui.local.json"));
-        var s = new SessionController(TestProcesses.FakeFactory("normal", TestProcesses.TempDir("ui-sessions")),
+        var s = new SessionController(TestProcesses.FakeFactory(scenario, TestProcesses.TempDir("ui-sessions")),
             new LaunchRequest(TestProcesses.TempDir("ui-project"), ApprovalMode: "write"));
         var vm = new MainViewModel(s, new AppArgs(), settings: store);
         var w = new MainWindow { DataContext = vm, Width = width, Height = height };
@@ -67,6 +67,50 @@ public sealed class SettingsUiTests
         vm.ChooseModelCommand.Execute(vm.Models.Single(m => m.Key == "fake/vision"));
         await Until(() => vm.CurrentModel == "fake/vision" && !vm.IsModelMenuOpen, "switched");
         Assert.False(vm.ShowThinking); // the vision model has no reasoning: no thinking selector
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Model_picker_folds_models_by_provider()
+    {
+        var (w, vm, _, _) = await OpenAsync(scenario: "many-providers");
+        var list = w.FindControl<ListBox>("ModelList")!;
+        string Rows() => string.Join(" | ", vm.Models.Select(m => m.IsProvider ? $"[{m.Name}: {m.Detail}]" : $"{m.Name}: {m.Detail}"));
+        void Key_(Key key) => list.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = key, Source = list.ContainerFromIndex(list.SelectedIndex) });
+        w.FindControl<Button>("ModelButton")!.Command!.Execute(null);
+
+        // The current model's provider is open (its rows without the provider's name), the others only headings
+        await Until(() => vm.IsModelMenuOpen && vm.Models.Count == 5, "headings listed");
+        Assert.Equal("[fake: 2 models] | Fake Model: 128k context | Fake Vision: 32k context | [anthropic: 3 models] | [openai-codex: 1 model]", Rows());
+        Shot(w, "ui-model-picker-providers");
+
+        // A heading opens in place, the menu stays open; its families still open to their versions
+        vm.ChooseModelCommand.Execute(vm.Models.Single(m => m.Name == "anthropic"));
+        Assert.True(vm.IsModelMenuOpen);
+        Assert.Equal("[fake: 2 models] | Fake Model: 128k context | Fake Vision: 32k context | [anthropic: 3 models] | "
+            + "Claude Opus: 2 versions · newest Claude Opus 5.5 | Claude Haiku 5.5: 200k context | [openai-codex: 1 model]", Rows());
+
+        // ← on a row under a heading goes to the heading, ← there closes it, → opens it again
+        await Until(() => list.ContainerFromIndex(4) is not null, "rows realized");
+        list.SelectedIndex = 4;
+        Key_(Key.Left);
+        await Until(() => list.SelectedIndex == 3, "on the heading");
+        Key_(Key.Left);
+        await Until(() => vm.Models.Count == 5, "closed by ←");
+        Key_(Key.Right);
+        await Until(() => vm.Models.Count == 7, "opened by →");
+
+        // Closed over the current model, a heading is marked and names it
+        vm.ChooseModelCommand.Execute(vm.Models.Single(m => m.Name == "fake"));
+        var fake = vm.Models.Single(m => m.Name == "fake");
+        Assert.True(fake.IsCurrent);
+        Assert.Equal("2 models · current Fake Model", fake.Detail);
+
+        // A search lists every match flat, each with its provider
+        vm.ModelFilter = "luna";
+        await Until(() => vm.Models.Count == 1, "filtered");
+        Assert.Equal("GPT-5.6-Luna: openai-codex · 272k context", Rows());
         await vm.DisposeAsync();
         w.Close();
     }
