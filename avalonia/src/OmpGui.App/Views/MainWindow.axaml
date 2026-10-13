@@ -1878,11 +1878,11 @@
                 <TextBlock x:Name="UpdateHow" Classes="muted" TextWrapping="Wrap" Text="{Binding UpdateHowText}" />
                 <Grid ColumnDefinitions="*,Auto">
                   <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
-                    <TextBlock Text="Check automatically" FontWeight="Medium" />
-                    <TextBlock Classes="muted" Text="Shortly after start and once a day. Nothing is installed without you" TextWrapping="Wrap" />
+                    <TextBlock Text="Update automatically" FontWeight="Medium" />
+                    <TextBlock Classes="muted" Text="Checks at every start and once a day; a new version is downloaded and goes in when you restart or quit" TextWrapping="Wrap" />
                   </StackPanel>
                   <ToggleButton x:Name="AutoUpdateBox" Grid.Column="1" Classes="switch" IsChecked="{Binding CheckForUpdatesAutomatically}"
-                                AutomationProperties.Name="Check for updates automatically" VerticalAlignment="Center" />
+                                AutomationProperties.Name="Update automatically" VerticalAlignment="Center" />
                 </Grid>
                 <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
                 <WrapPanel>

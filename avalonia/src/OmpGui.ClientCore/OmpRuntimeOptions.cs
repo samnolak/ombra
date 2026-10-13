@@ -44,7 +44,7 @@ public sealed record OmpRuntimeOptions
     public string? SendKey { get; init; }
     /// <summary>Update manifest address (https, signed with the release key); unset = this client's release feed.</summary>
     public string? UpdateFeed { get; init; }
-    /// <summary>Check the feed shortly after start and once a day (default on). Installing always waits for the user.</summary>
+    /// <summary>Check the feed at every start and once a day, and get a newer version ready for the next restart or quit (default on).</summary>
     public bool? CheckForUpdates { get; init; }
     /// <summary>The pixel pet above the message box (<see cref="PetOptions"/>); null means the defaults.</summary>
     public PetOptions? Pet { get; init; }

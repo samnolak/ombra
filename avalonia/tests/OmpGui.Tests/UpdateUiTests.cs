@@ -141,26 +141,18 @@ public sealed class UpdateUiTests
         vm.OnWindowOpened();
         await Until(() => vm.Phase == SessionPhase.Ready, "omp ready");
 
-        // The automatic check: a notice in the sidebar, nothing downloaded.
-        await Until(() => vm.UpdateAvailable, "update offered");
+        // The automatic check gets the update ready by itself: the sidebar offers the restart.
+        await Until(() => vm.UpdateReady, "update downloaded and unpacked by the automatic check");
         await Settle();
         Assert.True(w.FindControl<Button>("UpdatePill")!.IsEffectivelyVisible);
-        Take(w, $"{theme}-sidebar-available");
-        Assert.DoesNotContain(Directory.GetFileSystemEntries(parent), d => Path.GetFileName(d).StartsWith('.'));
+        Assert.Equal("Restart to update to 0.2.0", vm.UpdatePill);
+        Take(w, $"{theme}-sidebar-ready");
 
         vm.OpenUpdatesCommand.Execute(null);
         await Until(() => vm.IsSettingsOpen && vm.SettingsCategory == "updates", "updates page");
         await Settle();
-        Assert.Equal("Download and install", w.FindControl<Button>("DownloadUpdateButton")!.Content);
-        Assert.True(w.FindControl<TextBlock>("UpdateOmp")!.IsEffectivelyVisible);
-        Take(w, $"{theme}-updates-available");
-
-        vm.DownloadUpdateCommand.Execute(null);
-        await Until(() => vm.UpdateReady, "update unpacked");
-        await Settle();
         Assert.True(w.FindControl<Button>("RestartToUpdateButton")!.IsEffectivelyVisible);
         Assert.False(w.FindControl<Button>("DownloadUpdateButton")!.IsEffectivelyVisible);
-        Assert.Equal("Restart to update to 0.2.0", vm.UpdatePill);
         Assert.Equal("old", File.ReadAllText(Path.Combine(root, "marker.txt"))); // nothing replaced while running
         Take(w, $"{theme}-updates-ready");
         w.Width = 640;

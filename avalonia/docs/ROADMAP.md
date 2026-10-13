@@ -75,7 +75,9 @@ on-demand MCP servers: the agent enables Blender or Figma (Desktop) through the 
 them and disables them afterwards ([`docs/harness.md`](../../docs/harness.md)). Settings › Model providers gains
 *Local and custom*: Ollama, LM Studio, llama.cpp and vLLM shown as running or not and added in one click, and custom
 OpenAI- or Anthropic-compatible providers tested, added, edited and removed (omp's `models.yml`, edited in place);
-signing out is a compact icon beside *Signed in*.
+signing out is a compact icon beside *Signed in*. Preview comments stay on the page they were left on, single-page
+app routes included. Updates are checked at every start and once a day and, by default, downloaded and made ready by
+themselves: the new version goes in at the next restart or quit.
 
 ## M1 scope: the 15 features (fixed 2026-09-25)
 
