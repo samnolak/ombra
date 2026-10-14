@@ -90,7 +90,7 @@ header bar that stays at the top while the block is on screen and folds it; a ru
 blinking; a chat waiting for an answer shows an amber raised hand in the sidebar; the message box's caret no longer
 vanishes after a pause; hovers and clipped areas are rounded everywhere; tool tooltips read as plain text.
 
-Next (Codex-style reskin, after the ChatGPT desktop app's Codex section): a neutral
+In 0.0.8 (Codex-style reskin, after the ChatGPT desktop app's Codex section): a neutral
 grey palette with the logo's yellow as the one accent (Send, switches, checks; your messages tinted with it), pill buttons, 12-radius menus with a shortcut column.
 An icon rail left of the sidebar opens Plugins, MCP and Skills, with Settings at its foot (the sidebar's and header's
 Settings buttons are gone). The right side is one panel with tabs (Files, Changes, Background tasks, Plan and the
@@ -99,19 +99,24 @@ terminal is a bottom panel. The header has the folder, the title, a **⋯** menu
 panels, and a summary popover (changes, plan, background work). Sidebar search sits behind an icon; a chat row's hover
 shows pin and delete and a card with its project and age. In the conversation a finished turn folds under
 *Worked for 1m 18s* above its answer, tool calls group into one grey line per run (a command opens into a Shell card
-with its exit code), user messages are blue bubbles with time, copy and rewind on hover, a date line marks new days or
+with its exit code), user messages are bubbles tinted with the yellow, with time, copy and rewind on hover, a date line marks new days or
 long gaps, the change card lists files with +/− and *Review changes*, and notices sit centred between hairlines. On
 macOS the window has no separate title strip: the traffic lights sit in the app's own top row, whose empty parts move
 the window (double-click zooms; a double-click on the chat title no longer renames there — Rename is in **⋯**).
 The frame follows Codex too: a 44 px title band and the icon rail are one chrome surface, the sidebar, the
 conversation and the right panel sit on rounded sheets under it, the panel's tabs are rounded tabs in the band, its
-toolbars are grouped pills, and the new-tab tools, settings sections and recent files are rounded cards.
+toolbars are grouped pills, and the new-tab tools, settings sections and recent files are rounded cards. Icons are
+Lucide at Codex's sizes; the window has macOS 26's own rounder corners and its traffic lights sit in the middle of the
+band; a new session's greeting, message box and the row under it stay in the middle of the frame, the terminal open
+or not. Unpin shows a struck-through pin.
 
-Renamed OMP GUI → **Ombra** (projects and namespaces `Ombra.*`, executable `Ombra`, bundle id
-`io.github.samnolak.ombra`, `OMBRA_*` variables, update feed `samnolak/ombra`) with a new icon (a hooded coder,
-`tools/icon/ombra-art.jpg`). The first start moves the old data folders and links the old paths (omp's sessions keep
-them); packages carry the launcher a second time as `OmpGui` so installed OMP GUI updaters accept them; an
-updated *OMP GUI.app* renames itself to *Ombra.app*. Once no OMP GUI install is left, the `OmpGui` launcher copy can go.
+Also in 0.0.8: renamed OMP GUI → **Ombra** (projects and namespaces `Ombra.*`, executable `Ombra`, bundle id
+`io.github.samnolak.ombra`, `OMBRA_*` variables, update feed `samnolak/ombra`) with a new icon (a smirking clown with a
+red nose, `tools/icon/ombra-art.jpg`) that also greets a new session: *Oh? You're approaching ‹project›?* The first
+start moves the old data folders and links the old paths (omp's sessions keep them); packages carry the launcher a
+second time as `OmpGui` so installed OMP GUI updaters accept them (checked: 0.0.7's updater installs a 0.0.8 package
+on macOS); an updated *OMP GUI.app* renames itself to *Ombra.app*. Once no OMP GUI install is left, the `OmpGui`
+launcher copy can go.
 
 ## M1 scope: the 15 features (fixed 2026-09-25)
 
