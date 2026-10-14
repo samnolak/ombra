@@ -13,7 +13,7 @@ using Ombra.ClientCore;
 namespace Ombra.Tests;
 
 /// <summary>
-/// Several chats at once (P1-1b of docs/FIX_PLAN.md) in the real window over the fake omp ("multi": the message decides
+/// Several chats at once in the real window over the fake omp ("multi": the message decides
 /// the turn — FOREVER streams until stopped, LONG streams for 3 s, APPROVE asks an approval, CRASH exits mid-reply). Each
 /// chat runs its own omp; switching never stops one, and coming back finds a chat as it was left.
 /// </summary>
@@ -677,7 +677,7 @@ public sealed class MultiSessionTests
     [AvaloniaFact]
     public async Task Switching_chats_while_one_streams_opens_each_at_its_latest_message()
     {
-        // FIX_PLAN P0-1: a chat opened while another streams lands on its last row; the streaming chat, left while it
+        // A chat opened while another streams lands on its last row; the streaming chat, left while it
         // followed its reply, is back on the end of the (longer) reply, not where it was when it was left.
         var root = TestProcesses.TempDir("multi-sessions");
         var cwd = SessionCatalog.ResolveLinks(TestProcesses.TempDir("multi-project"));
