@@ -1,4 +1,4 @@
-# The app icon: the Ombra artwork (tools/icon/ombra-art.jpg, a hooded coder with glowing yellow eyes and </> on a dark card) cut out of its card,
+# The app icon: the Ombra artwork (tools/icon/ombra-art.jpg, a smirking clown with a red nose on a dark card) cut out of its card,
 # masked to the macOS-grid squircle (824/1024 body) with a soft drop shadow and a faint top rim. Needs Pillow.
 # Usage: python3 tools/icon/make_icon.py src/Ombra.App/Assets  (writes icon-1024/512/256.png and icon.ico)
 import math, os, sys
