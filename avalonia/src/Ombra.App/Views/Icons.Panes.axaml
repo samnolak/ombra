@@ -1,0 +1,14 @@
+<!-- Line icons for the window's panels (icon rail, right panel, its tools), same rules as Icons.axaml (24-unit grid, stroked; Filled for solid shapes). -->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- The right panel shown or hidden: IconPanelLeft mirrored -->
+  <StreamGeometry x:Key="IconPanelRight">M5 3 L19 3 A2 2 0 0 1 21 5 L21 19 A2 2 0 0 1 19 21 L5 21 A2 2 0 0 1 3 19 L3 5 A2 2 0 0 1 5 3 Z M15 3 L15 21</StreamGeometry>
+  <!-- Changes: a sheet with a plus over a minus -->
+  <StreamGeometry x:Key="IconChanges">M6 22 A2 2 0 0 1 4 20 L4 4 A2 2 0 0 1 6 2 L14 2 A2.4 2.4 0 0 1 15.704 2.706 L19.292 6.294 A2.4 2.4 0 0 1 20 8 L20 20 A2 2 0 0 1 18 22 Z M9 10 L15 10 M12 13 L12 7 M9 17 L15 17</StreamGeometry>
+  <!-- Skills: an open book -->
+  <StreamGeometry x:Key="IconSkills">M12 5 L12 21 M20.001 19 A2 2 0 0 0 22 17 L22 5 A2 2 0 0 0 20.001 3 L16 3.002 A5 5 0 0 0 12 5 A5 5 0 0 0 8 3 L4 3 A2 2 0 0 0 2 5 L2 17 A2 2 0 0 0 3.999 19 L8 19 A5 5 0 0 1 12 21 A5 5 0 0 1 16 19 Z</StreamGeometry>
+  <!-- The chat's summary (project, changes, what runs): a list of short lines -->
+  <StreamGeometry x:Key="IconSummary">M3 5 L3.01 5 M3 12 L3.01 12 M3 19 L3.01 19 M8 5 L21 5 M8 12 L21 12 M8 19 L21 19</StreamGeometry>
+  <!-- The new-tab page: four rounded tiles -->
+  <StreamGeometry x:Key="IconTools">M4 3 L9 3 A1 1 0 0 1 10 4 L10 9 A1 1 0 0 1 9 10 L4 10 A1 1 0 0 1 3 9 L3 4 A1 1 0 0 1 4 3 Z M15 3 L20 3 A1 1 0 0 1 21 4 L21 9 A1 1 0 0 1 20 10 L15 10 A1 1 0 0 1 14 9 L14 4 A1 1 0 0 1 15 3 Z M15 14 L20 14 A1 1 0 0 1 21 15 L21 20 A1 1 0 0 1 20 21 L15 21 A1 1 0 0 1 14 20 L14 15 A1 1 0 0 1 15 14 Z M4 14 L9 14 A1 1 0 0 1 10 15 L10 20 A1 1 0 0 1 9 21 L4 21 A1 1 0 0 1 3 20 L3 15 A1 1 0 0 1 4 14 Z</StreamGeometry>
+</ResourceDictionary>

@@ -1,0 +1,117 @@
+<!-- The header's summary toggle (the ChatGPT app's): a popover with the chat's project, what it changed (+N −M, opens
+     the Changes tab), its plan, and what runs in the background — subagents and jobs (open Background tasks), terminal
+     tabs (open the terminal). Read when it opens and kept current while open (MainViewModel.Summary.cs).
+     DataContext: MainViewModel. -->
+<UserControl xmlns:loc="using:Ombra.App.Localization"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
+             x:Class="Ombra.App.Views.Session.SessionSummaryButton"
+             x:DataType="vm:MainViewModel">
+  <Button x:Name="SummaryButton" Classes="icon" Classes.on="{Binding IsSummaryOpen}"
+          ToolTip.Tip="{loc:T 'Summary: changes and what runs in the background'}" AutomationProperties.Name="{loc:T 'Summary'}">
+    <Panel>
+      <ctl:Icon Data="{StaticResource IconSummary}" Size="16" />
+      <Border Classes="views-dot" IsHitTestVisible="False">
+        <Border.IsVisible>
+          <MultiBinding Converter="{x:Static BoolConverters.And}">
+            <Binding Path="Tasks.HasRunning" />
+            <Binding Path="!IsTasksPaneShown" />
+          </MultiBinding>
+        </Border.IsVisible>
+      </Border>
+    </Panel>
+    <Button.Flyout>
+      <Flyout Placement="BottomEdgeAlignedRight">
+        <ScrollViewer MaxHeight="560" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel x:Name="SummaryList" Width="300" Spacing="1">
+            <!-- The project -->
+            <TextBlock Classes="summary-project" Text="{Binding ProjectChipLabel}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding ProjectChipTip}" />
+            <Button x:Name="SummaryChangesItem" Classes="menu-item" Command="{Binding ShowPaneCommand}" CommandParameter="{x:Static vm:SidePane.Changes}"
+                    ToolTip.Tip="{Binding SessionFilesText}" AutomationProperties.Name="{loc:T 'Changes'}">
+              <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                <ctl:Icon Data="{StaticResource IconChanges}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Changes'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="mono diff-added" Text="{Binding SessionAddedText}" IsVisible="{Binding HasSessionFiles}" Margin="12,0,0,0" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="3" Classes="mono diff-removed" Text="{Binding SessionRemovedText}" IsVisible="{Binding HasSessionFiles}" Margin="6,0,0,0" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Button x:Name="SummaryPlanItem" Classes="menu-item" Command="{Binding ShowPaneCommand}" CommandParameter="{x:Static vm:SidePane.Plan}"
+                    IsVisible="{Binding Plan.HasPlan}" AutomationProperties.Name="{loc:T 'Plan'}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon Data="{StaticResource IconChecklist}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Plan'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-shortcut" Text="{Binding Plan.ShortProgress}" Margin="12,0,0,0" VerticalAlignment="Center" ToolTip.Tip="{loc:T 'Tasks done'}" />
+              </Grid>
+            </Button>
+
+            <Border Classes="menu-separator" />
+            <TextBlock Classes="menu-heading" Text="{loc:T 'Background processes'}" />
+            <!-- Subagents and jobs that run now: the Background tasks tab has the rest -->
+            <ItemsControl x:Name="SummarySubagents" ItemsSource="{Binding Tasks.Subagents}">
+              <ItemsControl.Styles>
+                <Style Selector="ContentPresenter" x:DataType="vm:SubagentRowViewModel">
+                  <Setter Property="IsVisible" Value="{Binding IsRunning}" />
+                </Style>
+              </ItemsControl.Styles>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:SubagentRowViewModel">
+                  <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                          Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).ShowPaneCommand}" CommandParameter="{x:Static vm:SidePane.Tasks}"
+                          ToolTip.Tip="{Binding StatusText}" AutomationProperties.Name="{Binding AccessibleName}">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                      <ctl:Icon Data="{StaticResource IconLayers}" Size="16" Margin="0,0,10,0" />
+                      <TextBlock Grid.Column="1" Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="2" Classes="menu-shortcut" Text="{Binding ElapsedText}" Margin="12,0,0,0" VerticalAlignment="Center" />
+                    </Grid>
+                  </Button>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <ItemsControl x:Name="SummaryJobs" ItemsSource="{Binding Tasks.Jobs}">
+              <ItemsControl.Styles>
+                <Style Selector="ContentPresenter" x:DataType="vm:JobRowViewModel">
+                  <Setter Property="IsVisible" Value="{Binding IsRunning}" />
+                </Style>
+              </ItemsControl.Styles>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:JobRowViewModel">
+                  <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                          Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).ShowPaneCommand}" CommandParameter="{x:Static vm:SidePane.Tasks}"
+                          ToolTip.Tip="{Binding Detail}" AutomationProperties.Name="{Binding AccessibleName}">
+                    <Grid ColumnDefinitions="Auto,*">
+                      <ctl:Icon Data="{StaticResource IconBolt}" Size="16" Margin="0,0,10,0" />
+                      <TextBlock Grid.Column="1" Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                    </Grid>
+                  </Button>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <!-- Terminal tabs whose process still runs -->
+            <ItemsControl x:Name="SummaryTerminals" ItemsSource="{Binding Terminals}">
+              <ItemsControl.Styles>
+                <Style Selector="ContentPresenter" x:DataType="vm:TerminalViewModel">
+                  <Setter Property="IsVisible" Value="{Binding !HasExited}" />
+                </Style>
+              </ItemsControl.Styles>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:TerminalViewModel">
+                  <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                          Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).ShowTerminalCommand}" CommandParameter="{Binding}"
+                          AutomationProperties.Name="{Binding Title}">
+                    <Grid ColumnDefinitions="Auto,*">
+                      <ctl:Icon Data="{StaticResource IconTerminal}" Size="16" Margin="0,0,10,0" />
+                      <TextBlock Grid.Column="1" Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                    </Grid>
+                  </Button>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <TextBlock Classes="summary-empty" Text="{loc:T 'Nothing runs in the background'}" IsVisible="{Binding HasNoBackgroundWork}" />
+          </StackPanel>
+        </ScrollViewer>
+      </Flyout>
+    </Button.Flyout>
+  </Button>
+</UserControl>

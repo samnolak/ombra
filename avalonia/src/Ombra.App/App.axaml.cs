@@ -1,0 +1,207 @@
+using Ombra.App.Localization;
+using Avalonia;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Controls;
+using Avalonia.Markup.Xaml;
+using Avalonia.Platform;
+using Ombra.App.Services.Runtime;
+using Ombra.App.ViewModels;
+using Ombra.App.Views;
+using Ombra.ClientCore;
+using Ombra.Rpc;
+
+namespace Ombra.App;
+
+public sealed class App : Application
+{
+    public override void Initialize() => AvaloniaXamlLoader.Load(this);
+
+    public override void OnFrameworkInitializationCompleted()
+    {
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            var args = Program.Args;
+            // Everything this app starts carries its mark, and ends with it (OwnedProcesses). First what an app that is
+            // gone left running — an earlier version's omp daemon broker and its dev servers among them — so no omp
+            // started below joins a broker of that app; before any process of ours starts.
+            OwnedProcesses.MarkThisProcess();
+            var owned = new OwnedProcesses(RuntimePack.DefaultRoot);
+            owned.Stop(OwnedProcesses.Moment.Start);
+            desktop.Exit += (_, _) => owned.Stop(OwnedProcesses.Moment.Quit);
+            var store = new ClientSettingsStore(args.ConfigPath ?? Environment.GetEnvironmentVariable(OmpRuntimeOptions.ConfigEnvVar) ?? OmpRuntimeOptions.DefaultConfigPath);
+            OmpRuntimeOptions options;
+            string? configError = null;
+            try
+            {
+                options = store.Load();
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                options = new OmpRuntimeOptions();
+                configError = Loc.F("Could not read the settings ({0}); using defaults.", e.Message);
+            }
+            Ombra.App.Localization.Loc.Load(Ombra.App.Localization.Loc.Resolve(options.Language, store.Path), store.Path);
+            MainViewModel.ApplyTheme(options.Theme);
+            var platform = Ombra.App.Platform.RuntimePlatform.Key(out _);
+            var installer = new RuntimeInstaller(new HttpClient { Timeout = Timeout.InfiniteTimeSpan }, RuntimePack.DefaultRoot, platform);
+            // Every launch reads the settings again, so a restart applies what the user saved. An empty command means
+            // the pinned runtime the client installed, else omp on PATH.
+            OmpRuntimeOptions Current()
+            {
+                OmpRuntimeOptions o;
+                try { o = store.Load(); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) { o = options; }
+                // After an update that brought a new pack, omp runs from the earlier one until the new one is installed.
+                return (installer.FindInstalled() ?? installer.FindPrevious()?.Runtime) is { } rt ? rt.ApplyTo(o) : o;
+            }
+            // omp's browser tool drives the preview panel — over Tern (TernHost: tabs with trusted native input) or cmux
+            // (AgentBrowserBridge, also the fallback a Tern-less omp finds) — and is made the agent's default for every omp
+            // started here unless the setting is off (AgentBrowserDefaults)
+            var agentBrowser = AgentBrowserBridge.TryStart();
+            var tern = agentBrowser is not null && Ombra.ClientCore.Browser.AgentBrowserDefaults.ChooseBackend() == Ombra.ClientCore.Browser.AgentBrowserBackend.Tern
+                ? Ombra.ClientCore.Browser.TernHost.TryStart() : null;
+            var browserDefaults = agentBrowser is null ? null
+                : new Ombra.ClientCore.Browser.AgentBrowserDefaults(agentBrowser, Path.Combine(Path.GetDirectoryName(Path.GetFullPath(store.Path))!, "agent-browser"), tern);
+            // Network privacy (Settings › Advanced): every omp start first turns off the providers the user has not added,
+            // and in strict mode goes through the app's filtering proxy
+            var privacy = new Ombra.ClientCore.Network.NetworkPrivacy(Ombra.ClientCore.Network.NetworkPrivacy.DirectoryFor(store.Path));
+            // Chats get names from omp's own title generator, as in omp's terminal (SessionTitles)
+            var titles = new SessionTitles(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(store.Path))!, "session-titles"));
+            async Task<OmpLaunchSpec> Launch(LaunchRequest request, CancellationToken ct)
+            {
+                var o = Current();
+                return await privacy.ApplyAsync(titles.Apply(browserDefaults?.ForSession(o, request) ?? o.ToLaunchSpec(request)), o, ct);
+            }
+            configError ??= options.ApprovalModeWarning;
+            // The project used last, when it still exists; else a new chat outside any project, in a folder of its own (not
+            // the home folder, which the agent would roam and the Files pane list; an app opened from Finder runs in "/").
+            // A chat used last is not taken up again: its folder holds that chat, and the window starts on a new one.
+            var chats = new ChatFolders(ChatFolders.DefaultRoot, ChatFolders.LegacyDefaultRoot);
+            var initial = new LaunchRequest(options.WorkingDirectory ?? ProjectToResume(options.LastWorkingDirectory, chats) ?? NewChatFolder(chats),
+                ApprovalMode: OmpRuntimeOptions.EffectiveApprovalMode(options.ApprovalMode));
+            // "Bypass permissions" was chosen explicitly before; say so at every start, not only in the chip.
+            if (initial.ApprovalMode == "yolo")
+                configError = (configError is null ? "" : configError + "\n") + Loc.T("Bypass permissions is on: omp runs every tool, including shell commands, without asking. Change it under the message box.");
+            installer.RemovePrevious(); // packs of earlier versions, once this version's is installed (before omp starts)
+            var session = new SessionController(Launch, initial);
+            var updater = Ombra.App.Services.UpdateInstaller.ForThisApp(out var noInstall);
+            var vm = new MainViewModel(session, args, configError, store)
+            {
+                Chats = chats,
+                Privacy = privacy,
+                OmpTuiLaunch = async (dir, ct) =>
+                {
+                    var o = Current();
+                    return await privacy.ApplyAsync(browserDefaults?.ForTui(o, dir) ?? o.ToTuiLaunchSpec(dir), o, ct);
+                },
+                OmpCliLaunch = (cliArgs, dir) =>
+                {
+                    var o = Current();
+                    return privacy.ApplyStrict(o.ToCliLaunchSpec(cliArgs, dir), o);
+                },
+                RuntimeInstaller = installer,
+                Updates = new Ombra.App.Services.UpdateChecker(new HttpClient { Timeout = TimeSpan.FromMinutes(30) },
+                    options.UpdateFeed ?? Ombra.App.Services.UpdateChecker.DefaultFeed,
+                    Ombra.App.Services.UpdateChecker.ThisVersion(), Ombra.App.Services.UpdateChecker.ThisRid(),
+                    Ombra.App.Services.UpdateChecker.BuiltInPublicKey()),
+                UpdateInstaller = updater,
+                UpdateInstallUnavailable = noInstall,
+            };
+            // Last line of defence: an exception that escapes a UI handler (an async command, a drop, a web view event)
+            // is logged to client.log and said once under the message box, instead of taking omp and the session down
+            // with the app. Before this point a failure ends the start, and ClientLog's process hook records it.
+            Avalonia.Threading.Dispatcher.UIThread.UnhandledException += (_, e) =>
+            {
+                Console.Error.WriteLine("Unhandled UI exception: " + e.Exception);
+                vm.ReportClientError(e.Exception);
+                e.Handled = true;
+            };
+            if (agentBrowser is not null)
+            {
+                agentBrowser.Host = new PreviewAgentHost(vm);
+                desktop.Exit += (_, _) => agentBrowser.Dispose();
+            }
+            desktop.Exit += (_, _) => privacy.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            if (tern is not null)
+            {
+                tern.Browser = new TernPreviewHost(vm);
+                desktop.Exit += (_, _) => tern.Dispose();
+            }
+            var window = new MainWindow { DataContext = vm, Notifier = CreateNotifier() };
+            desktop.MainWindow = window;
+            Ombra.App.Services.PerfLog.Attach(window); // OMBRA_PERF=1: frame-rate and layout graphs, slow applies on stderr
+            window.Opened += (_, _) => vm.OnWindowOpened();
+            vm.NotificationsEnabled = options.Notifications ?? true;
+            vm.SendKey = options.SendKey == "mod-enter" ? "mod-enter" : "enter";
+            SetUpMenus(desktop, window, vm);
+        }
+        base.OnFrameworkInitializationCompleted();
+    }
+
+    private static string? ProjectToResume(string? path, ChatFolders chats) =>
+        path is not null && Directory.Exists(path) && !chats.Contains(path) ? path : null;
+
+    /// <summary>A new chat's folder; the home folder only when the app's data folder cannot be written (omp needs some
+    /// folder to start in).</summary>
+    private static string NewChatFolder(ChatFolders chats)
+    {
+        try { return chats.Create(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine("No folder for a new chat: " + e.Message);
+            return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+    }
+
+    /// <summary>Platform Layer choice: the only place that asks which OS this is.</summary>
+    private static Ombra.App.Platform.INotifier CreateNotifier() =>
+        OperatingSystem.IsMacOS() ? new Ombra.App.Platform.OsaScriptNotifier()
+        : OperatingSystem.IsWindows() ? new Ombra.App.Platform.TaskbarFlashNotifier()
+        : new Ombra.App.Platform.NotifySendNotifier();
+
+    /// <summary>
+    /// macOS application menu (About, Settings ⌘,, Quit are where Mac users look for them), the window's menu bar
+    /// (MainWindow.MenuBar) and a tray / menu-bar icon on every platform that has one. Everything in them is also in
+    /// the window itself.
+    /// </summary>
+    private void SetUpMenus(IClassicDesktopStyleApplicationLifetime desktop, MainWindow window, MainViewModel vm)
+    {
+        var settings = new NativeMenuItem(Loc.T("Settings…")) { Command = vm.OpenSettingsCommand, Gesture = new Avalonia.Input.KeyGesture(Avalonia.Input.Key.OemComma, Avalonia.Input.KeyModifiers.Meta) };
+        var appMenu = new NativeMenu();
+        appMenu.Add(settings);
+        NativeMenu.SetMenu(this, appMenu);
+        NativeMenu.SetMenu(window, window.MenuBar(vm));
+
+        try
+        {
+            var show = new NativeMenuItem(Loc.T("Show Ombra"));
+            show.Click += (_, _) => ShowWindow(window);
+            var quit = new NativeMenuItem("Quit");
+            quit.Click += (_, _) => window.Close();
+            var trayMenu = new NativeMenu();
+            trayMenu.Add(show);
+            trayMenu.Add(new NativeMenuItem(Loc.T("New Chat")) { Command = vm.NewChatCommand });
+            trayMenu.Add(quit);
+            var tray = new TrayIcon
+            {
+                Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://Ombra/Assets/icon-256.png"))),
+                ToolTipText = "Ombra",
+                Menu = trayMenu,
+            };
+            tray.Clicked += (_, _) => ShowWindow(window);
+            TrayIcon.SetIcons(this, [tray]);
+            desktop.Exit += (_, _) => tray.Dispose();
+        }
+        catch (Exception e) when (e is PlatformNotSupportedException or InvalidOperationException or NotSupportedException)
+        {
+            // No tray on this desktop (e.g. a Linux session without a status-notifier host): the window has everything.
+        }
+    }
+
+    private static void ShowWindow(Window window)
+    {
+        if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
+        window.Show();
+        window.Activate();
+    }
+}

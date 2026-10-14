@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 
-namespace OmpGui.WebViewHarness.Native;
+namespace Ombra.WebViewHarness.Native;
 
 /// <summary>
 /// The harness's Objective-C delegate classes. <c>OmpHarnessNavDelegate</c> mirrors Avalonia 12.1's

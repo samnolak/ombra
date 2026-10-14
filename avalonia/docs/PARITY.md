@@ -1,9 +1,9 @@
-# Feature parity: omp 18.2.0 vs OMP GUI
+# Feature parity: omp 18.2.0 vs Ombra
 
 Every omp CLI flag and subcommand, every builtin slash command and every RPC feature of **omp 18.2.0**, and what the
 GUI offers for it. Source of truth: omp's own code (`packages/coding-agent/src`: `cli/args.ts`, `slash-commands/
 builtin-*.ts`, `modes/rpc/rpc-mode.ts`, `modes/rpc/rpc-types.ts`) and its help (`omp --help`, `omp <cmd> --help`),
-checked against a running omp 18.2.0 (`tests/OmpGui.Tests/RealSessionAreaTests.cs`, `RealOmpCommandTests`).
+checked against a running omp 18.2.0 (`tests/Ombra.Tests/RealSessionAreaTests.cs`, `RealOmpCommandTests`).
 
 Status:
 
@@ -21,7 +21,7 @@ was checked against the merged client and its tests.
 ## 1. Launch flags (`omp [flags] [messages]`)
 
 The GUI starts omp as `omp --mode rpc-ui --approval-mode <mode> [--resume <file>] [--model <m>] <extraArgs>` in the
-project folder. `extraArgs` (and `environment`) in the GUI's settings file (`omp-gui.local.json`) pass any other flag;
+project folder. `extraArgs` (and `environment`) in the GUI's settings file (`ombra.local.json`) pass any other flag;
 "settings file only" below means there is no control for it in the window.
 
 | Flag | What omp does | GUI |
@@ -269,7 +269,7 @@ omp's own interface for them.
   app-owned overlay appended to `PI_CONFIG_FILES` (`browser.enabled: true`, `cdpUrl: ""`, `cmux: true`,
   `idleCloseSec: 0`) and an `--extension` whose `before_agent_start` appends a note that the user sees this browser
   (not `--append-system-prompt`, which would replace the user's `APPEND_SYSTEM.md`); Settings › General › *Agent uses
-  the OMP GUI browser* (default on) turns all of it off. The user's omp files are never written.
+  the Ombra browser* (default on) turns all of it off. The user's omp files are never written.
   Native windows a page opens (sign-in for HTTP auth, `alert` / `confirm` / `prompt`, *Leave this page?*, file
   chooser, download, permission, popup) are cards in the preview, one at a time over a frozen picture of the page
   (`ClientCore/Browser/DialogBroker`, `ViewModels/BrowserDialogsViewModel`), as cmux routes them: what omp's browser

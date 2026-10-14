@@ -87,10 +87,10 @@ jobs:
       - name: Package win-x64 from this commit
         run: |
           V="0.1.0-rc.1.${GITHUB_SHA::7}"
-          dotnet publish src/OmpGui.App -c Release -r win-x64 --self-contained -o "$RUNNER_TEMP/pub" -p:Version=0.1.0 -p:InformationalVersion="$V"
+          dotnet publish src/Ombra.App -c Release -r win-x64 --self-contained -o "$RUNNER_TEMP/pub" -p:Version=0.1.0 -p:InformationalVersion="$V"
           tools/package/package.sh win-x64 "$RUNNER_TEMP/pub" "$RUNNER_TEMP/dist" "$V"
           (cd "$RUNNER_TEMP/dist" && cat *.sha256 > SHA256SUMS)
-          echo "ZIP=$RUNNER_TEMP/dist/omp-gui-$V-win-x64.zip" >> "$GITHUB_ENV"
+          echo "ZIP=$RUNNER_TEMP/dist/ombra-$V-win-x64.zip" >> "$GITHUB_ENV"
       - name: Windows gate
         shell: pwsh
         run: tools/verify/windows-package-gate.ps1 -Zip $env:ZIP -Source (Get-Location).Path -Out "$env:RUNNER_TEMP/windows-gate-result.txt"

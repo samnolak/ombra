@@ -1,12 +1,12 @@
 using System.Text.Json.Nodes;
-using OmpGui.WebViewHarness.Native;
-using OmpGui.WebViewHarness.Server;
+using Ombra.WebViewHarness.Native;
+using Ombra.WebViewHarness.Server;
 #if APP_HOOKS
-using OmpGui.App.Platform.Mac;
-using OmpGui.ClientCore.Browser;
+using Ombra.App.Platform.Mac;
+using Ombra.ClientCore.Browser;
 #endif
 
-namespace OmpGui.WebViewHarness.Scenarios;
+namespace Ombra.WebViewHarness.Scenarios;
 
 /// <summary>R1 reproduced: with Avalonia's delegate shape and no hooks, a 401 Basic page just shows nginx's 401 body.</summary>
 internal sealed class AuthBaselineScenario : IScenario

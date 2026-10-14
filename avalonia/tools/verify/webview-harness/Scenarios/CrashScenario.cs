@@ -1,8 +1,8 @@
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
-using OmpGui.WebViewHarness.Native;
+using Ombra.WebViewHarness.Native;
 
-namespace OmpGui.WebViewHarness.Scenarios;
+namespace Ombra.WebViewHarness.Scenarios;
 
 /// <summary>kill -9 of the page's WebContent process → webViewWebContentProcessDidTerminate, pending dialog answered, reload recovers.</summary>
 internal sealed partial class CrashScenario : IScenario

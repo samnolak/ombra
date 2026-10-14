@@ -18,13 +18,13 @@
 #            TARGET_OMP_ARGS      extra omp flags, space-separated (default none; for a small context e.g.
 #                                 "--tools=bash,read --no-skills --no-rules --no-lsp")
 #            OMP_RUNTIME          installed pinned runtime (default: the client's own install,
-#                                 ~/.local/share/OmpGui/runtimes/omp-18.8.0-bun-1.4.2)
+#                                 ~/.local/share/Ombra/runtimes/omp-18.8.0-bun-1.4.2)
 # Result: <work-dir>/target-report.txt (every step) and <work-dir>/result.txt (PASS / FAIL per check).
 set -uo pipefail
 WORK=${1:?work dir}; mkdir -p "$WORK"; WORK=$(cd "$WORK" && pwd)
 : "${TARGET_BASE_URL:?TARGET_BASE_URL (e.g. http://127.0.0.1:8000/v1)}" "${TARGET_MODEL_ID:?TARGET_MODEL_ID}"
 PROVIDER=${TARGET_PROVIDER:-target-local}; ROUTE="$PROVIDER/$TARGET_MODEL_ID"
-RT=${OMP_RUNTIME:-$HOME/.local/share/OmpGui/runtimes/omp-18.8.0-bun-1.4.2}
+RT=${OMP_RUNTIME:-$HOME/.local/share/Ombra/runtimes/omp-18.8.0-bun-1.4.2}
 HERE=$(cd "$(dirname "$0")/../.." && pwd)
 [ -x "$RT/bun/bun" ] || [ -f "$RT/bun/bun.exe" ] || { echo "no pinned runtime at $RT (install it from the app, or set OMP_RUNTIME)"; exit 2; }
 KEYVAR=${TARGET_API_KEY_VAR:-TARGET_NO_KEY}
@@ -75,13 +75,13 @@ EOF
 
 # 3. The real window against it: discovery + choice, prompt, streaming, abort, recovery, long reply, tool + approval.
 cd "$HERE"
-OMPGUI_REAL_MODEL_CONFIG=$WORK/target.json OMPGUI_REAL_MODEL_ROUTE=$ROUTE OMPGUI_REAL_MODEL_REPORT=$WORK/target-report.txt \
-OMPGUI_REAL_MODEL_REQUIRE_TOOLS=1 OMPGUI_REAL_MODEL_LONG_MIN_CHARS=${TARGET_LONG_MIN_CHARS:-3000} OMPGUI_SHOT_DIR=$WORK/shots \
-  dotnet test tests/OmpGui.Tests -c Release --filter "FullyQualifiedName~RealModelTests" \
+OMBRA_REAL_MODEL_CONFIG=$WORK/target.json OMBRA_REAL_MODEL_ROUTE=$ROUTE OMBRA_REAL_MODEL_REPORT=$WORK/target-report.txt \
+OMBRA_REAL_MODEL_REQUIRE_TOOLS=1 OMBRA_REAL_MODEL_LONG_MIN_CHARS=${TARGET_LONG_MIN_CHARS:-3000} OMBRA_SHOT_DIR=$WORK/shots \
+  dotnet test tests/Ombra.Tests -c Release --filter "FullyQualifiedName~RealModelTests" \
   --logger "console;verbosity=normal" --logger "trx;LogFileName=target.trx" --results-directory "$WORK/trx" > "$WORK/tests.log" 2>&1
 code=$?
 for t in The_model_is_discovered A_prompt_streams_and_completes A_long_response A_tool_call; do
-  line=$(grep -E "^\s+(Passed|Failed|Skipped) OmpGui.Tests.RealModelTests.$t" "$WORK/tests.log" | head -1 | awk '{print $1}')
+  line=$(grep -E "^\s+(Passed|Failed|Skipped) Ombra.Tests.RealModelTests.$t" "$WORK/tests.log" | head -1 | awk '{print $1}')
   result "${line:-MISSING} $t"
 done
 grep -q "^Passed" "$WORK/result.txt" && [ $code -eq 0 ] && ! grep -qE "^(FAIL|Failed|Skipped|MISSING)" "$WORK/result.txt" \

@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
-using OmpGui.WebViewHarness.Native;
+using Ombra.WebViewHarness.Native;
 
-namespace OmpGui.WebViewHarness.Scenarios;
+namespace Ombra.WebViewHarness.Scenarios;
 
 /// <summary>The spike's first question: does an off-screen WKWebView load pages and run JS in a windowless process?</summary>
 internal sealed class SmokeScenario : IScenario

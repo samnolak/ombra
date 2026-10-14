@@ -5,7 +5,7 @@ Status: plan (2026-10-08). Nothing below is implemented yet. Research behind eve
 `omp-tern-protocol.md` (how omp 18.8 picks and drives a browser), `browser-input.md` (agent input the engine treats
 like the user's), `browser-refs.md` and `codex-browser-internals.md` (Claude Code, Codex, cmux, Playwright).
 Rule for whoever executes: **reproduce first, fix, then repeat the same reproduction**. Paths are relative to
-`avalonia/src/OmpGui.App` unless noted.
+`avalonia/src/Ombra.App` unless noted.
 
 ## 0. What is wrong today (verified)
 
@@ -52,7 +52,7 @@ Rule for whoever executes: **reproduce first, fix, then repeat the same reproduc
    GUI extension (`--extension`) whose `before_agent_start` adds a short system-prompt note ("the browser is visible
    to the user; use `browser.open` for any page the user should see or sign in to; never `bash open`; `persist:true`
    for logins"). Not `--append-system-prompt` (it replaces the user's `APPEND_SYSTEM.md`). A Settings switch
-   "Agent uses the OMP GUI browser" (default on) turns the overlay/flags off.
+   "Agent uses the Ombra browser" (default on) turns the overlay/flags off.
 7. **Mobile emulation is honest per engine**: WebView2 gets the full bundle (viewport, DPR, `mobile`, touch, UA +
    client hints, all from one real device profile); WKWebView gets viewport projection + real device UA + page zoom,
    labelled "size and user agent only" in the toolbar.
@@ -169,8 +169,8 @@ Avalonia); alert/confirm/prompt, beforeunload, file chooser, download ask, permi
 Deny), auth (A1), popup notice. Exactly-once answers on dispose/crash/navigation. Fully headless-tested.
 
 Done (`ClientCore/Browser/DialogBroker.cs`, `ViewModels/BrowserDialogsViewModel.cs`, `BrowserDialogLayer` in
-`Controls/PreviewPanel.axaml(.cs)`; tests `tests/OmpGui.Tests/BrowserDialogTests.cs`, screenshots light/dark × 560/1180
-with `OMPGUI_REVIEW_DIR`):
+`Controls/PreviewPanel.axaml(.cs)`; tests `tests/Ombra.Tests/BrowserDialogTests.cs`, screenshots light/dark × 560/1180
+with `OMBRA_REVIEW_DIR`):
 - [x] one user card at a time, FIFO, "N more" — `…Questions_are_shown_one_at_a_time_in_the_order_they_came`
 - [x] exactly once (double answer, cancel after answer, 32 racing threads) — `…A_question_is_answered_exactly_once`,
   wrong answer type refused — `…The_wrong_kind_of_answer_is_refused`
@@ -263,7 +263,7 @@ Done so far (`ClientCore/Browser/TernHost.cs`, `TernBlock.cs`, `TernPage.cs`, `T
   isolated world gets a `requestAnimationFrame` that also fires after 100 ms (page world untouched) — `run.sh tern`
   119 s → 3 s; `HARNESS_ISOLATION_CHECK=1 run.sh all` 17/17 scenarios, preflight-only TCC
 - [ ] real-omp end-to-end test with the app's pane (`TernPreviewHost`) not run. Default stays cmux (`AgentBrowserDefaults.DefaultBackend`);
-  `OMPGUI_AGENT_BROWSER=tern` opts in. `fork` answered `unsupported` (omp forks in place); clipboard read and paste
+  `OMBRA_AGENT_BROWSER=tern` opts in. `fork` answered `unsupported` (omp forks in place); clipboard read and paste
   refused (macOS paste privacy); invalid certificates never accepted; a viewport larger than the pane is limited to it.
 
 **B4. User-equivalent input + isolated world** (`Platform/Mac/NativeInput.cs`, `Platform/Windows/CdpInput.cs`,
@@ -344,7 +344,7 @@ chosen folder, credentials never logged or sent to omp, per-site permission stor
 
 **D2. Performance** — no polling (events instead of `url.get` loops), screenshots scaled ≤1024 px before sending,
 snapshot size cap with paging, hidden tabs throttled (`inactiveSchedulingPolicy`), one web process per profile, idle
-CPU ~0 with the pane closed. Measured with `OMPGUI_PERF=1`.
+CPU ~0 with the pane closed. Measured with `OMBRA_PERF=1`.
 
 **D3. Docs and release** — USER_GUIDE "Browser" chapter, PARITY rows, DESIGN_SYSTEM cards, `test-app.sh` build for
 the user's real-site checks, then release.
@@ -383,7 +383,7 @@ files (`PreviewPanel.axaml(.cs)`, `App.axaml.cs`) get small targeted edits only.
 
 Isolation: all agents verify headless or in the windowless harness; nothing opens windows on the user's screen or
 asks for macOS permissions. The user does the final real-site checks (studio.example.com credentials) in
-*OMP GUI Test.app*.
+*Ombra Test.app*.
 
 ## 5. Improvements and optimizations (beyond the requirements)
 

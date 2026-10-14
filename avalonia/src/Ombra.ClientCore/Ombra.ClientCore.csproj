@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Ombra.ClientCore</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Ombra.Rpc\Ombra.Rpc.csproj" />
+    <InternalsVisibleTo Include="Ombra.Tests" />
+    <!-- tools/verify/webview-harness drives the agent browser bridge against a real WKWebView (scenario agent-native) -->
+    <InternalsVisibleTo Include="WebViewHarness" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
+</Project>

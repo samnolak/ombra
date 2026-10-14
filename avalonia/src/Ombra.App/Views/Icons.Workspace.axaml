@@ -1,0 +1,9 @@
+<!-- Line icons for the Computer use, Git and worktrees and SSH settings, same rules as Icons.axaml (24-unit grid, stroked; Filled for solid shapes). -->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Requirement states: a circle with a check (met), a cross (not met), an exclamation mark (limited), a dash (unknown) -->
+  <StreamGeometry x:Key="IconCheckCircle">M2 12 A10 10 0 1 0 22 12 A10 10 0 1 0 2 12 Z M16 9 L10.5 14.5 L8 12</StreamGeometry>
+  <StreamGeometry x:Key="IconCrossCircle">M2 12 A10 10 0 1 0 22 12 A10 10 0 1 0 2 12 Z M15 9 L9 15 M9 9 L15 15</StreamGeometry>
+  <StreamGeometry x:Key="IconAlertCircle">M2 12 A10 10 0 1 0 22 12 A10 10 0 1 0 2 12 Z M12 8 L12 12 M12 16 L12.01 16</StreamGeometry>
+  <StreamGeometry x:Key="IconDashCircle">M2 12 A10 10 0 1 0 22 12 A10 10 0 1 0 2 12 Z M8 12 L16 12</StreamGeometry>
+</ResourceDictionary>

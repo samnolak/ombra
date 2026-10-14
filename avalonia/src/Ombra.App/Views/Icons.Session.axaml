@@ -1,0 +1,32 @@
+<!-- Line icons for the session menu, usage and model options, same rules as Icons.axaml (24-unit grid, stroked; Filled for solid shapes). -->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Session menu -->
+  <StreamGeometry x:Key="IconPencil">M21.174 6.812 A1 1 0 0 0 17.188 2.825 L3.842 16.174 A2 2 0 0 0 3.342 17.004 L2.021 21.356 A0.5 0.5 0 0 0 2.644 21.978 L6.997 20.658 A2 2 0 0 0 7.827 20.161 Z M15 5 L19 9</StreamGeometry>
+  <StreamGeometry x:Key="IconCompact">M12 22 L12 16 M12 8 L12 2 M4 12 L2 12 M10 12 L8 12 M16 12 L14 12 M22 12 L20 12 M15 19 L12 16 L9 19 M15 5 L12 8 L9 5</StreamGeometry>
+  <StreamGeometry x:Key="IconHandoff">M4.226 20.925 A2 2 0 0 0 6 22 L18 22 A2 2 0 0 0 20 20 L20 8 A2.4 2.4 0 0 0 19.294 6.294 L15.706 2.706 A2.4 2.4 0 0 0 14 2 L6 2 A2 2 0 0 0 4 4 L4 7.127 M14 2 L14 7 A1 1 0 0 0 15 8 L20 8 M5 11 L2 14 M5 17 L2 14 L12 14</StreamGeometry>
+  <StreamGeometry x:Key="IconFresh">M21 12 A9 9 0 0 0 12 3 A9.75 9.75 0 0 0 5.26 5.74 L3 8 M3 3 L3 8 L8 8 M3 12 A9 9 0 0 0 12 21 A9.75 9.75 0 0 0 18.74 18.26 L21 16 M16 16 L21 16 L21 21 M11 12 A1 1 0 1 0 13 12 A1 1 0 1 0 11 12 Z</StreamGeometry>
+  <StreamGeometry x:Key="IconRetry">M3 12 A9 9 0 1 0 12 3 A9.75 9.75 0 0 0 5.26 5.74 L3 8 M3 3 L3 8 L8 8</StreamGeometry>
+  <StreamGeometry x:Key="IconRewind">M9 14 L4 9 L9 4 M4 9 L14.5 9 A5.5 5.5 0 0 1 20 14.5 A5.5 5.5 0 0 1 14.5 20 L11 20</StreamGeometry>
+  <StreamGeometry x:Key="IconTrash">M10 11 L10 17 M14 11 L14 17 M19 6 L19 20 A2 2 0 0 1 17 22 L7 22 A2 2 0 0 1 5 20 L5 6 M3 6 L21 6 M8 6 L8 4 A2 2 0 0 1 10 2 L14 2 A2 2 0 0 1 16 4 L16 6</StreamGeometry>
+  <StreamGeometry x:Key="IconExport">M12 2 L12 15 M16 6 L12 2 L8 6 M4 12 L4 20 A2 2 0 0 0 6 22 L18 22 A2 2 0 0 0 20 20 L20 12</StreamGeometry>
+  <StreamGeometry x:Key="IconShare">M15 5 A3 3 0 1 0 21 5 A3 3 0 1 0 15 5 Z M3 12 A3 3 0 1 0 9 12 A3 3 0 1 0 3 12 Z M15 19 A3 3 0 1 0 21 19 A3 3 0 1 0 15 19 Z M8.59 13.51 L15.42 17.49 M15.41 6.51 L8.59 10.49</StreamGeometry>
+  <StreamGeometry x:Key="IconFolders">M12 10 L12 16 M9 13 L15 13 M20 20 A2 2 0 0 0 22 18 L22 8 A2 2 0 0 0 20 6 L12.1 6 A2 2 0 0 1 10.41 5.1 L9.6 3.9 A2 2 0 0 0 7.93 3 L4 3 A2 2 0 0 0 2 5 L2 18 A2 2 0 0 0 4 20 Z</StreamGeometry>
+  <StreamGeometry x:Key="IconMove">M2 9 L2 5 A2 2 0 0 1 4 3 L7.9 3 A2 2 0 0 1 9.59 3.9 L10.4 5.1 A2 2 0 0 0 12.07 6 L20 6 A2 2 0 0 1 22 8 L22 18 A2 2 0 0 1 20 20 L4 20 A2 2 0 0 1 2 18 L2 17 M2 13 L12 13 M9 16 L12 13 L9 10</StreamGeometry>
+  <StreamGeometry x:Key="IconPin">M12 17 L12 22 M9 10.76 A2 2 0 0 1 7.89 12.55 L6.11 13.45 A2 2 0 0 0 5 15.24 L5 16 A1 1 0 0 0 6 17 L18 17 A1 1 0 0 0 19 16 L19 15.24 A2 2 0 0 0 17.89 13.45 L16.11 12.55 A2 2 0 0 1 15 10.76 L15 7 A1 1 0 0 1 16 6 A2 2 0 0 0 16 2 L8 2 A2 2 0 0 0 8 6 A1 1 0 0 1 9 7 Z</StreamGeometry>
+  <!-- Unpin: the pin struck through -->
+  <StreamGeometry x:Key="IconPinOff">M12 17 L12 22 M15 9.34 L15 7 A1 1 0 0 1 16 6 A2 2 0 0 0 16 2 L7.89 2 M2 2 L22 22 M9 9 L9 10.76 A2 2 0 0 1 7.89 12.55 L6.11 13.45 A2 2 0 0 0 5 15.24 L5 16 A1 1 0 0 0 6 17 L17 17</StreamGeometry>
+  <StreamGeometry x:Key="IconChart">M3 3 L3 19 A2 2 0 0 0 5 21 L21 21 M18 17 L18 9 M13 17 L13 5 M8 17 L8 14</StreamGeometry>
+  <StreamGeometry x:Key="IconMemory">M2 6 L6 6 M2 10 L6 10 M2 14 L6 14 M2 18 L6 18 M6 2 L18 2 A2 2 0 0 1 20 4 L20 20 A2 2 0 0 1 18 22 L6 22 A2 2 0 0 1 4 20 L4 4 A2 2 0 0 1 6 2 Z M16 2 L16 22</StreamGeometry>
+  <StreamGeometry x:Key="IconHash">M4 9 L20 9 M4 15 L20 15 M10 3 L8 21 M16 3 L14 21</StreamGeometry>
+  <StreamGeometry x:Key="IconFileText">M6 22 A2 2 0 0 1 4 20 L4 4 A2 2 0 0 1 6 2 L14 2 A2.4 2.4 0 0 1 15.704 2.706 L19.292 6.294 A2.4 2.4 0 0 1 20 8 L20 20 A2 2 0 0 1 18 22 Z M14 2 L14 7 A1 1 0 0 0 15 8 L20 8 M10 9 L8 9 M16 13 L8 13 M16 17 L8 17</StreamGeometry>
+  <!-- Model options -->
+  <StreamGeometry x:Key="IconBolt">M15.914 4 A1.5 1.5 0 0 0 13.44 2.439 L4.44 11.439 A1.5 1.5 0 0 0 5.5 14 L9.502 14 A0.5 0.5 0 0 1 9.973 14.666 L8.086 20 A1.5 1.5 0 0 0 10.561 21.56 L19.561 12.56 A1.5 1.5 0 0 0 18.5 10 L14.503 10 A0.5 0.5 0 0 1 14.031 9.333 Z</StreamGeometry>
+  <!-- Extended context: a span stretched both ways (its own key: IconExpand is the file and image viewers') -->
+  <StreamGeometry x:Key="IconExtendedContext">M18 8 L22 12 L18 16 M2 12 L22 12 M6 8 L2 12 L6 16</StreamGeometry>
+  <StreamGeometry x:Key="IconAdvisor">M2.062 12.348 A1 1 0 0 1 2.062 11.652 A10.75 10.75 0 0 1 21.938 11.652 A1 1 0 0 1 21.938 12.348 A10.75 10.75 0 0 1 2.062 12.348 M9 12 A3 3 0 1 0 15 12 A3 3 0 1 0 9 12 Z</StreamGeometry>
+  <!-- A raised hand (a session waits for the user) -->
+  <StreamGeometry x:Key="IconHand">M18 11 L18 6 A2 2 0 0 0 16 4 A2 2 0 0 0 14 6 M14 10 L14 4 A2 2 0 0 0 12 2 A2 2 0 0 0 10 4 L10 6 M10 10.5 L10 6 A2 2 0 0 0 8 4 A2 2 0 0 0 6 6 L6 14 M18 8 A2 2 0 1 1 22 8 L22 14 A8 8 0 0 1 14 22 L12 22 C9.2 22 7.5 21.14 6.01 19.66 L2.41 16.06 A2 2 0 0 1 5.24 13.24 L7 15</StreamGeometry>
+  <!-- A tool call that runs: an open circle (it turns while the call runs) -->
+  <StreamGeometry x:Key="IconSpinner">M21 12 A9 9 0 1 1 14.781 3.44</StreamGeometry>
+</ResourceDictionary>

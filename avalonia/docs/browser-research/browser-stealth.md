@@ -130,7 +130,7 @@ Prefer `_simulateMouseMove:` with a `respondsToSelector:` guard. Fall back to th
 - Keep the page alive when the user switches away: `WKPreferences.inactiveSchedulingPolicy = WKInactiveSchedulingPolicyNone` (public, macOS 14+, `WKPreferences.h` L85-99). Our minimum is 14 (browser-input.md §2.3). Optional SPI `_setWindowOcclusionDetectionEnabled:NO` only while an agent action runs: occluded windows otherwise report `visibilityState:"hidden"` and stop rAF (`PageClientImplMac.mm` L209-213). Off by default, because it misreports visibility.
 
 ### 4.4 Scripts
-- Move everything we own into `[WKContentWorld worldWithName:@"ompgui"]`: the snapshot library, title/state probes, annotations logic.
+- Move everything we own into `[WKContentWorld worldWithName:@"ombra"]`: the snapshot library, title/state probes, annotations logic.
 - Tern's `world:"isolated"` maps to a second named world `"omp"`.
 - Message handlers for our code use `addScriptMessageHandler:contentWorld:name:` in **our** world. That world is invisible to `window.webkit` in the page world [INFERENCE: handlers are per world, by WebKit API design].
 
@@ -195,11 +195,11 @@ Budget guard:
 WKContentWorld (§4.4). A CSP-proof function call is `callAsyncJavaScript` (it is not `eval`, so page CSP does not apply), as Tern requires (omp-tern-protocol §2 `eval`).
 
 ### 6.3 Windows (CDP isolated world without `Runtime.enable`)
-- Install: `Page.addScriptToEvaluateOnNewDocument{source, worldName:"ompgui", runImmediately:true}`.
-- Evaluate: `Page.createIsolatedWorld{frameId, worldName:"ompgui"}` → `executionContextId` → `Runtime.evaluate{contextId, expression, awaitPromise:true, returnByValue:true}`. Re-create after each main-frame navigation.
+- Install: `Page.addScriptToEvaluateOnNewDocument{source, worldName:"ombra", runImmediately:true}`.
+- Evaluate: `Page.createIsolatedWorld{frameId, worldName:"ombra"}` → `executionContextId` → `Runtime.evaluate{contextId, expression, awaitPromise:true, returnByValue:true}`. Re-create after each main-frame navigation.
   - Navigation is known from the `NavigationCompleted`/`ContentLoading` WebView2 events, so no `Page.enable`-driven `Runtime` events are needed.
   - [INFERENCE: Chromium reuses one isolated world per name per frame, so the document-start script and later evaluations share globals. Puppeteer's utility world relies on this; verify in the spike.]
-- Isolated → host channel: `Runtime.addBinding{name, executionContextName:"ompgui"}`, received as `Runtime.bindingCalled` through `GetDevToolsProtocolEventReceiver` (slot 42). This is rebrowser's technique, chosen precisely because it avoids `Runtime.enable` ([rebrowser-patches](https://github.com/rebrowser/rebrowser-patches)).
+- Isolated → host channel: `Runtime.addBinding{name, executionContextName:"ombra"}`, received as `Runtime.bindingCalled` through `GetDevToolsProtocolEventReceiver` (slot 42). This is rebrowser's technique, chosen precisely because it avoids `Runtime.enable` ([rebrowser-patches](https://github.com/rebrowser/rebrowser-patches)).
 - Page-world surface:
   - Set `ICoreWebView2Settings.IsWebMessageEnabled = false` once annotations use the binding. Docs: "window.chrome.webview.postMessage fails" when false ([docs](https://learn.microsoft.com/en-us/dotnet/api/microsoft.web.webview2.core.corewebview2settings.iswebmessageenabled)). Whether `chrome.webview` disappears entirely: [INFERENCE: verify].
   - Avalonia's `invokeCSharpAction` document-created script (F8w) remains unless we own the WebView2 controller.
@@ -260,7 +260,7 @@ WKContentWorld (§4.4). A CSP-proof function call is `callAsyncJavaScript` (it i
 ```
 omp (unchanged) ──Tern protocol (preferred) / cmux fallback──▶ GUI host (per tab/block)
    ├─ Identity: engine-native UA (+Safari token on mac); no fingerprint spoofing
-   ├─ ScriptWorlds: "ompgui" (our kit, probes, annotations) · "omp" (Tern isolated kit) · page (agent eval; omp capture per §6.4 policy)
+   ├─ ScriptWorlds: "ombra" (our kit, probes, annotations) · "omp" (Tern isolated kit) · page (agent eval; omp capture per §6.4 policy)
    ├─ HumanVerificationGuard: detect → pause → hand to user (§7)
    ├─ Humaniser: plans paths/cadence for each input op, seeded, budgeted (§5)
    └─ IAgentInput (native actuator, browser-input.md §9.1)

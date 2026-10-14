@@ -10,16 +10,16 @@
 #                                         (--hooks harness leaves out the scenarios of the app's own hooks only)
 #
 # Exit code 0 = every check passed and nothing was on screen. A PASS/FAIL line per scenario goes to stderr.
-# The app's src/OmpGui.App/Platform/Mac/*.cs are compiled in when present (--hooks app is then the default).
+# The app's src/Ombra.App/Platform/Mac/*.cs are compiled in when present (--hooks app is then the default).
 # Environment:
-#   HARNESS_ARTIFACTS        build output (default /tmp/ompgui-webview-harness)
+#   HARNESS_ARTIFACTS        build output (default /tmp/ombra-webview-harness)
 #   HARNESS_NO_BUILD=1       skip the build
 #   HARNESS_TIMEOUT_SEC      per scenario (default 90)
 #   HARNESS_VERBOSE=1        delegate callbacks to stderr as they happen
 #   HARNESS_ISOLATION_CHECK=1  afterwards: no harness process left, no TCC request from the harness in the unified log
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-ART=${HARNESS_ARTIFACTS:-/tmp/ompgui-webview-harness}
+ART=${HARNESS_ARTIFACTS:-/tmp/ombra-webview-harness}
 DLL="$ART/bin/WebViewHarness/debug/WebViewHarness.dll"
 [ "$(uname)" = Darwin ] || { echo "The WKWebView harness runs on macOS only." >&2; exit 2; }
 [ $# -ge 1 ] || { echo "usage: $0 <scenario|all|--list> [--hooks app|harness]" >&2; exit 2; }

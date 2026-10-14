@@ -12,7 +12,7 @@
 //   TOOLCALL            one `read` tool call, then a final answer
 //   BIGREPLY <kib>      a single reply of <kib> KiB (drives omp's rpc_chunk path when > 1 MiB)
 //   BROWSERCALL <url>   one `eval` tool call running `browser.open({url})` (exec tier), then a final answer that says
-//                       whether the system prompt carried the OMP GUI browser note (NOTE-SEEN=yes|no)
+//                       whether the system prompt carried the Ombra browser note (NOTE-SEEN=yes|no)
 //   SLOW                a long reply streamed slowly (for abort tests)
 //   SLOWSHORT           a few seconds of streaming (for messages sent while the agent works)
 //   anything else       a short streamed reply
@@ -80,7 +80,7 @@ function plan(body) {
 	m = /BROWSERCALL\s+(\S+)/.exec(lastUser);
 	if (m && hasTools && toolNames.has("eval")) {
 		const system = msgs.filter(x => x.role === "system" || x.role === "developer").map(x => textOf(x.content)).join("\n");
-		const seen = system.includes("the OMP GUI's built-in browser") ? "yes" : "no";
+		const seen = system.includes("the Ombra's built-in browser") ? "yes" : "no";
 		if (toolResults === 0) {
 			const code = `const tab = await browser.open({ url: ${JSON.stringify(m[1])}, persist: true });\nprint(await tab.url());`;
 			return { text: `Opening the page. NOTE-SEEN=${seen}`, tool: { name: "eval", args: { language: "js", code } } };

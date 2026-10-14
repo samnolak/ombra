@@ -11,7 +11,7 @@
 # Ground truth comes from omp's own session files, the client's settings file, the file system and /proc;
 # screenshots are kept as evidence. Every check is one PASS / FAIL line in <work>/result.txt; exit 1 on any FAIL.
 #
-#   tools/verify/package-e2e.sh <omp-gui-…-linux-x64.tar.gz> <work-dir> [display-number]
+#   tools/verify/package-e2e.sh <ombra-…-linux-x64.tar.gz> <work-dir> [display-number]
 # Environment:
 #   REAL_MODEL_URL   an OpenAI-compatible endpoint of a real model (e.g. http://127.0.0.1:18090/v1 from
 #                    tools/real-model/setup.sh); REAL_MODEL_ID its model id. Without it the real-model steps FAIL.
@@ -51,7 +51,7 @@ sleep 1
 # The artifact: checksum, unpacked read-only.
 (cd "$(dirname "$ARCHIVE")" && sha256sum -c "$(basename "$ARCHIVE").sha256" > /dev/null); check archive-sha256 $? "$(basename "$ARCHIVE") matches its .sha256"
 tar xzf "$ARCHIVE" -C "$WORK/app" && chmod -R a-w "$WORK/app"
-EXE=$(ls "$WORK"/app/*/OmpGui)
+EXE=$(ls "$WORK"/app/*/Ombra)
 log "artifact $(sha256sum "$ARCHIVE" | cut -c1-16)… unpacked to $EXE"
 
 start_app() {
@@ -109,13 +109,13 @@ close_app() {
 
 # ── 1. First start with an empty HOME ─────────────────────────────────────────────────────────────────────────
 start_app; shot 01-first-start
-[ ! -e "$H/.config/OmpGui/omp-gui.local.json" ]; check first-start-writes-no-settings $? "no settings file written by just starting"
+[ ! -e "$H/.config/Ombra/ombra.local.json" ]; check first-start-writes-no-settings $? "no settings file written by just starting"
 # Coordinates below are for the 1100x760 window (MainWindow.axaml): the recovery card sits right above the composer
 # (bottom of the main column), its buttons start at x≈363 (272 sidebar + 24 margin + 36 icon + 14 gap + card padding).
 click 499 436                                       # "Install omp 18.8.0" on the setup screen ("Install omp to get started")
 log "install clicked"
-for _ in $(seq 1 1200); do ls "$H"/.local/share/OmpGui/runtimes/*/installed.json > /dev/null 2>&1 && break; sleep 0.5; done
-RT=$(dirname "$(ls "$H"/.local/share/OmpGui/runtimes/*/installed.json 2>/dev/null | head -1)")
+for _ in $(seq 1 1200); do ls "$H"/.local/share/Ombra/runtimes/*/installed.json > /dev/null 2>&1 && break; sleep 0.5; done
+RT=$(dirname "$(ls "$H"/.local/share/Ombra/runtimes/*/installed.json 2>/dev/null | head -1)")
 grep -q '"omp": "18.8.0"' "$RT/installed.json" 2>/dev/null && grep -q '"bun": "1.4.2"' "$RT/installed.json"; check runtime-installed-from-ui $? "installed.json: $(tr -d '\n ' < "$RT/installed.json" 2>/dev/null | cut -c1-120)"
 # omp starts from the new runtime and, with no model, exits before its RPC is ready (after its local-provider
 # discovery, which takes seconds): wait for that exit instead of a fixed pause, then the screen offers Try again.
@@ -161,8 +161,8 @@ EOF
 DEFAULT=${REAL_MODEL_URL:+local-real/${REAL_MODEL_ID:-}}; DEFAULT=${DEFAULT:-stand-in-mock/scripted-stand-in}
 printf 'modelRoles:\n  default: %s\n' "$DEFAULT" > "$H/.omp/agent/config.yml"
 EXTRA='[]'; [ "$CTX" -lt 32768 ] && EXTRA='["--tools=bash,read", "--no-skills", "--no-rules", "--no-lsp"]'
-mkdir -p "$H/.config/OmpGui"
-cat > "$H/.config/OmpGui/omp-gui.local.json" <<EOF
+mkdir -p "$H/.config/Ombra"
+cat > "$H/.config/Ombra/ombra.local.json" <<EOF
 {
   "workingDirectory": "$H/proj",
   "extraArgs": $EXTRA,
@@ -229,7 +229,7 @@ sleep 2; shot 08-approved
 
 # ── 5b. An image pasted from the X clipboard (Ctrl+V) goes to omp as an attachment ───────────────────────────
 if [ -n "${PYXLIB:-}" ] && "$PYXLIB" -c "import Xlib" 2>/dev/null; then
-  PNG=$(ls "$WORK"/app/*/omp-gui.png)
+  PNG=$(ls "$WORK"/app/*/ombra.png)
   "$PYXLIB" "$HERE/tools/verify/x11-clipboard.py" "$PNG" image/png > "$WORK/clipboard.log" 2>&1 & CLIP=$!
   sleep 1; xdotool key ctrl+v; sleep 1.5; shot 08b-pasted-image
   typeln "Here is a picture"
@@ -253,7 +253,7 @@ shot 10-settings
 click 1025 140; sleep 1                              # Appearance: the "Dark" segment (System / Light / Dark), General page (every settings page is 720 px wide)
 click 1048 24; sleep 1                               # Done (right end of the Settings header)
 shot 11-dark
-grep -q '"theme": "dark"' "$H/.config/OmpGui/omp-gui.local.json"; check theme-saved $? "settings file: $(grep -o '"theme": "[a-z]*"' "$H/.config/OmpGui/omp-gui.local.json")"
+grep -q '"theme": "dark"' "$H/.config/Ombra/ombra.local.json"; check theme-saved $? "settings file: $(grep -o '"theme": "[a-z]*"' "$H/.config/Ombra/ombra.local.json")"
 
 # ── 8. Close, then start again: history and settings kept ───────────────────────────────────────────────────
 close_app close-leaves-nothing-running
@@ -268,7 +268,7 @@ close_app close-again-leaves-nothing-running
 # ── 9. What the client wrote ────────────────────────────────────────────────────────────────────────────────
 top=$(cd "$H" && find . -maxdepth 3 -mindepth 1 -type d | sort | tr '\n' ' ')
 [ ! -e "$H/.bun" ]; check no-global-bun-cache $? "~/.bun absent (Bun's caches stay in the runtime folder)"
-extra=$(cd "$H" && find . -maxdepth 2 -mindepth 1 | grep -vE '^\./(\.config|\.config/OmpGui|\.local|\.local/share|\.omp|\.omp/.*|proj|proj/.*|\.cache|\.cache/mesa_shader_cache)$' | tr '\n' ' ')
+extra=$(cd "$H" && find . -maxdepth 2 -mindepth 1 | grep -vE '^\./(\.config|\.config/Ombra|\.local|\.local/share|\.omp|\.omp/.*|proj|proj/.*|\.cache|\.cache/mesa_shader_cache)$' | tr '\n' ' ')
 [ -z "$extra" ]; check writes-only-own-folders $? "HOME holds: $top${extra:+ — unexpected: $extra}"
 
 echo "$( grep -c ^PASS "$RESULT") passed, $fails failed" | tee -a "$RESULT"

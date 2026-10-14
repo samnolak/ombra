@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Ombra
+GenericName=Coding agent
+Comment=Desktop client for the original omp coding agent
+Exec=OMBRA_DIR/Ombra
+Icon=OMBRA_DIR/ombra.png
+Terminal=false
+Categories=Development;
+StartupWMClass=Ombra

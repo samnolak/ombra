@@ -1,0 +1,866 @@
+<!-- Component styles on the client's tokens (Tokens.axaml), in the ChatGPT desktop (Codex) look. Sizes: buttons 32 /
+     radius 8 (medium 44 / radius 12), the primary action an inverse pill (near-white on dark), inputs on surface 1 with a
+     hairline that turns focus blue, menus a grey card radius 12 with 30 px rows, cards radius 12–16, the composer 24,
+     pills full. Blue is the one accent (send, switches, checks, links, focus); yellow is the brand mark only. -->
+<Styles xmlns:loc="using:Ombra.App.Localization"
+             xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ctl="using:Ombra.App.Controls">
+
+  <!-- ─────────────── Type ─────────────── -->
+  <!-- No contextual alternates (inherited by everything in the window, popups included): Inter's turn an "x" between
+       digits into "×" and "->" into an arrow, so a hash, size or path the user or omp wrote ("0x1F", "1920x1080") read
+       differently from what it is and from what Copy gives -->
+  <Style Selector="Window">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+    <Setter Property="FontFeatures" Value="-calt" />
+  </Style>
+  <Style Selector="TextBlock.muted, SelectableTextBlock.muted">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+  </Style>
+  <!-- Small secondary text (12). Tertiary text (4.6:1 light, 5.4:1 dark) passes AA but stays for hints and meta. -->
+  <Style Selector="TextBlock.tertiary, SelectableTextBlock.tertiary">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+  </Style>
+  <!-- body (16 / 24): message text -->
+  <Style Selector="SelectableTextBlock.body, TextBlock.body">
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontMessage}" />
+    <Setter Property="LineHeight" Value="{DynamicResource GuiLineMessage}" />
+  </Style>
+  <Style Selector="TextBlock.mono, SelectableTextBlock.mono">
+    <Setter Property="FontFamily" Value="{DynamicResource GuiFontMono}" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCode}" />
+  </Style>
+  <!-- Error / warning text in the status colours measures 2.5–4.1:1 on light surfaces: such lines are
+       primary text, and an icon or dot next to them (GuiStatus*, 3:1 is enough for graphics) carries the meaning. -->
+  <Style Selector="TextBlock.error, SelectableTextBlock.error, TextBlock.warning, SelectableTextBlock.warning">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="ctl|Icon.warning-mark">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiStatusWarning}" />
+  </Style>
+  <Style Selector="ctl|Icon.error-mark">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiStatusError}" />
+  </Style>
+  <!-- caps (12, semibold, spaced): small section labels -->
+  <Style Selector="TextBlock.caps">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontXs}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LetterSpacing" Value="0.8" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="TextBlock.caption">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="TextBlock.section">
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontL}" />
+  </Style>
+  <Style Selector="TextBlock.page-title">
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontXl}" />
+  </Style>
+  <Style Selector="TextBlock.label">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+
+  <!-- Keyboard focus only (never on click): a 2 px focus-blue ring that follows the control's own shape (circle, pill,
+       card), drawn inset as a shadow so nothing moves or is clipped; Fluent's adorner was a 2 px black square -->
+  <Style Selector="Button, ToggleButton, ComboBox, CheckBox, RadioButton, ToggleSwitch, ListBoxItem, Slider">
+    <Setter Property="FocusAdorner" Value="{x:Null}" />
+  </Style>
+  <Style Selector="Button:focus-visible /template/ ContentPresenter#PART_ContentPresenter, ToggleButton:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BoxShadow" Value="{DynamicResource GuiFocusRing}" />
+  </Style>
+  <Style Selector="ComboBox:focus-visible /template/ Border#Background">
+    <Setter Property="BoxShadow" Value="{DynamicResource GuiFocusRing}" />
+  </Style>
+  <Style Selector="ListBoxItem:focus-visible /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="BoxShadow" Value="{DynamicResource GuiFocusRing}" />
+  </Style>
+  <Style Selector="CheckBox:focus-visible /template/ Border#NormalRectangle">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiFocus}" />
+    <Setter Property="BorderThickness" Value="2" />
+  </Style>
+  <!-- Splitters are for the mouse: the keyboard skipped nothing by stopping on one -->
+  <Style Selector="GridSplitter">
+    <Setter Property="IsTabStop" Value="False" />
+    <Setter Property="Focusable" Value="False" />
+  </Style>
+
+  <!-- ─────────────── Buttons ─────────────── -->
+  <!-- Default = the secondary button, size small (32, radius 8). Colors come from Fluent's keys in Tokens. -->
+  <Style Selector="Button, ToggleButton">
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Padding" Value="12,0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <!-- A label in the middle of its button (a MinWidth wider than "Allow" had left it on the left); rows that read
+         left to right (menu items, sessions, options) set their own alignment -->
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <!-- Size medium (36, a pill, 14 px): the actions of a card (Codex: "Сбросить лимит", "Повысить тариф") -->
+  <Style Selector="Button.md">
+    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="Padding" Value="16,0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontUi}" />
+  </Style>
+  <!-- Inverse: black in light, near-white in dark (Stop, the primary pill) -->
+  <Style Selector="Button.inverse">
+    <Setter Property="Background" Value="{DynamicResource GuiInverse}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnInverse}" />
+  </Style>
+  <!-- The primary action and the inverse button are pills (Codex: "Повысить тариф", "Просмотреть изменения") -->
+  <Style Selector="Button.accent, Button.inverse">
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+  </Style>
+  <!-- Outline: a quiet pill with a hairline, the secondary action next to a primary pill -->
+  <Style Selector="Button.outline">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+  </Style>
+  <Style Selector="Button.outline:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderHover}" />
+  </Style>
+  <Style Selector="Button.inverse:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiInverseHover}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnInverse}" />
+  </Style>
+  <Style Selector="Button.inverse:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiInversePressed}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnInverse}" />
+  </Style>
+  <!-- Primary (Fluent's "accent" class): the inverse pill, near-white with dark text on dark, near-black with white text
+       on light (AccentButton* keys in Tokens). Danger: the error colour filled with white text, for the one destructive
+       action of a confirmation. Disabled primary, danger and inverse buttons keep their colour at 50 % instead of turning
+       into a grey secondary button. -->
+  <Style Selector="Button.danger:not(.chip):not(.menu-item):not(.flat)">
+    <Setter Property="Background" Value="{DynamicResource GuiStatusError}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnDanger}" />
+  </Style>
+  <Style Selector="Button.danger:not(.chip):not(.menu-item):not(.flat):pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.danger:not(.chip):not(.menu-item):not(.flat):pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiStatusError}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnDanger}" />
+    <Setter Property="Opacity" Value="0.9" />
+  </Style>
+  <Style Selector="Button.accent:disabled, Button.danger:not(.chip):not(.menu-item):not(.flat):disabled, Button.inverse:disabled">
+    <Setter Property="Opacity" Value="0.5" />
+  </Style>
+  <Style Selector="Button.danger:not(.chip):not(.menu-item):not(.flat):disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiStatusError}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnDanger}" />
+  </Style>
+  <Style Selector="Button.inverse:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiInverse}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnInverse}" />
+  </Style>
+  <!-- Flat buttons: no fill until hovered (fill 1) -->
+  <Style Selector="Button.icon, Button.flat, Button.sidebar-action, Button.session, Button.menu-item, Button.link, ToggleButton.flat">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.icon:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.flat:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.sidebar-action:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.session:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.menu-item:pointerover /template/ ContentPresenter#PART_ContentPresenter, ToggleButton.flat:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+  </Style>
+  <Style Selector="Button.icon:pressed /template/ ContentPresenter#PART_ContentPresenter, Button.flat:pressed /template/ ContentPresenter#PART_ContentPresenter, Button.menu-item:pressed /template/ ContentPresenter#PART_ContentPresenter, ToggleButton.flat:pressed /template/ ContentPresenter#PART_ContentPresenter, Button.chip.ghost:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1Pressed}" />
+  </Style>
+  <Style Selector="Button.icon:disabled /template/ ContentPresenter#PART_ContentPresenter, Button.flat:disabled /template/ ContentPresenter#PART_ContentPresenter, Button.sidebar-action:disabled /template/ ContentPresenter#PART_ContentPresenter, Button.session:disabled /template/ ContentPresenter#PART_ContentPresenter, Button.menu-item:disabled /template/ ContentPresenter#PART_ContentPresenter, Button.link:disabled /template/ ContentPresenter#PART_ContentPresenter, Button.chip:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <!-- Icon buttons: 32 square, radius 8, a fill on hover; "sm" 28 for a strip's own actions (+ after the tabs, a
+       terminal's chevron); in a toolbar pill they turn round (Border.toolbar-pill) -->
+  <Style Selector="Button.icon">
+    <Setter Property="Width" Value="32" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="Button.icon.sm">
+    <Setter Property="Width" Value="28" />
+    <Setter Property="Height" Value="28" />
+  </Style>
+  <Style Selector="Button.icon.wide">
+    <Setter Property="Width" Value="NaN" />
+    <Setter Property="Padding" Value="8,0" />
+  </Style>
+  <Style Selector="Button.icon:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <!-- A panel toggle in the header while its panel is open -->
+  <Style Selector="Button.icon.on">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="Button.icon.recording">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextError}" />
+  </Style>
+  <Style Selector="Button.link">
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="0,2" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="Button.link:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <!-- "action" link: the blue link text -->
+  <Style Selector="Button.link.action">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextLink}" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+  </Style>
+  <Style Selector="Button.link.action:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextLinkHover}" />
+  </Style>
+  <!-- Pills in the header: fill 1, full radius -->
+  <Style Selector="Button.chip">
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="Padding" Value="10,0,12,0" />
+    <Setter Property="MinHeight" Value="32" />
+  </Style>
+  <!-- In the composer toolbar the pills are quiet: no fill until hovered, secondary text -->
+  <Style Selector="Button.chip.ghost, ComboBox.chip.ghost">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="Padding" Value="8,0,8,0" />
+  </Style>
+  <Style Selector="Button.chip.ghost:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="Button.round">
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+  </Style>
+  <Style Selector="ComboBox.chip">
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Padding" Value="12,0,4,0" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="Button.option">
+    <Setter Property="Padding" Value="12,8" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+    <Setter Property="FontSize" Value="14" />
+  </Style>
+
+  <!-- ─────────────── Inputs ─────────────── -->
+  <Style Selector="TextBox">
+    <Setter Property="MinHeight" Value="40" />
+    <Setter Property="Padding" Value="12,9" />
+    <Setter Property="FontSize" Value="14" />
+  </Style>
+  <Style Selector="TextBox.search, TextBox.sm">
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Padding" Value="10,6" />
+  </Style>
+  <Style Selector="TextBox.search">
+    <Setter Property="Padding" Value="6,6,10,6" />
+  </Style>
+  <!-- The composer: the card around it is the field, the text box stays bare in every state -->
+  <!-- Placeholders: Fluent draws them at half opacity over the placeholder colour (read as disabled); the placeholder
+       colour is the tertiary text (4.6:1 / 5.4:1), shown at full strength -->
+  <Style Selector="TextBox:not(:disabled) /template/ TextBlock#PART_Placeholder">
+    <Setter Property="Opacity" Value="1" />
+  </Style>
+  <!-- One line in a narrow message box ("… Shift+Enter for a / new line" had wrapped): trimmed instead -->
+  <!-- :not(:disabled) gives the setter a trigger's priority: the template binds TextWrapping to the box's own -->
+  <Style Selector="TextBox#Composer:not(:disabled) /template/ TextBlock#PART_Placeholder">
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+  <!-- 15 px on 22 px lines; MaxHeight (MainWindow) is the padding plus whole lines, so a long message scrolled to its top
+       ends on a full line instead of half a line against the toolbar -->
+  <Style Selector="TextBox#Composer">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontM}" />
+    <Setter Property="LineHeight" Value="22" />
+    <Setter Property="MinHeight" Value="48" />
+    <Setter Property="Padding" Value="8,8,6,8" />
+  </Style>
+
+  <!-- ─────────────── Surfaces: the chrome and its sheets ───────────────
+       The window is the chrome (GuiChrome): the title band across the top (GuiChromeBand high) and the icon rail down the
+       left. Under the band, right of the rail, the sheet frame: the chat's surface, its two top corners rounded, a
+       hairline round its top and sides (GuiChromeEdge). The sidebar and the settings list are sheets of their own over
+       its left part, on the sidebar's colour, the same top-left corner and a hairline to the conversation. -->
+  <Style Selector="Border.sheet-frame">
+    <Setter Property="Margin" Value="{DynamicResource GuiSheetMargin}" />
+    <Setter Property="Background" Value="{DynamicResource GuiWindow}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiChromeEdge}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiSheetRadius}" />
+  </Style>
+  <Style Selector="Border.sidebar-sheet, Border.settings-sidebar">
+    <Setter Property="Margin" Value="{DynamicResource GuiSheetMargin}" />
+    <Setter Property="Background" Value="{DynamicResource GuiSidebar}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiChromeEdge}" />
+    <Setter Property="BorderThickness" Value="1,1,1,1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiSheetRadiusLeft}" />
+  </Style>
+  <!-- The sidebar itself is transparent: its top row lies in the band, its sheet (Border.sidebar-sheet) under it -->
+  <Style Selector="Border.sidebar">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <!-- A narrow window's drawer lies over the conversation: its band part on the chrome, with the popup shadow -->
+  <Style Selector="Border.sidebar.drawer">
+    <Setter Property="Background" Value="{DynamicResource GuiChrome}" />
+    <Setter Property="BoxShadow" Value="{DynamicResource GuiShadowPopup}" />
+  </Style>
+  <!-- Behind a drawer or a sheet: the ink at 20 % in light, black at 35 % in dark -->
+  <Style Selector="Border.scrim">
+    <Setter Property="Background" Value="{DynamicResource GuiBackdrop}" />
+  </Style>
+  <!-- The header: the band's part over the conversation (hit-testable: on macOS its empty part moves the window) -->
+  <Style Selector="Border.header">
+    <Setter Property="Height" Value="{DynamicResource GuiChromeBand}" />
+    <Setter Property="Padding" Value="10,0" />
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <!-- The composer, the row under it and their density steps: Styles.Composer.axaml -->
+  <!-- Cards: a quiet card on the chat surface (GuiCard: #212121 in dark, as the Codex limit card), a hairline, radius
+       16; a soft shadow in light only -->
+  <Style Selector="Border.card, Border.dialog, Border.banner, Border.widgets">
+    <Setter Property="Background" Value="{DynamicResource GuiCard}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius16}" />
+    <Setter Property="BoxShadow" Value="{DynamicResource GuiShadow}" />
+    <Setter Property="Padding" Value="16,14" />
+  </Style>
+  <Style Selector="Border.widgets">
+    <Setter Property="Padding" Value="14,10" />
+  </Style>
+  <!-- The comments sent with a message: Codex's "3 annotations" pill under its images, right-aligned (surface 2, a
+       hairline, 28 high, full radius) -->
+  <Style Selector="Border.bubble-chip">
+    <Setter Property="Background" Value="{DynamicResource GuiSurface2}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiCardBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="Padding" Value="12,4" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextPrimary}" />
+    <Setter Property="TextElement.FontSize" Value="{DynamicResource GuiFontCaption}" />
+  </Style>
+  <Style Selector="Border.attachment.comment-chip">
+    <Setter Property="Padding" Value="6,4,4,4" />
+  </Style>
+  <!-- The number of a page comment, on the accent (the brand yellow, white number) -->
+  <Style Selector="Border.pin">
+    <Setter Property="Width" Value="20" />
+    <Setter Property="Height" Value="20" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Background" Value="{DynamicResource GuiAccent}" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextOnAccent}" />
+  </Style>
+  <!-- omp cannot run: a warning mark, a title that says what to do, one primary action -->
+  <Style Selector="Border.recover-mark">
+    <Setter Property="Width" Value="36" />
+    <Setter Property="Height" Value="36" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="Background" Value="{DynamicResource GuiStatusWarningSoft}" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextWarning}" />
+  </Style>
+  <Style Selector="TextBlock.recover-title">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontM}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <!-- The setup screen of a new session that cannot start: the same content without the card, larger, in the middle -->
+  <Style Selector="Border#RecoverCard.setup">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="BoxShadow" Value="none" />
+    <Setter Property="MaxWidth" Value="520" />
+    <Setter Property="Padding" Value="0" />
+  </Style>
+  <Style Selector="Border#RecoverCard.setup Border.recover-mark">
+    <Setter Property="Width" Value="44" />
+    <Setter Property="Height" Value="44" />
+  </Style>
+  <Style Selector="Border#RecoverCard.setup TextBlock.recover-title">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontXl}" />
+  </Style>
+  <Style Selector="Border#RecoverCard.setup TextBlock.recover-hint">
+    <Setter Property="FontSize" Value="14" />
+  </Style>
+  <Style Selector="Border.banner.error">
+    <Setter Property="Background" Value="{DynamicResource GuiStatusErrorSoft}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="BoxShadow" Value="none" />
+  </Style>
+  <!-- A menu card (Codex: #2D2D2D, a hairline, radius 12, a soft shadow) -->
+  <Style Selector="Border.menu">
+    <Setter Property="Background" Value="{DynamicResource GuiSurface2}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusMenu}" />
+    <Setter Property="BoxShadow" Value="{DynamicResource GuiShadowPopup}" />
+    <Setter Property="Padding" Value="5" />
+  </Style>
+  <!-- The settings page: over the conversation's place, on the chrome (its band row), its own sheet frame under the
+       band (Border.sheet-frame inside it), its list a sheet of its own (Border.settings-sidebar) -->
+  <Style Selector="Border.page">
+    <Setter Property="Background" Value="{DynamicResource GuiChrome}" />
+  </Style>
+  <!-- A settings section: a card on the sheet (GuiCard, as the new-tab page's tiles), a hairline, radius 16 -->
+  <Style Selector="Border.section-card">
+    <Setter Property="Background" Value="{DynamicResource GuiCard}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius16}" />
+    <Setter Property="Padding" Value="20,18" />
+  </Style>
+  <Style Selector="Border.tag">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius4}" />
+    <Setter Property="Padding" Value="6,1" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.attachment">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+    <Setter Property="Padding" Value="6" />
+  </Style>
+  <Style Selector="Border.terminal-panel">
+    <Setter Property="Background" Value="{DynamicResource GuiSidebar}" />
+  </Style>
+  <Style Selector="Border.terminal-surface">
+    <Setter Property="Margin" Value="8,0,8,8" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusControl}" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+  <Style Selector="Border.tab">
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="Padding" Value="8,0,2,0" />
+  </Style>
+  <Style Selector="Border.tab.selected">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+  </Style>
+  <!-- The Events panel: under the band, the sidebar's colour, a hairline at its top and left edge -->
+  <Style Selector="Border.events">
+    <Setter Property="Margin" Value="{DynamicResource GuiSheetMargin}" />
+    <Setter Property="Background" Value="{DynamicResource GuiPage}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiChromeEdge}" />
+    <Setter Property="BorderThickness" Value="1,1,0,0" />
+  </Style>
+
+  <!-- ─────────────── Menus ─────────────── -->
+  <Style Selector="ListBox.menu-list">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="ListBox.menu-list ListBoxItem">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Focusable" Value="False" />
+  </Style>
+  <!-- A menu row: 30 px, 13 px label; an icon left, a shortcut right (TextBlock.menu-shortcut) -->
+  <Style Selector="Button.menu-item">
+    <Setter Property="Padding" Value="8,5" />
+    <Setter Property="MinHeight" Value="{DynamicResource GuiMenuRowHeight}" />
+    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+  </Style>
+  <!-- A keyboard shortcut on the right of a menu row: tertiary text -->
+  <Style Selector="TextBlock.menu-shortcut">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
+    <Setter Property="HorizontalAlignment" Value="Right" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Margin" Value="16,0,0,0" />
+  </Style>
+  <!-- A small section label inside a menu ("Add", "Plugins") -->
+  <Style Selector="TextBlock.menu-heading">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
+    <Setter Property="Margin" Value="8,6,8,4" />
+  </Style>
+  <Style Selector="Button.menu-item.current /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+  </Style>
+  <Style Selector="ListBox#ModelList ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+  </Style>
+  <!-- A check mark that says which choice is on (menus, lists): primary text, as Codex draws it -->
+  <Style Selector="ctl|Icon.menu-check">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <!-- Every flyout is a menu card: surface 2, a hairline, radius 12, 5 px around its rows (rows radius 8) -->
+  <Style Selector="FlyoutPresenter">
+    <Setter Property="Padding" Value="5" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusMenu}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="MinHeight" Value="0" />
+  </Style>
+  <Style Selector="MenuFlyoutPresenter, ContextMenu">
+    <Setter Property="Padding" Value="5" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusMenu}" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+  <Style Selector="MenuItem">
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusControl}" />
+    <Setter Property="Padding" Value="8,5" />
+    <Setter Property="MinHeight" Value="{DynamicResource GuiMenuRowHeight}" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+  </Style>
+  <!-- A text field's right-click menu: Fluent's Cut, Copy, Paste and, as in every Mac text field, Select all. One menu for
+       all fields (it acts on the one it opens on); the message box's Paste still attaches images and files. -->
+  <Style Selector="TextBox">
+    <Setter Property="ContextFlyout">
+      <MenuFlyout Placement="Pointer">
+        <MenuItem Header="{loc:T 'Cut'}" Command="{Binding $parent[TextBox].Cut}" IsEnabled="{Binding $parent[TextBox].CanCut}" InputGesture="{x:Static TextBox.CutGesture}" />
+        <MenuItem Header="{loc:T 'Copy'}" Command="{Binding $parent[TextBox].Copy}" IsEnabled="{Binding $parent[TextBox].CanCopy}" InputGesture="{x:Static TextBox.CopyGesture}" />
+        <MenuItem Header="{loc:T 'Paste'}" Command="{Binding $parent[TextBox].Paste}" IsEnabled="{Binding $parent[TextBox].CanPaste}" InputGesture="{x:Static TextBox.PasteGesture}" />
+        <Separator />
+        <MenuItem Header="{loc:T 'Select all'}" Command="{Binding $parent[TextBox].SelectAll}" InputGesture="{x:Static ctl:ContextMenus.SelectAllGesture}" />
+      </MenuFlyout>
+    </Setter>
+  </Style>
+  <!-- Tooltips: near-black in light, a raised grey card with a hairline in dark (Codex), 12 px, radius 8 -->
+  <Style Selector="ToolTip">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="Padding" Value="8,5" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="MaxWidth" Value="320" />
+  </Style>
+  <!-- A path's preview in the conversation (Controls/PathLinks): a card like the menus, not the inverse tooltip, so the
+       code and folder listings read as they do in the app; wide enough for a few lines of code -->
+  <Style Selector="ToolTip.path-peek">
+    <Setter Property="Background" Value="{DynamicResource GuiSurface2}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+    <Setter Property="Padding" Value="12,10" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="MaxWidth" Value="460" />
+  </Style>
+
+  <!-- Transcript, Markdown and dialog cards: Styles.Session.axaml -->
+  <Style Selector="TextBlock.activity">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
+  <Style Selector="TextBlock.activity-hint">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <!-- Switch (an on/off setting): a 36×20 pill, the knob slides. Off = a mid-grey track that a white knob stands out on;
+       on = the blue accent. Keyboard focus = the focus ring inside the track (an outer ring is cut off by the control's
+       bounds). -->
+  <Style Selector="ToggleButton.switch">
+    <Setter Property="Width" Value="36" />
+    <Setter Property="Height" Value="20" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border x:Name="Track" CornerRadius="10" Background="{DynamicResource GuiBorderStrong}">
+          <Border.Transitions>
+            <Transitions><BrushTransition Property="Background" Duration="0:0:0.12" /></Transitions>
+          </Border.Transitions>
+          <Border x:Name="Knob" Width="16" Height="16" CornerRadius="8" Background="#FFFFFFFF" HorizontalAlignment="Left" Margin="2,2,18,2"
+                  BoxShadow="0 1 2 0 #40000000">
+            <Border.Transitions>
+              <Transitions><ThicknessTransition Property="Margin" Duration="0:0:0.12" Easing="CubicEaseOut" /></Transitions>
+            </Border.Transitions>
+          </Border>
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="ToggleButton.switch:pointerover /template/ Border#Track">
+    <Setter Property="Background" Value="{DynamicResource GuiBorderFocus}" />
+  </Style>
+  <Style Selector="ToggleButton.switch:checked /template/ Border#Track">
+    <Setter Property="Background" Value="{DynamicResource GuiAccent}" />
+  </Style>
+  <Style Selector="ToggleButton.switch:checked:pointerover /template/ Border#Track">
+    <Setter Property="Background" Value="{DynamicResource GuiAccentHover}" />
+  </Style>
+  <Style Selector="ToggleButton.switch:checked /template/ Border#Knob">
+    <Setter Property="Margin" Value="18,2,2,2" />
+  </Style>
+  <Style Selector="ToggleButton.switch:focus-visible /template/ Border#Track">
+    <Setter Property="BoxShadow" Value="{DynamicResource GuiFocusRing}" />
+  </Style>
+  <Style Selector="ToggleButton.switch:disabled">
+    <Setter Property="Opacity" Value="0.4" />
+  </Style>
+  <!-- Segmented choice (2–3 options): a fill track, the chosen segment raised off it (GuiSegmentSelected) -->
+  <Style Selector="Border.segmented">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="Padding" Value="2" />
+  </Style>
+  <Style Selector="Button.segment">
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="Padding" Value="12,0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="CornerRadius" Value="6" />
+  </Style>
+  <Style Selector="Button.segment:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <!-- An unavailable choice: muted words on the track, never a fill that reads as the chosen one -->
+  <Style Selector="Button.segment:disabled /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+  <Style Selector="Button.segment.selected">
+    <Setter Property="Background" Value="{DynamicResource GuiSegmentSelected}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="Button.segment.selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiSegmentSelected}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+    <Setter Property="BoxShadow" Value="{DynamicResource GuiShadow}" />
+  </Style>
+  <!-- Status badges (20 high; the soft status colours) -->
+  <Style Selector="Border.status">
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="Padding" Value="8,1" />
+    <Setter Property="MinHeight" Value="20" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Background" Value="{DynamicResource GuiStatusNeutralSoft}" />
+  </Style>
+  <!-- Text in the status colour on its own pale fill measures 2.8–3.9:1: badge text is primary, the dot carries the state -->
+  <Style Selector="Border.status TextBlock">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="Border.status Ellipse">
+    <Setter Property="Width" Value="6" />
+    <Setter Property="Height" Value="6" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusNeutral}" />
+  </Style>
+  <Style Selector="Border.status.running Ellipse">
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusInfo}" />
+  </Style>
+  <Style Selector="Border.status.done Ellipse">
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusSuccess}" />
+  </Style>
+  <Style Selector="Border.status.failed Ellipse">
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusError}" />
+  </Style>
+  <Style Selector="Border.status.running">
+    <Setter Property="Background" Value="{DynamicResource GuiStatusInfoSoft}" />
+  </Style>
+  <Style Selector="Border.status.done">
+    <Setter Property="Background" Value="{DynamicResource GuiStatusSuccessSoft}" />
+  </Style>
+  <Style Selector="Border.status.failed">
+    <Setter Property="Background" Value="{DynamicResource GuiStatusErrorSoft}" />
+  </Style>
+  <Style Selector="ToggleButton.expander">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Width" Value="24" />
+    <Setter Property="Height" Value="24" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="ToggleButton.expander:checked /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="ToggleButton.expander ctl|Icon">
+    <Setter Property="RenderTransform" Value="rotate(0deg)" />
+  </Style>
+  <Style Selector="ToggleButton.expander:checked ctl|Icon">
+    <Setter Property="RenderTransform" Value="rotate(90deg)" />
+  </Style>
+  <Style Selector="Border.widgets.todo">
+    <Setter Property="Padding" Value="4" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+  </Style>
+  <Style Selector="ToggleButton.todo-head">
+    <Setter Property="Height" Value="32" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="8,0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="FontWeight" Value="Normal" />
+  </Style>
+  <Style Selector="ToggleButton.todo-head:checked /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="ToggleButton.todo-head:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+  </Style>
+  <Style Selector="ToggleButton.todo-head ctl|Icon.chevron">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextTertiary}" />
+    <Setter Property="RenderTransform" Value="rotate(180deg)" />
+  </Style>
+  <Style Selector="ToggleButton.todo-head:checked ctl|Icon.chevron">
+    <Setter Property="RenderTransform" Value="rotate(0deg)" />
+  </Style>
+  <Style Selector="TextBlock.todo-task">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="TextBlock.todo-task.done, TextBlock.todo-task.dropped">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
+    <Setter Property="TextDecorations" Value="Strikethrough" />
+  </Style>
+  <Style Selector="Ellipse.todo-active-dot">
+    <Setter Property="Width" Value="6" />
+    <Setter Property="Height" Value="6" />
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusInfo}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <!-- Checkbox (Markdown task lists, the todo list): a 16 px rounded square; checked is filled -->
+  <!-- A 16 px box with a 1.5 px border leaves 13 px inside: the mark is 12 px (at 14 it overflowed and sat off-centre) -->
+  <Style Selector="Border.md-check">
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius4}" />
+    <Setter Property="BorderThickness" Value="1.5" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderStrong}" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+  </Style>
+  <Style Selector="Border.md-check.active">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiStatusInfo}" />
+  </Style>
+  <Style Selector="Border.md-check.dropped">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+  <Style Selector="Border.md-check.checked">
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiInverse}" />
+    <Setter Property="Background" Value="{DynamicResource GuiInverse}" />
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextOnInverse}" />
+  </Style>
+
+  <!-- ─────────────── Status line ─────────────── -->
+  <Style Selector="Ellipse.state-dot">
+    <Setter Property="Width" Value="8" />
+    <Setter Property="Height" Value="8" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusSuccess}" />
+  </Style>
+  <Style Selector="Ellipse.state-dot.running">
+    <!-- Working: the in-progress blue, pulsing (ctl:Pulse, not a style animation: that would redraw the window every
+         vsync) -->
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusInfo}" />
+    <Setter Property="ctl:Pulse.Low" Value="0.3" />
+  </Style>
+  <Style Selector="Ellipse.state-dot.running.waiting">
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusWarning}" />
+  </Style>
+  <Style Selector="TextBlock.activity.waiting">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextWarning}" />
+  </Style>
+  <Style Selector="Ellipse.state-dot.error">
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusError}" />
+  </Style>
+  <Style Selector="ListBox.events ListBoxItem">
+    <Setter Property="Padding" Value="12,1" />
+    <Setter Property="MinHeight" Value="0" />
+  </Style>
+  <!-- Splitters: the sheets' hairline (GuiChromeEdge), in a wider transparent strip to grab (Fluent's 6 px minimum had
+       drawn the whole strip, a grey bar between the conversation and a side pane) -->
+  <Style Selector="GridSplitter">
+    <Setter Property="Background" Value="{DynamicResource GuiChromeEdge}" />
+  </Style>
+  <Style Selector="GridSplitter[ResizeDirection=Columns]">
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="Transparent">
+          <Border Width="1" HorizontalAlignment="Center" Background="{TemplateBinding Background}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <Style Selector="GridSplitter[ResizeDirection=Rows]">
+    <Setter Property="Template">
+      <ControlTemplate>
+        <Border Background="Transparent">
+          <Border Height="1" VerticalAlignment="Center" Background="{TemplateBinding Background}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+  <!-- ─────────────── Toolbar pills (the ChatGPT app's panel toolbars) ───────────────
+       Related actions share one rounded pill (GuiToolbarPill, 32 high, full radius): back | forward · reload, a file's
+       actions; inside it the icon buttons are 28 round with a hover fill over the pill, a 1 px divider between groups.
+       A lone action is a round pill of its own (Button.icon.pill); a field in a toolbar is a full pill (TextBox.pill). -->
+  <Style Selector="Border.toolbar-pill">
+    <Setter Property="Background" Value="{DynamicResource GuiToolbarPill}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="Padding" Value="2" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.toolbar-pill Button.icon">
+    <Setter Property="Width" Value="28" />
+    <Setter Property="Height" Value="28" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+  </Style>
+  <Style Selector="Border.toolbar-divider">
+    <Setter Property="Width" Value="1" />
+    <Setter Property="Height" Value="16" />
+    <Setter Property="Margin" Value="3,0" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Background" Value="{DynamicResource GuiBorder}" />
+  </Style>
+  <Style Selector="Button.icon.pill">
+    <Setter Property="Background" Value="{DynamicResource GuiToolbarPill}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+  </Style>
+  <Style Selector="Button.icon.pill:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2Hover}" />
+  </Style>
+  <Style Selector="TextBox.pill">
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="Padding" Value="14,0,10,0" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    <Setter Property="Background" Value="{DynamicResource GuiToolbarPill}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+  </Style>
+  <Style Selector="TextBox.pill:pointerover /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="{DynamicResource GuiToolbarPill}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
+  </Style>
+  <Style Selector="TextBox.pill:focus /template/ Border#PART_BorderElement">
+    <Setter Property="Background" Value="{DynamicResource GuiToolbarPill}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TextControlBorderBrushFocused}" />
+  </Style>
+  <!-- A search field as a pill: its icon at the start (InnerLeftContent), so the text keeps the search's own padding -->
+  <Style Selector="TextBox.search.pill">
+    <Setter Property="Padding" Value="6,0,10,0" />
+  </Style>
+  <!-- A segmented choice in a toolbar: the track a pill, the chosen segment a pill on it -->
+  <Style Selector="Border.segmented.pill">
+    <Setter Property="Background" Value="{DynamicResource GuiToolbarPill}" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+  </Style>
+  <Style Selector="Border.segmented.pill Button.segment">
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+  </Style>
+</Styles>

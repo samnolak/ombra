@@ -1,7 +1,7 @@
-# omp 18.8.0 browser tool vs the OMP GUI built-in browser
+# omp 18.8.0 browser tool vs the Ombra built-in browser
 
-Read-only research. Source root (abbreviated `S/`): `~/Library/Application Support/OmpGui-Test/runtimes/omp-18.8.0-bun-1.4.2/omp/node_modules/@oh-my-pi/pi-coding-agent/src/`.
-Browser code lives in `S/tools/browser.ts` (abbrev. `B`) and `S/tools/browser/` (abbrev. `BR/`). GUI side: `avalonia/src/OmpGui.ClientCore/AgentBrowserBridge.cs` (`AB`), `AgentBrowserScripts.cs` (`AS`), `avalonia/src/OmpGui.App/ViewModels/PreviewAgentPage.cs`, `App.axaml.cs:48-86`.
+Read-only research. Source root (abbreviated `S/`): `~/Library/Application Support/Ombra-Test/runtimes/omp-18.8.0-bun-1.4.2/omp/node_modules/@oh-my-pi/pi-coding-agent/src/`.
+Browser code lives in `S/tools/browser.ts` (abbrev. `B`) and `S/tools/browser/` (abbrev. `BR/`). GUI side: `avalonia/src/Ombra.ClientCore/AgentBrowserBridge.cs` (`AB`), `AgentBrowserScripts.cs` (`AS`), `avalonia/src/Ombra.App/ViewModels/PreviewAgentPage.cs`, `App.axaml.cs:48-86`.
 The complete Tern wire spec is in **local://omp-tern-protocol.md**. Everything there and here comes from the source at the cited lines. Inferences are marked [INFERENCE].
 
 ## TL;DR
@@ -60,7 +60,7 @@ If an auto-chosen Tern open fails with `no_window|unsupported|connect`, omp fall
    - Tern: `TERN_PANE_SOCKET=<sock>`, `TERN_PANE=<numeric id>`, `PI_BROWSER_TERN=1`.
    - cmux fallback: `CMUX_SOCKET_PATH`, `CMUX_SOCKET_PASSWORD`, `PI_BROWSER_CMUX=1`.
    - Keep removing `CMUX_WORKSPACE_ID/SURFACE_ID/RELAY_*` (`AB:84,182`). If both env sets are present, Tern wins (`B:213-225`).
-   - `PI_BROWSER_RELAY=0` neutralises the relay, but only when the user chose "Use OMP GUI browser". The relay is a deliberate user mode.
+   - `PI_BROWSER_RELAY=0` neutralises the relay, but only when the user chose "Use Ombra browser". The relay is a deliberate user mode.
 2. **Settings overlay** (no edits to the user's config.yml). Write a GUI-owned YAML file and append it to `PI_CONFIG_FILES`, `path.delimiter`-separated, keeping any existing value (`S/config/settings.ts:661-663`; overlays load after global/project, `:2461-2497`; `config-cli.ts:352` confirms an overlay overrides config for the process). Example, only when the user opts in:
    ```yaml
    browser:
@@ -72,7 +72,7 @@ If an auto-chosen Tern open fails with `no_window|unsupported|connect`, omp fall
    ```
    `--config <file>` is equivalent (`S/cli/flag-tables.ts:116`), but the GUI already uses its own `--config` for itself (`Program.cs:42`). Env is cleaner.
 3. **Prompt guidance without patching.**
-   - Ship a GUI-owned extension, passed with `--extension <path>` (`flag-tables.ts:222`; merges with discovered extensions unless `--no-extensions`). Its `before_agent_start` handler returns `systemPrompt` additions (`types.ts:845-852, 1297-1298, 1412`). Suggested text: "The `browser` eval object drives the OMP GUI's built-in browser, which the user sees live. For any web page the user should see or interact with (logins, previews, localhost apps) use `browser.open`, never `bash open`/system browser. Keep one tab named `main` and pass `persist: true` for multi-step flows."
+   - Ship a GUI-owned extension, passed with `--extension <path>` (`flag-tables.ts:222`; merges with discovered extensions unless `--no-extensions`). Its `before_agent_start` handler returns `systemPrompt` additions (`types.ts:845-852, 1297-1298, 1412`). Suggested text: "The `browser` eval object drives the Ombra's built-in browser, which the user sees live. For any web page the user should see or interact with (logins, previews, localhost apps) use `browser.open`, never `bash open`/system browser. Keep one tab named `main` and pass `persist: true` for multi-step flows."
    - On cmux only, also add: "prefer `tab.ariaSnapshot()` over `tab.observe()`; dialogs/emulation/downloads are unavailable".
    - Do **not** use `--append-system-prompt`: it replaces the user's discovered `APPEND_SYSTEM.md` (`S/main.ts:1348`) and changes the fork cache shape (`main.ts:1383-1386`).
 4. **Alternative: an RPC host tool.** `set_host_tools` (`S/modes/rpc/rpc-types.ts:67, 770-789`; `rpc-mode.ts:2131-2135`) registers GUI-executed tools, with `loadMode: "essential" | "discoverable"`. The GUI could expose its own `gui_browser` tool with its own description. Downsides: it duplicates omp's rich helpers, it competes with the `browser` prelude, and it is not available in the TUI process. Not recommended as the primary path; useful only for GUI-only actions such as "show this URL to the user".
@@ -222,7 +222,7 @@ Full details are in local://omp-tern-protocol.md. Highlights:
 
 1. **Implement a Tern host in the GUI** (new `AgentTernHost`). Unix socket (named pipe on Windows [INFERENCE]), u32-LE frames, `hello` → `{"welcome":{"ops":[]}}`. Minimum ops: open, close, dialogs, scripts, goto, nav, viewport, events, state, eval (page + isolated worlds, Promise await, frame paths), input (native events), capture. Then files, downloads, credentials, agent, appearance, cookies, pdf, clipboard, edit. Add `webkit.messageHandlers.stencil` (page world) and `stencilFrame` (isolated world). One block per omp tab, shown as preview tabs. Env: `TERN_PANE_SOCKET`, `TERN_PANE=<n>`, `PI_BROWSER_TERN=1`.
 2. **Keep the cmux bridge as a fallback for one release.** Fix the timeout margin (`AB:514-536`) and the single-surface model (`AB:423-438`), and set `PI_BROWSER_CMUX=1`.
-3. **Opt-in "Use OMP GUI browser for the agent" switch** (default on). It writes the `PI_CONFIG_FILES` overlay (`browser.cdpUrl:""`, `browser.enabled:true`, optionally `idleCloseSec:0`) and adds `PI_BROWSER_RELAY=0`.
+3. **Opt-in "Use Ombra browser for the agent" switch** (default on). It writes the `PI_CONFIG_FILES` overlay (`browser.cdpUrl:""`, `browser.enabled:true`, optionally `idleCloseSec:0`) and adds `PI_BROWSER_RELAY=0`.
 4. **GUI extension (`--extension`) with a `before_agent_start` system-prompt note:** the browser is visible to the user; use it for every page the user must see; never use `bash open`; use `persist:true` for logins.
 5. **Windows option.** Start the preview WebView2 with `--remote-debugging-port=<random>` (bound to 127.0.0.1) and point `browser.cdpUrl` at it through the overlay. That gives the full Puppeteer helper set and trusted CDP input. Trade-off: any local process can attach to that port while it is open, and omp attaches to existing page targets without creating tabs (`BR/attach.ts:616-636`). Linux and macOS have no CDP, so they use Tern.
 6. **Do not port omp's Chrome stealth scripts to WebKit.** For WKWebView, make the UA a genuine Safari one (`applicationNameForUserAgent = "Version/<n> Safari/605.1.15"`) [INFERENCE: the default WKWebView UA lacks the Safari token]. Keep omp/GUI globals out of the page world and use trusted input. Details belong to the anti-detection slice.

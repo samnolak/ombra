@@ -28,14 +28,14 @@ say "macos gate $(date -u +%FT%TZ) commit $COMMIT on $(sw_vers -productName) $(s
 
 # ── BUILD ────────────────────────────────────────────────────────────────────────────────────────────────────────
 dotnet --info > "$WORK/dotnet-info.txt" 2>&1
-dotnet restore OmpGui.sln > "$WORK/restore.log" 2>&1; check "restore" $?
-dotnet build OmpGui.sln -c Release --no-restore > "$WORK/build.log" 2>&1; check "build" $?
-dotnet test tests/OmpGui.Tests -c Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=macos-full.trx" \
+dotnet restore Ombra.sln > "$WORK/restore.log" 2>&1; check "restore" $?
+dotnet build Ombra.sln -c Release --no-restore > "$WORK/build.log" 2>&1; check "build" $?
+dotnet test tests/Ombra.Tests -c Release --no-build --logger "console;verbosity=normal" --logger "trx;LogFileName=macos-full.trx" \
   --results-directory "$WORK/trx" > "$WORK/tests-full.log" 2>&1; check "unit+headless-tests" $? "$(grep -E '^\s*(Passed|Failed|Skipped):' "$WORK/tests-full.log" | tr -s ' ' | tr '\n' ' ')"
 for rid in osx-arm64 osx-x64; do
-  dotnet publish src/OmpGui.App -c Release -r $rid --self-contained -o "$WORK/pub-$rid" -p:Version=0.1.0 -p:InformationalVersion=$V > "$WORK/publish-$rid.log" 2>&1 \
+  dotnet publish src/Ombra.App -c Release -r $rid --self-contained -o "$WORK/pub-$rid" -p:Version=0.1.0 -p:InformationalVersion=$V > "$WORK/publish-$rid.log" 2>&1 \
     && tools/package/package.sh $rid "$WORK/pub-$rid" "$WORK/dist" $V > "$WORK/package-$rid.log" 2>&1
-  check "package-$rid" $? "$(cd "$WORK/dist" 2>/dev/null && cat omp-gui-$V-$rid.zip.sha256 2>/dev/null)"
+  check "package-$rid" $? "$(cd "$WORK/dist" 2>/dev/null && cat ombra-$V-$rid.zip.sha256 2>/dev/null)"
 done
 tools/package/smoke.sh $RID "$WORK/dist" "$WORK/smoke" $V > "$WORK/smoke.log" 2>&1
 check "package-smoke-$RID (self-test, runtime install, omp over RPC, window start/close, codesign --verify)" $? "$(grep 'package smoke passed' "$WORK/smoke.log")"
@@ -46,9 +46,9 @@ check "real-omp (startup, stdin/stdout RPC, protocol v2, prompt, stream, abort, 
 RT=$WORK/omp/runtimes/omp-18.8.0-bun-1.4.2
 
 # $SHELL: zsh (macOS default) and a non-macOS path; the packaged app's self-test must still start a shell.
-APP_DIR="$WORK/smoke/unpacked/omp-gui-$V-$RID/OMP GUI.app"; APP="$APP_DIR/Contents/MacOS/OmpGui"
+APP_DIR="$WORK/smoke/unpacked/ombra-$V-$RID/Ombra.app"; APP="$APP_DIR/Contents/MacOS/Ombra"
 for sh in /bin/zsh /usr/bin/bash-does-not-exist; do
-  HOME=$WORK/smoke/home OMPGUI_RUNTIME_DIR=$WORK/smoke/runtimes OMPGUI_CONFIG=$WORK/smoke/home/omp-gui.local.json SHELL=$sh \
+  HOME=$WORK/smoke/home OMBRA_RUNTIME_DIR=$WORK/smoke/runtimes OMBRA_CONFIG=$WORK/smoke/home/ombra.local.json SHELL=$sh \
     "$APP" --self-test "$WORK/selftest-shell.json" > "$WORK/selftest-shell.log" 2>&1
   python3 -c "import json,sys; r=json.load(open(sys.argv[1])); c=[c for c in r['checks'] if c['name']=='pty'][0]; print(c['detail']); sys.exit(0 if c['ok'] else 1)" "$WORK/selftest-shell.json" > "$WORK/pty.txt" 2>&1
   check "shell-SHELL=$sh" $? "$(cat "$WORK/pty.txt")"
@@ -90,13 +90,13 @@ PY
   check "minimized-core-folds-ui-paused" $? "$(cat "$WORK/minimized.txt")"
   for _ in $(seq 1 180); do grep -q "omp finished" "$WORK/osascript-calls.txt" 2>/dev/null && break; sleep 1; done
   grep -q "omp finished" "$WORK/osascript-calls.txt" 2>/dev/null; check "notification-on-run-end (client → osascript)" $? "$(head -1 "$WORK/osascript-calls.txt" 2>/dev/null)"
-  osascript -e 'tell application id "io.github.samnolak.omp-gui" to activate' >/dev/null 2>&1; sleep 2
+  osascript -e 'tell application id "io.github.samnolak.ombra" to activate' >/dev/null 2>&1; sleep 2
   tail -1 "$WORK/timeline.csv" | grep -q ",Normal,"; check "restore-shows-current-state" $? "$(tail -1 "$WORK/timeline.csv")"
 else
   say "NOT RUN minimize / background / notification — osascript has no Accessibility permission here ($(tail -1 "$WORK/minimize.log"))"
   for _ in $(seq 1 240); do tail -1 "$WORK/timeline.csv" | grep -q ",Ready," && break; sleep 1; done
 fi
-osascript -e 'tell application id "io.github.samnolak.omp-gui" to quit' > "$WORK/quit.log" 2>&1
+osascript -e 'tell application id "io.github.samnolak.ombra" to quit' > "$WORK/quit.log" 2>&1
 for _ in $(seq 1 30); do kill -0 $APPPID 2>/dev/null || break; sleep 0.5; done
 LEFT=""; kill -0 $APPPID 2>/dev/null && LEFT="app $APPPID"; for p in $OMPS; do kill -0 "$p" 2>/dev/null && LEFT="$LEFT omp $p"; done
 [ -z "$LEFT" ]; check "quit-leaves-nothing-running (Apple event quit → app and omp gone)" $? "${LEFT:-nothing left}"

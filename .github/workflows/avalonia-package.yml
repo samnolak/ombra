@@ -110,7 +110,7 @@ jobs:
           fi
       - name: Publish (self-contained)
         run: |
-          dotnet publish src/OmpGui.App -c Release -r "$RID" --self-contained -o "$RUNNER_TEMP/pub" \
+          dotnet publish src/Ombra.App -c Release -r "$RID" --self-contained -o "$RUNNER_TEMP/pub" \
             -p:Version="${VERSION%%-*}" -p:InformationalVersion="$VERSION"
           du -sh "$RUNNER_TEMP/pub"
       - name: Package (signed only when the owner's certificates are in the secrets)
@@ -135,7 +135,7 @@ jobs:
           # Exercises sign.sh's Authenticode path end to end without the owner's certificate: a self-signed code
           # signing certificate, trusted only on this throwaway runner and removed after, signs a copy of the publish folder. The shipped
           # package above is untouched and stays as its .signing.txt says.
-          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=OMP GUI signing check (throwaway)" -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddDays(1)
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Ombra signing check (throwaway)" -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddDays(1)
           $pw = [guid]::NewGuid().ToString()
           $pfx = Join-Path $env:RUNNER_TEMP "check.pfx"
           Export-PfxCertificate -Cert $cert -FilePath $pfx -Password (ConvertTo-SecureString $pw -AsPlainText -Force) | Out-Null
@@ -146,7 +146,7 @@ jobs:
           $env:WINDOWS_CERT_PASSWORD = $pw
           & "C:\Program Files\Git\bin\bash.exe" tools/package/sign.sh windows "$($env:RUNNER_TEMP -replace '\\','/')/signcheck" "$($env:RUNNER_TEMP -replace '\\','/')/signcheck.txt"
           if ($LASTEXITCODE -ne 0) { exit 1 }
-          $sig = Get-AuthenticodeSignature "$env:RUNNER_TEMP\signcheck\OmpGui.exe"
+          $sig = Get-AuthenticodeSignature "$env:RUNNER_TEMP\signcheck\Ombra.exe"
           "$($sig.Status) $($sig.SignerCertificate.Subject)"
           if ($sig.Status -ne 'Valid') { exit 1 }
           Remove-Item -Recurse -Force "$env:RUNNER_TEMP\signcheck", $pfx
@@ -161,7 +161,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: ${{ !cancelled() }}
         with:
-          name: omp-gui-${{ matrix.rid }}
+          name: ombra-${{ matrix.rid }}
           path: |
             ${{ runner.temp }}/dist/*
             ${{ runner.temp }}/smoke/*.json
@@ -181,7 +181,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: omp-gui-*
+          pattern: ombra-*
           path: all
           merge-multiple: true
       - name: Gather the files in all/dist
@@ -189,7 +189,7 @@ jobs:
         # without a smoke report lands there too. Everything a release ships goes to all/dist.
         run: |
           mkdir -p all/dist
-          find all -maxdepth 1 -type f \( -name 'omp-gui-*' -o -name 'update.json*' -o -name SHA256SUMS \) -exec mv -t all/dist {} +
+          find all -maxdepth 1 -type f \( -name 'ombra-*' -o -name 'update.json*' -o -name SHA256SUMS \) -exec mv -t all/dist {} +
           ls -la all/dist
       - name: SHA256SUMS (verified against each package's own .sha256)
         run: |
@@ -204,7 +204,7 @@ jobs:
         env:
           NOTES: ${{ inputs.notes }}
         run: |
-          VERSION=$(ls all/dist | sed -nE 's/^omp-gui-(.+)-(linux|win|osx)-(x64|arm64)\.(tar\.gz|zip)$/\1/p' | sort -u)
+          VERSION=$(ls all/dist | sed -nE 's/^ombra-(.+)-(linux|win|osx)-(x64|arm64)\.(tar\.gz|zip)$/\1/p' | sort -u)
           [ "$(echo "$VERSION" | wc -l)" = 1 ] || { echo "packages of several versions: $VERSION"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           avalonia/tools/release/make-manifest.py all/dist --version "$VERSION" --repo "$GITHUB_REPOSITORY" --notes "${NOTES:-CI build $VERSION}"
@@ -219,7 +219,7 @@ jobs:
           rm -f "$RUNNER_TEMP/key.pem"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: omp-gui-SHA256SUMS
+          name: ombra-SHA256SUMS
           path: |
             all/dist/SHA256SUMS
             all/dist/update.json
@@ -240,7 +240,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: omp-gui-*
+          pattern: ombra-*
           path: all
           merge-multiple: true
       - name: Gather the files in all/dist
@@ -248,7 +248,7 @@ jobs:
         # without a smoke report lands there too. Everything a release ships goes to all/dist.
         run: |
           mkdir -p all/dist
-          find all -maxdepth 1 -type f \( -name 'omp-gui-*' -o -name 'update.json*' -o -name SHA256SUMS \) -exec mv -t all/dist {} +
+          find all -maxdepth 1 -type f \( -name 'ombra-*' -o -name 'update.json*' -o -name SHA256SUMS \) -exec mv -t all/dist {} +
           ls -la all/dist
       - name: Check the signature as a client would
         run: |
@@ -269,7 +269,7 @@ jobs:
           # Not marked pre-release, even for 0.x-alpha versions: clients read releases/latest, which skips pre-releases
           # Only the platforms this run built (input "platforms"): a missing kind of package is not an error
           shopt -s nullglob
-          FILES=(omp-gui-*.tar.gz omp-gui-*.zip ./*.sha256 SHA256SUMS update.json update.json.sig)
+          FILES=(ombra-*.tar.gz ombra-*.zip ./*.sha256 SHA256SUMS update.json update.json.sig)
           printf '%s\n' "${FILES[@]}"
-          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "OMP GUI $VERSION" \
-            --notes "${NOTES:-OMP GUI $VERSION}" $DRAFT "${FILES[@]}"
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Ombra $VERSION" \
+            --notes "${NOTES:-Ombra $VERSION}" $DRAFT "${FILES[@]}"

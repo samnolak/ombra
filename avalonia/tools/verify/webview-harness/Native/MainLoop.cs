@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace OmpGui.WebViewHarness.Native;
+namespace Ombra.WebViewHarness.Native;
 
 /// <summary>
 /// The process's AppKit main thread without any UI: <c>NSApplication</c> with activation policy <i>prohibited</i>

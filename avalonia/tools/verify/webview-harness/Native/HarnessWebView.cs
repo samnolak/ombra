@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 
-namespace OmpGui.WebViewHarness.Native;
+namespace Ombra.WebViewHarness.Native;
 
 /// <summary>Which delegates the harness installs on a web view (beyond the Avalonia-shaped navigation delegate).</summary>
 internal sealed record HookOptions

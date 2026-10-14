@@ -1,0 +1,221 @@
+<!-- The header's ⋯ (the ChatGPT app's chat menu): the session's actions — each runs one of omp's builtins over RPC
+     (MainViewModel.Session.cs) and reports on the session card above the message box — then the panels with their
+     shortcuts, a tick on the one shown (the right panel's tabs, the terminal). DataContext: MainViewModel. -->
+<UserControl xmlns:loc="using:Ombra.App.Localization"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
+             x:Class="Ombra.App.Views.Session.SessionMenuButton"
+             x:DataType="vm:MainViewModel">
+  <Button x:Name="MenuButton" Classes="icon" ToolTip.Tip="{loc:T 'Chat menu: rename, pin, export, share, panels…'}"
+          AutomationProperties.Name="{loc:T 'Chat menu'}">
+    <Panel>
+      <ctl:Icon Data="{StaticResource IconMoreHorizontal}" Size="16" />
+      <!-- Background tasks run while their tab is not shown -->
+      <Border x:Name="TasksDot" Classes="views-dot" IsHitTestVisible="False">
+        <Border.IsVisible>
+          <MultiBinding Converter="{x:Static BoolConverters.And}">
+            <Binding Path="Tasks.HasRunning" />
+            <Binding Path="!IsTasksPaneShown" />
+          </MultiBinding>
+        </Border.IsVisible>
+      </Border>
+    </Panel>
+    <Button.Flyout>
+      <Flyout Placement="BottomEdgeAlignedRight">
+        <ScrollViewer x:Name="MenuScroll" MaxHeight="620" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel x:Name="ChatMenu" MinWidth="300" Spacing="1">
+          <!-- The session's actions: not on the setup screen, where there is no session to act on yet -->
+          <StackPanel x:Name="SessionItems" Spacing="1" Classes="session-menu" IsVisible="{Binding !ShowSetupScreen}">
+            <Button x:Name="RenameItem" Classes="menu-item" Command="{Binding StartRenameCommand}" AutomationProperties.Name="{loc:T 'Rename'}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon Data="{StaticResource IconPencil}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Rename'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-hint" Text="/rename" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Button x:Name="CopyIdItem" Classes="menu-item" Command="{Binding CopySessionIdCommand}" AutomationProperties.Name="{loc:T 'Copy session ID'}">
+              <Grid ColumnDefinitions="Auto,*">
+                <ctl:Icon Data="{StaticResource IconHash}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Copy session ID'}" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Button x:Name="CopyFileItem" Classes="menu-item" Command="{Binding CopySessionFileCommand}" AutomationProperties.Name="{loc:T 'Copy session file path'}">
+              <Grid ColumnDefinitions="Auto,*">
+                <ctl:Icon Data="{StaticResource IconFileText}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Copy session file path'}" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Border Classes="menu-separator" />
+            <Button x:Name="CompactItem" Classes="menu-item" Command="{Binding CompactConversationCommand}" AutomationProperties.Name="{loc:T 'Compact conversation'}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon Data="{StaticResource IconCompact}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Compact conversation…'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-hint" Text="/compact" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Button x:Name="HandoffItem" Classes="menu-item" Command="{Binding HandOffCommand}" AutomationProperties.Name="{loc:T 'Hand off'}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon Data="{StaticResource IconHandoff}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Hand off…'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-hint" Text="/handoff" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Button x:Name="FreshItem" Classes="menu-item" Command="{Binding FreshProviderSessionCommand}" AutomationProperties.Name="{loc:T 'Fresh provider session'}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon Data="{StaticResource IconFresh}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Fresh provider session'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-hint" Text="/fresh" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Button x:Name="RetryItem" Classes="menu-item" Command="{Binding RetryLastTurnCommand}" AutomationProperties.Name="{loc:T 'Retry the last turn'}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon Data="{StaticResource IconRetry}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Retry the last turn'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-hint" Text="/retry" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Button x:Name="RewindItem" Classes="menu-item" Command="{Binding RewindCommand}" AutomationProperties.Name="{loc:T 'Rewind to an earlier message'}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon Data="{StaticResource IconRewind}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Rewind…'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-hint" Text="/branch" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Border Classes="menu-separator" />
+            <Button x:Name="ExportItem" Classes="menu-item" Command="{Binding ExportHtmlCommand}" AutomationProperties.Name="{loc:T 'Export as HTML'}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon Data="{StaticResource IconExport}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Export as HTML'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-hint" Text="/export" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Button x:Name="ShareItem" Classes="menu-item" Command="{Binding ShareSessionCommand}" AutomationProperties.Name="{loc:T 'Share a link'}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon Data="{StaticResource IconShare}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Share a link…'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-hint" Text="/share" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Border Classes="menu-separator" />
+            <Button x:Name="FoldersItem" Classes="menu-item" Command="{Binding WorkspaceFoldersCommand}" AutomationProperties.Name="{loc:T 'Workspace folders'}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon Data="{StaticResource IconFolders}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Workspace folders…'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-hint" Text="/dirs" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Button x:Name="MoveItem" Classes="menu-item" Command="{Binding MoveSessionCommand}" AutomationProperties.Name="{loc:T 'Move to another folder'}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon Data="{StaticResource IconMove}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Move to another folder…'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-hint" Text="/move" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Button x:Name="PinItem" Classes="menu-item" Command="{Binding TogglePinCommand}" AutomationProperties.Name="{Binding PinLabel}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon IsVisible="{Binding !IsSessionPinned}" Data="{StaticResource IconPin}" Size="16" Margin="0,0,10,0" />
+                <ctl:Icon IsVisible="{Binding IsSessionPinned}" Data="{StaticResource IconPinOff}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{Binding PinLabel}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-hint" Text="/pin" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Button x:Name="MemoryItem" Classes="menu-item" Command="{Binding ShowMemoryCommand}" AutomationProperties.Name="{loc:T 'Memory'}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon Data="{StaticResource IconMemory}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Memory'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-hint" Text="/memory" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Border Classes="menu-separator" />
+            <Button x:Name="DeleteItem" Classes="menu-item danger" Command="{Binding DeleteSessionCommand}" AutomationProperties.Name="{loc:T 'Delete session'}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon Data="{StaticResource IconTrash}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Delete session…'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-hint" Text="/drop" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
+            <Border Classes="menu-separator" />
+          </StackPanel>
+          <!-- The panels (the right panel's tabs, the terminal): a choice shows it, or hides the one shown -->
+          <StackPanel x:Name="PanelItems" Spacing="1" Classes="session-menu">
+            <TextBlock Classes="menu-heading" Text="{loc:T 'Panels'}" />
+            <Button x:Name="ViewFilesItem" Classes="menu-item" Command="{Binding TogglePaneCommand}" CommandParameter="{x:Static vm:SidePane.Files}"
+                    AutomationProperties.Name="{loc:T 'Files'}">
+              <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                <ctl:Icon Data="{StaticResource IconFiles}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Files'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-shortcut" Text="{x:Static vm:MainViewModel.FilesShortcut}" Margin="12,0,0,0" VerticalAlignment="Center" />
+                <Panel Grid.Column="3" Width="16" Margin="10,0,0,0">
+                  <ctl:Icon Classes="menu-check" Data="{StaticResource IconCheck}" Size="16" IsVisible="{Binding IsFilesPaneShown}" VerticalAlignment="Center" />
+                </Panel>
+              </Grid>
+            </Button>
+            <Button x:Name="ViewChangesItem" Classes="menu-item" Command="{Binding TogglePaneCommand}" CommandParameter="{x:Static vm:SidePane.Changes}"
+                    AutomationProperties.Name="{loc:T 'Changes'}">
+              <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                <ctl:Icon Data="{StaticResource IconChanges}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Changes'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-shortcut" Text="{x:Static vm:MainViewModel.ChangesShortcut}" Margin="12,0,0,0" VerticalAlignment="Center" />
+                <Panel Grid.Column="3" Width="16" Margin="10,0,0,0">
+                  <ctl:Icon Classes="menu-check" Data="{StaticResource IconCheck}" Size="16" IsVisible="{Binding IsChangesPaneShown}" VerticalAlignment="Center" />
+                </Panel>
+              </Grid>
+            </Button>
+            <Button x:Name="ViewTasksItem" Classes="menu-item" Command="{Binding TogglePaneCommand}" CommandParameter="{x:Static vm:SidePane.Tasks}"
+                    AutomationProperties.Name="{loc:T 'Background tasks'}">
+              <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+                <ctl:Icon Data="{StaticResource IconLayers}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Background tasks'}" VerticalAlignment="Center" />
+                <Border x:Name="TasksCount" Grid.Column="2" Classes="views-count" Margin="8,0,0,0" HorizontalAlignment="Left" IsVisible="{Binding Tasks.HasRunning}"
+                        ToolTip.Tip="{loc:T 'Running now'}">
+                  <TextBlock Text="{Binding Tasks.RunningCount}" />
+                </Border>
+                <TextBlock Grid.Column="3" Classes="menu-shortcut" Text="{x:Static vm:MainViewModel.TasksShortcut}" Margin="12,0,0,0" VerticalAlignment="Center" />
+                <Panel Grid.Column="4" Width="16" Margin="10,0,0,0">
+                  <ctl:Icon Classes="menu-check" Data="{StaticResource IconCheck}" Size="16" IsVisible="{Binding IsTasksPaneShown}" VerticalAlignment="Center" />
+                </Panel>
+              </Grid>
+            </Button>
+            <Button x:Name="ViewPlanItem" Classes="menu-item" Command="{Binding TogglePaneCommand}" CommandParameter="{x:Static vm:SidePane.Plan}"
+                    AutomationProperties.Name="{loc:T 'Plan'}">
+              <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+                <ctl:Icon Data="{StaticResource IconChecklist}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Plan'}" VerticalAlignment="Center" />
+                <TextBlock x:Name="PlanProgress" Grid.Column="2" Classes="tertiary" Text="{Binding Plan.ShortProgress}" IsVisible="{Binding Plan.HasPlan}"
+                           Margin="8,0,0,0" VerticalAlignment="Center" ToolTip.Tip="{loc:T 'Tasks done'}" />
+                <TextBlock Grid.Column="3" Classes="menu-shortcut" Text="{x:Static vm:MainViewModel.PlanShortcut}" Margin="12,0,0,0" VerticalAlignment="Center" />
+                <Panel Grid.Column="4" Width="16" Margin="10,0,0,0">
+                  <ctl:Icon Classes="menu-check" Data="{StaticResource IconCheck}" Size="16" IsVisible="{Binding IsPlanPaneShown}" VerticalAlignment="Center" />
+                </Panel>
+              </Grid>
+            </Button>
+            <Button x:Name="ViewBrowserItem" Classes="menu-item" Command="{Binding TogglePaneCommand}" CommandParameter="{x:Static vm:SidePane.Browser}"
+                    AutomationProperties.Name="{loc:T 'Browser'}">
+              <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                <ctl:Icon Data="{StaticResource IconGlobe}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Browser'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-shortcut" Text="{x:Static vm:MainViewModel.BrowserShortcut}" Margin="12,0,0,0" VerticalAlignment="Center" />
+                <Panel Grid.Column="3" Width="16" Margin="10,0,0,0">
+                  <ctl:Icon Classes="menu-check" Data="{StaticResource IconCheck}" Size="16" IsVisible="{Binding IsPreviewOpen}" VerticalAlignment="Center" />
+                </Panel>
+              </Grid>
+            </Button>
+            <Button x:Name="ViewTerminalItem" Classes="menu-item" Command="{Binding ToggleTerminalCommand}" AutomationProperties.Name="{loc:T 'Terminal'}">
+              <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                <ctl:Icon Data="{StaticResource IconTerminal}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Terminal'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-shortcut" Text="{x:Static vm:MainViewModel.TerminalShortcut}" Margin="12,0,0,0" VerticalAlignment="Center" />
+                <Panel Grid.Column="3" Width="16" Margin="10,0,0,0">
+                  <ctl:Icon Classes="menu-check" Data="{StaticResource IconCheck}" Size="16" IsVisible="{Binding IsTerminalOpen}" VerticalAlignment="Center" />
+                </Panel>
+              </Grid>
+            </Button>
+          </StackPanel>
+          </StackPanel>
+        </ScrollViewer>
+      </Flyout>
+    </Button.Flyout>
+  </Button>
+</UserControl>

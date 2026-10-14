@@ -1,8 +1,8 @@
 using System.Text.Json.Nodes;
-using OmpGui.WebViewHarness.Native;
-using OmpGui.WebViewHarness.Server;
+using Ombra.WebViewHarness.Native;
+using Ombra.WebViewHarness.Server;
 
-namespace OmpGui.WebViewHarness.Scenarios;
+namespace Ombra.WebViewHarness.Scenarios;
 
 internal interface IScenario
 {
@@ -32,7 +32,7 @@ internal sealed class HarnessContext(MainLoop loop, TestServer server, string ho
     public JsonArray Checks { get; } = [];
     public JsonObject Data { get; } = [];
 
-    public string TempDir { get; } = Directory.CreateTempSubdirectory("ompgui-harness-").FullName;
+    public string TempDir { get; } = Directory.CreateTempSubdirectory("ombra-harness-").FullName;
 
     /// <summary>
     /// A web view never on screen. <see cref="HookOptions.Reference"/> means "the hooks under test": the app's own

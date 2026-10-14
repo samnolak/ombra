@@ -2,7 +2,7 @@
 
 Execution order = priority. Each item: symptom → root cause (with evidence) → fix → acceptance checks.
 Rule for whoever executes: **reproduce first, fix, then repeat the same reproduction**. Do not mark an item done
-from tests alone. Code paths are relative to `avalonia/src/OmpGui.App` unless noted.
+from tests alone. Code paths are relative to `avalonia/src/Ombra.App` unless noted.
 
 Baseline: about 20 tests already fail before any of this work (the `/private/var` vs `/var` path assertion,
 `QaEdgeCaseTests` line 158, `FilesPane*`, `LayoutAudit*`, `UpdateUi*`). Record the failing list before you start.
@@ -15,7 +15,7 @@ Don't fix them as a side effect, and don't hide them.
 Without numbers, the performance work turns into guessing.
 
 - Add `RendererDiagnostics.DebugOverlays = Fps | LayoutTimeGraph | RenderTimeGraph` under an env flag
-  (`OMPGUI_PERF=1`) in `App.axaml.cs` / `MainWindow` ctor.
+  (`OMBRA_PERF=1`) in `App.axaml.cs` / `MainWindow` ctor.
 - Add a Stopwatch around `MainViewModel.Apply` (`ViewModels/MainViewModel.cs:411`). Log any call >4 ms
   together with a count of `Rows.Add` and `row.Update` in that call.
 - Count the `LayoutUpdated` invocations of `Transcript` per second (`Views/MainWindow.axaml.cs:682`) and the
@@ -133,7 +133,7 @@ re-realization (items 1–2, P0-1); with those fixes in, the same run measured: 
 (max 7 ms, was 205 / 390 ms), 101 MB allocated in all (was 1.57 GB), GC pauses 0.18 s (was 1.4 s), layout + render
 p95 1.0 ms per frame; the managed heap levels off at ~123 MB over 10 further replies. Still open: the real-display
 FPS reading, and idle wakeups — the only app timer left ticking at idle is the pet's 30 Hz one (P2-2).
-`OMPGUI_PERF=1` (Services/PerfLog.cs) shows the overlays, logs slow applies and counts Markdown builds, transcript
+`OMBRA_PERF=1` (Services/PerfLog.cs) shows the overlays, logs slow applies and counts Markdown builds, transcript
 follows and Files refreshes per second.
 
 ## P1-1. The sidebar hover blinks while a chat is running (user item 1)
@@ -173,7 +173,7 @@ Done: keyed by session file (unique; a copied file can share an id) in `ApplySes
 This isn't a bug: the architecture is built for one session. Confirmed in code:
 - `MainViewModel` has **one** `SessionController _session` (`ViewModels/MainViewModel.cs:22`), which means one
   omp process for the whole window.
-- `SessionController.OpenSessionAsync` (`../OmpGui.ClientCore/SessionController.cs:166-191`) refuses during a
+- `SessionController.OpenSessionAsync` (`../Ombra.ClientCore/SessionController.cs:166-191`) refuses during a
   run ("Stop the current run before changing sessions"). Within the same project it switches the same process
   (`switch_session`); in another project it **restarts** omp with `--resume`.
 - `CanChangeSession()` (`ViewModels/MainViewModel.Sessions.cs:100`) disables opening a session, a new session,
@@ -218,7 +218,7 @@ Fix:
 7. **Resources:** each omp is a separate process (check its RSS). Show the number of live processes in the
    debug panel; close the window → stop all of them (and check that no zombie processes are left).
 
-Acceptance (headless over FakeOmp's "multi" scenario: `tests/OmpGui.Tests/MultiSessionTests.cs`, `SessionHostTests.cs`):
+Acceptance (headless over FakeOmp's "multi" scenario: `tests/Ombra.Tests/MultiSessionTests.cs`, `SessionHostTests.cs`):
 - [x] Start a long run in chat A, switch to chat B, send a message there: both run at once, and A's reply keeps
       streaming in the background.
 - [x] Return to A: the whole reply is there, the scroll position is where you left it (or at the bottom if it
@@ -283,7 +283,7 @@ What exists: in the composer, `AttachmentViewModel` builds `Thumbnail` synchrono
 see a preview: a thumbnail of `null` (a decode error), a chip size that is too small, or a paste via a path that
 skips `TryAddImage`.
 What is broken: after sending, the image data is dropped. `UserItem` and `QueuedMessage`
-(`../OmpGui.ClientCore/Transcript.cs:12,20`) keep only `ImageCount`; `ConversationState.AddUserPrompt` (`:222`),
+(`../Ombra.ClientCore/Transcript.cs:12,20`) keep only `ImageCount`; `ConversationState.AddUserPrompt` (`:222`),
 `Enqueue` (`:247`), message_start (`:527`) and history (`:455`) count images and never store them. In the chat
 the row shows only "1 image" (`MainWindow.axaml` ~300).
 
@@ -317,7 +317,7 @@ Acceptance:
 
 Current state: `Controls/PetPerch.axaml.cs:34-79,152-165` is a Canvas layer inside `MainWindow`. The position is
 a fraction 0..1 of the window, clamped to the window's size. `ViewModels/PetsViewModel.cs:165-200`
-(`MoveTo`, `Position`), `../OmpGui.ClientCore/PetOptions.cs` (X/Y as fractions), `Controls/PetView.cs:242-248`
+(`MoveTo`, `Position`), `../Ombra.ClientCore/PetOptions.cs` (X/Y as fractions), `Controls/PetView.cs:242-248`
 (`RenderScale` from the TopLevel).
 
 Fix:

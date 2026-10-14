@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 
-namespace OmpGui.WebViewHarness.Native;
+namespace Ombra.WebViewHarness.Native;
 
 [StructLayout(LayoutKind.Sequential)]
 internal struct CGPoint(double x, double y)

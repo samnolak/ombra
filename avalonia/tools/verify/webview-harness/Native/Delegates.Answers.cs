@@ -1,6 +1,6 @@
 using System.Text.Json.Nodes;
 
-namespace OmpGui.WebViewHarness.Native;
+namespace Ombra.WebViewHarness.Native;
 
 /// <summary>The asynchronous halves of the delegate callbacks: ask the scenario's handler, then answer the block once.</summary>
 internal static partial class Delegates

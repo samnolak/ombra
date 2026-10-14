@@ -4,12 +4,12 @@
   Prepared in a Linux container; NOT EXECUTED by its author (no Windows machine) — the result file it writes is the
   evidence.
 
-    powershell -ExecutionPolicy Bypass -File tools\verify\windows-package-gate.ps1 -Zip omp-gui-<ver>-win-x64.zip [-Source <repo>\avalonia]
+    powershell -ExecutionPolicy Bypass -File tools\verify\windows-package-gate.ps1 -Zip ombra-<ver>-win-x64.zip [-Source <repo>\avalonia]
 
   Checks:
     1. The zip matches its .sha256 (next to it) and, when SHA256SUMS is next to it, that list too.
     2. Signature state is what <package>.signing.txt says (Authenticode "Valid" only when it says signed).
-    3. OmpGui.exe --self-test --install-runtime with an empty profile: Skia, HarfBuzz, ConPTY shell, speech engine,
+    3. Ombra.exe --self-test --install-runtime with an empty profile: Skia, HarfBuzz, ConPTY shell, speech engine,
        the pinned runtime installed by the client, omp over RPC, nothing left running.
     4. The same with SHELL=/usr/bin/bash (as a Git Bash parent sets it; not a Windows path): the terminal must still
        start a shell (regression of 49077f6 — CI's Windows run found it; it was fixed and verified on Linux only).
@@ -54,10 +54,10 @@ if (Test-Path -LiteralPath $sums) {
 }
 
 # Unpacked into a fresh folder
-$work = Join-Path ([IO.Path]::GetTempPath()) ('ompgui-gate-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$work = Join-Path ([IO.Path]::GetTempPath()) ('ombra-gate-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Path $work | Out-Null
 Expand-Archive -LiteralPath $Zip -DestinationPath (Join-Path $work 'app')
-$exe = Get-ChildItem -Path (Join-Path $work 'app') -Recurse -Filter OmpGui.exe | Select-Object -First 1
+$exe = Get-ChildItem -Path (Join-Path $work 'app') -Recurse -Filter Ombra.exe | Select-Object -First 1
 Check 'unpacked' ($null -ne $exe) "$($exe.FullName)"
 
 # 2. Signature state
@@ -84,8 +84,8 @@ function SelfTest([string]$label, [hashtable]$extraEnv) {
   $psi.EnvironmentVariables['TMP'] = (Join-Path $profileDir 'Temp')
   # .NET resolves %LOCALAPPDATA% / %APPDATA% through the shell, not these variables: the client's own overrides keep
   # its runtime and settings in the throwaway folder; omp (Bun) takes its home from USERPROFILE.
-  $psi.EnvironmentVariables['OMPGUI_RUNTIME_DIR'] = (Join-Path $profileDir 'runtimes')
-  $psi.EnvironmentVariables['OMPGUI_CONFIG'] = (Join-Path $profileDir 'omp-gui.local.json')
+  $psi.EnvironmentVariables['OMBRA_RUNTIME_DIR'] = (Join-Path $profileDir 'runtimes')
+  $psi.EnvironmentVariables['OMBRA_CONFIG'] = (Join-Path $profileDir 'ombra.local.json')
   foreach ($k in $extraEnv.Keys) { $psi.EnvironmentVariables[$k] = $extraEnv[$k] }
   $p = [System.Diagnostics.Process]::Start($psi)
   if (-not $p.WaitForExit(20 * 60 * 1000)) { $p.Kill(); Check "self-test-$label" $false 'timed out after 20 min'; return }
@@ -108,7 +108,7 @@ SelfTest 'git-bash-shell' @{ 'SHELL' = '/usr/bin/bash' }
 if ($Source) {
   Push-Location $Source
   try {
-    & dotnet test tests/OmpGui.Tests -c Release --logger "console;verbosity=normal" --logger "trx;LogFileName=windows-gate.trx" --results-directory (Join-Path $work 'trx') 2>&1 | Tee-Object -FilePath (Join-Path $work 'tests.log') | Select-Object -Last 3 | ForEach-Object { $results.Add("  $_") }
+    & dotnet test tests/Ombra.Tests -c Release --logger "console;verbosity=normal" --logger "trx;LogFileName=windows-gate.trx" --results-directory (Join-Path $work 'trx') 2>&1 | Tee-Object -FilePath (Join-Path $work 'tests.log') | Select-Object -Last 3 | ForEach-Object { $results.Add("  $_") }
     Check 'client-tests' ($LASTEXITCODE -eq 0) "dotnet test exit $LASTEXITCODE (log and TRX in $work)"
   } finally { Pop-Location }
 }
@@ -156,7 +156,7 @@ providers:
   $psi.FileName = $exe.FullName
   $psi.Arguments = "--config `"$cfg`" --timeline `"$timeline`" --auto-prompt `"LONGTASK 2 minutes: keep checking`""
   $psi.UseShellExecute = $false
-  $psi.EnvironmentVariables['OMPGUI_RUNTIME_DIR'] = (Join-Path $rtProfile 'runtimes')
+  $psi.EnvironmentVariables['OMBRA_RUNTIME_DIR'] = (Join-Path $rtProfile 'runtimes')
   $psi.EnvironmentVariables['APPDATA'] = (Join-Path $home2 'Roaming'); $psi.EnvironmentVariables['LOCALAPPDATA'] = (Join-Path $home2 'Local')
   $app = [System.Diagnostics.Process]::Start($psi)
   function Last { if (Test-Path -LiteralPath $timeline) { (Get-Content -LiteralPath $timeline -Tail 1) -split ',' } else { @() } }

@@ -22,7 +22,7 @@ class Notifications(ServiceInterface):
 
     @method()
     def GetServerInformation(self) -> "ssss":
-        return ["ompgui-notification-check", "ompgui", "1", "1.2"]
+        return ["ombra-notification-check", "ombra", "1", "1.2"]
 
     @method()
     def Notify(self, app_name: "s", replaces_id: "u", app_icon: "s", summary: "s", body: "s", actions: "as",
