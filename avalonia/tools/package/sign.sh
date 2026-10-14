@@ -36,7 +36,8 @@ case "$MODE" in
     SIGNTOOL=$(ls -d "/c/Program Files (x86)/Windows Kits/10/bin/"*/x64/signtool.exe 2>/dev/null | sort -V | tail -1)
     [ -x "$SIGNTOOL" ] || { echo "signtool.exe not found"; exit 1; }
     printf '%s' "$WINDOWS_CERT_PFX_BASE64" | base64 -d > "$TMP/cert.pfx"
-    FILES=("$TARGET/Ombra.exe" "$TARGET/OmpGui.exe")
+    FILES=("$TARGET/Ombra.exe")
+    [ -f "$TARGET/OmpGui.exe" ] && FILES+=("$TARGET/OmpGui.exe") # the launcher copy for OMP GUI updaters (package.sh)
     for f in "$TARGET"/Ombra*.dll; do [ -f "$f" ] && FILES+=("$f"); done
     WIN=(); for f in "${FILES[@]}"; do WIN+=("$(cygpath -w "$f")"); done
     # Git Bash rewrites arguments that look like POSIX paths ("/fd" → "C:/Program Files/Git/fd"), so signtool lost
@@ -45,7 +46,7 @@ case "$MODE" in
     "$SIGNTOOL" sign /fd sha256 /td sha256 /tr "${WINDOWS_TIMESTAMP_URL:-http://timestamp.digicert.com}" \
       /f "$(cygpath -w "$TMP/cert.pfx")" /p "$WINDOWS_CERT_PASSWORD" "${WIN[@]}" > "$TMP/sign.log" 2>&1 || { cat "$TMP/sign.log"; exit 1; }
     "$SIGNTOOL" verify /pa "${WIN[@]}" > "$TMP/verify.log" 2>&1 || { cat "$TMP/verify.log"; exit 1; }
-    record "windows: Authenticode, verified (signtool verify /pa): ${#FILES[@]} files ($(cd "$TARGET" && ls Ombra.exe OmpGui.exe Ombra*.dll | tr '\n' ' '))"
+    record "windows: Authenticode, verified (signtool verify /pa): ${#FILES[@]} files ($(cd "$TARGET" && ls Ombra.exe OmpGui.exe Ombra*.dll 2>/dev/null | tr '\n' ' '))"
     ;;
 
   macos)
