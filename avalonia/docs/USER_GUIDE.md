@@ -1,6 +1,6 @@
-# OMP GUI — user guide
+# Ombra — user guide
 
-OMP GUI is a desktop client for the original **omp** coding agent (oh-my-pi). The agent itself is always the
+Ombra is a desktop client for the original **omp** coding agent (oh-my-pi). The agent itself is always the
 unmodified omp; the GUI starts it, talks to it over omp's own RPC and shows what it does. Nothing here replaces
 or patches omp.
 
@@ -21,26 +21,26 @@ been run so far (see the README); Windows, macOS and arm64 are built but not yet
 **No release of this client is published yet**: the packages come from the package workflow (a CI build) or from
 `tools/package/package.sh`.
 
-Each package is `omp-gui-<version>-<platform>` (`.tar.gz` on Linux, `.zip` on Windows and macOS) and unpacks into a
+Each package is `ombra-<version>-<platform>` (`.tar.gz` on Linux, `.zip` on Windows and macOS) and unpacks into a
 folder of the same name, with the licence notices and this guide. Every archive has a `.sha256` file next to it
 (and a `.signing.txt` that says how it was signed). Check it before you install (`sha256sum -c
-omp-gui-….tar.gz.sha256` on Linux, `shasum -a 256 -c …` on macOS, `Get-FileHash` on Windows).
+ombra-….tar.gz.sha256` on Linux, `shasum -a 256 -c …` on macOS, `Get-FileHash` on Windows).
 
 The packages are **not signed** with a developer certificate (no signing certificate is available to this
 project yet), so the OS warns on first start:
 
-- **Windows** — extract the zip anywhere and run `OmpGui.exe`. SmartScreen: *More info → Run anyway*.
-- **macOS** — unzip and move *OMP GUI.app* to Applications. The app is signed with the project's own certificate, not
+- **Windows** — extract the zip anywhere and run `Ombra.exe`. SmartScreen: *More info → Run anyway*.
+- **macOS** — unzip and move *Ombra.app* to Applications. The app is signed with the project's own certificate, not
   an Apple Developer ID, and not notarized, so
   macOS blocks its first start. macOS 15 (Sequoia) and later: open the app once, close the warning, then
   *System Settings → Privacy & Security → Open Anyway* and confirm with *Open*. macOS 14 (Sonoma): Control-click the
   app → *Open* → *Open* (Sequoia removed this way). On any version you can instead run
-  `xattr -dr com.apple.quarantine "/Applications/OMP GUI.app"`. After that it starts from its icon as usual. macOS
+  `xattr -dr com.apple.quarantine "/Applications/Ombra.app"`. After that it starts from its icon as usual. macOS
   asks for microphone access the first time you dictate, and for a folder such as Documents the first time omp works
   in it; what you allow stays across updates (every release is signed with the same certificate). Releases before
   0.0.6 were ad-hoc signed, which macOS treats as a new app at every update: after updating to 0.0.6 it asks once more.
-- **Linux** — `tar -xzf omp-gui-….tar.gz` and run `./OmpGui` in the extracted folder. `./install-desktop-entry.sh`
-  adds it to your application menu (only `~/.local/share/applications/omp-gui.desktop` is written; it points at the
+- **Linux** — `tar -xzf ombra-….tar.gz` and run `./Ombra` in the extracted folder. `./install-desktop-entry.sh`
+  adds it to your application menu (only `~/.local/share/applications/ombra.desktop` is written; it points at the
   folder, so run it again if you move the folder).
 
 ## First start
@@ -117,7 +117,7 @@ project yet), so the OS warns on first start:
   *Minimal*, *Low*, *Medium*, *High*, *Extra high*, *Max* — each with a line on what it does; only the levels the
   model accepts; hidden for models that don't reason). A new chat or session — and omp's terminal UI in the terminal
   panel — starts at *Medium* (omp's own default is *High*); the chip changes it for that chat, and a session you open
-  again keeps the level it had. `"defaultThinkingLevel"` in the client's settings file (`omp-gui.local.json`; any of
+  again keeps the level it had. `"defaultThinkingLevel"` in the client's settings file (`ombra.local.json`; any of
   `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `auto`) sets another starting level. The model chip lists the models omp can use, one row per
   family (*Claude Sonnet*, *Claude Haiku*…) that opens to its versions, newest first (→ opens, ← or Esc goes back);
   two entries under one name show their ids. With models from more than one provider they fold under the provider's
@@ -167,7 +167,7 @@ project yet), so the OS warns on first start:
   the clipboard, **Open in default app** opens it in your image app (from a temporary copy). Esc, × or a click
   around the image closes it. An image that cannot be read (a corrupt file) shows an image mark and says so; an
   animated GIF shows its first frame.
-- **New session** — the page asks *What should we work on in ‹project›?*; the project opens the same project menu,
+- **New session** — the page asks, in Dio’s words, *Oh? You’re approaching ‹project›?* under the app’s mark; the project opens the same project menu,
   and the starter prompts under it (*Explain how this project is organized*, *Find a bug and fix it*, *Add tests for
   the code I changed last*) fill the message box to edit and send. A new chat without a project asks *What should we
   work on?* with general starters (*Explain a concept in simple terms*, *Write a script that automates a task*, *Help
@@ -277,11 +277,11 @@ project yet), so the OS warns on first start:
   browser, so pages you should look at or sign in to, and anything on localhost, open here rather than in your system
   browser; a `browser.cdpUrl` or browser relay set in omp's own settings does not take over. Your omp configuration
   files are not changed (the app passes its own settings layer and note only to the omp processes it starts). To
-  give omp its own browser back, turn off **Settings → General → Agent uses the OMP GUI browser**; chats started or
+  give omp its own browser back, turn off **Settings → General → Agent uses the Ombra browser**; chats started or
   restarted after that use omp's own browser settings.
   On macOS omp's clicks, typing, keys and scrolling reach the page as if you did them (pages treat them as real input,
   so pop-ups, sign-in windows and file pickers work); the composer keeps your keyboard, and when you use the page
-  yourself omp waits until you pause. Hovering only works while the OMP GUI window is the active one, as in Safari.
+  yourself omp waits until you pause. Hovering only works while the Ombra window is the active one, as in Safari.
   omp's helper scripts live apart from the page, which cannot see or change them. On Windows and Linux omp's input is
   still simulated by scripts, and omp is told so.
 - **Questions from the page** — when a page in the preview asks something (a sign-in for a password-protected site,
@@ -354,7 +354,7 @@ project yet), so the OS warns on first start:
 - **Menus and tray** — on macOS the app menu has **Settings…** (⌘,) and the menu bar *File* (New Chat ⌘N, Open
   Folder… ⌘O), *Edit* (Undo, Redo, Cut, Copy, Paste, Select All, on the text that has the keyboard), *View*
   (Sessions, Terminal, Events) and *Window* (Minimize ⌘M, Zoom, Close ⌘W). Where the desktop has a tray or menu-bar
-  area, an OMP GUI icon there offers **Show OMP GUI**, **New Chat** and **Quit** (which asks first while omp works,
+  area, an Ombra icon there offers **Show Ombra**, **New Chat** and **Quit** (which asks first while omp works,
   as closing the window does).
 - **In the conversation** — **Retry** on a failed reply. Point at a reply's end (*Worked for 12s · 3 tools*) for
   **Copy** (as Markdown); point at one of your messages for **Copy** and **Rewind to here** (a new session from
@@ -659,7 +659,7 @@ omp reads only when it starts say so and offer **Restart omp**.
   ask, except with *Bypass permissions*), **Ask** asks every time, **Allow** never asks, **Deny** blocks it.
   *Screenshots* sets the display and the largest size. *What omp needs* checks this computer: omp's eval tool;
   on Linux an X11 display with the XTEST and RandR extensions (on Wayland omp can't take screenshots); on macOS
-  the Screen Recording and Accessibility permissions for OMP GUI (the buttons open the right System Settings pane);
+  the Screen Recording and Accessibility permissions for Ombra (the buttons open the right System Settings pane);
   Windows needs no permission.
 - **Git and worktrees** — the project's branch, uncommitted changes, upstream and remote. *GitHub*: omp works with
   GitHub only through the GitHub CLI (`gh`); **Sign in…** runs `gh auth login` in the terminal panel, and *Let omp
@@ -730,7 +730,7 @@ saved in its settings file (`pet`), and omp knows nothing about them.
 
 ## Updates
 
-OMP GUI updates itself from this project's GitHub releases. A few seconds after every start, and then once a day,
+Ombra updates itself from this project's GitHub releases. A few seconds after every start, and then once a day,
 it asks the release feed whether a newer version exists and, when one does, downloads and gets it ready by itself:
 the bottom of the sidebar then says **Restart to update to …**, and the new version goes in when you restart or
 simply quit the app. **Settings → Updates → Update automatically** turns this off; then a newer version only shows
@@ -742,7 +742,7 @@ way). Until the first release of this client is published, the check says *No re
   list of packages (`update.json`) must carry a valid signature from the project's release key, which is built into
   the app, and the package must match the size and SHA-256 that list gives. The package is then unpacked next to
   the app and started once to check it runs on this computer.
-- **Restart now** (or simply quitting OMP GUI) installs it: once the app has closed, the new version takes the old
+- **Restart now** (or simply quitting Ombra) installs it: once the app has closed, the new version takes the old
   one's place — same folder, so shortcuts keep working — and, with Restart now, starts. The version before is kept
   next to the app as `.<folder name>.previous` until the next update (to go back, swap the folders by hand). If the
   swap fails, the old version is put back and Settings → Updates says why at the next start.
@@ -754,8 +754,8 @@ way). Until the first release of this client is published, the check says *No re
 
 The app downloads the package to your Downloads folder instead (**Download and verify**, then replace the app
 yourself) when it cannot replace itself: when this user may not change the folder it is in (for example Program
-Files), or when it runs from a development build. From a terminal, `OmpGui --update` reports whether an update
-exists and `OmpGui --update --yes` installs it (`--restart` starts the new version afterwards); `OmpGui --version`
+Files), or when it runs from a development build. From a terminal, `Ombra --update` reports whether an update
+exists and `Ombra --update --yes` installs it (`--restart` starts the new version afterwards); `Ombra --version`
 prints the version. (`updateFeed` in the settings file points the check at another feed; its manifest must still
 be signed with the release key.) The newest published release is offered, alpha versions included.
 
@@ -767,11 +767,11 @@ state and last error, the names (not the contents) of recent events, and the app
 Known credential formats are masked everywhere and your home folder is shown as `~`. No conversation text is
 included and nothing is uploaded. The page also shows where the settings file is, and *RPC events* (F12) shows the
 raw events omp sends. When something goes wrong inside the app itself, it carries on and says so once under the
-message box; the details go to `client.log` (on macOS in `~/Library/Logs/OMP GUI`, elsewhere in the local app data
-folder under `OmpGui/logs`; two files of up to 1 MB each).
+message box; the details go to `client.log` (on macOS in `~/Library/Logs/Ombra`, elsewhere in the local app data
+folder under `Ombra/logs`; two files of up to 1 MB each).
 
-**When the window lags**, start the app from a terminal with `OMPGUI_PERF=1` — on macOS
-`OMPGUI_PERF=1 "/Applications/OMP GUI.app/Contents/MacOS/OmpGui"`, elsewhere `OMPGUI_PERF=1` before the app's
+**When the window lags**, start the app from a terminal with `OMBRA_PERF=1` — on macOS
+`OMBRA_PERF=1 "/Applications/Ombra.app/Contents/MacOS/Ombra"`, elsewhere `OMBRA_PERF=1` before the app's
 executable. The window then shows Avalonia's frame rate and its layout and render times in the top-left corner, and
 the terminal gets a line for every update of the window from omp's state that took 4 ms or more (with the part that
 took the time and how many messages it added or changed), and once a second how many such updates ran and how often
@@ -782,17 +782,23 @@ report. Without the variable none of this runs.
 
 | What | Windows | macOS | Linux |
 |---|---|---|---|
-| GUI settings (`omp-gui.local.json`) | `%APPDATA%\OmpGui` | `~/Library/Application Support/OmpGui` | `~/.config/OmpGui` |
-| Providers turned off for omp (`network-privacy/providers-*.yml`, one per project, rewritten at every start) | `%APPDATA%\OmpGui\network-privacy` | `~/Library/Application Support/OmpGui/network-privacy` | `~/.config/OmpGui/network-privacy` |
-| Installed omp runtime | `%LOCALAPPDATA%\OmpGui\runtimes` | `~/Library/Application Support/OmpGui/runtimes` | `~/.local/share/OmpGui/runtimes` |
-| Dictation model | `%LOCALAPPDATA%\OmpGui\speech-models` | `~/Library/Application Support/OmpGui/speech-models` | `~/.local/share/OmpGui/speech-models` |
-| Chats without a project (one empty folder each, deleted when the chat is closed with nothing in it) | `%LOCALAPPDATA%\OmpGui\chats` | `~/Library/Application Support/OmpGui/chats` | `~/.local/share/OmpGui/chats` |
-| The app's own errors (`client.log`) | `%LOCALAPPDATA%\OmpGui\logs` | `~/Library/Logs/OMP GUI` | `~/.local/share/OmpGui/logs` |
+| GUI settings (`ombra.local.json`) | `%APPDATA%\Ombra` | `~/Library/Application Support/Ombra` | `~/.config/Ombra` |
+| Providers turned off for omp (`network-privacy/providers-*.yml`, one per project, rewritten at every start) | `%APPDATA%\Ombra\network-privacy` | `~/Library/Application Support/Ombra/network-privacy` | `~/.config/Ombra/network-privacy` |
+| Installed omp runtime | `%LOCALAPPDATA%\Ombra\runtimes` | `~/Library/Application Support/Ombra/runtimes` | `~/.local/share/Ombra/runtimes` |
+| Dictation model | `%LOCALAPPDATA%\Ombra\speech-models` | `~/Library/Application Support/Ombra/speech-models` | `~/.local/share/Ombra/speech-models` |
+| Chats without a project (one empty folder each, deleted when the chat is closed with nothing in it) | `%LOCALAPPDATA%\Ombra\chats` | `~/Library/Application Support/Ombra/chats` | `~/.local/share/Ombra/chats` |
+| The app's own errors (`client.log`) | `%LOCALAPPDATA%\Ombra\logs` | `~/Library/Logs/Ombra` | `~/.local/share/Ombra/logs` |
 | omp's own data (sessions, sign-in, settings) | omp's folder (`~/.omp`), managed by omp | same | same |
 
-On Linux `XDG_CONFIG_HOME` and `XDG_DATA_HOME` move the GUI's folders. `--config <file>` or `OMPGUI_CONFIG` use
-another settings file; `OMPGUI_RUNTIME_DIR`, `OMPGUI_STT_DIR`, `OMPGUI_LOG_DIR` and `OMPGUI_CHATS_DIR` move the
+On Linux `XDG_CONFIG_HOME` and `XDG_DATA_HOME` move the GUI's folders. `--config <file>` or `OMBRA_CONFIG` use
+another settings file; `OMBRA_RUNTIME_DIR`, `OMBRA_STT_DIR`, `OMBRA_LOG_DIR` and `OMBRA_CHATS_DIR` move the
 runtime, the speech model, the error log and the chats' folders.
+
+**Formerly OMP GUI.** Ombra was called OMP GUI. Its first start moves the old `OmpGui` folders above to `Ombra`
+(the settings file becomes `ombra.local.json`) and leaves a link named `OmpGui` in their place, because omp's
+sessions remember the chats' folders by their old path; nothing moves when an `Ombra` folder exists already or
+`OMBRA_CONFIG` is set. On macOS an *OMP GUI.app* that updated itself to Ombra renames itself to *Ombra.app* at its
+first start, and the new bundle id makes macOS ask once more for the microphone and other permissions.
 
 The GUI writes its own settings file (atomically, keeping a `.bak` of a version you edited by hand), the folders
 above, and what you save (update packages, diagnostics). It reads omp's session folder to list sessions. Of omp's
@@ -805,10 +811,10 @@ everything else goes through omp.
 
 ## Uninstall
 
-Delete the app folder (or *OMP GUI.app*) and, after an update, the `.<folder name>.previous` folder next to it;
+Delete the app folder (or *Ombra.app*) and, after an update, the `.<folder name>.previous` folder next to it;
 then — if you want — the GUI's folders from the table above, the Linux menu entry
-(`~/.local/share/applications/omp-gui.desktop`) and update packages you downloaded by hand. On macOS remove
-OMP GUI from *System Settings → Privacy & Security* (Microphone, Screen Recording, Accessibility) if you granted
+(`~/.local/share/applications/ombra.desktop`) and update packages you downloaded by hand. On macOS remove
+Ombra from *System Settings → Privacy & Security* (Microphone, Screen Recording, Accessibility) if you granted
 them. omp's own data is left alone; remove `~/.omp` only if you want to remove omp's sessions and sign-ins too.
 
 ## Troubleshooting

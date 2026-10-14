@@ -3,18 +3,18 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
-using OmpGui.App;
-using OmpGui.App.Controls;
-using OmpGui.App.ViewModels;
-using OmpGui.App.Views;
-using OmpGui.ClientCore;
-using OmpGui.Rpc;
+using Ombra.App;
+using Ombra.App.Controls;
+using Ombra.App.ViewModels;
+using Ombra.App.Views;
+using Ombra.ClientCore;
+using Ombra.Rpc;
 
 // Real-window check of page comments (annotate mode): the main window with the scripted fake omp, a page served on
 // localhost:8766 in the preview (WebKitGTK), and real X11 mouse and keyboard input through xdotool. run.sh sets it up.
 var dir = Environment.GetEnvironmentVariable("SHOTS") ?? Directory.GetCurrentDirectory();
 var fake = Environment.GetEnvironmentVariable("FAKE_OMP_DLL")
-    ?? throw new InvalidOperationException("FAKE_OMP_DLL: the path of tests/OmpGui.FakeOmp's built OmpGui.FakeOmp.dll");
+    ?? throw new InvalidOperationException("FAKE_OMP_DLL: the path of tests/Ombra.FakeOmp's built Ombra.FakeOmp.dll");
 AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().SetupWithoutStarting();
 var vm = new MainViewModel(new SessionController(new OmpLaunchSpec { FileName = "dotnet", Arguments = [fake, "normal"] }), new AppArgs());
 var w = new MainWindow { DataContext = vm, Width = 1280, Height = 800, Position = new PixelPoint(0, 0) };

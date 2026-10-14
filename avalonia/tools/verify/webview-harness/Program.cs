@@ -1,13 +1,13 @@
 using System.Runtime.Versioning;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using OmpGui.WebViewHarness.Native;
-using OmpGui.WebViewHarness.Scenarios;
-using OmpGui.WebViewHarness.Server;
+using Ombra.WebViewHarness.Native;
+using Ombra.WebViewHarness.Scenarios;
+using Ombra.WebViewHarness.Server;
 
 [assembly: SupportedOSPlatform("macos")]
 
-namespace OmpGui.WebViewHarness;
+namespace Ombra.WebViewHarness;
 
 /// <summary>
 /// Windowless native WKWebView harness (BROWSER_PLAN B0): one scenario per process, its result as one JSON object on

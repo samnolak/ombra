@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 
-namespace OmpGui.WebViewHarness.Native;
+namespace Ombra.WebViewHarness.Native;
 
 /// <summary>
 /// Apple's block ABI. Outgoing blocks (completion handlers we pass to WebKit) are stack literals holding a GCHandle,

@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json.Nodes;
 
-namespace OmpGui.WebViewHarness.Native;
+namespace Ombra.WebViewHarness.Native;
 
 /// <summary>Every delegate callback the harness saw, in order, with milliseconds since start (part of the JSON result).</summary>
 internal static class HarnessLog

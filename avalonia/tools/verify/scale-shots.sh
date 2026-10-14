@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # The packaged client in a real X11 window at 100 %, 150 % and 200 % (AVALONIA_GLOBAL_SCALE_FACTOR), in three window
 # sizes and both themes, for the design review: what headless tests cannot show (they render at 100 % only).
-# omp is the test suite's fake (tests/OmpGui.FakeOmp, scenario "plan"): a conversation with a plan and tool calls.
+# omp is the test suite's fake (tests/Ombra.FakeOmp, scenario "plan"): a conversation with a plan and tool calls.
 #
 #   tools/verify/scale-shots.sh <package.tar.gz> <out-dir> [display]
-# Needs Xvfb, openbox, xdotool, ImageMagick, dotnet and a built tests/OmpGui.FakeOmp.
+# Needs Xvfb, openbox, xdotool, ImageMagick, dotnet and a built tests/Ombra.FakeOmp.
 set -euo pipefail
 ARCHIVE=$(realpath "${1:?archive}"); OUT=$(mkdir -p "${2:?out dir}" && cd "$2" && pwd); DNUM=${3:-97}
 HERE=$(cd "$(dirname "$0")/../.." && pwd)
-FAKE="$HERE/tests/OmpGui.FakeOmp/bin/Debug/net10.0/OmpGui.FakeOmp.dll"
-[ -f "$FAKE" ] || { echo "build tests/OmpGui.FakeOmp first" >&2; exit 2; }
+FAKE="$HERE/tests/Ombra.FakeOmp/bin/Debug/net10.0/Ombra.FakeOmp.dll"
+[ -f "$FAKE" ] || { echo "build tests/Ombra.FakeOmp first" >&2; exit 2; }
 DOTNET=$(command -v dotnet)
 export DISPLAY=":$DNUM"
 WORK=$(mktemp -d); PIDS=()
@@ -19,14 +19,14 @@ Xvfb "$DISPLAY" -screen 0 3900x2300x24 -nolisten tcp > "$OUT/xvfb.log" 2>&1 & PI
 sleep 1
 openbox > "$OUT/openbox.log" 2>&1 & PIDS+=($!)
 mkdir -p "$WORK/app" && tar xzf "$ARCHIVE" -C "$WORK/app"
-EXE=$(ls "$WORK"/app/*/OmpGui)
+EXE=$(ls "$WORK"/app/*/Ombra)
 
 for theme in light dark; do
   for scale in 1 1.5 2; do
     for size in 1280x800 1024x768 1920x1080; do
       w=${size%x*}; h=${size#*x}
-      H="$WORK/home-$theme-$scale-$size"; mkdir -p "$H/.config/OmpGui" "$H/proj" "$H/sessions"
-      cat > "$H/.config/OmpGui/omp-gui.local.json" <<JSON
+      H="$WORK/home-$theme-$scale-$size"; mkdir -p "$H/.config/Ombra" "$H/proj" "$H/sessions"
+      cat > "$H/.config/Ombra/ombra.local.json" <<JSON
 {
   "command": "$DOTNET",
   "prefixArgs": ["$FAKE", "plan"],

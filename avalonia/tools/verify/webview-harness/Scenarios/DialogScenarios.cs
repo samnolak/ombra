@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
-using OmpGui.WebViewHarness.Native;
+using Ombra.WebViewHarness.Native;
 
-namespace OmpGui.WebViewHarness.Scenarios;
+namespace Ombra.WebViewHarness.Scenarios;
 
 /// <summary>R2 reproduced: no UI delegate (Avalonia sets none) → alert OK, confirm and prompt Cancel, nobody asked.</summary>
 internal sealed class DialogsBaselineScenario : IScenario

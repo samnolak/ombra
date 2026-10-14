@@ -1,6 +1,6 @@
-# OMP GUI (Avalonia client) — third-party notices
+# Ombra (Avalonia client) — third-party notices
 
-OMP GUI is distributed under the MIT License (`LICENSE`). It is an independent client for the original omp
+Ombra is distributed under the MIT License (`LICENSE`). It is an independent client for the original omp
 (oh-my-pi); it is not an official product of the omp authors, the Bun authors, Anthropic or OpenAI.
 
 ## Bundled in this package
@@ -28,6 +28,7 @@ OMP GUI is distributed under the MIT License (`LICENSE`). It is an independent c
 | ONNX Runtime (inside the sherpa-onnx native runtime) | — | MIT | https://github.com/microsoft/onnxruntime |
 | PortAudioSharp2 (+ native PortAudio runtime) | 1.0.6 | Apache-2.0 (PortAudio: MIT-style PortAudio license) | https://github.com/csukuangfj/PortAudioSharp2 |
 | Avalonia.Controls.WebView (browser preview panel) | 12.1.0 | MIT | https://github.com/AvaloniaUI/Avalonia.Controls.WebView |
+| Lucide icons (converted to the app's icon path data) | 1.57.0 | ISC (the icons Lucide derives from Feather: also MIT, © Cole Bemis) | https://github.com/lucide-icons/lucide |
 
 ## Downloaded on first use (not in this package; each under its own license)
 

@@ -1,4 +1,4 @@
-# OMP GUI
+# Ombra
 
 A cross-platform desktop client for [oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp`), the coding agent. The
 agent itself is always the unmodified omp: the client starts it, talks to it over omp's official RPC (JSON lines over
@@ -9,13 +9,13 @@ not an official product of the omp, Bun, Anthropic or OpenAI projects.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="avalonia/docs/design/screens/readme-window-dark.png">
-  <img alt="OMP GUI: a finished run with tool calls, a diff, the plan card and the message box" src="avalonia/docs/design/screens/readme-window.png">
+  <img alt="Ombra: a finished run with tool calls, a diff, the plan card and the message box" src="avalonia/docs/design/screens/readme-window.png">
 </picture>
 
 ## Install
 
-Download the package for your system from the [latest release](https://github.com/samnolak/omp-gui/releases/latest)
-(macOS: unzip and move *OMP GUI.app* to Applications; Windows: unzip and run `OmpGui.exe`; Linux: unpack and run
+Download the package for your system from the [latest release](https://github.com/samnolak/ombra/releases/latest)
+(macOS: unzip and move *Ombra.app* to Applications; Windows: unzip and run `Ombra.exe`; Linux: unpack and run
 `install-desktop-entry.sh`). Packages are self-contained: no .NET needed. On first start without omp the app installs
 the pinned omp itself. After that the app finds new releases on its own (Settings → Updates) and installs them when
 you choose to. Model providers and API keys live in omp's configuration; the app has no account or sign-in of its own.
@@ -92,10 +92,10 @@ what is verified where: [PROJECT_STATE.md](avalonia/docs/PROJECT_STATE.md).
 Requires the .NET 10 SDK ([`avalonia/global.json`](avalonia/global.json)). From `avalonia/`:
 
 ```
-dotnet build OmpGui.sln
-dotnet run --project src/OmpGui.App             # first run offers to install omp; or --config <omp-gui.local.json>
-dotnet test tests/OmpGui.Tests                  # real-omp and acceptance tests run only when OMPGUI_TEST_CONFIG is set
-dotnet build OmpGui.sln -c Release && tools/ci/real-omp-smoke.sh <work-dir>
+dotnet build Ombra.sln
+dotnet run --project src/Ombra.App             # first run offers to install omp; or --config <ombra.local.json>
+dotnet test tests/Ombra.Tests                  # real-omp and acceptance tests run only when OMBRA_TEST_CONFIG is set
+dotnet build Ombra.sln -c Release && tools/ci/real-omp-smoke.sh <work-dir>
                                                 # installs the pinned runtime and runs those tests against a stand-in
                                                 # model server (needs Node.js, curl and network access to npm)
 tools/real-model/setup.sh <work> <omp-runtime-dir>   # a real small model (SmolLM2 on llama.cpp) for RealModelTests
@@ -105,11 +105,11 @@ tools/real-model/setup.sh <work> <omp-runtime-dir>   # a real small model (SmolL
 A self-contained package for one platform, as CI builds it:
 
 ```
-dotnet publish src/OmpGui.App -c Release -r linux-x64 --self-contained -o <publish-dir>
+dotnet publish src/Ombra.App -c Release -r linux-x64 --self-contained -o <publish-dir>
 tools/package/package.sh linux-x64 <publish-dir> <out-dir> <version>
 ```
 
-On a Mac, `tools/package/test-app.sh` builds this checkout as *OMP GUI Test.app* next to the installed app, with its
+On a Mac, `tools/package/test-app.sh` builds this checkout as *Ombra Test.app* next to the installed app, with its
 own settings folder (copied from the installed app on the first build), for trying changes before a release.
 
 A release is made by running `avalonia-package.yml` with a version and `release: published`: it builds and checks all
@@ -123,14 +123,14 @@ with the real speech model.
 
 The workflows run only by hand (*Actions → Run workflow*). Before a merge, run the checks locally and post the
 result in the pull request: `dotnet build`
-(warnings are errors), `dotnet test tests/OmpGui.Tests` (with `OMPGUI_TEST_CONFIG` for the real-omp tests), and for
-UI changes the layout audit screenshots (`OMPGUI_REVIEW_DIR`) and `tools/verify/package-e2e.sh` on a package.
+(warnings are errors), `dotnet test tests/Ombra.Tests` (with `OMBRA_TEST_CONFIG` for the real-omp tests), and for
+UI changes the layout audit screenshots (`OMBRA_REVIEW_DIR`) and `tools/verify/package-e2e.sh` on a package.
 
 ## Repository
 
 | Path | What it is |
 |---|---|
-| [`avalonia/`](avalonia) | The client: `src/OmpGui.Rpc` (process, stdio, framing), `src/OmpGui.ClientCore` (state, session control), `src/OmpGui.App` (view models, UI, platform adapters), `tests/`, `tools/` (packaging, verification, stand-in model), `packaging/`, `docs/` |
+| [`avalonia/`](avalonia) | The client: `src/Ombra.Rpc` (process, stdio, framing), `src/Ombra.ClientCore` (state, session control), `src/Ombra.App` (view models, UI, platform adapters), `tests/`, `tools/` (packaging, verification, stand-in model), `packaging/`, `docs/` |
 | [`runtime/packs/`](runtime/packs) | The pinned omp runtime pack (omp 18.8.0 on Bun 1.4.2) that the client builds in and installs |
 | [`harness/`](harness) | The `harness` omp profile template, used by the client's real-omp tests ([docs/harness.md](docs/harness.md)) |
 
@@ -139,7 +139,7 @@ how to run every environment), [ROADMAP.md](avalonia/docs/ROADMAP.md), [PARITY.m
 [DESIGN_SYSTEM.md](avalonia/docs/design/DESIGN_SYSTEM.md) and [`docs/upstream/`](avalonia/docs/upstream) (proposals
 prepared for omp, not applied here).
 
-Work for the next version collects on the [`next`](https://github.com/samnolak/omp-gui/tree/next) branch; `main` is
+Work for the next version collects on the [`next`](https://github.com/samnolak/ombra/tree/next) branch; `main` is
 what the latest release was built from.
 
 ## License

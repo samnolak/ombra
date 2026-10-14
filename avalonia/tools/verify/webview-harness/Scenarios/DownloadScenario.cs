@@ -1,11 +1,11 @@
 using System.Text.Json.Nodes;
-using OmpGui.WebViewHarness.Native;
-using OmpGui.WebViewHarness.Server;
+using Ombra.WebViewHarness.Native;
+using Ombra.WebViewHarness.Server;
 #if APP_HOOKS
-using OmpGui.ClientCore.Browser;
+using Ombra.ClientCore.Browser;
 #endif
 
-namespace OmpGui.WebViewHarness.Scenarios;
+namespace Ombra.WebViewHarness.Scenarios;
 
 /// <summary>Content-Disposition attachment, &lt;a download&gt; (http and blob:), unknown MIME → WKDownload to a temp folder.</summary>
 internal sealed class DownloadScenario : IScenario

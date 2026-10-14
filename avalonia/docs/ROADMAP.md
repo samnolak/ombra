@@ -9,8 +9,8 @@ State, decisions and what is verified where: [`PROJECT_STATE.md`](PROJECT_STATE.
   rewrite, fork or patch it. Its contract to us is the official RPC over stdio. Incompatibilities are solved
   in our Client Integration Layer; real upstream bugs are recorded as `UPSTREAM OMP ISSUE` with a minimal
   external workaround. Dependencies on undocumented behaviour are marked `UNDOCUMENTED / VERSION-PINNED`.
-- Our layers: **Client Integration Layer** (`OmpGui.Rpc`: process, stdio, framing, correlation) →
-  **Application Core** (`OmpGui.ClientCore`: state, reducer, session control) → **ViewModels** → **Avalonia UI**,
+- Our layers: **Client Integration Layer** (`Ombra.Rpc`: process, stdio, framing, correlation) →
+  **Application Core** (`Ombra.ClientCore`: state, reducer, session control) → **ViewModels** → **Avalonia UI**,
   plus a **Platform Layer** (OS adapters) created only when the first real OS-specific implementation appears.
 - Harness and model/provider are separate layers on top of omp; the client uses them in place and never
   re-implements what omp or the harness already does.
@@ -89,6 +89,29 @@ settings folder's `languages/`, started from `template.json`). Expanded tool out
 header bar that stays at the top while the block is on screen and folds it; a running tool's mark turns instead of
 blinking; a chat waiting for an answer shows an amber raised hand in the sidebar; the message box's caret no longer
 vanishes after a pause; hovers and clipped areas are rounded everywhere; tool tooltips read as plain text.
+
+Next (Codex-style reskin, after the ChatGPT desktop app's Codex section): a neutral
+grey palette with the logo's yellow as the one accent (Send, switches, checks; your messages tinted with it), pill buttons, 12-radius menus with a shortcut column.
+An icon rail left of the sidebar opens Plugins, MCP and Skills, with Settings at its foot (the sidebar's and header's
+Settings buttons are gone). The right side is one panel with tabs (Files, Changes, Background tasks, Plan and the
+browser's pages); **+** opens a page of tools and the files this chat changed; ⌘/Ctrl+Shift+G opens Changes. The
+terminal is a bottom panel. The header has the folder, the title, a **⋯** menu with every session action and the
+panels, and a summary popover (changes, plan, background work). Sidebar search sits behind an icon; a chat row's hover
+shows pin and delete and a card with its project and age. In the conversation a finished turn folds under
+*Worked for 1m 18s* above its answer, tool calls group into one grey line per run (a command opens into a Shell card
+with its exit code), user messages are blue bubbles with time, copy and rewind on hover, a date line marks new days or
+long gaps, the change card lists files with +/− and *Review changes*, and notices sit centred between hairlines. On
+macOS the window has no separate title strip: the traffic lights sit in the app's own top row, whose empty parts move
+the window (double-click zooms; a double-click on the chat title no longer renames there — Rename is in **⋯**).
+The frame follows Codex too: a 44 px title band and the icon rail are one chrome surface, the sidebar, the
+conversation and the right panel sit on rounded sheets under it, the panel's tabs are rounded tabs in the band, its
+toolbars are grouped pills, and the new-tab tools, settings sections and recent files are rounded cards.
+
+Renamed OMP GUI → **Ombra** (projects and namespaces `Ombra.*`, executable `Ombra`, bundle id
+`io.github.samnolak.ombra`, `OMBRA_*` variables, update feed `samnolak/ombra`) with a new icon (a hooded coder,
+`tools/icon/ombra-art.jpg`). The first start moves the old data folders and links the old paths (omp's sessions keep
+them); packages carry the launcher a second time as `OmpGui` so installed OMP GUI updaters accept them; an
+updated *OMP GUI.app* renames itself to *Ombra.app*. Once no OMP GUI install is left, the `OmpGui` launcher copy can go.
 
 ## M1 scope: the 15 features (fixed 2026-09-25)
 

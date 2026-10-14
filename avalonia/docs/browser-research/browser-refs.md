@@ -1,6 +1,6 @@
 # Built-in browser — reference implementations & best practices
 
-Scope: what mature agent browsers do (Claude Code Desktop Browser pane, Claude in Chrome, Anthropic `browser_toolset`, Codex/ChatGPT in-app browser, cmux, omp's own backends, Playwright MCP, Chrome DevTools MCP, browser-use, Stagehand), turned into concrete features, UX and an agent-tool contract for the OMP GUI preview (Avalonia 12 `NativeWebView`: WKWebView / WebView2 / WebKitGTK).
+Scope: what mature agent browsers do (Claude Code Desktop Browser pane, Claude in Chrome, Anthropic `browser_toolset`, Codex/ChatGPT in-app browser, cmux, omp's own backends, Playwright MCP, Chrome DevTools MCP, browser-use, Stagehand), turned into concrete features, UX and an agent-tool contract for the Ombra preview (Avalonia 12 `NativeWebView`: WKWebView / WebView2 / WebKitGTK).
 Companion file with deep Codex internals (file:line links into the decompiled app): **local://codex-browser-internals.md**.
 Verified 2026-10-08. Anything not observed in a source is marked `[INFERENCE]`.
 
@@ -157,7 +157,7 @@ Sources: [learn.chatgpt.com/docs/browser](https://developers.openai.com/codex/ap
 
 ## 5. cmux — the closest analog (native macOS app, WKWebView, agent-driven)
 
-Repo [manaflow-ai/cmux](https://github.com/manaflow-ai/cmux) @ `09a51fb30b70`, package `Packages/macOS/CmuxBrowser`. Skill doc: [skills/cmux-browser/SKILL.md](https://github.com/manaflow-ai/cmux/blob/main/skills/cmux-browser/SKILL.md). Driver spec: [docs/browser-repl/driver-protocol.md](https://github.com/manaflow-ai/cmux/blob/main/docs/browser-repl/driver-protocol.md). **omp ships a client for its socket API** (`pi-coding-agent/src/tools/browser/cmux/*`), and that is the protocol the OMP GUI already emulates.
+Repo [manaflow-ai/cmux](https://github.com/manaflow-ai/cmux) @ `09a51fb30b70`, package `Packages/macOS/CmuxBrowser`. Skill doc: [skills/cmux-browser/SKILL.md](https://github.com/manaflow-ai/cmux/blob/main/skills/cmux-browser/SKILL.md). Driver spec: [docs/browser-repl/driver-protocol.md](https://github.com/manaflow-ai/cmux/blob/main/docs/browser-repl/driver-protocol.md). **omp ships a client for its socket API** (`pi-coding-agent/src/tools/browser/cmux/*`), and that is the protocol the Ombra already emulates.
 
 Base URL for the file links below: `https://github.com/manaflow-ai/cmux/blob/09a51fb30b70/Packages/macOS/CmuxBrowser/Sources/CmuxBrowser/`.
 
@@ -208,7 +208,7 @@ Base URL for the file links below: `https://github.com/manaflow-ai/cmux/blob/09a
 
 ## 6. omp's own host-browser backends (pinned omp 18.8.0)
 
-Source root: `~/Library/Application Support/OmpGui-Test/runtimes/omp-18.8.0-bun-1.4.2/omp/node_modules/@oh-my-pi/pi-coding-agent/src/`.
+Source root: `~/Library/Application Support/Ombra-Test/runtimes/omp-18.8.0-bun-1.4.2/omp/node_modules/@oh-my-pi/pi-coding-agent/src/`.
 
 - Tool doc: `prompts/tools/browser.md` (77 lines). The `browser` tool runs inside Eval. Backend precedence: explicit `app` (path / `cdp_url` / `relay`) > Tern pane > cmux > managed Chromium. Related settings: `browser.tern`, `browser.cmux`. `tab.devices()` = Puppeteer `KnownDevices`.
 - **cmux backend** `tools/browser/cmux/{rpc.ts,socket-client.ts,cmux-tab.ts}`:
@@ -244,7 +244,7 @@ Source root: `~/Library/Application Support/OmpGui-Test/runtimes/omp-18.8.0-bun-
 
   - `emulate` explicitly throws on WKWebView for timezone, extra headers, reduced motion, CPU and network throttling (`tern-tab.ts:2014-2035`).
   - `device` = Puppeteer descriptor → `viewport` + `agent` UA; DPR and touch are not applied (`:2036-2051`).
-- The GUI today serves the cmux protocol (`avalonia/src/OmpGui.ClientCore/AgentBrowserBridge.cs:67-85`; `docs/PARITY.md:252-255`: "one page at a time; screenshots of the visible area … not full-page or element clips").
+- The GUI today serves the cmux protocol (`avalonia/src/Ombra.ClientCore/AgentBrowserBridge.cs:67-85`; `docs/PARITY.md:252-255`: "one page at a time; screenshots of the visible area … not full-page or element clips").
 
 ## 7. Playwright MCP & Chrome DevTools MCP (tool contracts)
 

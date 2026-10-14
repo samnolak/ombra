@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
-using OmpGui.WebViewHarness.Native;
+using Ombra.WebViewHarness.Native;
 
-namespace OmpGui.WebViewHarness.Scenarios;
+namespace Ombra.WebViewHarness.Scenarios;
 
 /// <summary>
 /// The trusted-input self-test page. Compares what the page observes for script-dispatched events (today's agent

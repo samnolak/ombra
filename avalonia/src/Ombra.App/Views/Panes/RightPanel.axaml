@@ -1,0 +1,111 @@
+<!-- The right panel (as the ChatGPT desktop app's): a strip of tabs in the window's title band — the tools (Files,
+     Changes, Background tasks, Plan) and the browser's pages, each a rounded tab with its ×, then + (the new-tab page) —
+     and at the far right the toggle that hides the panel, lit while the panel shows. Under it, on the sheet, a tool's
+     own line (what it counts, Refresh), then the tab shown. MainWindow.FitPanels docks it beside the conversation or,
+     in a narrow window, lays it over the conversation (opaque then: Styles.Workspace). DataContext: MainViewModel
+     (MainViewModel.Panes.cs). -->
+<UserControl xmlns:loc="using:Ombra.App.Localization"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
+             xmlns:panes="using:Ombra.App.Views.Panes"
+             xmlns:chrome="using:Avalonia.Controls.Chrome"
+             x:Class="Ombra.App.Views.Panes.RightPanel"
+             x:DataType="vm:MainViewModel"
+             AutomationProperties.Name="{loc:T 'Right panel'}">
+  <DockPanel>
+    <!-- ── The strip: the tabs share its width (TabStripPanel: long titles shrink, × stays), past their narrowest they
+         scroll sideways without a bar; + follows the last tab (TabStripRow); the panel toggle at the far right. Level
+         with the header: on macOS part of the window's title bar, its empty part moves the window. ── -->
+    <Border x:Name="PanelStrip" DockPanel.Dock="Top" Classes="panel-strip" chrome:WindowDecorationProperties.ElementRole="TitleBar">
+      <Grid ColumnDefinitions="*,Auto">
+        <ctl:TabStripRow VerticalAlignment="Center">
+          <ScrollViewer x:Name="PanelTabScroller" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
+            <ItemsControl x:Name="PanelTabItems" ItemsSource="{Binding PanelTabs}">
+              <ItemsControl.Styles>
+                <Style Selector="ContentPresenter" x:DataType="vm:PanelTab">
+                  <Setter Property="IsVisible" Value="{Binding ShowsInStrip}" />
+                </Style>
+              </ItemsControl.Styles>
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <ctl:TabStripPanel Spacing="2" MinItemWidth="112" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:PanelTab">
+                  <Border Classes="panel-tab" Classes.active="{Binding IsActive}">
+                    <DockPanel>
+                      <Button DockPanel.Dock="Right" Classes="icon panel-tab-close" Width="20" Height="20" Margin="0,0,4,0"
+                              Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).ClosePanelTabCommand}" CommandParameter="{Binding}"
+                              ToolTip.Tip="{loc:T 'Close tab'}" AutomationProperties.Name="{loc:T 'Close tab'}">
+                        <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+                      </Button>
+                      <Button Classes="flat panel-tab-button" Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SelectPanelTabCommand}"
+                              CommandParameter="{Binding}" ToolTip.Tip="{Binding ToolTip}" AutomationProperties.Name="{Binding Header}">
+                        <DockPanel>
+                          <Panel DockPanel.Dock="Left" Width="14" Margin="0,0,6,0" VerticalAlignment="Center">
+                            <ctl:Icon Data="{Binding Icon}" Size="16" IsVisible="{Binding !IsLoading}" />
+                            <Ellipse Classes="state-dot running" IsVisible="{Binding IsLoading}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                          </Panel>
+                          <!-- A window the page opened (sign-in pop-ups): it closes itself when done -->
+                          <TextBlock DockPanel.Dock="Right" Classes="tertiary" Text="{loc:T 'Pop-up'}" IsVisible="{Binding IsPopup}" VerticalAlignment="Center"
+                                     FontSize="{DynamicResource GuiFontXs}" Margin="6,0,0,0" />
+                          <TextBlock Classes="panel-tab-title" Text="{Binding Header}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        </DockPanel>
+                      </Button>
+                    </DockPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+          <Button x:Name="NewPanelTabButton" Classes="icon sm" Margin="4,0,0,0"
+                  Command="{Binding ShowPaneCommand}" CommandParameter="{x:Static vm:SidePane.NewTab}"
+                  ToolTip.Tip="{loc:T 'New tab: tools and recent files'}" AutomationProperties.Name="{loc:T 'New tab'}">
+            <ctl:Icon Data="{StaticResource IconPlus}" Size="16" />
+          </Button>
+        </ctl:TabStripRow>
+        <Button x:Name="HidePanelButton" Grid.Column="1" Classes="icon on" Margin="6,0,0,0" Command="{Binding ToggleRightPanelCommand}"
+                ToolTip.Tip="{loc:T 'Hide the panel'}" AutomationProperties.Name="{loc:T 'Hide the panel'}">
+          <ctl:Icon Data="{StaticResource IconPanelRight}" Size="16" />
+        </Button>
+      </Grid>
+    </Border>
+
+    <!-- ── A tool's own line: what it counts (the plan's progress, what runs, the project), Refresh for the files ── -->
+    <Border x:Name="ToolLine" DockPanel.Dock="Top" Classes="panel-toolline" IsVisible="{Binding IsToolBarShown}">
+      <Grid ColumnDefinitions="*,Auto">
+        <Panel VerticalAlignment="Center">
+          <TextBlock Classes="pane-subtitle" Text="{Binding Plan.ProgressText}" IsVisible="{Binding IsPlanPaneShown}" TextTrimming="CharacterEllipsis" />
+          <TextBlock Classes="pane-subtitle" Text="{Binding Tasks.Summary}" IsVisible="{Binding IsTasksPaneShown}" TextTrimming="CharacterEllipsis" />
+          <TextBlock Classes="pane-subtitle" Text="{Binding Files.RootName}" IsVisible="{Binding IsFilesViewShown}" TextTrimming="CharacterEllipsis"
+                     ToolTip.Tip="{Binding Files.Root}" />
+        </Panel>
+        <Button x:Name="RefreshFilesButton" Grid.Column="1" Classes="icon pill" Command="{Binding Files.RefreshNowCommand}"
+                IsVisible="{Binding IsFilesViewShown}" ToolTip.Tip="{loc:T 'Read the files again'}" AutomationProperties.Name="{loc:T 'Refresh files'}">
+          <ctl:Icon Data="{StaticResource IconReload}" Size="16" />
+        </Button>
+      </Grid>
+    </Border>
+
+    <!-- ── The tab shown ── -->
+    <Panel>
+      <Panel IsVisible="{Binding IsPlanPaneShown}">
+        <panes:PlanPane x:Name="PlanPane" DataContext="{Binding Plan}" />
+      </Panel>
+      <Panel IsVisible="{Binding IsTasksPaneShown}">
+        <panes:TasksPane x:Name="TasksPane" DataContext="{Binding Tasks}" />
+      </Panel>
+      <!-- Files and Changes are one pane: Changes lists only the changed files (git's, or this session's), without "All" -->
+      <Panel IsVisible="{Binding IsFilesViewShown}" Classes.changes="{Binding IsChangesPaneShown}">
+        <panes:FilesPane x:Name="FilesPane" DataContext="{Binding Files}" />
+      </Panel>
+      <panes:NewTabPage x:Name="NewTabPage" IsVisible="{Binding IsNewTabShown}" />
+      <Panel IsVisible="{Binding IsPreviewOpen}">
+        <ctl:PreviewPanel x:Name="PreviewPanel" DataContext="{Binding Preview}" />
+      </Panel>
+    </Panel>
+  </DockPanel>
+</UserControl>

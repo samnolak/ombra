@@ -1,0 +1,609 @@
+<!-- The client's design tokens: colours per theme, radius, type scale, shadows (docs/design/DESIGN_SYSTEM.md). The palette
+     follows the ChatGPT desktop (Codex) look, sampled from screenshots of that app: neutral greys (dark is primary: chat
+     #181818, sidebar #1E1E1E, raised cards / menus #2D2D2D; light: white chat, #F9F9F9 sidebar, #F3F3F3 cards), primary text
+     #ECECEC / #0D0D0D, one brand-yellow accent (send, switches, checks, progress; links and focus stay blue). The primary button is the inverse pill
+     (near-white on dark). The accent is the logo's yellow, with dark marks on it. A new colour goes into both theme dictionaries. -->
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <!-- the client's tokens -->
+          <SolidColorBrush x:Key="GuiTextPrimary" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="GuiTextSecondary" Color="#FF5D5D5D" />
+          <SolidColorBrush x:Key="GuiTextTertiary" Color="#FF737373" />
+          <SolidColorBrush x:Key="GuiTextLink" Color="#FF2563EB" />
+          <SolidColorBrush x:Key="GuiTextLinkHover" Color="#FF1D4ED8" />
+          <SolidColorBrush x:Key="GuiTextError" Color="#FFD03B30" />
+          <SolidColorBrush x:Key="GuiTextSuccess" Color="#FF1E7F3A" />
+          <SolidColorBrush x:Key="GuiTextWarning" Color="#FF9A5A12" />
+          <SolidColorBrush x:Key="GuiTextOnAccent" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="GuiTextOnDanger" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="GuiTextOnInverse" Color="#FFFFFFFF" />
+          <!-- Surfaces: the chat / window, the sidebar and rail, the title bar band, raised cards and menus -->
+          <SolidColorBrush x:Key="GuiWindow" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="GuiPage" Color="#FFF9F9F9" />
+          <SolidColorBrush x:Key="GuiSurface1" Color="#FFFFFFFF" />
+          <!-- The chosen segment of a segmented control: raised off its fill track -->
+          <SolidColorBrush x:Key="GuiSegmentSelected" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="GuiSurface2" Color="#FFFFFFFF" />
+          <!-- The chrome: the title band across the window top and the left icon rail, one L-shaped surface a step darker
+               than the sheets under it (the sidebar, the chat, the right panel); the sheets' hairline edge; the band's
+               active tab; a toolbar's grouped pill (back | forward · reload, the address field, a file's actions) -->
+          <SolidColorBrush x:Key="GuiChrome" Color="#FFF0F0F0" />
+          <SolidColorBrush x:Key="GuiChromeEdge" Color="#FFE1E1E1" />
+          <SolidColorBrush x:Key="GuiChromeTabActive" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="GuiToolbarPill" Color="#FFF0F0F0" />
+          <!-- A quiet card on the chat surface (the change card, the limit card) and the message box -->
+          <SolidColorBrush x:Key="GuiCard" Color="#FFF3F3F3" />
+          <SolidColorBrush x:Key="GuiComposer" Color="#FFF4F4F4" />
+          <!-- Your message: a bubble tinted with the brand yellow, and its text -->
+          <SolidColorBrush x:Key="GuiUserBubble" Color="#FFFBF0CC" />
+          <SolidColorBrush x:Key="GuiUserBubbleText" Color="#FF0D0D0D" />
+          <!-- A step line (a tool call, a group of them): quieter than the answer's text, louder than meta -->
+          <SolidColorBrush x:Key="GuiStepText" Color="#FF5F5F5F" />
+          <!-- The hairline under a turn's "Worked for…" line -->
+          <SolidColorBrush x:Key="GuiHairline" Color="#FFEBEBEB" />
+          <!-- Code cards' hairline; the change card's header, its rows and its hairline; a table's rule between rows -->
+          <SolidColorBrush x:Key="GuiCodeBlockBorder" Color="#FFE8E8E8" />
+          <SolidColorBrush x:Key="GuiChangeHead" Color="#FFF7F7F7" />
+          <SolidColorBrush x:Key="GuiChangeRow" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="GuiCardBorder" Color="#FFE3E3E3" />
+          <SolidColorBrush x:Key="GuiTableRule" Color="#FFF0F0F0" />
+          <SolidColorBrush x:Key="GuiFill1" Color="#0D000000" />
+          <SolidColorBrush x:Key="GuiFill1Hover" Color="#14000000" />
+          <SolidColorBrush x:Key="GuiFill1Pressed" Color="#1C000000" />
+          <SolidColorBrush x:Key="GuiFill1OnWindow" Color="#FFF3F3F3" />
+          <SolidColorBrush x:Key="GuiFill1OnSurface1" Color="#FFF3F3F3" />
+          <SolidColorBrush x:Key="GuiFill2" Color="#12000000" />
+          <SolidColorBrush x:Key="GuiFill2Hover" Color="#1C000000" />
+          <SolidColorBrush x:Key="GuiFill3" Color="#29000000" />
+          <!-- Accent: the brand yellow (send, switches, checks, progress), white text and marks on it -->
+          <SolidColorBrush x:Key="GuiAccent" Color="#FFF2B200" />
+          <SolidColorBrush x:Key="GuiAccentHover" Color="#FFFFC21A" />
+          <SolidColorBrush x:Key="GuiAccentPressed" Color="#FFD99E00" />
+          <SolidColorBrush x:Key="GuiAccentDisabled" Color="#FFF5DD8F" />
+          <!-- Inverse: the primary button, a near-white pill on dark / near-black on light -->
+          <SolidColorBrush x:Key="GuiInverse" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="GuiInverseHover" Color="#FF2F2F2F" />
+          <SolidColorBrush x:Key="GuiInversePressed" Color="#FF4A4A4A" />
+          <SolidColorBrush x:Key="GuiBorder" Color="#1A000000" />
+          <SolidColorBrush x:Key="GuiBorderSoft" Color="#0F000000" />
+          <SolidColorBrush x:Key="GuiBorderStrong" Color="#40000000" />
+          <SolidColorBrush x:Key="GuiBorderHover" Color="#2E000000" />
+          <SolidColorBrush x:Key="GuiBorderFocus" Color="#73000000" />
+          <SolidColorBrush x:Key="GuiBorderDarkOnly" Color="#00FFFFFF" />
+          <!-- "In progress" marks (current todo, running pill, counts, the update row): the accent's yellow / amber -->
+          <SolidColorBrush x:Key="GuiStatusInfo" Color="#FFB07A00" />
+          <SolidColorBrush x:Key="GuiStatusInfoSoft" Color="#FFFBF0CC" />
+          <SolidColorBrush x:Key="GuiStatusSuccess" Color="#FF2E8B47" />
+          <SolidColorBrush x:Key="GuiStatusSuccessSoft" Color="#FFE5F3E9" />
+          <SolidColorBrush x:Key="GuiStatusError" Color="#FFD03B30" />
+          <SolidColorBrush x:Key="GuiStatusErrorSoft" Color="#FFFCEBEA" />
+          <SolidColorBrush x:Key="GuiStatusWarning" Color="#FFB5661B" />
+          <SolidColorBrush x:Key="GuiStatusWarningSoft" Color="#FFFBF0E3" />
+          <SolidColorBrush x:Key="GuiStatusNeutral" Color="#FF737373" />
+          <SolidColorBrush x:Key="GuiStatusNeutralSoft" Color="#12000000" />
+          <SolidColorBrush x:Key="GuiSelection" Color="#FFC7DBFA" />
+          <SolidColorBrush x:Key="GuiTooltip" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="GuiProgressTrack" Color="#14000000" />
+          <SolidColorBrush x:Key="GuiBackdrop" Color="#33000000" />
+          <!-- Behind the image viewer: opaque, so nothing of the conversation shows through the image's margins -->
+          <SolidColorBrush x:Key="GuiImageBackdrop" Color="#FFF9F9F9" />
+          <SolidColorBrush x:Key="GuiSidebar" Color="#FFF9F9F9" />
+          <!-- Roles: brand mark (logo, spinner: the one yellow), keyboard focus, permission modes, diff rows, session dots -->
+          <SolidColorBrush x:Key="GuiBrandMark" Color="#FFE0A100" />
+          <SolidColorBrush x:Key="GuiFocus" Color="#FF2F6BDA" />
+          <SolidColorBrush x:Key="GuiModeManual" Color="#FF737373" />
+          <SolidColorBrush x:Key="GuiModeAcceptEdits" Color="#FF8700FF" />
+          <SolidColorBrush x:Key="GuiModePlan" Color="#FF006666" />
+          <SolidColorBrush x:Key="GuiModeBypass" Color="#FFAB2B3F" />
+          <!-- Diffs (Controls/DiffView, the Files pane's Changes): a line's fill, the stronger fill of the words that changed
+               in it, the solid bar at its left edge and the sign / count colour; a new file's lighter fill; the "Moved" badge -->
+          <SolidColorBrush x:Key="GuiDiffAddedBg" Color="#1F2EA043" />
+          <SolidColorBrush x:Key="GuiDiffAddedWordBg" Color="#592EA043" />
+          <SolidColorBrush x:Key="GuiDiffAddedBar" Color="#FF2EA043" />
+          <SolidColorBrush x:Key="GuiDiffAddedText" Color="#FF1A7F37" />
+          <SolidColorBrush x:Key="GuiDiffNewFileBg" Color="#122EA043" />
+          <SolidColorBrush x:Key="GuiDiffRemovedBg" Color="#1FE5534B" />
+          <SolidColorBrush x:Key="GuiDiffRemovedWordBg" Color="#59E5534B" />
+          <SolidColorBrush x:Key="GuiDiffRemovedBar" Color="#FFCF222E" />
+          <SolidColorBrush x:Key="GuiDiffRemovedText" Color="#FFC0272D" />
+          <SolidColorBrush x:Key="GuiDiffMovedBg" Color="#1F2F6BDA" />
+          <SolidColorBrush x:Key="GuiDiffMovedText" Color="#FF2563EB" />
+          <SolidColorBrush x:Key="GuiStatusRunning" Color="#FF2E8B47" />
+          <SolidColorBrush x:Key="GuiStatusWaiting" Color="#FFB5661B" />
+          <SolidColorBrush x:Key="GuiStatusUnread" Color="#FFE0A100" />
+          <SolidColorBrush x:Key="GuiStatusUnreadRing" Color="#00000000" />
+          <SolidColorBrush x:Key="GuiInlineCodeBg" Color="#0F000000" />
+          <SolidColorBrush x:Key="GuiCodeBlockBg" Color="#FFF7F7F7" />
+          <!-- A code block's header row (language, Copy) -->
+          <SolidColorBrush x:Key="GuiCodeBlockHeader" Color="#FFF7F7F7" />
+          <!-- Code (Controls/SyntaxHighlighter): quiet colours that keep the text readable on pale diff fills -->
+          <SolidColorBrush x:Key="GuiCodeKeyword" Color="#FF8A2BB5" />
+          <SolidColorBrush x:Key="GuiCodeString" Color="#FF1F7A3A" />
+          <SolidColorBrush x:Key="GuiCodeComment" Color="#FF737373" />
+          <SolidColorBrush x:Key="GuiCodeNumber" Color="#FFA6501A" />
+          <SolidColorBrush x:Key="GuiCodeType" Color="#FF1D5FC2" />
+          <SolidColorBrush x:Key="GuiCodeFunction" Color="#FF9A3412" />
+          <!-- Fluent theme keys -->
+          <SolidColorBrush x:Key="TextControlForeground" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="TextControlForegroundDisabled" Color="#FF737373" />
+          <SolidColorBrush x:Key="TextControlBackground" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="#0D000000" />
+          <SolidColorBrush x:Key="TextControlBorderBrush" Color="#1A000000" />
+          <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#2E000000" />
+          <!-- A focused field: a 1 px border in the focus blue; the keyboard ring is GuiFocusRing -->
+          <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#FF2F6BDA" />
+          <BoxShadows x:Key="GuiFocusRing">inset 0 0 0 2 #FF2F6BDA</BoxShadows>
+          <SolidColorBrush x:Key="TextControlBorderBrushDisabled" Color="#0F000000" />
+          <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#FF737373" />
+          <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="#FF737373" />
+          <SolidColorBrush x:Key="TextControlPlaceholderForegroundFocused" Color="#FF737373" />
+          <SolidColorBrush x:Key="TextControlSelectionHighlightColor" Color="#FFC7DBFA" />
+          <SolidColorBrush x:Key="ComboBoxBackground" Color="#0D000000" />
+          <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver" Color="#14000000" />
+          <SolidColorBrush x:Key="ComboBoxBackgroundPressed" Color="#1C000000" />
+          <SolidColorBrush x:Key="ComboBoxBackgroundFocused" Color="#0D000000" />
+          <SolidColorBrush x:Key="ComboBoxBorderBrush" Color="#00000000" />
+          <SolidColorBrush x:Key="ComboBoxBorderBrushPointerOver" Color="#00000000" />
+          <SolidColorBrush x:Key="ComboBoxBorderBrushPressed" Color="#00000000" />
+          <SolidColorBrush x:Key="ComboBoxForeground" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="ComboBoxPlaceHolderForeground" Color="#FF737373" />
+          <SolidColorBrush x:Key="ComboBoxDropDownGlyphForeground" Color="#FF5D5D5D" />
+          <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="#1A000000" />
+          <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="#14000000" />
+          <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="#12000000" />
+          <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPointerOver" Color="#1C000000" />
+          <!-- Menus and flyouts: a raised grey card with a hairline (#2D2D2D in the Codex captures) -->
+          <SolidColorBrush x:Key="FlyoutPresenterBackground" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="FlyoutBorderThemeBrush" Color="#1A000000" />
+          <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="#1A000000" />
+          <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPointerOver" Color="#14000000" />
+          <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPressed" Color="#12000000" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForegroundDisabled" Color="#FF737373" />
+          <SolidColorBrush x:Key="MenuFlyoutItemKeyboardAcceleratorTextForeground" Color="#FF737373" />
+          <SolidColorBrush x:Key="MenuFlyoutItemKeyboardAcceleratorTextForegroundPointerOver" Color="#FF737373" />
+          <SolidColorBrush x:Key="MenuFlyoutSubItemChevron" Color="#FF5D5D5D" />
+          <SolidColorBrush x:Key="MenuFlyoutSeparatorBackground" Color="#1A000000" />
+          <!-- Tooltips: near-black in light; a raised grey card in dark (as Codex draws them) -->
+          <SolidColorBrush x:Key="ToolTipBackground" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="ToolTipForeground" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="ToolTipBorderBrush" Color="#00000000" />
+          <!-- Check boxes and radios: the yellow accent with a white mark -->
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillChecked" Color="#FFF2B200" />
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPointerOver" Color="#FFFFC21A" />
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPressed" Color="#FFD99E00" />
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeChecked" Color="#FFF2B200" />
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeCheckedPointerOver" Color="#FFFFC21A" />
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeCheckedPressed" Color="#FFD99E00" />
+          <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundChecked" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPointerOver" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPressed" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeUnchecked" Color="#40000000" />
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeUncheckedPointerOver" Color="#73000000" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseCheckedFill" Color="#FFF2B200" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseCheckedStroke" Color="#FFF2B200" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseCheckedFillPointerOver" Color="#FFFFC21A" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseCheckedStrokePointerOver" Color="#FFFFC21A" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseCheckedFillPressed" Color="#FFD99E00" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseCheckedStrokePressed" Color="#FFD99E00" />
+          <SolidColorBrush x:Key="RadioButtonCheckGlyphFill" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="RadioButtonCheckGlyphFillPointerOver" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="RadioButtonCheckGlyphFillPressed" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseStroke" Color="#40000000" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseStrokePointerOver" Color="#73000000" />
+          <!-- Switches (Fluent ToggleSwitch): an outlined track when off, the yellow accent with a white knob when on -->
+          <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#FFF2B200" />
+          <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#FFFFC21A" />
+          <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#FFD99E00" />
+          <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="#FFF2B200" />
+          <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="#FFFFC21A" />
+          <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="ToggleSwitchFillOff" Color="#12000000" />
+          <SolidColorBrush x:Key="ToggleSwitchFillOffPointerOver" Color="#1C000000" />
+          <SolidColorBrush x:Key="ToggleSwitchStrokeOff" Color="#40000000" />
+          <SolidColorBrush x:Key="ToggleSwitchStrokeOffPointerOver" Color="#73000000" />
+          <SolidColorBrush x:Key="ToggleSwitchKnobFillOff" Color="#FF5D5D5D" />
+          <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="ProgressBarForeground" Color="#FFF2B200" />
+          <SolidColorBrush x:Key="ProgressBarBackground" Color="#14000000" />
+          <!-- Scroll bars stay thin and quiet: a soft thumb that firms up under the pointer -->
+          <SolidColorBrush x:Key="ScrollBarThumbFill" Color="#29000000" />
+          <SolidColorBrush x:Key="ScrollBarThumbFillPointerOver" Color="#73000000" />
+          <SolidColorBrush x:Key="ScrollBarThumbFillPressed" Color="#73000000" />
+          <SolidColorBrush x:Key="ScrollBarPanningThumbBackground" Color="#29000000" />
+          <SolidColorBrush x:Key="ListBoxItemBackgroundPointerOver" Color="#00000000" />
+          <SolidColorBrush x:Key="ListBoxItemBackgroundSelected" Color="#00000000" />
+          <SolidColorBrush x:Key="ListBoxItemBackgroundSelectedPointerOver" Color="#00000000" />
+          <SolidColorBrush x:Key="ListBoxItemBackgroundPressed" Color="#00000000" />
+          <!-- Buttons: secondary = fill 1 with primary text; primary (Fluent "accent") = the inverse pill: near-white with
+               dark text on dark, near-black with white text on light -->
+          <SolidColorBrush x:Key="ButtonBackground" Color="#0D000000" />
+          <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#14000000" />
+          <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#1C000000" />
+          <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#0D000000" />
+          <SolidColorBrush x:Key="ButtonForeground" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#FF737373" />
+          <SolidColorBrush x:Key="ButtonBorderBrush" Color="#00000000" />
+          <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#00000000" />
+          <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#00000000" />
+          <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="#00000000" />
+          <SolidColorBrush x:Key="AccentButtonBackground" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#FF2F2F2F" />
+          <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#FF4A4A4A" />
+          <SolidColorBrush x:Key="AccentButtonBackgroundDisabled" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="AccentButtonForeground" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="AccentButtonForegroundDisabled" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="AccentButtonBorderBrush" Color="#00000000" />
+          <SolidColorBrush x:Key="AccentButtonBorderBrushPointerOver" Color="#00000000" />
+          <SolidColorBrush x:Key="AccentButtonBorderBrushPressed" Color="#00000000" />
+          <SolidColorBrush x:Key="AccentButtonBorderBrushDisabled" Color="#00000000" />
+          <SolidColorBrush x:Key="ToggleButtonBackground" Color="#0D000000" />
+          <SolidColorBrush x:Key="ToggleButtonBackgroundPointerOver" Color="#14000000" />
+          <SolidColorBrush x:Key="ToggleButtonBackgroundPressed" Color="#1C000000" />
+          <SolidColorBrush x:Key="ToggleButtonForeground" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="ToggleButtonForegroundPointerOver" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="ToggleButtonBorderBrush" Color="#00000000" />
+          <SolidColorBrush x:Key="ToggleButtonBorderBrushPointerOver" Color="#00000000" />
+          <SolidColorBrush x:Key="ToggleButtonBorderBrushPressed" Color="#00000000" />
+          <SolidColorBrush x:Key="ToggleButtonBorderBrushChecked" Color="#00000000" />
+          <SolidColorBrush x:Key="ToggleButtonBorderBrushCheckedPointerOver" Color="#00000000" />
+          <SolidColorBrush x:Key="SystemControlFocusVisualPrimaryBrush" Color="#FFF2B200" />
+          <SolidColorBrush x:Key="SystemControlFocusVisualSecondaryBrush" Color="#00000000" />
+          <SolidColorBrush x:Key="ToggleButtonBackgroundChecked" Color="#12000000" />
+          <SolidColorBrush x:Key="ToggleButtonForegroundChecked" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPointerOver" Color="#1C000000" />
+          <SolidColorBrush x:Key="ToggleButtonForegroundCheckedPointerOver" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPressed" Color="#12000000" />
+          <SolidColorBrush x:Key="ToggleButtonForegroundCheckedPressed" Color="#FF0D0D0D" />
+          <Color x:Key="SystemAccentColor">#FFF2B200</Color>
+          <Color x:Key="SystemAccentColorLight1">#FFF2B200</Color>
+          <Color x:Key="SystemAccentColorLight2">#FFF2B200</Color>
+          <Color x:Key="SystemAccentColorLight3">#FFF2B200</Color>
+          <Color x:Key="SystemAccentColorDark1">#FFF2B200</Color>
+          <Color x:Key="SystemAccentColorDark2">#FFF2B200</Color>
+          <Color x:Key="SystemAccentColorDark3">#FFF2B200</Color>
+          <BoxShadows x:Key="GuiShadow">0 1 2 0 #0A000000, 0 4 14 0 #0F000000</BoxShadows>
+          <BoxShadows x:Key="GuiShadowPopup">0 2 6 0 #0F000000, 0 10 32 0 #1F000000</BoxShadows>
+          <!-- The message box: lifted off the chat in light, flat (fill + hairline) in dark -->
+          <BoxShadows x:Key="GuiShadowComposer">0 1 2 0 #0A000000, 0 4 16 0 #0D000000</BoxShadows>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <!-- the client's tokens -->
+          <SolidColorBrush x:Key="GuiTextPrimary" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="GuiTextSecondary" Color="#FFB4B4B4" />
+          <SolidColorBrush x:Key="GuiTextTertiary" Color="#FF8B8B8B" />
+          <SolidColorBrush x:Key="GuiTextLink" Color="#FF6086CC" />
+          <SolidColorBrush x:Key="GuiTextLinkHover" Color="#FF82A3DB" />
+          <SolidColorBrush x:Key="GuiTextError" Color="#FFF28B82" />
+          <SolidColorBrush x:Key="GuiTextSuccess" Color="#FF6BC47E" />
+          <SolidColorBrush x:Key="GuiTextWarning" Color="#FFE0A04F" />
+          <SolidColorBrush x:Key="GuiTextOnAccent" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="GuiTextOnDanger" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="GuiTextOnInverse" Color="#FF0D0D0D" />
+          <!-- Surfaces: the chat / window, the sidebar and rail, the title bar band, raised cards and menus -->
+          <SolidColorBrush x:Key="GuiWindow" Color="#FF181818" />
+          <SolidColorBrush x:Key="GuiPage" Color="#FF1E1E1E" />
+          <SolidColorBrush x:Key="GuiSurface1" Color="#FF2A2A2A" />
+          <!-- The chosen segment of a segmented control: raised off its fill track -->
+          <SolidColorBrush x:Key="GuiSegmentSelected" Color="#FF3D3D3D" />
+          <SolidColorBrush x:Key="GuiSurface2" Color="#FF2D2D2D" />
+          <!-- The chrome: the title band across the window top and the left icon rail, one L-shaped surface a step lighter
+               than the sheets under it (sampled from the Codex captures: #272829 band, #282929 rail); the sheets' hairline
+               edge; the band's active tab; a toolbar's grouped pill (#2D2D2D on the #181818 panel) -->
+          <SolidColorBrush x:Key="GuiChrome" Color="#FF272829" />
+          <SolidColorBrush x:Key="GuiChromeEdge" Color="#FF333435" />
+          <SolidColorBrush x:Key="GuiChromeTabActive" Color="#FF393B3C" />
+          <SolidColorBrush x:Key="GuiToolbarPill" Color="#FF2D2D2D" />
+          <!-- A quiet card on the chat surface (the change card, the limit card) and the message box -->
+          <SolidColorBrush x:Key="GuiCard" Color="#FF212121" />
+          <SolidColorBrush x:Key="GuiComposer" Color="#FF303030" />
+          <!-- Your message: a bubble tinted with the brand yellow (Codex's shape, our colour), and its text -->
+          <SolidColorBrush x:Key="GuiUserBubble" Color="#FF3A3322" />
+          <SolidColorBrush x:Key="GuiUserBubbleText" Color="#FFFFF8E6" />
+          <!-- A step line (a tool call, a group of them): quieter than the answer's text, louder than meta -->
+          <SolidColorBrush x:Key="GuiStepText" Color="#FFA3A3A3" />
+          <!-- The hairline under a turn's "Worked for…" line -->
+          <SolidColorBrush x:Key="GuiHairline" Color="#FF2B2B2B" />
+          <!-- Code cards' hairline; the change card's header, its rows and its hairline; a table's rule between rows -->
+          <SolidColorBrush x:Key="GuiCodeBlockBorder" Color="#FF333333" />
+          <SolidColorBrush x:Key="GuiChangeHead" Color="#FF232223" />
+          <SolidColorBrush x:Key="GuiChangeRow" Color="#FF1C1B1C" />
+          <SolidColorBrush x:Key="GuiCardBorder" Color="#FF3C3C3C" />
+          <SolidColorBrush x:Key="GuiTableRule" Color="#FF222222" />
+          <SolidColorBrush x:Key="GuiFill1" Color="#0FFFFFFF" />
+          <SolidColorBrush x:Key="GuiFill1Hover" Color="#17FFFFFF" />
+          <SolidColorBrush x:Key="GuiFill1Pressed" Color="#1FFFFFFF" />
+          <SolidColorBrush x:Key="GuiFill1OnWindow" Color="#FF222222" />
+          <SolidColorBrush x:Key="GuiFill1OnSurface1" Color="#FF353535" />
+          <SolidColorBrush x:Key="GuiFill2" Color="#1AFFFFFF" />
+          <SolidColorBrush x:Key="GuiFill2Hover" Color="#24FFFFFF" />
+          <SolidColorBrush x:Key="GuiFill3" Color="#33FFFFFF" />
+          <!-- Accent: the brand yellow (send, switches, checks, progress), white text and marks on it -->
+          <SolidColorBrush x:Key="GuiAccent" Color="#FFF5C02A" />
+          <SolidColorBrush x:Key="GuiAccentHover" Color="#FFFFCD3C" />
+          <SolidColorBrush x:Key="GuiAccentPressed" Color="#FFE0AC14" />
+          <SolidColorBrush x:Key="GuiAccentDisabled" Color="#FF5A4B1F" />
+          <!-- Inverse: the primary button, a near-white pill on dark / near-black on light -->
+          <SolidColorBrush x:Key="GuiInverse" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="GuiInverseHover" Color="#FFD9D9D9" />
+          <SolidColorBrush x:Key="GuiInversePressed" Color="#FFC4C4C4" />
+          <SolidColorBrush x:Key="GuiBorder" Color="#1AFFFFFF" />
+          <SolidColorBrush x:Key="GuiBorderSoft" Color="#12FFFFFF" />
+          <SolidColorBrush x:Key="GuiBorderStrong" Color="#33FFFFFF" />
+          <SolidColorBrush x:Key="GuiBorderHover" Color="#26FFFFFF" />
+          <SolidColorBrush x:Key="GuiBorderFocus" Color="#66FFFFFF" />
+          <SolidColorBrush x:Key="GuiBorderDarkOnly" Color="#14FFFFFF" />
+          <!-- "In progress" marks (current todo, running pill, counts, the update row): the accent's yellow / amber -->
+          <SolidColorBrush x:Key="GuiStatusInfo" Color="#FFF5C02A" />
+          <SolidColorBrush x:Key="GuiStatusInfoSoft" Color="#FF3A3322" />
+          <SolidColorBrush x:Key="GuiStatusSuccess" Color="#FF6BC47E" />
+          <SolidColorBrush x:Key="GuiStatusSuccessSoft" Color="#FF1F3324" />
+          <SolidColorBrush x:Key="GuiStatusError" Color="#FFE5534B" />
+          <SolidColorBrush x:Key="GuiStatusErrorSoft" Color="#FF3A2120" />
+          <SolidColorBrush x:Key="GuiStatusWarning" Color="#FFE0A04F" />
+          <SolidColorBrush x:Key="GuiStatusWarningSoft" Color="#FF3A2D1C" />
+          <SolidColorBrush x:Key="GuiStatusNeutral" Color="#FF8E8E8E" />
+          <SolidColorBrush x:Key="GuiStatusNeutralSoft" Color="#17FFFFFF" />
+          <SolidColorBrush x:Key="GuiSelection" Color="#FF2B4A73" />
+          <SolidColorBrush x:Key="GuiTooltip" Color="#FF2D2D2D" />
+          <SolidColorBrush x:Key="GuiProgressTrack" Color="#1AFFFFFF" />
+          <SolidColorBrush x:Key="GuiBackdrop" Color="#80000000" />
+          <!-- Behind the image viewer: opaque, so nothing of the conversation shows through the image's margins -->
+          <SolidColorBrush x:Key="GuiImageBackdrop" Color="#FF181818" />
+          <SolidColorBrush x:Key="GuiSidebar" Color="#FF1E1E1E" />
+          <!-- Roles: brand mark (logo, spinner: the one yellow), keyboard focus, permission modes, diff rows, session dots -->
+          <SolidColorBrush x:Key="GuiBrandMark" Color="#FFFFD24D" />
+          <SolidColorBrush x:Key="GuiFocus" Color="#FF5E9CF5" />
+          <SolidColorBrush x:Key="GuiModeManual" Color="#FF8E8E8E" />
+          <SolidColorBrush x:Key="GuiModeAcceptEdits" Color="#FFAF87FF" />
+          <SolidColorBrush x:Key="GuiModePlan" Color="#FF48968C" />
+          <SolidColorBrush x:Key="GuiModeBypass" Color="#FFFF6B80" />
+          <!-- Diffs (Controls/DiffView, the Files pane's Changes): a line's fill, the stronger fill of the words that changed
+               in it, the solid bar at its left edge and the sign / count colour; a new file's lighter fill; the "Moved" badge -->
+          <SolidColorBrush x:Key="GuiDiffAddedBg" Color="#246BC47E" />
+          <SolidColorBrush x:Key="GuiDiffAddedWordBg" Color="#666BC47E" />
+          <SolidColorBrush x:Key="GuiDiffAddedBar" Color="#FF6BC47E" />
+          <SolidColorBrush x:Key="GuiDiffAddedText" Color="#FF6BC47E" />
+          <SolidColorBrush x:Key="GuiDiffNewFileBg" Color="#146BC47E" />
+          <SolidColorBrush x:Key="GuiDiffRemovedBg" Color="#24E75543" />
+          <SolidColorBrush x:Key="GuiDiffRemovedWordBg" Color="#66E75543" />
+          <SolidColorBrush x:Key="GuiDiffRemovedBar" Color="#FFE75543" />
+          <SolidColorBrush x:Key="GuiDiffRemovedText" Color="#FFEE6A5C" />
+          <SolidColorBrush x:Key="GuiDiffMovedBg" Color="#335E9CF5" />
+          <SolidColorBrush x:Key="GuiDiffMovedText" Color="#FF8CC2FF" />
+          <SolidColorBrush x:Key="GuiStatusRunning" Color="#FF6BC47E" />
+          <SolidColorBrush x:Key="GuiStatusWaiting" Color="#FFE0A04F" />
+          <SolidColorBrush x:Key="GuiStatusUnread" Color="#FFF5C02A" />
+          <SolidColorBrush x:Key="GuiStatusUnreadRing" Color="#00000000" />
+          <SolidColorBrush x:Key="GuiInlineCodeBg" Color="#FF303030" />
+          <SolidColorBrush x:Key="GuiCodeBlockBg" Color="#FF2A2A2A" />
+          <!-- A code block's header row (language, Copy): the block's own fill, no rule under it (Codex) -->
+          <SolidColorBrush x:Key="GuiCodeBlockHeader" Color="#FF2A2A2A" />
+          <!-- Code (Controls/SyntaxHighlighter): quiet colours that keep the text readable on pale diff fills -->
+          <SolidColorBrush x:Key="GuiCodeKeyword" Color="#FFC792EA" />
+          <SolidColorBrush x:Key="GuiCodeString" Color="#FF9ECE6A" />
+          <SolidColorBrush x:Key="GuiCodeComment" Color="#FF8E8E8E" />
+          <SolidColorBrush x:Key="GuiCodeNumber" Color="#FFF0A45D" />
+          <SolidColorBrush x:Key="GuiCodeType" Color="#FF7AB8FF" />
+          <SolidColorBrush x:Key="GuiCodeFunction" Color="#FFE8B26A" />
+          <!-- Fluent theme keys -->
+          <SolidColorBrush x:Key="TextControlForeground" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="TextControlForegroundDisabled" Color="#FF8E8E8E" />
+          <SolidColorBrush x:Key="TextControlBackground" Color="#FF2A2A2A" />
+          <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#FF2A2A2A" />
+          <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#FF2A2A2A" />
+          <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="#0FFFFFFF" />
+          <SolidColorBrush x:Key="TextControlBorderBrush" Color="#1AFFFFFF" />
+          <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="#26FFFFFF" />
+          <!-- A focused field: a 1 px border in the focus blue; the keyboard ring is GuiFocusRing -->
+          <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="#FF5E9CF5" />
+          <BoxShadows x:Key="GuiFocusRing">inset 0 0 0 2 #FF5E9CF5</BoxShadows>
+          <SolidColorBrush x:Key="TextControlBorderBrushDisabled" Color="#12FFFFFF" />
+          <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#FF8E8E8E" />
+          <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="#FF8E8E8E" />
+          <SolidColorBrush x:Key="TextControlPlaceholderForegroundFocused" Color="#FF8E8E8E" />
+          <SolidColorBrush x:Key="TextControlSelectionHighlightColor" Color="#FF2B4A73" />
+          <SolidColorBrush x:Key="ComboBoxBackground" Color="#0FFFFFFF" />
+          <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver" Color="#17FFFFFF" />
+          <SolidColorBrush x:Key="ComboBoxBackgroundPressed" Color="#1FFFFFFF" />
+          <SolidColorBrush x:Key="ComboBoxBackgroundFocused" Color="#0FFFFFFF" />
+          <SolidColorBrush x:Key="ComboBoxBorderBrush" Color="#00000000" />
+          <SolidColorBrush x:Key="ComboBoxBorderBrushPointerOver" Color="#00000000" />
+          <SolidColorBrush x:Key="ComboBoxBorderBrushPressed" Color="#00000000" />
+          <SolidColorBrush x:Key="ComboBoxForeground" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="ComboBoxPlaceHolderForeground" Color="#FF8E8E8E" />
+          <SolidColorBrush x:Key="ComboBoxDropDownGlyphForeground" Color="#FFB4B4B4" />
+          <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="#FF2D2D2D" />
+          <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="#1AFFFFFF" />
+          <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="#17FFFFFF" />
+          <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="#1AFFFFFF" />
+          <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPointerOver" Color="#24FFFFFF" />
+          <!-- Menus and flyouts: a raised grey card with a hairline (#2D2D2D in the Codex captures) -->
+          <SolidColorBrush x:Key="FlyoutPresenterBackground" Color="#FF2D2D2D" />
+          <SolidColorBrush x:Key="FlyoutBorderThemeBrush" Color="#1AFFFFFF" />
+          <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="#FF2D2D2D" />
+          <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="#1AFFFFFF" />
+          <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPointerOver" Color="#17FFFFFF" />
+          <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPressed" Color="#1AFFFFFF" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="MenuFlyoutItemForegroundDisabled" Color="#FF8E8E8E" />
+          <SolidColorBrush x:Key="MenuFlyoutItemKeyboardAcceleratorTextForeground" Color="#FF8E8E8E" />
+          <SolidColorBrush x:Key="MenuFlyoutItemKeyboardAcceleratorTextForegroundPointerOver" Color="#FF8E8E8E" />
+          <SolidColorBrush x:Key="MenuFlyoutSubItemChevron" Color="#FFB4B4B4" />
+          <SolidColorBrush x:Key="MenuFlyoutSeparatorBackground" Color="#1AFFFFFF" />
+          <!-- Tooltips: near-black in light; a raised grey card in dark (as Codex draws them) -->
+          <SolidColorBrush x:Key="ToolTipBackground" Color="#FF2D2D2D" />
+          <SolidColorBrush x:Key="ToolTipForeground" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="ToolTipBorderBrush" Color="#1AFFFFFF" />
+          <!-- Check boxes and radios: the yellow accent with a white mark -->
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillChecked" Color="#FFF5C02A" />
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPointerOver" Color="#FFFFCD3C" />
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPressed" Color="#FFE0AC14" />
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeChecked" Color="#FFF5C02A" />
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeCheckedPointerOver" Color="#FFFFCD3C" />
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeCheckedPressed" Color="#FFE0AC14" />
+          <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundChecked" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPointerOver" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPressed" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeUnchecked" Color="#33FFFFFF" />
+          <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeUncheckedPointerOver" Color="#66FFFFFF" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseCheckedFill" Color="#FFF5C02A" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseCheckedStroke" Color="#FFF5C02A" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseCheckedFillPointerOver" Color="#FFFFCD3C" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseCheckedStrokePointerOver" Color="#FFFFCD3C" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseCheckedFillPressed" Color="#FFE0AC14" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseCheckedStrokePressed" Color="#FFE0AC14" />
+          <SolidColorBrush x:Key="RadioButtonCheckGlyphFill" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="RadioButtonCheckGlyphFillPointerOver" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="RadioButtonCheckGlyphFillPressed" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseStroke" Color="#33FFFFFF" />
+          <SolidColorBrush x:Key="RadioButtonOuterEllipseStrokePointerOver" Color="#66FFFFFF" />
+          <!-- Switches (Fluent ToggleSwitch): an outlined track when off, the yellow accent with a white knob when on -->
+          <SolidColorBrush x:Key="ToggleSwitchFillOn" Color="#FFF5C02A" />
+          <SolidColorBrush x:Key="ToggleSwitchFillOnPointerOver" Color="#FFFFCD3C" />
+          <SolidColorBrush x:Key="ToggleSwitchFillOnPressed" Color="#FFE0AC14" />
+          <SolidColorBrush x:Key="ToggleSwitchStrokeOn" Color="#FFF5C02A" />
+          <SolidColorBrush x:Key="ToggleSwitchStrokeOnPointerOver" Color="#FFFFCD3C" />
+          <SolidColorBrush x:Key="ToggleSwitchKnobFillOn" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPointerOver" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="ToggleSwitchKnobFillOnPressed" Color="#FFFFFFFF" />
+          <SolidColorBrush x:Key="ToggleSwitchFillOff" Color="#1AFFFFFF" />
+          <SolidColorBrush x:Key="ToggleSwitchFillOffPointerOver" Color="#24FFFFFF" />
+          <SolidColorBrush x:Key="ToggleSwitchStrokeOff" Color="#33FFFFFF" />
+          <SolidColorBrush x:Key="ToggleSwitchStrokeOffPointerOver" Color="#66FFFFFF" />
+          <SolidColorBrush x:Key="ToggleSwitchKnobFillOff" Color="#FFB4B4B4" />
+          <SolidColorBrush x:Key="ToggleSwitchKnobFillOffPointerOver" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="ProgressBarForeground" Color="#FFF5C02A" />
+          <SolidColorBrush x:Key="ProgressBarBackground" Color="#1AFFFFFF" />
+          <!-- Scroll bars stay thin and quiet: a soft thumb that firms up under the pointer -->
+          <SolidColorBrush x:Key="ScrollBarThumbFill" Color="#33FFFFFF" />
+          <SolidColorBrush x:Key="ScrollBarThumbFillPointerOver" Color="#66FFFFFF" />
+          <SolidColorBrush x:Key="ScrollBarThumbFillPressed" Color="#66FFFFFF" />
+          <SolidColorBrush x:Key="ScrollBarPanningThumbBackground" Color="#33FFFFFF" />
+          <SolidColorBrush x:Key="ListBoxItemBackgroundPointerOver" Color="#00000000" />
+          <SolidColorBrush x:Key="ListBoxItemBackgroundSelected" Color="#00000000" />
+          <SolidColorBrush x:Key="ListBoxItemBackgroundSelectedPointerOver" Color="#00000000" />
+          <SolidColorBrush x:Key="ListBoxItemBackgroundPressed" Color="#00000000" />
+          <!-- Buttons: secondary = fill 1 with primary text; primary (Fluent "accent") = the inverse pill: near-white with
+               dark text on dark, near-black with white text on light -->
+          <SolidColorBrush x:Key="ButtonBackground" Color="#0FFFFFFF" />
+          <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#17FFFFFF" />
+          <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#1FFFFFFF" />
+          <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#0FFFFFFF" />
+          <SolidColorBrush x:Key="ButtonForeground" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#FF8E8E8E" />
+          <SolidColorBrush x:Key="ButtonBorderBrush" Color="#00000000" />
+          <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#00000000" />
+          <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#00000000" />
+          <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="#00000000" />
+          <SolidColorBrush x:Key="AccentButtonBackground" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#FFD9D9D9" />
+          <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#FFC4C4C4" />
+          <SolidColorBrush x:Key="AccentButtonBackgroundDisabled" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="AccentButtonForeground" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="AccentButtonForegroundDisabled" Color="#FF0D0D0D" />
+          <SolidColorBrush x:Key="AccentButtonBorderBrush" Color="#00000000" />
+          <SolidColorBrush x:Key="AccentButtonBorderBrushPointerOver" Color="#00000000" />
+          <SolidColorBrush x:Key="AccentButtonBorderBrushPressed" Color="#00000000" />
+          <SolidColorBrush x:Key="AccentButtonBorderBrushDisabled" Color="#00000000" />
+          <SolidColorBrush x:Key="ToggleButtonBackground" Color="#0FFFFFFF" />
+          <SolidColorBrush x:Key="ToggleButtonBackgroundPointerOver" Color="#17FFFFFF" />
+          <SolidColorBrush x:Key="ToggleButtonBackgroundPressed" Color="#1FFFFFFF" />
+          <SolidColorBrush x:Key="ToggleButtonForeground" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="ToggleButtonForegroundPointerOver" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="ToggleButtonBorderBrush" Color="#00000000" />
+          <SolidColorBrush x:Key="ToggleButtonBorderBrushPointerOver" Color="#00000000" />
+          <SolidColorBrush x:Key="ToggleButtonBorderBrushPressed" Color="#00000000" />
+          <SolidColorBrush x:Key="ToggleButtonBorderBrushChecked" Color="#00000000" />
+          <SolidColorBrush x:Key="ToggleButtonBorderBrushCheckedPointerOver" Color="#00000000" />
+          <SolidColorBrush x:Key="SystemControlFocusVisualPrimaryBrush" Color="#FF5E9CF5" />
+          <SolidColorBrush x:Key="SystemControlFocusVisualSecondaryBrush" Color="#00000000" />
+          <SolidColorBrush x:Key="ToggleButtonBackgroundChecked" Color="#1AFFFFFF" />
+          <SolidColorBrush x:Key="ToggleButtonForegroundChecked" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPointerOver" Color="#24FFFFFF" />
+          <SolidColorBrush x:Key="ToggleButtonForegroundCheckedPointerOver" Color="#FFECECEC" />
+          <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPressed" Color="#1AFFFFFF" />
+          <SolidColorBrush x:Key="ToggleButtonForegroundCheckedPressed" Color="#FFECECEC" />
+          <Color x:Key="SystemAccentColor">#FFF5C02A</Color>
+          <Color x:Key="SystemAccentColorLight1">#FFF5C02A</Color>
+          <Color x:Key="SystemAccentColorLight2">#FFF5C02A</Color>
+          <Color x:Key="SystemAccentColorLight3">#FFF5C02A</Color>
+          <Color x:Key="SystemAccentColorDark1">#FFF5C02A</Color>
+          <Color x:Key="SystemAccentColorDark2">#FFF5C02A</Color>
+          <Color x:Key="SystemAccentColorDark3">#FFF5C02A</Color>
+          <BoxShadows x:Key="GuiShadow">0 0 0 0 #00000000</BoxShadows>
+          <BoxShadows x:Key="GuiShadowPopup">0 10 32 0 #66000000, 0 0 0 1 #0DFFFFFF</BoxShadows>
+          <!-- The message box: lifted off the chat in light, flat (fill + hairline) in dark -->
+          <BoxShadows x:Key="GuiShadowComposer">0 0 0 0 #00000000</BoxShadows>
+        </ResourceDictionary>
+  </ResourceDictionary.ThemeDictionaries>
+  <!-- A focused field keeps its 1 px border (only the colour changes): 2 px had shifted its text by a pixel -->
+  <Thickness x:Key="TextControlBorderThemeThicknessFocused">1</Thickness>
+
+  <!-- radius: 8 controls and rows, 10 the band's tabs, 12 menus / cards / code blocks / the sheets' outer corners, 16
+       large cards and the settings sections, 18 the user bubble, 24 the composer, pills full -->
+  <CornerRadius x:Key="GuiRadius4">4</CornerRadius>
+  <CornerRadius x:Key="GuiRadius8">8</CornerRadius>
+  <CornerRadius x:Key="GuiRadius10">10</CornerRadius>
+  <CornerRadius x:Key="GuiRadius12">12</CornerRadius>
+  <CornerRadius x:Key="GuiRadius16">16</CornerRadius>
+  <CornerRadius x:Key="GuiRadiusFull">999</CornerRadius>
+  <CornerRadius x:Key="GuiRadiusControl">8</CornerRadius>
+  <CornerRadius x:Key="GuiRadiusCard">12</CornerRadius>
+  <CornerRadius x:Key="GuiRadiusMenu">12</CornerRadius>
+  <CornerRadius x:Key="GuiRadiusBubble">18</CornerRadius>
+  <CornerRadius x:Key="GuiRadiusComposer">24</CornerRadius>
+  <!-- The sheets under the chrome: the content area's four corners, the sidebar's (or the settings list's) left two -->
+  <CornerRadius x:Key="GuiSheetRadius">12</CornerRadius>
+  <CornerRadius x:Key="GuiSheetRadiusLeft">12,0,0,12</CornerRadius>
+  <!-- The chrome shows round the sheets on the right and at the bottom too (the band and the rail cover top and left) -->
+  <Thickness x:Key="GuiFrameInset">0,0,8,8</Thickness>
+  <!-- The title band's height: the header, the sidebar's top row, the right panel's tab strip (MainWindow.Chrome.cs) -->
+  <x:Double x:Key="GuiChromeBand">44</x:Double>
+  <!-- What starts under the band: the sheets (the sidebar's, the settings list's), the settings page, the Events panel -->
+  <Thickness x:Key="GuiSheetMargin">0,44,0,0</Thickness>
+  <!-- Fluent's own corner radii follow the control / overlay radii above -->
+  <CornerRadius x:Key="ControlCornerRadius">8</CornerRadius>
+  <CornerRadius x:Key="OverlayCornerRadius">12</CornerRadius>
+  <!-- type scale, system UI font: UI 14, sidebar rows / menus / step lines 13, messages 14 on 22 (Codex), captions 12, code 13 -->
+  <x:Double x:Key="GuiFontUi">14</x:Double>
+  <x:Double x:Key="GuiFontMessage">14</x:Double>
+  <x:Double x:Key="GuiLineMessage">22</x:Double>
+  <x:Double x:Key="GuiFontCaption">12</x:Double>
+  <x:Double x:Key="GuiFontCode">13</x:Double>
+  <x:Double x:Key="GuiFontL">17</x:Double>
+  <x:Double x:Key="GuiFontM">15</x:Double>
+  <x:Double x:Key="GuiFontS">13</x:Double>
+  <x:Double x:Key="GuiFontXs">12</x:Double>
+  <x:Double x:Key="GuiFontXl">20</x:Double>
+  <x:Double x:Key="GuiFontXxl">24</x:Double>
+  <x:Double x:Key="ControlContentThemeFontSize">14</x:Double>
+  <!-- A menu row: 30 px tall, icon + label + a right-aligned shortcut in tertiary text -->
+  <x:Double x:Key="GuiMenuRowHeight">30</x:Double>
+  <!-- code: the platform's mono first (SF Mono / Menlo on macOS: Cascadia and Consolas are not there) -->
+  <FontFamily x:Key="GuiFontMono">SF Mono, Menlo, Cascadia Mono, Consolas, DejaVu Sans Mono, monospace</FontFamily>
+</ResourceDictionary>

@@ -178,7 +178,7 @@ Direct responder calls avoid all three while running the identical WebKit path.
 ## 6. Truthful, consistent identity
 
 - **Default:** no overrides. Keep the engine's own UA, Client Hints, platform, screen and devicePixelRatio.
-  - Appending an honest product token through `applicationNameForUserAgent` / `ApplicationNameForUserAgent` (e.g. `OMPGUI/<version>`) is fine.
+  - Appending an honest product token through `applicationNameForUserAgent` / `ApplicationNameForUserAgent` (e.g. `OMBRA/<version>`) is fine.
   - Do **not** add `Version/x Safari/…` to WKWebView's UA. WKWebView's default UA deliberately omits it, and adding it would claim to be Safari.
 - **No fingerprint patching of any kind:** no `navigator.webdriver`, `plugins`, canvas or WebGL noise, timezone or locale changes. Input that is genuinely user-equivalent makes these unnecessary.
 - **Mobile emulation, only where the engine can be consistent (WebView2).** Use a real device profile from Chromium DevTools' list (`front_end/models/emulation/EmulatedDevices.ts` in devtools-frontend). Apply as one bundle:
@@ -229,7 +229,7 @@ Direct responder calls avoid all three while running the identical WebKit path.
 ### 9.1 Split: page-side locator in an isolated world, native input actuator
 1. `AgentBrowserScripts` library moves into the "omp" world (§5); `RunScriptAsync` gains a world parameter. The agent's own `browser.eval` stays in the page world.
 2. For `click`/`dblclick`/`hover`/`check`/`type`/`press`/`scroll`, the library no longer dispatches events. It returns an **action target**: the element's client rect after `scrollIntoView({block:"center"})`, a hit point (centre, or the first point where `elementFromPoint` hits the element or a descendant), `devicePixelRatio`, and actionability flags (visible, enabled, not covered, stable rect across 2 frames, or a 100 ms timer when the page is hidden). This is Playwright's actionability model.
-3. C# turns the hit point into native input through a new `IAgentInput`, implemented per platform in `OmpGui.App/Platform` beside the snapshot helpers:
+3. C# turns the hit point into native input through a new `IAgentInput`, implemented per platform in `Ombra.App/Platform` beside the snapshot helpers:
    - `MacAgentInput`: objc_msgSend to WKWebView responder methods; `_simulateMouseMove:` when available; `insertText:replacementRange:`; `performKeyEquivalent:` for shortcuts.
    - `WebView2AgentInput`: `CallDevToolsProtocolMethod` COM handler (slot 36); also isolated world and emulation.
    - `GtkAgentInput`: GdkEvent + `gtk_widget_event` on the GLib thread; `evaluate_javascript` with `world_name`.

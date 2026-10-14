@@ -3,7 +3,7 @@
 # ===== Secrets and machine-local settings: never committed =====
 .env
 .env.*
-omp-gui.local.json
+ombra.local.json
 *.local.json
 *.pem
 *.key

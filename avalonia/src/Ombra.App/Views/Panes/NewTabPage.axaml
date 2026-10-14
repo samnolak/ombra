@@ -1,0 +1,96 @@
+<!-- The right panel's new tab (+): the tools as cards with their shortcuts — a tool takes this tab's place (the
+     terminal opens under the chat) — then Recent, the files this chat changed last (only when it changed some), each
+     opening in the Files tab at its change. DataContext: MainViewModel. -->
+<UserControl xmlns:loc="using:Ombra.App.Localization"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
+             x:Class="Ombra.App.Views.Panes.NewTabPage"
+             x:DataType="vm:MainViewModel"
+             AutomationProperties.Name="{loc:T 'New tab'}">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="20,20,20,24" Spacing="28">
+      <StackPanel Spacing="10">
+        <TextBlock Classes="newtab-heading" Text="{loc:T 'Tools'}" />
+        <!-- The tiles' 4 px margins make an 8 px gutter; the grid's -4 keeps their outer edges on the headings' -->
+        <UniformGrid x:Name="ToolGrid" Columns="2" Margin="-4">
+          <Button x:Name="ChangesTool" Classes="tool-card" Command="{Binding OpenToolCommand}" CommandParameter="{x:Static vm:SidePane.Changes}"
+                  ToolTip.Tip="{loc:T 'The files changed, with their changes'}" AutomationProperties.Name="{loc:T 'Changes'}">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <ctl:Icon Data="{StaticResource IconChanges}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="{loc:T 'Changes'}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+              <Border Grid.Column="2" Classes="key-chip"><TextBlock Classes="tool-shortcut" Text="{x:Static vm:MainViewModel.ChangesShortcut}" /></Border>
+            </Grid>
+          </Button>
+          <Button x:Name="FilesTool" Classes="tool-card" Command="{Binding OpenToolCommand}" CommandParameter="{x:Static vm:SidePane.Files}"
+                  ToolTip.Tip="{loc:T 'The project folder as a tree'}" AutomationProperties.Name="{loc:T 'Files'}">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <ctl:Icon Data="{StaticResource IconFiles}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="{loc:T 'Files'}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+              <Border Grid.Column="2" Classes="key-chip"><TextBlock Classes="tool-shortcut" Text="{x:Static vm:MainViewModel.FilesShortcut}" /></Border>
+            </Grid>
+          </Button>
+          <Button x:Name="TerminalTool" Classes="tool-card" Command="{Binding ShowTerminalCommand}"
+                  ToolTip.Tip="{loc:T 'A shell in the project folder, under the chat'}" AutomationProperties.Name="{loc:T 'Terminal'}">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <ctl:Icon Data="{StaticResource IconTerminal}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="{loc:T 'Terminal'}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+              <Border Grid.Column="2" Classes="key-chip"><TextBlock Classes="tool-shortcut" Text="{x:Static vm:MainViewModel.TerminalShortcut}" /></Border>
+            </Grid>
+          </Button>
+          <Button x:Name="TasksTool" Classes="tool-card" Command="{Binding OpenToolCommand}" CommandParameter="{x:Static vm:SidePane.Tasks}"
+                  ToolTip.Tip="{loc:T 'Subagents and background jobs'}" AutomationProperties.Name="{loc:T 'Background tasks'}">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <ctl:Icon Data="{StaticResource IconLayers}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="{loc:T 'Background tasks'}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+              <Border Grid.Column="2" Classes="key-chip"><TextBlock Classes="tool-shortcut" Text="{x:Static vm:MainViewModel.TasksShortcut}" /></Border>
+            </Grid>
+          </Button>
+          <Button x:Name="PlanTool" Classes="tool-card" Command="{Binding OpenToolCommand}" CommandParameter="{x:Static vm:SidePane.Plan}"
+                  ToolTip.Tip="{loc:T 'omp’s task list for this chat'}" AutomationProperties.Name="{loc:T 'Plan'}">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <ctl:Icon Data="{StaticResource IconChecklist}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="{loc:T 'Plan'}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+              <Border Grid.Column="2" Classes="key-chip"><TextBlock Classes="tool-shortcut" Text="{x:Static vm:MainViewModel.PlanShortcut}" /></Border>
+            </Grid>
+          </Button>
+          <Button x:Name="BrowserTool" Classes="tool-card" Command="{Binding OpenToolCommand}" CommandParameter="{x:Static vm:SidePane.Browser}"
+                  ToolTip.Tip="{loc:T 'A page of the built-in browser'}" AutomationProperties.Name="{loc:T 'Browser'}">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+              <ctl:Icon Data="{StaticResource IconGlobe}" Size="16" Margin="0,0,10,0" />
+              <TextBlock Grid.Column="1" Text="{loc:T 'Browser'}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+              <Border Grid.Column="2" Classes="key-chip"><TextBlock Classes="tool-shortcut" Text="{x:Static vm:MainViewModel.BrowserShortcut}" /></Border>
+            </Grid>
+          </Button>
+        </UniformGrid>
+      </StackPanel>
+
+      <!-- The files this chat changed, the latest first: only when it changed some -->
+      <StackPanel x:Name="RecentSection" Spacing="2" IsVisible="{Binding HasSessionFiles}">
+        <TextBlock Classes="newtab-heading" Text="{loc:T 'Recent'}" Margin="0,0,0,6" />
+        <ItemsControl x:Name="RecentList" ItemsSource="{Binding RecentFiles}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:TurnFileViewModel">
+              <Button Classes="recent-row" Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).OpenRecentFileCommand}" CommandParameter="{Binding}"
+                      ToolTip.Tip="{Binding Path}" AutomationProperties.Name="{Binding OpenName}">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                  <Border Classes="recent-tile">
+                    <ctl:Icon Classes="recent-icon" Data="{StaticResource IconFile}" Size="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </Border>
+                  <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Classes="tertiary" Text="{Binding Folder}" TextTrimming="PrefixCharacterEllipsis" FontSize="{DynamicResource GuiFontXs}"
+                               IsVisible="{Binding Folder, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="2" Classes="mono diff-added" Text="{Binding AddedText}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                  <TextBlock Grid.Column="3" Classes="mono diff-removed" Text="{Binding RemovedText}" Margin="6,0,0,0" VerticalAlignment="Center" />
+                </Grid>
+              </Button>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

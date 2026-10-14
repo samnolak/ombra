@@ -1,4 +1,4 @@
-# Project state — OMP GUI (Avalonia, cross-platform)
+# Project state — Ombra (Avalonia, cross-platform)
 
 Living document; keep it short. Plan: [`ROADMAP.md`](ROADMAP.md) · features: [`PARITY.md`](PARITY.md) · design:
 [`design/DESIGN_SYSTEM.md`](design/DESIGN_SYSTEM.md).
@@ -14,10 +14,10 @@ its official RPC over stdio, and uses the harness profile and model/provider con
 | Term | Meaning | Code |
 |---|---|---|
 | Original OMP Core | upstream omp; a separate runtime/process | — (outside this project) |
-| Client Integration Layer | process, stdio, JSONL/v2 framing, request correlation | `src/OmpGui.Rpc` |
-| Application Core / Client Core | portable state, reducer, session control, runtime options | `src/OmpGui.ClientCore` |
-| ViewModels + Avalonia UI | presentation | `src/OmpGui.App` |
-| Platform Layer | OS-specific adapters; the only place that asks which OS this is | `src/OmpGui.App/Platform` (notifications, runtime platform key) |
+| Client Integration Layer | process, stdio, JSONL/v2 framing, request correlation | `src/Ombra.Rpc` |
+| Application Core / Client Core | portable state, reducer, session control, runtime options | `src/Ombra.ClientCore` |
+| ViewModels + Avalonia UI | presentation | `src/Ombra.App` |
+| Platform Layer | OS-specific adapters; the only place that asks which OS this is | `src/Ombra.App/Platform` (notifications, runtime platform key) |
 | Harness, Model/Provider | configuration/behaviour layers on top of omp; not ours, not omp core | user profile |
 
 ## Where things are
@@ -92,7 +92,7 @@ Nothing critical depends on UI timers, focus or rendering. No OS checks outside 
 | Own updater, not Velopack or Sparkle / Squirrel | the client ships as a plain folder / `.app` in an archive; an in-place swap of that folder keeps its path and needs no installer format per OS. The manifest is signed with ECDSA P-256, because .NET verifies it without extra libraries and Ed25519 is not built into .NET 10. Installing waits for the user |
 | omp updates only with the client | each client version pins one runtime pack (tested together); a new pack installs after the client update while the old omp keeps working |
 | First-run provider setup through omp's own TUI | omp exits before its RPC is ready when no provider is set up (18.2.0: "No models available", 18.8.0: "No default model selected"), so RPC login cannot be used then |
-| Local settings in the OS config folder (`omp-gui.local.json`, or `--config`, `OMPGUI_CONFIG`) | no machine paths or secrets in source; atomic writes, `.bak` of hand edits |
+| Local settings in the OS config folder (`ombra.local.json`, or `--config`, `OMBRA_CONFIG`) | no machine paths or secrets in source; atomic writes, `.bak` of hand edits |
 | Mock model only for deterministic tests | Original OMP Core, RPC, provider path, tools stay real; reports separate mock-model results |
 | omp starts with `--config <overlay>` naming every provider the user has not added in `disabledProviders` (ClientCore/Network/ProviderGate) | `UPSTREAM OMP ISSUE`: 18.8.0 fetches public model lists from every provider it knows and probes local model servers, signed in or not (draft: `docs/upstream/omp-discovery-opt-in.md`). The overlay is omp's documented per-run settings layer, so config.yml is never written. Which providers exist and which are added is asked of omp's own modules by a script on its Bun runtime (`UNDOCUMENTED / VERSION-PINNED`: omp 18.8.0 module paths and catalog rules; RealProviderGateTests). A failed check stops the start. The model catalog download (catalog.stencil.so) has no off switch in 18.8.0: documented as a known limitation |
 | Strict network privacy = a loopback proxy in the app, opt-in (ClientCore/Network/PrivacyProxy, NetworkPrivacy) | omp routes every fetch through `PI_PROXY` (18.8.0), so a host allowlist there covers provider streams, token refresh, usage, discovery and the catalog without touching omp; tools inherit the proxy variables. Not an OS firewall: programs that ignore proxy variables, and loopback / private-range targets (omp keeps those direct), are not covered, and the page says so |
@@ -105,23 +105,23 @@ omp 18.8.0 npm sources (pinned since 2026-10-07; 18.2.0 before it, RPC byte-iden
 ## How to run
 
 ```
-dotnet build OmpGui.sln                         # warnings are errors
-dotnet test tests/OmpGui.Tests                  # real-omp + acceptance tests run when OMPGUI_TEST_CONFIG is set
-dotnet run --project src/OmpGui.App             # first run offers to install omp; or --config <omp-gui.local.json>
-OmpGui --self-test report.json [--install-runtime]   # packaged-app check without a window
+dotnet build Ombra.sln                         # warnings are errors
+dotnet test tests/Ombra.Tests                  # real-omp + acceptance tests run when OMBRA_TEST_CONFIG is set
+dotnet run --project src/Ombra.App             # first run offers to install omp; or --config <ombra.local.json>
+Ombra --self-test report.json [--install-runtime]   # packaged-app check without a window
 
 # Package (Linux; the same for the other RIDs)
-dotnet publish src/OmpGui.App -c Release -r linux-x64 --self-contained -o <pub> -p:Version=0.1.0 -p:InformationalVersion=<version>
+dotnet publish src/Ombra.App -c Release -r linux-x64 --self-contained -o <pub> -p:Version=0.1.0 -p:InformationalVersion=<version>
 tools/package/package.sh linux-x64 <pub> <dist> <version>
 
 # Mock environment: Original OMP + the harness profile + the stand-in model (a scripted server, not a model)
 tools/ci/real-omp-smoke.sh <work-dir>           # installs the pinned runtime, builds the harness home, runs the real-omp tests
 #   or by hand: node tools/mock-model/server.mjs 18080 &  tools/stand-in-env/setup.sh <home> 18080 <work>
-#   then OMPGUI_TEST_CONFIG=<omp-gui.local.json with profile "harness", HOME=<home>> dotnet test …
+#   then OMBRA_TEST_CONFIG=<ombra.local.json with profile "harness", HOME=<home>> dotnet test …
 
 # Real-model environment: SmolLM2-135M on llama.cpp, both from PyPI with checked hashes, on 127.0.0.1:18090
 tools/real-model/setup.sh <work> <omp-runtime-dir> 18090    # writes <work>/realmodel.json
-OMPGUI_REAL_MODEL_CONFIG=<work>/realmodel.json OMPGUI_REAL_MODEL_ROUTE=local-llamacpp/smollm2-135m-instruct-q4_1 dotnet test … --filter RealModelTests
+OMBRA_REAL_MODEL_CONFIG=<work>/realmodel.json OMBRA_REAL_MODEL_ROUTE=local-llamacpp/smollm2-135m-instruct-q4_1 dotnet test … --filter RealModelTests
 REAL_MODEL_URL=http://127.0.0.1:18090/v1 REAL_MODEL_ID=smollm2-135m-instruct-q4_1 tools/verify/package-e2e.sh <package> <work>
 
 # Updates: E2E on two local packages (a throwaway key, a feed on 127.0.0.1); a release
@@ -130,7 +130,7 @@ tools/verify/update-e2e.sh <work>                # builds 0.9.0 and 0.9.1, or pa
 tools/release/keygen.sh <dir>                    # a new release key pair (see the script before replacing the key)
 
 # Before a merge (Actions run by hand only): build, the suite, and for UI changes the layout audit
-# (OMPGUI_REVIEW_DIR=<dir> dotnet test … --filter LayoutAudit) and package-e2e.sh; check that the model servers
+# (OMBRA_REVIEW_DIR=<dir> dotnet test … --filter LayoutAudit) and package-e2e.sh; check that the model servers
 # answer GET /v1/models first.
 ```
 

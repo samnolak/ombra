@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
-using OmpGui.WebViewHarness.Native;
+using Ombra.WebViewHarness.Native;
 
-namespace OmpGui.WebViewHarness.Scenarios;
+namespace Ombra.WebViewHarness.Scenarios;
 
 /// <summary>OAuth-style popup: window.open → a WKWebView built from WebKit's configuration → opener postMessage → window.close.</summary>
 internal sealed class PopupScenario : IScenario

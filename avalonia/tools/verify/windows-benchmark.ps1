@@ -5,7 +5,7 @@
   Not executed by the author (Linux container); run on the real machine, with no other heavy load:
 
     powershell -ExecutionPolicy Bypass -File tools\verify\windows-benchmark.ps1 `
-      -Exe "C:\path\to\omp-gui-<version>-win-x64\OmpGui.exe" -Runs 5 -Out bench.csv
+      -Exe "C:\path\to\ombra-<version>-win-x64\Ombra.exe" -Runs 5 -Out bench.csv
 
   Close any running copy of the client first. The client starts omp itself; idle memory is sampled after
   -SettleSeconds. For the streaming scenario, start a prompt by hand when asked and press Enter here; the script then

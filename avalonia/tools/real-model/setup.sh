@@ -14,8 +14,8 @@
 #
 #   tools/real-model/setup.sh <work-dir> <omp-runtime-dir> [port]     # omp-runtime-dir: …/omp-18.8.0-bun-1.4.2
 # Then:
-#   OMPGUI_REAL_MODEL_CONFIG=<work-dir>/realmodel.json OMPGUI_REAL_MODEL_ROUTE=local-llamacpp/smollm2-135m-instruct-q4_1 \
-#     dotnet test tests/OmpGui.Tests --filter FullyQualifiedName~RealModelTests
+#   OMBRA_REAL_MODEL_CONFIG=<work-dir>/realmodel.json OMBRA_REAL_MODEL_ROUTE=local-llamacpp/smollm2-135m-instruct-q4_1 \
+#     dotnet test tests/Ombra.Tests --filter FullyQualifiedName~RealModelTests
 set -euo pipefail
 WORK=${1:?work dir}; RT=${2:?omp runtime dir}; PORT=${3:-18090}
 mkdir -p "$WORK"; WORK=$(cd "$WORK" && pwd); RT=$(cd "$RT" && pwd)

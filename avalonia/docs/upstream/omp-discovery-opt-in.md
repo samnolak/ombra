@@ -1,9 +1,9 @@
 # Upstream proposal: opt-in model discovery and remote catalog
 
 Prepared for [can1357/oh-my-pi](https://github.com/can1357/oh-my-pi), against the pinned release
-**omp 18.8.0** (Bun 1.4.2). **Not submitted yet.** OMP GUI does not fork or patch omp. The patch
+**omp 18.8.0** (Bun 1.4.2). **Not submitted yet.** Ombra does not fork or patch omp. The patch
 `omp-discovery-opt-in.patch` (next to this file) is only for upstream and is not applied
-anywhere in this project. Until upstream ships a fix, OMP GUI relies on an external workaround:
+anywhere in this project. Until upstream ships a fix, Ombra relies on an external workaround:
 a `--config` overlay that sets `disabledProviders`, plus the optional Strict Network Privacy
 allowlist proxy.
 
@@ -217,7 +217,7 @@ PR adds none. Suggested coverage in the monorepo's model-registry tests, using a
    models.dev references.
 4. A provider in `disabledProviders` is never contacted, even when configured.
 
-The patch is `avalonia/docs/upstream/omp-discovery-opt-in.patch` in the OMP GUI repository. It
+The patch is `avalonia/docs/upstream/omp-discovery-opt-in.patch` in the Ombra repository. It
 is a git-style unified diff with `a/packages/…` / `b/packages/…` paths, matching the monorepo
 layout taken from each package's `repository.directory`. It was checked with
 `patch --dry-run -p1` and `git apply --check` against the 18.8.0 published sources laid out as

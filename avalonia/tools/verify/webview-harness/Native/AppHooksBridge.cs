@@ -1,9 +1,9 @@
 #if APP_HOOKS
 using System.Text.Json.Nodes;
-using OmpGui.App.Platform.Mac;
-using OmpGui.ClientCore.Browser;
+using Ombra.App.Platform.Mac;
+using Ombra.ClientCore.Browser;
 
-namespace OmpGui.WebViewHarness.Native;
+namespace Ombra.WebViewHarness.Native;
 
 /// <summary>
 /// The app's hooks (<c>Platform/Mac/WebKitHooks</c>: UI delegate, navigation extras, downloads, pop-ups) on a harness

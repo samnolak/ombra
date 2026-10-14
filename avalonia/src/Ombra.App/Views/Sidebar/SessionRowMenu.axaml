@@ -1,0 +1,67 @@
+<!-- A sidebar chat's menu (right-click on the row, or its ⋯ on hover), in the order of ChatGPT's: Rename, Pin / Unpin;
+     Export as HTML and Share (omp's /export, /share: the chat shown only); Copy session ID, Copy session file path;
+     Delete (asks first). DataContext: the row's SessionItemViewModel (its commands are MainViewModel's: a popup cannot
+     reach the window). -->
+<UserControl xmlns:loc="using:Ombra.App.Localization"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
+             x:Class="Ombra.App.Views.Sidebar.SessionRowMenu"
+             x:DataType="vm:SessionItemViewModel">
+  <StackPanel MinWidth="220" Spacing="2">
+    <Button x:Name="RenameItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+            Command="{Binding RenameCommand}" CommandParameter="{Binding}" AutomationProperties.Name="{loc:T 'Rename'}">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconPencil}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="{loc:T 'Rename'}" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Button x:Name="PinItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+            Command="{Binding TogglePinCommand}" CommandParameter="{Binding}" AutomationProperties.Name="{Binding PinLabel}">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon IsVisible="{Binding !IsPinned}" Data="{StaticResource IconPin}" Size="16" Margin="0,0,10,0" />
+        <ctl:Icon IsVisible="{Binding IsPinned}" Data="{StaticResource IconPinOff}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="{Binding PinLabel}" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Border Classes="menu-separator" IsVisible="{Binding IsCurrent}" />
+    <Button x:Name="ShareItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsVisible="{Binding IsCurrent}"
+            Command="{Binding ShareCommand}" AutomationProperties.Name="{loc:T 'Share a link…'}">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconShare}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="{loc:T 'Share a link…'}" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Button x:Name="ExportItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsVisible="{Binding IsCurrent}"
+            Command="{Binding ExportCommand}" AutomationProperties.Name="{loc:T 'Export as HTML'}">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconExport}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="{loc:T 'Export as HTML'}" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Border Classes="menu-separator" />
+    <Button x:Name="CopyIdItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsVisible="{Binding HasId}"
+            Command="{Binding CopyIdCommand}" CommandParameter="{Binding}" AutomationProperties.Name="{loc:T 'Copy session ID'}">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconHash}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="{loc:T 'Copy session ID'}" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Button x:Name="CopyPathItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+            Command="{Binding CopyPathCommand}" CommandParameter="{Binding}" AutomationProperties.Name="{loc:T 'Copy session file path'}">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="{loc:T 'Copy session file path'}" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Border Classes="menu-separator" />
+    <Button x:Name="DeleteItem" Classes="menu-item danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+            Command="{Binding DeleteCommand}" CommandParameter="{Binding}" AutomationProperties.Name="{loc:T 'Delete'}">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconTrash}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="{loc:T 'Delete…'}" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+  </StackPanel>
+</UserControl>

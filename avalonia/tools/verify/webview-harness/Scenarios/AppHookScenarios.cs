@@ -3,13 +3,13 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using OmpGui.WebViewHarness.Native;
+using Ombra.WebViewHarness.Native;
 #if APP_HOOKS
-using OmpGui.App.Platform.Mac;
-using OmpGui.ClientCore.Browser;
+using Ombra.App.Platform.Mac;
+using Ombra.ClientCore.Browser;
 #endif
 
-namespace OmpGui.WebViewHarness.Scenarios;
+namespace Ombra.WebViewHarness.Scenarios;
 
 /// <summary>
 /// Navigation failures: an unreachable server is reported with the engine's error (the app's error page), a navigation

@@ -1,7 +1,7 @@
 using System.Text.Json.Nodes;
-using OmpGui.WebViewHarness.Native;
+using Ombra.WebViewHarness.Native;
 
-namespace OmpGui.WebViewHarness.Scenarios;
+namespace Ombra.WebViewHarness.Scenarios;
 
 /// <summary>&lt;input type=file multiple&gt; through runOpenPanelWithParameters: no NSOpenPanel, files preset by the harness.</summary>
 internal sealed class FileInputScenario : IScenario

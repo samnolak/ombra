@@ -4,7 +4,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json.Nodes;
 
-namespace OmpGui.WebViewHarness.Server;
+namespace Ombra.WebViewHarness.Server;
 
 /// <summary>
 /// Test pages on <c>http://127.0.0.1:&lt;free port&gt;/</c> (loopback only: no firewall or local-network prompt).

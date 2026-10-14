@@ -1,12 +1,12 @@
 #if APP_HOOKS
 using System.Diagnostics;
 using System.Text.Json.Nodes;
-using OmpGui.App.Platform.Mac;
-using OmpGui.ClientCore.Browser;
-using OmpGui.Rpc;
-using OmpGui.WebViewHarness.Native;
+using Ombra.App.Platform.Mac;
+using Ombra.ClientCore.Browser;
+using Ombra.Rpc;
+using Ombra.WebViewHarness.Native;
 
-namespace OmpGui.WebViewHarness.Scenarios;
+namespace Ombra.WebViewHarness.Scenarios;
 
 /// <summary>
 /// BROWSER_PLAN B3 conformance on real WKWebViews: the app's <see cref="TernHost"/> serves omp's Tern protocol, each
@@ -25,7 +25,7 @@ internal sealed class TernScenario : IAppHooksOnly
     {
         if (FindOmpClient() is not { } omp)
         {
-            ctx.Check("an OMP GUI runtime pack with omp's Tern client is installed (or OMPGUI_TERN_OMP_PACK names one)", false);
+            ctx.Check("an Ombra runtime pack with omp's Tern client is installed (or OMBRA_TERN_OMP_PACK names one)", false);
             return;
         }
         using var host = TernHost.TryStart() ?? throw new InvalidOperationException("The Tern host could not listen.");
@@ -66,14 +66,14 @@ internal sealed class TernScenario : IAppHooksOnly
         return File.Exists(script) ? script : throw new FileNotFoundException("The Tern conformance script is missing.", script);
     }
 
-    /// <summary>bun, omp's bunfig and its pi-coding-agent/src from an installed OMP GUI runtime pack.</summary>
+    /// <summary>bun, omp's bunfig and its pi-coding-agent/src from an installed Ombra runtime pack.</summary>
     private static (string Bun, string Config, string Src)? FindOmpClient()
     {
         var packs = new List<string>();
-        if (Environment.GetEnvironmentVariable("OMPGUI_TERN_OMP_PACK") is { Length: > 0 } pinned) packs.Add(pinned);
+        if (Environment.GetEnvironmentVariable("OMBRA_TERN_OMP_PACK") is { Length: > 0 } pinned) packs.Add(pinned);
         var support = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Application Support");
         if (Directory.Exists(support))
-            foreach (var app in Directory.EnumerateDirectories(support, "OmpGui*"))
+            foreach (var app in Directory.EnumerateDirectories(support, "Ombra*"))
                 if (Directory.Exists(Path.Combine(app, "runtimes")))
                     packs.AddRange(Directory.EnumerateDirectories(Path.Combine(app, "runtimes")));
         foreach (var pack in packs)

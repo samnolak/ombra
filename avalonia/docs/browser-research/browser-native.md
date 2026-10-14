@@ -5,7 +5,7 @@ Scope: JS alert/confirm/prompt, popups (`window.open` / `target=_blank`, OAuth w
 Evidence key:
 - `AV:` = Avalonia.Controls.WebView **12.1.0**, decompiled with `dotnet tool install ilspycmd --tool-path /tmp/ilspy && /tmp/ilspy/ilspycmd -p -o /tmp/avwv ~/.nuget/packages/avalonia.controls.webview/12.1.0/lib/net8.0/Avalonia.Controls.WebView.dll`. Paths below are relative to `/tmp/avwv`. I spot-checked that the `lib/net10.0` build has the same `WKNavigationDelegate` and `MaciosWebViewAdapter`.
 - `WK:` = WebKit `main`, from https://github.com/WebKit/WebKit (headers under `Source/WebKit/UIProcess/API/Cocoa/`, implementation in `Source/WebKit/UIProcess/Cocoa/{NavigationState,UIDelegate}.mm`).
-- Repo paths are relative to `avalonia/src/OmpGui.App/`.
+- Repo paths are relative to `avalonia/src/Ombra.App/`.
 - `[INFERENCE]` marks anything I did not observe directly.
 
 ---
@@ -48,7 +48,7 @@ Content-Type: text/html   (188-byte nginx "401 Authorization Required" page)
 ```
 `https://example.com` itself did not answer. The whole studio is behind nginx `auth_basic`. No OAuth, GIS, Apple/Telegram widget or passkey is reachable before Basic auth succeeds; the app's own bundles are behind the 401, so I could not inspect them.
 
-Chain in OMP GUI today:
+Chain in Ombra today:
 1. `Controls/PreviewPanel.axaml.cs:129-140` creates `new NativeWebView()`. It attaches no `EnvironmentRequested` and no `AdapterCreated` handler, so it uses Avalonia's defaults.
 2. AV `Avalonia.Controls.Macios/MaciosWebViewAdapter.cs:159-165` sets only `navigationDelegate = ManagedWKNavigationDelegate` and never calls `setUIDelegate:`.
 3. The class has no `webView:didReceiveAuthenticationChallenge:completionHandler:`, so WK `NavigationState.mm:1208-1209` calls `completeChallenge(RejectProtectionSpaceAndContinue)`.
@@ -246,9 +246,9 @@ Navigation-delegate additions (§3.0B) plus our own `OmpWKDownloadDelegate` (pro
 
 ### 3.8 Cookies, ITP, persistence
 
-- Today: `WKWebsiteDataStore.defaultDataStore`, persistent per bundle id `io.github.samnolak.omp-gui` (`packaging/Info.plist:7`). Logins already survive restarts in the packaged app. Unbundled runs (`dotnet run`) use a store keyed by the process name instead [INFERENCE].
+- Today: `WKWebsiteDataStore.defaultDataStore`, persistent per bundle id `io.github.samnolak.ombra` (`packaging/Info.plist:7`). Logins already survive restarts in the packaged app. Unbundled runs (`dotnet run`) use a store keyed by the process name instead [INFERENCE].
 - Make it explicit through `EnvironmentRequested`:
-  - `DataStoreIdentifier = <fixed Guid "OMP GUI browser profile">`. `WKWebsiteDataStore dataStoreForIdentifier:` is macOS 14+, matching the app minimum.
+  - `DataStoreIdentifier = <fixed Guid "Ombra browser profile">`. `WKWebsiteDataStore dataStoreForIdentifier:` is macOS 14+, matching the app minimum.
   - `NonPersistentDataStore = false`.
   - `EnableDevTools = true` (Web Inspector via right-click).
   - Benefits: "Clear browsing data" (Claude's ⋮ menu, ref-claude-code.md:958) becomes `+[WKWebsiteDataStore removeDataStoreForIdentifier:completionHandler:]`, or `removeDataOfTypes:modifiedSince:` while views are alive. "Keep cookies" off becomes `NonPersistentDataStore = true`.
@@ -283,10 +283,10 @@ Navigation-delegate additions (§3.0B) plus our own `OmpWKDownloadDelegate` (pro
 ## 4. Agent integration (cmux bridge; omp unchanged)
 
 Facts:
-- omp drives the pane through the cmux protocol implemented in `OmpGui.ClientCore/AgentBrowserBridge.cs`, method switch at `:314-395`. The method list (grep of the omp 18.8.0 runtime) has **no dialog, popup, tab or upload methods**.
+- omp drives the pane through the cmux protocol implemented in `Ombra.ClientCore/AgentBrowserBridge.cs`, method switch at `:314-395`. The method list (grep of the omp 18.8.0 runtime) has **no dialog, popup, tab or upload methods**.
 - While an alert/confirm/prompt is open, the page's JS is blocked, so `RunScriptAsync` (`IAgentBrowserPage.RunScriptAsync`, `:59`) would hang until omp's own timeout.
 
-Design (`OmpGui.ClientCore/BrowserDialogBroker.cs`, platform-neutral and headless-testable):
+Design (`Ombra.ClientCore/BrowserDialogBroker.cs`, platform-neutral and headless-testable):
 - `BrowserDialogRequest { Id, TabId, Kind (Alert|Confirm|Prompt|Credentials|FileChooser|Permission|Download|PopupBlocked|PasskeyUnavailable|SignInBlocked), Origin, IsMainFrame, Message, DefaultText, Realm, IsRetry, CreatedAt, Respond(BrowserDialogAnswer) }`. Platform hooks (§3, §5, §6) create requests and get their native completion called from `Respond`.
 - `PreviewViewModel` gets `PendingDialog`, `Tabs` (opener + popups), `ActiveTab` and `Downloads`. Views render cards outside the native view (see §4.1).
 - Bridge rules (`AgentBrowserBridge` + the app's `IAgentBrowserPage` impl):
@@ -321,7 +321,7 @@ Wording follows the plan: sentence case, "omp" as subject where the agent is inv
 
 ## 5. Windows (WebView2) design
 
-Prerequisite: the app sets `<BuiltInComInteropSupport>false</BuiltInComInteropSupport>` (`OmpGui.App.csproj:8`). That rules out the `Microsoft.Web.WebView2.Core` managed wrappers (classic COM interop RCWs). Instead, declare the few interfaces we need with **`[GeneratedComInterface]`** (source-generated, trim/AOT-safe). For one-offs, keep the raw-vtable style of `Platform/WebView2Snapshot.cs`. Entry point: `IWindowsWebView2PlatformHandle.CoreWebView2` on `AdapterCreated`; it is AddRef'ed, so Release it on `AdapterDestroyed`. Events from our handlers coexist with Avalonia's (WebView2 supports multiple handlers per event).
+Prerequisite: the app sets `<BuiltInComInteropSupport>false</BuiltInComInteropSupport>` (`Ombra.App.csproj:8`). That rules out the `Microsoft.Web.WebView2.Core` managed wrappers (classic COM interop RCWs). Instead, declare the few interfaces we need with **`[GeneratedComInterface]`** (source-generated, trim/AOT-safe). For one-offs, keep the raw-vtable style of `Platform/WebView2Snapshot.cs`. Entry point: `IWindowsWebView2PlatformHandle.CoreWebView2` on `AdapterCreated`; it is AddRef'ed, so Release it on `AdapterDestroyed`. Events from our handlers coexist with Avalonia's (WebView2 supports multiple handlers per event).
 
 | Feature | WebView2 API | Design |
 |---|---|---|

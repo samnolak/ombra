@@ -1,11 +1,11 @@
-// Tern conformance: drives the OMP GUI's Tern host (avalonia/src/OmpGui.ClientCore/Browser/TernHost.cs) with omp's
+// Tern conformance: drives the Ombra's Tern host (avalonia/src/Ombra.ClientCore/Browser/TernHost.cs) with omp's
 // own Tern client — TernSocketClient and TernTab from the pinned omp's source, imported as they are — and prints one
 // JSON object per check on stdout ({"check","ok","detail"}), then {"done":true,"passed","failed"}.
 //
 //   OMP_SRC=<omp>/node_modules/@oh-my-pi/pi-coding-agent/src TERN_PANE_SOCKET=… TERN_PANE=… \
 //     bun --no-install conformance.ts wire|webkit [base-url]
 //
-// wire   — against the headless tests' scripted page (tests/OmpGui.Tests/TernHostTests.cs): every op's request and
+// wire   — against the headless tests' scripted page (tests/Ombra.Tests/TernHostTests.cs): every op's request and
 //          answer shape, ordering, timeouts, late answers, errors.
 // webkit — against real WKWebViews in the windowless harness (tools/verify/webview-harness, scenario "tern"):
 //          the same ops on real pages served at base-url (Server/Pages/tern*.html).

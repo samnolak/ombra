@@ -1,6 +1,6 @@
 # Tern daemon wire protocol as used by omp 18.8.0
 
-Source root abbreviations (all under `~/Library/Application Support/OmpGui-Test/runtimes/omp-18.8.0-bun-1.4.2/omp/node_modules/@oh-my-pi/pi-coding-agent/src/`):
+Source root abbreviations (all under `~/Library/Application Support/Ombra-Test/runtimes/omp-18.8.0-bun-1.4.2/omp/node_modules/@oh-my-pi/pi-coding-agent/src/`):
 - `W` = `tools/browser/tern/wire.ts`, `T` = `tools/browser/tern/tern-tab.ts`, `K` = `tools/browser/tern/keys.ts`,
   `PK` = `tools/browser/tern/page-kit.ts`, `PC` = `tools/browser/tern/page-capture.ts`, `NL` = `tools/browser/tern/network-log.ts`,
   `KD` = `tools/browser/tern/kind.ts`, `OT` = `tools/browser/op-timeouts.ts`, `TS` = `tools/browser/tab-supervisor.ts`,
@@ -276,6 +276,6 @@ Emulation (T:2015-2101):
 - `eval` `message` for `js` errors: first line `Error: <msg>` is shown to the agent (T:179-181).
 - `events` `seq` must be strictly increasing and stable per block; `after` is the last seen seq.
 - Script handler names are WebKit-specific (`webkit.messageHandlers.stencil|stencilFrame`, PC:68, PK:1321). **[INFERENCE]** WebKitGTK supports the same `window.webkit.messageHandlers.<name>` API and script worlds natively; on WebView2 the host must inject a shim object `webkit.messageHandlers.{stencil,stencilFrame}.postMessage` forwarding to `chrome.webview.postMessage` in each world, and emulate the isolated world (e.g. CDP `Page.createIsolatedWorld` via `CallDevToolsProtocolMethod`); WebView2 `ExecuteScriptAsync` has no frame/world parameters, so `frame` paths need CDP or `CoreWebView2Frame.ExecuteScriptAsync`.
-- Windows: omp uses `net.createConnection({ path })` (W:373). **[INFERENCE]** in Node/Bun on Windows a `path` of the form `\\.\pipe\<name>` connects to a named pipe, so `TERN_PANE_SOCKET=\\.\pipe\omp-gui-…` should work; AF_UNIX socket files on Windows 10+ are also an option. Not verified for Bun 1.4.2.
+- Windows: omp uses `net.createConnection({ path })` (W:373). **[INFERENCE]** in Node/Bun on Windows a `path` of the form `\\.\pipe\<name>` connects to a named pipe, so `TERN_PANE_SOCKET=\\.\pipe\ombra-…` should work; AF_UNIX socket files on Windows 10+ are also an option. Not verified for Bun 1.4.2.
 - Idle-close reaps Tern PiPs like headless tabs (TS:1199-1201) — expect unsolicited `close` ops.
 - `capture` is called after a rAF wait in the isolated world (T:1770-1776); background/hidden web views may never deliver rAF — kit uses a 50 ms timeout fallback (PK:650-654), but the host should keep the view rendering (hidden views may capture blank) **[INFERENCE]**.

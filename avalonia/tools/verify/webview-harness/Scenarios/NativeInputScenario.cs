@@ -3,11 +3,11 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using OmpGui.App.Platform.Mac;
-using OmpGui.ClientCore.Browser;
-using OmpGui.WebViewHarness.Native;
+using Ombra.App.Platform.Mac;
+using Ombra.ClientCore.Browser;
+using Ombra.WebViewHarness.Native;
 
-namespace OmpGui.WebViewHarness.Scenarios;
+namespace Ombra.WebViewHarness.Scenarios;
 
 /// <summary>
 /// The trusted-input self-test (BROWSER_PLAN B4) with the app's own code: <c>Platform/Mac/NativeInput.cs</c> driven by
@@ -205,9 +205,9 @@ internal sealed class NativeInputScenario : IScenario
             thrown?.StartsWith("Error: boom", StringComparison.Ordinal) == true && rejected?.StartsWith("TypeError: late", StringComparison.Ordinal) == true,
             new JsonObject { ["thrown"] = thrown, ["rejected"] = rejected });
 
-        await isolated.CallAsync("() => { globalThis.__ompGuiProbe = 42; window.ompHelper = { secret: 1 }; return true; }", "[]", ct);
-        var again = await isolated.CallAsync("() => globalThis.__ompGuiProbe", "[]", ct);
-        var page = await view.EvalAsync("({ probe: typeof __ompGuiProbe, helper: 'ompHelper' in window, names: Object.getOwnPropertyNames(window).filter(k => /^_*omp/i.test(k)) })");
+        await isolated.CallAsync("() => { globalThis.__ombraProbe = 42; window.ompHelper = { secret: 1 }; return true; }", "[]", ct);
+        var again = await isolated.CallAsync("() => globalThis.__ombraProbe", "[]", ct);
+        var page = await view.EvalAsync("({ probe: typeof __ombraProbe, helper: 'ompHelper' in window, names: Object.getOwnPropertyNames(window).filter(k => /^_*omp/i.test(k)) })");
         ctx.Check("the page cannot see the isolated world's globals (they persist there)",
             again == "42" && (string?)page?["probe"] == "undefined" && page?["helper"]?.GetValue<bool>() == false && page?["names"] is JsonArray { Count: 0 }, page);
 

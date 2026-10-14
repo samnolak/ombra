@@ -19,7 +19,7 @@ esac
 # The client's own installer (RuntimeInstaller): Bun from npm checked against its pinned sha512, omp from the pack
 # lockfile (bun install --frozen-lockfile --ignore-scripts), omp --version checked. The same code a user runs.
 echo "::group::Pinned runtime via the client's installer"
-(cd "$HERE" && OMPGUI_RUNTIME_INSTALL_DIR="$WORK/runtimes" dotnet test tests/OmpGui.Tests -c Release --no-build \
+(cd "$HERE" && OMBRA_RUNTIME_INSTALL_DIR="$WORK/runtimes" dotnet test tests/Ombra.Tests -c Release --no-build \
   --filter "FullyQualifiedName~RealRuntimeInstallTests" --logger "console;verbosity=detailed")
 RT="$WORK/runtimes/omp-18.8.0-bun-1.4.2"
 BUN="$RT/bun/bun$EXE"
@@ -38,7 +38,7 @@ for _ in $(seq 1 50); do curl -sf "http://127.0.0.1:$PORT/v1/models" >/dev/null 
 
 native() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else echo "$1"; fi; }
 # HOME redirects omp's ~/.omp; USERPROFILE is what omp reads for the home directory on Windows.
-cat > "$WORK/omp-gui.local.json" <<EOF
+cat > "$WORK/ombra.local.json" <<EOF
 {
   "command": "$(native "$BUN")",
   "prefixArgs": ["--no-install", "$(native "$CLI")"],
@@ -54,5 +54,5 @@ cat > "$WORK/omp-gui.local.json" <<EOF
 EOF
 
 cd "$HERE"
-OMPGUI_TEST_CONFIG="$(native "$WORK/omp-gui.local.json")" dotnet test tests/OmpGui.Tests -c Release --no-build \
+OMBRA_TEST_CONFIG="$(native "$WORK/ombra.local.json")" dotnet test tests/Ombra.Tests -c Release --no-build \
   --filter "FullyQualifiedName~RealOmp|FullyQualifiedName~AcceptanceTests" --logger "console;verbosity=normal"

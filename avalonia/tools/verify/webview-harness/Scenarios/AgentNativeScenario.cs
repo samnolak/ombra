@@ -1,11 +1,11 @@
 #if APP_INPUT
 using System.Text.Json.Nodes;
-using OmpGui.App.Platform.Mac;
-using OmpGui.ClientCore;
-using OmpGui.ClientCore.Browser;
-using OmpGui.WebViewHarness.Native;
+using Ombra.App.Platform.Mac;
+using Ombra.ClientCore;
+using Ombra.ClientCore.Browser;
+using Ombra.WebViewHarness.Native;
 
-namespace OmpGui.WebViewHarness.Scenarios;
+namespace Ombra.WebViewHarness.Scenarios;
 
 /// <summary>
 /// The agent's browser end to end on a real WKWebView: ClientCore's <see cref="AgentBrowserBridge"/> answering omp's

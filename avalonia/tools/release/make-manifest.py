@@ -3,7 +3,7 @@
 
     tools/release/make-manifest.py <dist-dir> --version 0.6.0 [--base-url URL] [--repo owner/name] [--notes-file F]
 
-Every omp-gui-<version>-<rid>.(tar.gz|zip) in <dist-dir> becomes an asset (size and SHA-256 computed here; a
+Every ombra-<version>-<rid>.(tar.gz|zip) in <dist-dir> becomes an asset (size and SHA-256 computed here; a
 <package>.sha256 next to it must agree). The URL of each package is <base-url>/<file>; the default base URL is the
 GitHub release of v<version> in --repo (or $GITHUB_REPOSITORY). "runtime" names the pinned omp pack this version
 brings (RuntimePack.Name in the client source, with its runtime/packs/<name>/pack.json), so a client can tell the
@@ -18,7 +18,7 @@ RIDS = "linux-x64|linux-arm64|win-x64|win-arm64|osx-arm64|osx-x64"
 
 
 def runtime_pack():
-    src = open(os.path.join(AVALONIA, "src/OmpGui.App/Services/Runtime/RuntimePack.cs"), encoding="utf-8").read()
+    src = open(os.path.join(AVALONIA, "src/Ombra.App/Services/Runtime/RuntimePack.cs"), encoding="utf-8").read()
     name = re.search(r'public const string Name = "([^"]+)";', src).group(1)
     pack = json.load(open(os.path.join(ROOT, "runtime/packs", name, "pack.json"), encoding="utf-8"))
     if pack["name"] != name:
@@ -42,7 +42,7 @@ def main():
     notes = open(a.notes_file, encoding="utf-8").read().strip() if a.notes_file else (a.notes or "")
     assets = {}
     for name in sorted(os.listdir(a.dist)):
-        m = re.match(rf"omp-gui-(.+)-({RIDS})\.(tar\.gz|zip)$", name)
+        m = re.match(rf"ombra-(.+)-({RIDS})\.(tar\.gz|zip)$", name)
         if not m:
             continue
         if m.group(1) != a.version:
@@ -54,7 +54,7 @@ def main():
             sys.exit(f"{name}: SHA-256 differs from {os.path.basename(side)}")
         assets[m.group(2)] = {"file": name, "url": f"{base.rstrip('/')}/{name}", "sha256": sha, "size": os.path.getsize(path)}
     if not assets:
-        sys.exit(f"no omp-gui-{a.version}-<rid> packages in {a.dist}")
+        sys.exit(f"no ombra-{a.version}-<rid> packages in {a.dist}")
     manifest = {"schema": 2, "version": a.version, "notes": notes, "runtime": runtime_pack(), "assets": assets}
     out = a.out or os.path.join(a.dist, "update.json")
     with open(out, "w", encoding="utf-8", newline="\n") as f:

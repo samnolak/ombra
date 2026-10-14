@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report it privately: the repository's **Security** tab → **Report a vulnerability**. Do not open a public
-issue for it. Include the client version (`OmpGui --version`), your OS and the steps to reproduce.
+issue for it. Include the client version (`Ombra --version`), your OS and the steps to reproduce.
 
 ## Open a folder only if you trust it
 

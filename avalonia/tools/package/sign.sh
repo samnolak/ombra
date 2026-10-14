@@ -3,8 +3,8 @@
 # bought, no OS protection is bypassed, and a package that could not be signed says so in <package>.signing.txt
 # (never "signed" without a signature that verifies).
 #
-#   tools/package/sign.sh windows  <folder> <record>          Authenticode (SHA-256, RFC 3161 timestamp) on OmpGui.exe and
-#                                                             the client's own OmpGui*.dll; verified with signtool verify /pa
+#   tools/package/sign.sh windows  <folder> <record>          Authenticode (SHA-256, RFC 3161 timestamp) on Ombra.exe, OmpGui.exe and
+#                                                             the client's own Ombra*.dll; verified with signtool verify /pa
 #   tools/package/sign.sh macos    <app> <record>             Developer ID, hardened runtime, packaging/entitlements.plist,
 #                                                             every Mach-O inside, then the bundle; else the project's own
 #                                                             self-signed certificate; else an ad-hoc signature
@@ -36,8 +36,8 @@ case "$MODE" in
     SIGNTOOL=$(ls -d "/c/Program Files (x86)/Windows Kits/10/bin/"*/x64/signtool.exe 2>/dev/null | sort -V | tail -1)
     [ -x "$SIGNTOOL" ] || { echo "signtool.exe not found"; exit 1; }
     printf '%s' "$WINDOWS_CERT_PFX_BASE64" | base64 -d > "$TMP/cert.pfx"
-    FILES=("$TARGET/OmpGui.exe")
-    for f in "$TARGET"/OmpGui*.dll; do [ -f "$f" ] && FILES+=("$f"); done
+    FILES=("$TARGET/Ombra.exe" "$TARGET/OmpGui.exe")
+    for f in "$TARGET"/Ombra*.dll; do [ -f "$f" ] && FILES+=("$f"); done
     WIN=(); for f in "${FILES[@]}"; do WIN+=("$(cygpath -w "$f")"); done
     # Git Bash rewrites arguments that look like POSIX paths ("/fd" → "C:/Program Files/Git/fd"), so signtool lost
     # its switches; the paths above are already converted with cygpath.
@@ -45,7 +45,7 @@ case "$MODE" in
     "$SIGNTOOL" sign /fd sha256 /td sha256 /tr "${WINDOWS_TIMESTAMP_URL:-http://timestamp.digicert.com}" \
       /f "$(cygpath -w "$TMP/cert.pfx")" /p "$WINDOWS_CERT_PASSWORD" "${WIN[@]}" > "$TMP/sign.log" 2>&1 || { cat "$TMP/sign.log"; exit 1; }
     "$SIGNTOOL" verify /pa "${WIN[@]}" > "$TMP/verify.log" 2>&1 || { cat "$TMP/verify.log"; exit 1; }
-    record "windows: Authenticode, verified (signtool verify /pa): ${#FILES[@]} files ($(cd "$TARGET" && ls OmpGui.exe OmpGui*.dll | tr '\n' ' '))"
+    record "windows: Authenticode, verified (signtool verify /pa): ${#FILES[@]} files ($(cd "$TARGET" && ls Ombra.exe OmpGui.exe Ombra*.dll | tr '\n' ' '))"
     ;;
 
   macos)

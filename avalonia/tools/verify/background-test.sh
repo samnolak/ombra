@@ -5,10 +5,10 @@
 # (--timeline); this script adds window state, process samples and screenshots.
 #
 #   tools/verify/background-test.sh <out-dir> <config.json> [minutes=20] [task-minutes=24]
-# APP_BIN=<path to a packaged OmpGui executable> runs a package instead of the Release build output.
+# APP_BIN=<path to a packaged Ombra executable> runs a package instead of the Release build output.
 set -euo pipefail
 OUT=${1:?out dir}; CONFIG=${2:?config}; MINUTES=${3:-20}; TASK=${4:-24}
-APP=$(cd "$(dirname "$0")/../.." && pwd)/src/OmpGui.App/bin/Release/net10.0/OmpGui.dll
+APP=$(cd "$(dirname "$0")/../.." && pwd)/src/Ombra.App/bin/Release/net10.0/Ombra.dll
 if [ -n "${APP_BIN:-}" ]; then RUN=("$APP_BIN"); else RUN=(dotnet "$APP"); fi
 export DISPLAY=${DISPLAY:-:99}
 mkdir -p "$OUT"
@@ -27,7 +27,7 @@ echo "$APP_PID" > "$OUT/app.pid"
 for _ in $(seq 1 120); do
   grep -q ",Running," "$OUT/timeline.csv" 2>/dev/null && break; sleep 1
 done
-WIN=$(xdotool search --sync --pid "$APP_PID" --name "OMP GUI" | head -1)
+WIN=$(xdotool search --sync --pid "$APP_PID" --name "Ombra" | head -1)
 log "running; window $WIN"
 sleep 5
 import -window root "$OUT/1-before-minimize.png"
