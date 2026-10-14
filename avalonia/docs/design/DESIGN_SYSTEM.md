@@ -415,14 +415,12 @@ Rendered by `DesignGalleryTests` (headless, 1180 × 760).
 | Transcript | ![](screens/after/design-transcript-light.png) | ![](screens/after/design-transcript-dark.png) |
 | Approval | ![](screens/after/design-approval-light.png) | ![](screens/after/design-approval-dark.png) |
 
-More: [running command, light](screens/after/design-running-light.png) ·
-[running command, dark](screens/after/design-running-dark.png) ·
-[preview, light](screens/after/design-preview-light.png) ·
+More: [preview, light](screens/after/design-preview-light.png) ·
 [preview, dark](screens/after/design-preview-dark.png) ·
-[dictation, light](screens/after/design-dictation-light.png) ·
 [new session, light](screens/after/design-new-session-light.png) ·
 [new session, dark](screens/after/design-new-session-dark.png) ·
 [tasks, light](screens/after/design-todos-light.png) ·
+[tasks, dark](screens/after/design-todos-dark.png) ·
 [first run, light](screens/after/design-first-run-light.png) ·
 [first run, dark](screens/after/design-first-run-dark.png) ·
 [settings, light](screens/after/design-settings-light.png) ·

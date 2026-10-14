@@ -16,7 +16,7 @@ using Xunit;
 namespace Ombra.Tests;
 
 /// <summary>
-/// The conversation's scrolling with a long chat and a streaming reply (P0-1/P0-2 of docs/FIX_PLAN.md): the view follows
+/// The conversation's scrolling with a long chat and a streaming reply: the view follows
 /// the reply without a pixel of jitter, holds still for a reader who scrolled up, opens on the last row, and rows
 /// changing above the view move nothing on screen.
 /// </summary>

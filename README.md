@@ -9,7 +9,7 @@ not an official product of the omp, Bun, Anthropic or OpenAI projects.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="avalonia/docs/design/screens/readme-window-dark.png">
-  <img alt="Ombra: a finished run with tool calls, a diff, the plan card and the message box" src="avalonia/docs/design/screens/readme-window.png">
+  <img alt="Ombra: a finished reply with a code block, a table and the change card, over the message box" src="avalonia/docs/design/screens/readme-window.png">
 </picture>
 
 ## Install

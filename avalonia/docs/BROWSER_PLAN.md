@@ -378,7 +378,7 @@ the user's real-site checks, then release.
 | After each phase | `reviewer` | medium | regressions, wording, UX states |
 
 Waves: **1** = B0 + A1 + A2 + A3 + B1 (parallel; B0 gates B2–B4 on macOS). **2** = B2 + B3 + B4. **3** = C1–C4.
-**4** = C5 + D1 + D2. **5** = D3, test app, user checks, release. File ownership per slice as in FIX_PLAN; shared
+**4** = C5 + D1 + D2. **5** = D3, test app, user checks, release. Each slice owns its files; shared
 files (`PreviewPanel.axaml(.cs)`, `App.axaml.cs`) get small targeted edits only.
 
 Isolation: all agents verify headless or in the windowless harness; nothing opens windows on the user's screen or
