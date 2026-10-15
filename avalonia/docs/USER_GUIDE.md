@@ -169,8 +169,8 @@ project yet), so the OS warns on first start:
   animated GIF shows its first frame.
 - **New session** — the page asks, in Dio’s words, *Oh? You’re approaching ‹project›?* under the app’s mark; the project opens the same project menu,
   and the starter prompts under it (*Explain how this project is organized*, *Find a bug and fix it*, *Add tests for
-  the code I changed last*) fill the message box to edit and send. A new chat without a project asks *What should we
-  work on?* with general starters (*Explain a concept in simple terms*, *Write a script that automates a task*, *Help
+  the code I changed last*) fill the message box to edit and send. A new chat without a project asks *Oh? You’re
+  approaching ‹me›?* — "me" opens the project menu too — with general starters (*Explain a concept in simple terms*, *Write a script that automates a task*, *Help
   me plan something step by step*). Notices from omp's start (or a session that could not be opened) do not hide it:
   they are listed above it.
 - **Tool calls** — each is one line that says what happened, in the tense of its state: *Running* / *Ran*,
@@ -178,11 +178,17 @@ project yet), so the OS warns on first start:
   *Moved* (`old → new`),
   *Wrote*, then what it works on, what it found (*2 lines*, *3 matches in 2 files*), its +N −M and how long it took
   (from a tenth of a second). The mark in front pulses while it runs, is a check when it is done, a red ✕ when it
-  failed (with the reason as a chip: *exit 127*, *timed out*) and a dashed circle when it was interrupted; while omp
-  waits for your approval the step reads *Waiting for approval*. A command shows as a console block: `$ command` and
+  failed (with the reason as a chip: *exit 127*, *timed out*) and a dashed circle when it was interrupted or skipped (a
+  step omp set aside to handle a message that came in first — yours, another agent's, a finished background job — says
+  why, e.g. *Skipped: a background job finished first*; omp runs it again if it is still needed); while omp
+  waits for your approval the step reads *Waiting for approval*. A message one agent sends another (omp's subagents
+  talking over IRC) is a card naming who wrote to whom (*GallerySolutions → omp*), its first two lines under it; a
+  click opens the whole message. A command shows as a console block: `$ command` and
   its newest lines while it runs, its first three lines and **… +N lines** when it is done (a failed one has a red
   edge); a command with no output stays one line. Two or more reads and searches in a row fold into one line,
-  *Explored 2 files, 2 searches* (*Exploring…* with the current step while they run); click it for the steps. Click a
+  *Explored 2 files, 2 searches* (*Exploring…* with the current step while they run); click it for the steps. What a
+  line folds sits under it as a tree: its rows one step to the right, with a thin guide down from the line (a finished
+  turn's *Worked for…* line, then a group's line), so you see what goes away before you fold it. Click a
   line to open the whole output: an open console or output starts with a bar that says what it is (**Terminal** and the
   command, **Output** and what the call read) and folds it again. *Thinking…* counts the seconds while the model
   thinks, then reads *Thought for 4s*; click it for the thoughts. While an open block is longer than the view, its
@@ -450,6 +456,13 @@ While it is open it refreshes after each reply. The limits come from omp's own u
 background: nothing is sent to the conversation); omp caches them, and the app asks again at most every 30 seconds,
 after a reply ends, or when you click refresh.
 
+Some providers give an account **saved resets** (ChatGPT and Claude subscriptions, now and then): each refreshes a
+used-up limit when you spend it. Under the account's meters the popover and Settings → Model providers show how many
+it has, how many can be spent now, when the soonest expires, or why none can be spent now (omp's reason, such as a
+cooldown). **Use a saved reset** asks once more in place; **Use reset** has omp spend one of that account's resets
+(`/usage reset`, without a message in the conversation), shows omp's answer under the account and reads the limits
+again. It needs a running chat; a spent reset cannot be taken back.
+
 ### Model options
 
 Under the model list: **Fast mode** (the provider's priority tier for this session: faster, costs more; omp says so
@@ -516,7 +529,8 @@ their own below:
   appears while omp is running. API keys stay in omp's configuration: a key typed for a custom provider goes into
   `models.yml` (readable only by your user when the app creates it), never into the app's own files.
   Below it, *Plan usage* shows every signed-in account whose provider reports limits (subscription windows, spend),
-  as meters with the share used and the time to reset, with a refresh button. Hidden when no provider reports usage.
+  as meters with the share used and the time to reset, and the account's saved resets with **Use a saved reset**
+  (see *Context and usage*), with a refresh button. Hidden when no provider reports usage.
 - **Advanced** — *omp runtime*: which omp the app starts. **Command** empty means the omp the app
   installed, otherwise omp from PATH; *Arguments before omp's own* (one per line; for your own Bun setup the command
   is `bun` with `--no-install` and the path to omp's `cli.ts`); *Profile* (`OMP_PROFILE`); **Save and restart omp**,
@@ -689,16 +703,21 @@ omp reads only when it starts say so and offer **Restart omp**.
 
 ## Pets
 
-A small pixel pet sits on the top edge of the message box, at its right end, and lives there: it breathes, blinks,
-looks around, and now and then twitches an ear, hops, stretches with a yawn or wiggles. It follows what omp does: it
-looks up at a thought cloud with dots while the model thinks or writes, bounces busily next to a turning gear while a
-tool runs, pops up a **!** and looks at you when omp asks you something, hops for joy among sparkles when a run
-finishes, wobbles with a sweat drop when a tool fails or omp stops, and falls asleep with drifting Zzz after three
-quiet minutes (typing or clicking it wakes it up). It looks at the pointer when you hover it, glances at the message
-box while you type, and hops happily when clicked. On the message box it has its own strip above the box, so it never
-covers the conversation; in a window less than 520 px tall it steps aside and gives that strip back. It moves only
-while the window is active and redraws only when something changes: minimised, in the background, or asleep for a
-while, it does not redraw at all.
+ONI — a small oni in a rigid mask, with red glowing eyes and two spirit flames, a red one and a violet one — sits on
+the top edge of the message box, at its right end, and follows what omp does. Idle it breathes and its spirits drift
+beside it; while the model thinks it ponders with bouncing dots over its head; while a tool runs it works at a laptop
+inside a turning seal of light; when omp asks you something it raises a hand with a **?**; when a run finishes it
+sways with joy (feet planted) for a couple of seconds; when a tool fails it winces with a **!!** for 2.4 s and goes
+back to work, and when omp itself stops it stays alarmed, with flickering interference behind it, until omp is back.
+A run you stop puts it back to idle without celebrating. After three quiet minutes it curls up and sleeps with rising
+z's; typing, hovering or clicking it wakes it. Short changes do not make it flicker: a mood shows once it has held for
+a moment, and stays at least 0.7 s. Every change goes through its entry animation, and a change in the middle of one
+turns back smoothly from where it is. On the message box it has its own strip above the box, so it never covers the
+conversation; in a window less than 520 px tall it steps aside and gives that strip back. It moves only while the
+window is active and it is on screen: minimised, in the background, hidden or asleep for half a minute, it shows a
+still picture and draws nothing more; back in view it carries on where it is now. A question or a fault nobody has
+answered for two minutes, and the desktop pet behind other apps, keep moving at a calmer frame rate. With **Reduce
+motion** (Settings → Pets, on by default when the system asks to reduce motion) it shows every pose still.
 
 **Click the pet** to message omp from it: a small message box opens above it with the keyboard in it, and the pet
 says what omp is doing (or a word of its own). **Enter** sends the text to the conversation just as the message box's
@@ -706,27 +725,30 @@ Send does (a new prompt, or queued for after the run while one goes on), without
 **Esc**, a click on the pet or a click elsewhere closes it (the text stays for next time) and the keyboard goes back
 where it was.
 
-**Drag the pet** (press and move it a few pixels; a press that barely moves is a click) to put it anywhere on your
+**Drag the pet** (press and move it 6 points; a press that barely moves is a click) to carry it anywhere on your
 screens, like a desktop pet: it lifts off the message box into a small window of its own that floats over every app,
-on any monitor, and stays where you drop it (also after a restart). It keeps clear of the menu bar, the Dock and the
-taskbar, and crosses from one monitor to another where they touch; unplug the monitor it is on and it comes over to
-one that is left (plug it back and it returns). Only the pet itself takes clicks: the screen around it works as
-usual. Out there it stays while the settings page is open and while the app's window is minimised; behind other apps
-it moves only while omp works, asks something or has news, and otherwise rests on a still picture. On macOS it shows
-on every Space and over full-screen apps, and Mission Control leaves it where it is. Clicking or dragging it makes
-the app the active one, as a click on any of its windows does. Its speech bubble and message box open beside it
-there too; while it is off the message box, the box gives its strip back. Drop it close to its place on the message
-box and it sits there again, or use **Reset position** in Settings → Pets.
+hanging from the pointer by the scruff, its body swinging with your moves and its spirits circling it. Let go and it
+keeps its swing, drops onto the spot under it with a puff of dust over its boots and goes back to whatever omp is
+doing now (a question asked while you held it shows once it lands). It stays where you put it (also after a restart),
+on any monitor. It keeps clear of the menu bar, the Dock and the taskbar, and crosses from one monitor to another
+where they touch; unplug the monitor it is on and it comes over to one that is left (plug it back and it returns).
+Only the pet itself takes clicks: the screen around it works as usual. Out there it stays while the settings page is
+open and while the app's window is minimised; behind other apps it moves only while omp works, asks something or has
+news, and otherwise rests on a still picture. On macOS it shows on every Space and over full-screen apps, and Mission
+Control leaves it where it is. Clicking or dragging it makes the app the active one, as a click on any of its windows
+does. Its speech bubble and message box open beside it there too; while it is off the message box, the box gives its
+strip back. Put it down close to its place on the message box and it sits there again, or use **Reset position** in
+Settings → Pets. If the pointer is taken away mid-carry (another window grabs it), the pet is put down where it is;
+that never counts as a click.
 
 **Roams: Inside the window** (Settings → Pets) keeps it in the app's window instead: dragged, it stays where you drop
 it inside the window, also when the window is resized. Switching between the two puts the pet back on the message box.
 
-**Settings → Pets** turns the pet on or off (on by default), sets its size (small 32 px or medium 48 px, the default),
-where it roams (the whole desktop, the default, or inside the window)
-and picks one of nine: Pi (omp's own), a cat, an owl, a robot, a slime, a cactus, a ghost, a fox and a turtle.
-**Create pet** makes your own (body, color, accessory, name) with a live preview of every mood; **Customize** renames,
-recolors or dresses the chosen one, deletes one you made, or resets a built-in one. Pets belong to the GUI: they are
-saved in its settings file (`pet`), and omp knows nothing about them.
+**Settings → Pets** turns the pet on or off (on by default), sets its size (64, 80 — the default — or 96 points
+tall), **Reduce motion**, and where it roams (the whole desktop, the default, or inside the window). **What it does**
+shows a preview of ONI in each case: idle, thinking, working, waiting, done, a failed tool, omp stopped, a stopped run,
+asleep. The pet belongs to the GUI: its settings are saved in its settings file (`pet`), and omp knows nothing about
+it. Its drawings are decoded once, at the size they are shown, and let go when no pet is on screen.
 
 ## Updates
 

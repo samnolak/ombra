@@ -5,9 +5,9 @@ using Ombra.App.Localization;
 namespace Ombra.App.ViewModels;
 
 /// <summary>
-/// The icon rail left of the sidebar (MainWindow): Plugins, MCP (Connectors) and Skills at the top, Settings at the
-/// bottom. Each opens its settings page; the one whose page is shown is lit. Skills is a section of the Plugins and
-/// skills page: the rail scrolls the page to it (<see cref="SettingsAnchorRequested"/>).
+/// The icon rail left of the sidebar (MainWindow): Chats, Plugins, MCP (Connectors) and Skills at the top, Settings at
+/// the bottom. Chats goes back to the conversation; the others open their settings page. The one shown is lit. Skills is
+/// a section of the Plugins and skills page: the rail scrolls the page to it (<see cref="SettingsAnchorRequested"/>).
 /// </summary>
 public partial class MainViewModel
 {
@@ -17,11 +17,13 @@ public partial class MainViewModel
     /// <summary>The view scrolls the settings page to this part ("skills": the Skills section of Plugins and skills).</summary>
     public event Action<string>? SettingsAnchorRequested;
 
+    public bool IsChatsRailOn => !IsSettingsOpen;
     public bool IsPluginsRailOn => IsSettingsOpen && SettingsCategory == "plugins" && SettingsAnchor != "skills";
     public bool IsSkillsRailOn => IsSettingsOpen && SettingsCategory == "plugins" && SettingsAnchor == "skills";
     public bool IsConnectorsRailOn => IsSettingsOpen && SettingsCategory == "connectors";
     public bool IsSettingsRailOn => IsSettingsOpen && SettingsCategory is not ("plugins" or "connectors");
 
+    public static string ChatsRailTip { get; } = Loc.T("Chats");
     public static string PluginsRailTip { get; } = Loc.T("Plugins");
     public static string ConnectorsRailTip { get; } = Loc.T("MCP servers (Connectors)");
     public static string SkillsRailTip { get; } = Loc.T("Skills");
@@ -30,6 +32,7 @@ public partial class MainViewModel
 
     private void OnRailChanged()
     {
+        OnPropertyChanged(nameof(IsChatsRailOn));
         OnPropertyChanged(nameof(IsPluginsRailOn));
         OnPropertyChanged(nameof(IsSkillsRailOn));
         OnPropertyChanged(nameof(IsConnectorsRailOn));

@@ -16,8 +16,13 @@ public abstract partial class RowViewModel : ObservableObject
     /// <summary>The step group this row is a step of (StepGroups.cs), or null: tool steps and the replies with nothing
     /// to read between them.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(InGroup))]
+    [NotifyPropertyChangedFor(nameof(Depth))]
     private StepGroupRowViewModel? _group;
+
+    /// <summary>One of the rows a finished turn's "Worked for…" line folds away (TurnFolds.cs).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Depth))]
+    private bool _isInTurn;
 
     /// <summary>Hidden inside its folded group of steps: the group's one line stands for it.</summary>
     [ObservableProperty]
@@ -32,7 +37,12 @@ public abstract partial class RowViewModel : ObservableObject
     /// <summary>Takes no room: its group or its turn is folded.</summary>
     public bool IsFolded => IsGroupFolded || IsTurnFolded;
 
-    public bool InGroup => Group is not null;
+    /// <summary>
+    /// How many lines that fold it stand above it: a finished turn's "Worked for…" line, then its step group's line. The
+    /// conversation indents it that far, with a guide down from each of those lines (Controls/TreeIndent), so what a
+    /// line folds away is seen before it is folded.
+    /// </summary>
+    public int Depth => (IsInTurn ? 1 : 0) + (Group is not null ? 1 : 0);
 
     protected RowViewModel(TranscriptItem model)
     {
@@ -56,6 +66,7 @@ public abstract partial class RowViewModel : ObservableObject
         NoticeItem n => new NoticeRowViewModel(n),
         CommandOutputItem c => new CommandOutputRowViewModel(c),
         TurnEndItem e => new TurnEndRowViewModel(e),
+        AgentMessageItem m => new AgentMessageRowViewModel(m),
         _ => throw new ArgumentOutOfRangeException(nameof(item)),
     };
 }
@@ -427,13 +438,15 @@ public sealed partial class ToolRowViewModel : RowViewModel
             ToolStatus.Running => Loc.T("running…"),
             ToolStatus.Succeeded => Loc.T("done"),
             ToolStatus.Failed => Loc.T("failed"),
+            ToolStatus.Skipped => Loc.T("skipped"),
             _ => Loc.T("interrupted"),
         };
         Output = t.Output ?? "";
         IsRunning = t.Status == ToolStatus.Running;
         IsFailed = t.Status == ToolStatus.Failed;
         IsDone = t.Status == ToolStatus.Succeeded;
-        IsInterrupted = t.Status == ToolStatus.Interrupted;
+        // Set aside for a message that came first: the stopped mark, not a failure (omp retries it if still needed)
+        IsInterrupted = t.Status is ToolStatus.Interrupted or ToolStatus.Skipped;
         TookText = t.Took is { TotalSeconds: >= 0.1 } took && t.Status != ToolStatus.Running ? TurnEndRowViewModel.Duration(took) : "";
         ParseArgs(t.Args);
         Verb = CurrentVerb();
@@ -569,6 +582,7 @@ public sealed partial class ToolRowViewModel : RowViewModel
             isOutput = Name is not ("task" or "todo" or "ask");
         }
         if (IsInterrupted && t.StartedAt is not null) meta = Loc.T("Interrupted");
+        if (t.Status == ToolStatus.Skipped) (result, more, meta) = ("", 0, SkippedFor(t.Output ?? ""));
         Result = result;
         ResultIsOutput = isOutput;
         MoreLines = more;
@@ -578,6 +592,17 @@ public sealed partial class ToolRowViewModel : RowViewModel
         OnPropertyChanged(nameof(ShowMore));
         OnPropertyChanged(nameof(MoreText));
     }
+
+    /// <summary>Why omp set the call aside, from its result ("Skipped due to a queued user message. …", agent-loop.ts).</summary>
+    internal static string SkippedFor(string output) => output switch
+    {
+        _ when output.Contains("queued user message", StringComparison.Ordinal) => Loc.T("Skipped for your queued message"),
+        _ when output.Contains("background completion", StringComparison.Ordinal) => Loc.T("Skipped: a background job finished first"),
+        _ when output.Contains("peer interrupt", StringComparison.Ordinal) => Loc.T("Skipped for another agent’s message"),
+        _ when output.Contains("parent steering", StringComparison.Ordinal) => Loc.T("Skipped for the parent agent’s message"),
+        _ when output.Contains("system advisory", StringComparison.Ordinal) => Loc.T("Skipped for an omp advisory"),
+        _ => Loc.T("Skipped for a message that came first"),
+    };
 
     /// <summary>The Shell card's output: open, all of it; running, its newest lines (shown live).</summary>
     private void UpdateConsole()
@@ -882,4 +907,41 @@ public sealed partial class CommandOutputRowViewModel(CommandOutputItem item) : 
         OnPropertyChanged(nameof(Marker));
         OnPropertyChanged(nameof(IsMarker));
     }
+}
+
+/// <summary>
+/// A message between agents (omp's IRC): who wrote to whom on a card's bar, its first lines under it; opened, the whole
+/// message as Markdown. Folded at first: it is addressed to an agent, and the reply that follows says what came of it.
+/// </summary>
+public sealed partial class AgentMessageRowViewModel(AgentMessageItem item) : RowViewModel(item)
+{
+    private AgentMessageItem Item => (AgentMessageItem)Model;
+    public string From => Item.From;
+    public string Text => Item.Text;
+
+    /// <summary>"→ omp" for a message to this chat's agent, "→ Name" between two others; "· reply" for an answer.</summary>
+    public string Route => (Item.To is { } to ? $"→ {to}" : Loc.T("→ omp")) + (Item.IsReply ? " · " + Loc.T("reply") : "");
+
+    /// <summary>The words in one run (the view shows two lines of it), with Markdown's marks taken out.</summary>
+    public string Preview => string.Join(' ', Text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(line => MarkdownMarks().Replace(line, "")));
+
+    public string AccessibleName => Loc.F("Message from {0}", From);
+
+    [ObservableProperty] private bool _isExpanded;
+
+    [RelayCommand]
+    private void Toggle() => IsExpanded = !IsExpanded;
+
+    protected override void OnUpdated()
+    {
+        OnPropertyChanged(nameof(From));
+        OnPropertyChanged(nameof(Text));
+        OnPropertyChanged(nameof(Route));
+        OnPropertyChanged(nameof(Preview));
+        OnPropertyChanged(nameof(AccessibleName));
+    }
+
+    [GeneratedRegex(@"\*\*|__|`{1,3}|^#{1,6} ")]
+    private static partial Regex MarkdownMarks();
 }

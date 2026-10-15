@@ -7,6 +7,14 @@ like the user's), `browser-refs.md` and `codex-browser-internals.md` (Claude Cod
 Rule for whoever executes: **reproduce first, fix, then repeat the same reproduction**. Paths are relative to
 `avalonia/src/Ombra.App` unless noted.
 
+**Next-release supersession (2026-10-15):** the owner requests one Nightly/Gecko runtime for the standalone
+browser and the existing Ombra browser/preview, not an additional backend. The selected architecture is an
+out-of-process runtime with GPU surface/input integration and automatic connection. See
+[`ARCHITECTURE_SOLUTIONS §2`](../../docs/ARCHITECTURE_SOLUTIONS.md) and
+[`NEXT_RELEASE_ROADMAP`](../../docs/NEXT_RELEASE_ROADMAP.md). The native-WebView work below records the
+current implementation path and its behavioral requirements; it is not a mandate to retain those engines
+or the Tern/cmux/Chromium fallback after cutover. Port useful behavioral coverage to Gecko before removal.
+
 ## 0. What is wrong today (verified)
 
 | # | Symptom | Root cause | Evidence |

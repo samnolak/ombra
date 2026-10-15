@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "character": "ONI-01",
+  "target": "Ombra / OMP (Avalonia)",
+  "nativeImplementationIncluded": false,
+  "units": {"geometry": "logical px", "clipTimeline": "milliseconds", "directorAndPhysics": "seconds"},
+  "sizes": {"artisticMinimum": 64, "preferred": [80, 96], "inspected": [32, 48, 64, 80, 96, 128], "smallSizeLimitation": "32/48 lose eye expression and spirit detail; do not inherit old pixel-pet scale blindly"},
+  "states": {"Idle": "idle", "Thinking": "thinking", "Working": "working", "Waiting": "waiting", "Done": "joy", "Error": "error", "Sleeping": "sleeping"},
+  "events": {"completedRun": "done", "toolFailure": "tool-error", "persistentFailure": "error", "abortedRun": "abort", "chatInput": "type", "petClick": "click", "captureStarted": "drag-start", "landed": "land"},
+  "priority": ["carried", "persistent-waiting-or-error", "transient", "busy", "idle-or-sleep"],
+  "timing": {"sleepAfterIdleSeconds": 180, "toolErrorSeconds": 2.4, "joyVisibleSeconds": 2.4, "joyAbsoluteDeadlineSeconds": 8, "visualDeltaLimitSeconds": 0.1, "semanticElapsed": "unclamped"},
+  "drawOrder": ["background-rune-or-glitch", "spirits-with-depth-at-or-below-zero", "whole-body-and-props", "landing-dust-over-boots", "spirits-with-positive-depth", "semantic-symbols"],
+  "symbols": {"thinking": "bouncing dots", "waiting": "?", "error": "!!", "sleeping": "rising growing z/Z"},
+  "drag": {"thresholdLogicalPx": 6, "maximumTiltDegreesApprox": 10, "pivotAboveBaselineHeightFraction": 0.42, "preserveVelocityOnReleaseAndRegrab": true, "cancelOpensChat": false, "spirits": "fast crossed orbits with depth switching"},
+  "reducedMotion": {"body": "state.staticFrame", "sleepSpirits": "hidden", "glitch": "disabled", "symbols": "static meaningful result"},
+  "sources": {"frames": "frames/approved-v1/manifest.json", "transitionsAndEffects": "transitions/manifest.json", "director": "scenario-player.cjs", "physics": "interaction.cjs", "effects": "effects-player.cjs"},
+  "designLocks": ["no pupils", "red glowing eyes", "rigid mouth and jaw", "no tail or rear rope", "short broken neck loop only", "no extra white shin cuff", "no thigh decoration"],
+  "nativeVerification": "See HANDOFF.md; browser validation does not certify Avalonia integration"
+}

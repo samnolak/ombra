@@ -55,7 +55,7 @@ public sealed class WindowChromeTests
         // The sidebar shown: the rail starts below the lights, the sidebar's top row after them
         Assert.True(vm.ShowSidebar);
         Assert.Empty(UnderTheLights(w));
-        Assert.True(Box(w, Named<Button>(w, "RailPluginsButton")).Y >= MainWindow.TitleBarHeight - 0.5);
+        Assert.True(Box(w, Named<Button>(w, "RailChatsButton")).Y >= MainWindow.TitleBarHeight - 0.5);
         Assert.True(Box(w, Named<Button>(w, "HideSidebarButton")).X >= Lights.Right);
 
         // The sidebar hidden: the header starts after the lights
@@ -97,7 +97,7 @@ public sealed class WindowChromeTests
         w.TrafficLightsShown = false;
         await Settle();
         Assert.Equal(8, sidebarTop.Margin.Left);
-        Assert.True(Box(w, Named<Button>(w, "RailPluginsButton")).Y >= MainWindow.TitleBarHeight - 0.5);
+        Assert.True(Box(w, Named<Button>(w, "RailChatsButton")).Y >= MainWindow.TitleBarHeight - 0.5);
         await vm.DisposeAsync();
         w.Close();
     }

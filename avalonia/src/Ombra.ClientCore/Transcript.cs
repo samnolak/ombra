@@ -2,7 +2,12 @@ namespace Ombra.ClientCore;
 
 public enum SessionPhase { NotStarted, Starting, Ready, Running, Aborting, Stopping, Stopped, Faulted }
 
-public enum ToolStatus { Running, Succeeded, Failed, Interrupted }
+/// <summary>
+/// How a tool call ended. <see cref="Skipped"/>: omp set the call aside to handle a message that came in first (the
+/// user's queued message, an agent's, a finished background job) and tells the model to retry it if still needed;
+/// normal control flow, not a failure (agent-loop.ts <c>interrupt_skipped</c>).
+/// </summary>
+public enum ToolStatus { Running, Succeeded, Failed, Interrupted, Skipped }
 
 public enum NoticeLevel { Info, Warning, Error }
 
@@ -70,6 +75,16 @@ public sealed record NoticeItem(long Key, NoticeLevel Level, string Text) : Tran
 
 /// <summary>Text a slash command printed (<c>command_output</c>).</summary>
 public sealed record CommandOutputItem(long Key, string Text) : TranscriptItem(Key);
+
+/// <summary>
+/// A message between agents over omp's IRC (<c>irc_message</c>; <c>irc:incoming</c> in the history): a subagent writing to
+/// this chat's agent, or one omp shows passing between two others (<c>irc:relay</c>, <c>irc:workpool</c>).
+/// </summary>
+/// <param name="From">The sending agent's name.</param>
+/// <param name="To">The agent it went to; null when it came to this chat's agent.</param>
+/// <param name="Text">What it says (Markdown), without omp's envelope for the model.</param>
+/// <param name="IsReply">An answer to an earlier message.</param>
+public sealed record AgentMessageItem(long Key, string From, string? To, string Text, bool IsReply) : TranscriptItem(Key);
 
 /// <summary>A slash command omp can run over RPC (<c>get_available_commands</c> / <c>available_commands_update</c>).</summary>
 public sealed record SlashCommand(string Name, string? Description, string? Hint, string Source, IReadOnlyList<string> Aliases, IReadOnlyList<SlashCommand> Subcommands);

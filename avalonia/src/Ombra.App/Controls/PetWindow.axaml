@@ -6,7 +6,7 @@
         xmlns:ctl="using:Ombra.App.Controls"
         x:Class="Ombra.App.Controls.PetWindow"
         x:DataType="vm:PetsViewModel"
-        Title="{Binding ChosenName}"
+        Title="ONI"
         WindowDecorations="None" TransparencyLevelHint="Transparent" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" CanResize="False" ShowActivated="False"
         SizeToContent="Manual" WindowStartupLocation="Manual">

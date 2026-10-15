@@ -3,12 +3,22 @@
 Living document: current plan only, no history. Update after every significant change.
 State, decisions and what is verified where: [`PROJECT_STATE.md`](PROJECT_STATE.md).
 
+Next release planning: [`NEXT_RELEASE_ROADMAP.md`](../../docs/NEXT_RELEASE_ROADMAP.md) integrates the
+product directions and parity work, with decision gates and acceptance criteria. D2 was accepted on 2026-10-15:
+an Ombra-maintained omp fork is allowed. D3 now means improving our harness, not adding ACP backends;
+existing authentication stays unchanged. D4 selects one Nightly/Gecko runtime for standalone browsing and ALL Ombra
+browser/preview surfaces, with automatic connection and GPU surface sharing. Replace the current WebKit/WebView2
+backend rather than retaining two engines; platform integration and performance require proof.
+K7 adds a native code editor; D1's server trust model remains open.
+
 ## Ground rules
 
-- **Original OMP Core** is upstream omp (`can1357/oh-my-pi`) and stays outside this project. We do not
-  rewrite, fork or patch it. Its contract to us is the official RPC over stdio. Incompatibilities are solved
-  in our Client Integration Layer; real upstream bugs are recorded as `UPSTREAM OMP ISSUE` with a minimal
-  external workaround. Dependencies on undocumented behaviour are marked `UNDOCUMENTED / VERSION-PINNED`.
+- **Agent runtime:** upstream omp (`can1357/oh-my-pi`) is the base for an Ombra-maintained fork, approved on
+  2026-10-15. Keep the runtime in a separate process with a versioned RPC contract; fix missing runtime contracts
+  at their source rather than accumulating client workarounds. Review upstream changes in integration branches,
+  run contract and end-to-end gates, then pin an immutable runtime artifact. No automatic upstream cutover and
+  no patching installed user runtimes. Upstream PRs are useful, not a prerequisite for shipping our changes.
+  The currently shipped 18.8.0 pack remains unchanged until a fork artifact is built and verified.
 - Our layers: **Client Integration Layer** (`Ombra.Rpc`: process, stdio, framing, correlation) →
   **Application Core** (`Ombra.ClientCore`: state, reducer, session control) → **ViewModels** → **Avalonia UI**,
   plus a **Platform Layer** (OS adapters) created only when the first real OS-specific implementation appears.
@@ -123,9 +133,9 @@ launcher copy can go.
 "Finished" = a daily-usable OMP desktop client on Windows, macOS and Linux. The list below is the release
 scope; anything not in it goes to the backlog (end of this file) and does not block a release. Every omp
 feature and what the client offers for it: [`PARITY.md`](PARITY.md).
-Everything goes through Original OMP Core's official RPC; where 18.2.0 has no RPC path the feature either uses
-a minimal external mechanism (files omp documents, `omp` CLI) or is reached through the omp TUI in the
-terminal panel, never through a patched or re-implemented omp.
+The historical M1 slice used Original OMP Core's official RPC; missing 18.2.0 paths were reached through
+documented files, omp CLI or its TUI. This describes that slice, not a restriction on the next release:
+new integration work follows the fork policy above and removes superseded workarounds on cutover.
 
 | # | Feature | Stage | Mechanism |
 |---|---|---|---|

@@ -23,8 +23,10 @@ public static class TranscriptRowHeights
     private const double Message = 14, MessageLine = 22, Caption = 12, Code = 13, CodeLine = 19;
     /// <summary>An open Shell card's or output's bar (Button.card-header).</summary>
     private const double CardHeader = 28;
-    /// <summary>A step's line (ToggleButton.tool-row), a group's line and a message's line of actions.</summary>
+    /// <summary>A step's line (ToggleButton.tool-row), the thinking line and a message's line of actions.</summary>
     private const double Line = 28;
+    /// <summary>A step's or a group's line with the 2 px it keeps above and below (the steps' rhythm).</summary>
+    private const double StepLine = 2 + Line + 2;
 
     private static double EstimateRow(object? row, double width)
     {
@@ -36,30 +38,32 @@ public static class TranscriptRowHeights
             AssistantRowViewModel a => Assistant(a, column),
             UserRowViewModel u => User(u, column),
             ToolRowViewModel t => Tool(t, column),
-            StepGroupRowViewModel => Line,
-            // 6 above (under the message's 28 px line of actions), the 22 px line, its hairline 10 below it, 14 under
-            TurnFoldRowViewModel => 6 + 22 + 11 + 14,
+            StepGroupRowViewModel => StepLine,
+            // 8 above (under the message's 28 px line of actions), the 22 px line, its hairline 10 below it, 16 under
+            TurnFoldRowViewModel => 8 + 22 + 11 + 16,
             // The change card: 12 above and 6 below, its hairline, the 62 px header, 32 px rows and "Show N more files"
             TurnEndRowViewModel e => e.HasFiles ? 18 + 2 + 62 + (e.HasFileRows ? e.ShownFiles.Count * 32 + (e.HasMoreFiles ? 32 : 0) : 0) : 0,
             CommandOutputRowViewModel c => c.IsMarker ? 28 + 18 : 8 + 16 + Lines(c.Text, (column - 24) / (Code * MonoCharWidth)) * CodeLine,
             NoticeRowViewModel n => 28 + Lines(n.Text, 440 / (Caption * CharWidth)) * 18,
+            // A message between agents: 8 above and 8 below, its bar, then two preview lines or the message, 8 and 10 inside
+            AgentMessageRowViewModel m => 16 + CardHeader + 18 + (m.IsExpanded ? MarkdownHeight.Estimate(m.Text, column - 24) : 2 * 20),
             _ => 60,
         };
     }
 
-    /// <summary>The thinking toggle, the thoughts when open, the reply, an error and the actions line, 6 apart, inside 6 above and below.</summary>
+    /// <summary>The thinking line, the thoughts when open, the reply, an error and the actions line, 8 apart, inside 10 above and below.</summary>
     private static double Assistant(AssistantRowViewModel a, double column)
     {
         if (!a.HasContent) return 0;
         var parts = 0;
-        var height = 12.0;
+        var height = 20.0;
         void Part(double h)
         {
-            height += h + (parts > 0 ? 6 : 0);
+            height += h + (parts > 0 ? 8 : 0);
             parts++;
         }
-        if (a.HasThinking) Part(24);
-        if (a.IsThinkingOpen) Part(8 + Lines(a.Thinking, (column - 14) / (14 * CharWidth)) * 22);
+        // The thoughts hang 6 under their line inside one part
+        if (a.HasThinking) Part(Line + (a.IsThinkingOpen ? 6 + 6 + Lines(a.Thinking, (column - 24) / (14 * CharWidth)) * 22 : 0));
         if (a.HasText) Part(MarkdownHeight.Estimate(a.Text, column));
         if (a.HasError) Part(16 + Lines(a.ErrorText ?? "", (column - 120) / (Message * CharWidth)) * MessageLine);
         if (a.ShowActions) Part(Line);
@@ -89,13 +93,13 @@ public static class TranscriptRowHeights
     }
 
     /// <summary>
-    /// The step's 28 px line; under it, 30 px in: a command's Shell card (2 above, 8 below, its bar when open, 8 + 10
-    /// inside, the command's lines, its output 4 below them, its exit code), what anything else gave (its lines,
-    /// "… +N lines"), or opened, the change or the output under its 28 px bar.
+    /// The step's 28 px line with 2 above and below; under it, 30 px in: a command's Shell card (2 above, 8 below, its
+    /// bar when open, 8 + 10 inside, the command's lines, its output 4 below them, its exit code), what anything else
+    /// gave (its lines, "… +N lines"), or opened, the change or the output under its 28 px bar.
     /// </summary>
     private static double Tool(ToolRowViewModel t, double column)
     {
-        var height = Line;
+        var height = StepLine;
         var mono = Code * MonoCharWidth;
         if (t.ShowConsole)
         {

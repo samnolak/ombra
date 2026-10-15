@@ -67,6 +67,112 @@ public sealed class ProviderUsageTests
         Assert.Equal("Premium requests", ProviderUsage.DisplayLabel(spend with { Label = "Copilot premium requests" }, "Copilot"));
     }
 
+    [Fact]
+    public void Saved_resets_are_read_as_omp_summarizes_them_and_matched_to_omps_account_list()
+    {
+        // Count only (omp 18.8.0's real ChatGPT report): every saved reset usable, nothing more said
+        var reports = ProviderUsage.Parse(RealUsageJson)!;
+        Assert.Equal(new ProviderUsageResets(2, 2, null, null), reports[0].Resets);
+        Assert.Null(reports[1].Resets);
+
+        static ProviderUsageResets? Read(string resetCredits) => ProviderUsage.Parse(
+            $$"""{"reports":[{"provider":"anthropic","limits":[{"label":"Claude 5 Hour"}],"resetCredits":{{resetCredits}}}]}""")![0].Resets;
+        var soon = DateTimeOffset.UtcNow.AddDays(2);
+        var later = DateTimeOffset.UtcNow.AddDays(9);
+        // The soonest expiry among the ones still to spend (a redeemed one does not count); the picked credit's block
+        var blocked = Read($$"""
+            {"availableCount":3,"redeemableCount":0,"nextCreditId":"b","credits":[
+              {"id":"a","status":"redeemed","expiresAt":"{{DateTimeOffset.UtcNow.AddHours(1):O}}"},
+              {"id":"b","remainingCount":1,"blocking":["anthropic:5h","anthropic:7d:opus"],"expiresAt":"{{later:O}}"},
+              {"id":"c","remainingCount":1,"expiresAt":"{{soon:O}}"}]}
+            """)!;
+        Assert.Equal((3, 0, "blocked by Claude 5h, Claude Opus weekly"), (blocked.Saved, blocked.Usable, blocked.Unavailable));
+        Assert.Equal(soon, blocked.SoonestExpiry!.Value, TimeSpan.FromSeconds(1));
+        // omp's own reason wins; a cooldown next; none usable without a reason says so
+        Assert.Equal("not eligible for this plan", Read("""{"availableCount":1,"redeemableCount":0,"reason":"not eligible for this plan","cooldownUntil":"x"}""")!.Unavailable);
+        Assert.Equal("cooldown until 2026-10-16", Read("""{"availableCount":1,"redeemableCount":0,"cooldownUntil":"2026-10-16"}""")!.Unavailable);
+        Assert.Equal("not usable right now", Read("""{"availableCount":1,"redeemableCount":0}""")!.Unavailable);
+
+        // /usage reset's list (omp 18.8.0): the account a report is about, by provider and e-mail (organization after it)
+        var listed = ProviderUsage.ParseSavedResetAccounts("""
+            Saved rate-limit resets:
+            - dev@example.com · Example [Claude · anthropic/2]: 2 saved, 1 usable now, expires 2026-10-18T09:00:00.000Z (active)
+            - other@example.com [Claude · anthropic/5]: 1 saved, 0 usable now (cooldown until 2026-10-16)
+            - dev@example.com [Codex · openai-codex/3]: unavailable (network error)
+
+            Spend one with `/usage reset <provider>/<credential id>` or `/usage reset <provider>/active`.
+            """);
+        Assert.Equal([new SavedResetAccount("anthropic", "2", "dev@example.com · Example", true), new SavedResetAccount("anthropic", "5", "other@example.com", false),
+            new SavedResetAccount("openai-codex", "3", "dev@example.com", false)], listed);
+        var claude = new ProviderUsageReport("anthropic", "dev@example.com", null, null, []);
+        Assert.Equal("/usage reset anthropic/2", ProviderUsage.SpendResetCommand(ProviderUsage.ResetAccountFor(claude, listed)!));
+        Assert.Equal("3", ProviderUsage.ResetAccountFor(claude with { Provider = "openai-codex", Account = null }, listed)!.CredentialId); // its provider's only one
+        Assert.Null(ProviderUsage.ResetAccountFor(claude with { Account = null }, listed)); // two Claude accounts: never a guess
+        Assert.Null(ProviderUsage.ResetAccountFor(claude with { Account = "dev@example" }, listed)); // not a prefix of another e-mail
+    }
+
+    [AvaloniaFact]
+    public async Task A_saved_reset_shows_with_the_limits_and_is_spent_only_after_asking()
+    {
+        const string applied = "Reset applied for dev@example.com · Example (Claude) — Claude's 5h session limit has been refreshed; weekly limits are unchanged.";
+        var e = await OpenAsync(model: Claude, extraCommands: _ => new()
+        {
+            ["/usage reset"] = "Saved rate-limit resets:\n- dev@example.com · Example [Claude · anthropic/2]: 2 saved, 1 usable now (active)\n\nSpend one with `/usage reset <provider>/<credential id>`.",
+            ["/usage reset anthropic/2"] = applied,
+        });
+        var vm = e.Vm;
+        await Send(e, "Look at the parser");
+        await Until(() => vm.Usage.HasPercent && vm.Phase == SessionPhase.Ready, "context ring");
+        vm.Usage.IsOpen = true;
+        await Until(() => !vm.Usage.IsLoading && vm.Usage.HasLimits, "plan usage in the popover");
+        var claude = Assert.Single(vm.Usage.Limits);
+        Assert.True(claude.HasSavedResets);
+        Assert.Equal("2 saved resets", claude.SavedResetsText);
+        Assert.Equal("1 usable now · the soonest expires in 3d", claude.SavedResetsDetail);
+        Assert.True(claude.CanSpendReset);
+        await Settle(300);
+        var view = e.W.GetVisualDescendants().OfType<UsageIndicator>().Single().Popup.Child!.GetVisualDescendants().OfType<ProviderUsageGroupView>().Single();
+        Assert.True(view.FindControl<Button>("UseSavedResetButton")!.IsEffectivelyVisible);
+
+        // Asked in place first: nothing is spent until the user confirms
+        claude.AskSpendResetCommand.Execute(null);
+        await Settle(100);
+        Assert.True(view.FindControl<StackPanel>("SpendResetConfirm")!.IsEffectivelyVisible);
+        Assert.DoesNotContain(Sent(e), l => l.StartsWith("/usage", StringComparison.Ordinal));
+        claude.CancelSpendResetCommand.Execute(null);
+        Assert.False(claude.IsConfirmingSpend);
+
+        var reads = UsageReads(e);
+        claude.AskSpendResetCommand.Execute(null);
+        await claude.SpendResetCommand.ExecuteAsync(null);
+        Assert.Equal(["/usage reset", "/usage reset anthropic/2"], Sent(e).Where(l => l.StartsWith("/usage", StringComparison.Ordinal)));
+        Assert.Equal(reads + 1, UsageReads(e)); // the limits are read again
+        // omp's answer stays under the group made from the new read
+        var after = Assert.Single(vm.Usage.Limits);
+        Assert.Equal((applied, false), (after.SpendMessage, after.SpendFailed));
+        await Close(e);
+    }
+
+    [AvaloniaFact]
+    public async Task A_saved_reset_of_an_account_omp_does_not_list_is_never_spent()
+    {
+        var e = await OpenAsync(model: Claude, extraCommands: _ => new()
+        {
+            ["/usage reset"] = "Saved rate-limit resets:\n- someone@else.com [Claude · anthropic/7]: 1 saved, 1 usable now",
+        });
+        var vm = e.Vm;
+        await vm.OpenSettingsAtAsync("providers");
+        await Until(() => vm.ProviderUsage.HasGroups && !vm.ProviderUsage.IsLoading, "plan usage in settings");
+        var claude = vm.ProviderUsage.Groups.Single(g => g.Provider == "anthropic");
+        Assert.False(vm.ProviderUsage.Groups.Single(g => g.Provider == "openai-codex").HasSavedResets);
+        await claude.SpendResetCommand.ExecuteAsync(null);
+        Assert.Equal(["/usage reset"], Sent(e).Where(l => l.StartsWith("/usage", StringComparison.Ordinal)));
+        var after = vm.ProviderUsage.Groups.Single(g => g.Provider == "anthropic");
+        Assert.True(after.SpendFailed);
+        Assert.Equal("omp did not list this account among the ones with saved resets.", after.SpendMessage);
+        await Close(e);
+    }
+
     private static int UsageReads(Env e) => File.Exists(e.Cli) ? File.ReadAllLines(e.Cli).Count(l => l == "usage --json") : 0;
 
     [AvaloniaFact]

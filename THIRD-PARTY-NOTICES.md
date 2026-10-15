@@ -1,8 +1,9 @@
 # Third-party notices
 
 This repository is distributed under the MIT License ([LICENSE](LICENSE)). Its desktop client (Ombra, in
-[`avalonia/`](avalonia)) is an independent client for the original omp (oh-my-pi); it is not an official product of
-the omp authors, the Bun authors, Anthropic or OpenAI.
+[`avalonia/`](avalonia)) integrates omp (oh-my-pi), including project-maintained derivatives when shipped; it is
+not an official product of the omp authors, the Bun authors, Anthropic or OpenAI. Fork distributions must retain
+upstream copyright and license notices and identify their upstream base and Ombra revision.
 
 - **Desktop client:** [`avalonia/packaging/THIRD-PARTY-NOTICES.md`](avalonia/packaging/THIRD-PARTY-NOTICES.md) lists
   every component bundled in its packages (.NET runtime, Avalonia, SkiaSharp / HarfBuzzSharp, CommunityToolkit.Mvvm,

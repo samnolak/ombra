@@ -11,7 +11,6 @@
         <ResourceInclude Source="avares://Ombra/Views/Icons.axaml" />
         <ResourceInclude Source="avares://Ombra/Views/Icons.Panes.axaml" />
         <ResourceInclude Source="avares://Ombra/Views/Icons.Files.axaml" />
-        <ResourceInclude Source="avares://Ombra/Views/Icons.Pets.axaml" />
         <ResourceInclude Source="avares://Ombra/Views/Icons.Connectors.axaml" />
         <ResourceInclude Source="avares://Ombra/Views/Icons.Workspace.axaml" />
         <ResourceInclude Source="avares://Ombra/Views/Icons.Session.axaml" />

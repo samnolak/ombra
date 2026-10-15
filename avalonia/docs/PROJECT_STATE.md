@@ -5,15 +5,16 @@ Living document; keep it short. Plan: [`ROADMAP.md`](ROADMAP.md) · features: [`
 
 ## Goal
 
-A native desktop client for omp on **Windows, macOS and Linux**. It talks
-to the **Original OMP Core** (upstream `can1357/oh-my-pi`, unmodified, never forked or patched) only through
-its official RPC over stdio, and uses the harness profile and model/provider configuration in place.
+A native desktop client for omp on **Windows, macOS and Linux**. It runs the agent in a separate process and
+uses versioned JSONL RPC over stdio, with the harness profile and model/provider configuration in place.
+The current pack is unmodified upstream omp 18.8.0. On 2026-10-15 the owner approved an Ombra-maintained fork
+for the next release; upstream updates will be reviewed and verified, not adopted automatically.
 
 ## Terminology
 
 | Term | Meaning | Code |
 |---|---|---|
-| Original OMP Core | upstream omp; a separate runtime/process | — (outside this project) |
+| Agent runtime / Original OMP Core | currently upstream omp; next release may use the approved Ombra fork; separate process | pinned runtime pack |
 | Client Integration Layer | process, stdio, JSONL/v2 framing, request correlation | `src/Ombra.Rpc` |
 | Application Core / Client Core | portable state, reducer, session control, runtime options | `src/Ombra.ClientCore` |
 | ViewModels + Avalonia UI | presentation | `src/Ombra.App` |
@@ -80,6 +81,7 @@ Nothing critical depends on UI timers, focus or rendering. No OS checks outside 
 
 | Decision | Why |
 |---|---|
+| Ombra-maintained omp fork approved (2026-10-15) | fix integration contracts in the runtime; review upstream changes in integration branches, pin verified artifacts, remove obsolete client workarounds; current 18.8.0 pack is not yet replaced |
 | .NET 10 LTS + Avalonia 12.1.3 | current LTS / stable; builds and tests on all three OSes (CI) |
 | Platform Layer as a folder of the app, not a project | few adapters (notifications, platform key); OS checks only there and in the composition root |
 | `rpc-ui` + `--approval-mode` always passed (default write) | omp's own default is yolo; the client never enables it without an explicit second confirmation |

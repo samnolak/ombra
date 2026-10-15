@@ -1,0 +1,92 @@
+[
+  {
+    "alias": "studies/archive/browser-exports/oni-drag-dynamics.webm",
+    "canonical": "studies/oni-drag-dynamics.webm",
+    "bytesRemoved": 895056,
+    "sha256": "338540d40097109c9269977b9daa5551b3fb98e62ef7d425315fef05b893e342"
+  },
+  {
+    "alias": "studies/archive/browser-exports/oni-drawn-frames (1).png",
+    "canonical": "studies/oni-drawn-frames-v2.png",
+    "bytesRemoved": 1438881,
+    "sha256": "bbf96e6cbf1c9d454706cc05c377dd4994c8cd519a0fb411738c52b266031b38"
+  },
+  {
+    "alias": "studies/archive/browser-exports/oni-states.png",
+    "canonical": "studies/oni-states.png",
+    "bytesRemoved": 948139,
+    "sha256": "61409fd843587400ed3d7b8a5ab1b36792bd00a2fd4a558bb98fc36f57b67dd1"
+  },
+  {
+    "alias": "studies/archive/browser-exports/oni-approved-states (3).png",
+    "canonical": "studies/oni-states-with-fx.png",
+    "bytesRemoved": 419217,
+    "sha256": "50c728d388c1391f5498a94dae5d8b65da7f843c20e45ccb9745224a1219fe2a"
+  },
+  {
+    "alias": "studies/archive/browser-exports/oni-drawn-animation.webm",
+    "canonical": "studies/oni-drawn-animation.webm",
+    "bytesRemoved": 1180248,
+    "sha256": "88f6d82984f1bbff6400bde93e51a6390a18d2930a8f31901f28574e49133e70"
+  },
+  {
+    "alias": "studies/archive/browser-exports/oni-approved-states.png",
+    "canonical": "studies/oni-approved-states.png",
+    "bytesRemoved": 487120,
+    "sha256": "155418e225607e5030cf3cf5c6aaf0f4f89c608b163dc5d2e0e691ddfc7a5e1b"
+  },
+  {
+    "alias": "studies/archive/browser-exports/oni-drawn-frames.png",
+    "canonical": "studies/oni-drawn-frames.png",
+    "bytesRemoved": 1482897,
+    "sha256": "b2b9adbcb8b6c746dac045776b85738c32d9178adf90b42a198021b7a32568d4"
+  },
+  {
+    "alias": "studies/archive/browser-exports/oni-approved-states.webm",
+    "canonical": "studies/oni-approved-states.webm",
+    "bytesRemoved": 2801881,
+    "sha256": "db70c4dc1cd7e378e95ef26d0494b0c960d95c263d58496330e054dfd7e1fb63"
+  },
+  {
+    "alias": "studies/archive/browser-exports/oni-drawn-animation (1).webm",
+    "canonical": "studies/oni-drawn-animation-v2.webm",
+    "bytesRemoved": 1106807,
+    "sha256": "e7a933c78eda940ddb7a144a92e07aafa016e32b540bba86439376fa00352f77"
+  },
+  {
+    "alias": "studies/archive/browser-exports/oni-approved-states (5).webm",
+    "canonical": "studies/oni-anime-joy-and-spirits-v6.webm",
+    "bytesRemoved": 2661653,
+    "sha256": "acb52d3cec2cdd59cee2cea0af7cd945b0378bf85f0609e9a55cd36639abab35"
+  },
+  {
+    "alias": "studies/archive/browser-exports/oni-approved-states (2).webm",
+    "canonical": "studies/oni-states-with-fx.webm",
+    "bytesRemoved": 2722386,
+    "sha256": "e0739768a1963e173864cd942276ba00aa0d7544e7d97a330ef157600c39efe3"
+  },
+  {
+    "alias": "studies/archive/browser-exports/oni-drag-dynamics (3).webm",
+    "canonical": "studies/oni-orbits-foreground-dust-v4.webm",
+    "bytesRemoved": 895926,
+    "sha256": "60a203fee5f986f50a2d0b2ca17ab12e1677295ee9d0739bec5fe82fc9fe7c9a"
+  },
+  {
+    "alias": "studies/archive/browser-exports/oni-drag-dynamics (1).webm",
+    "canonical": "studies/oni-nape-drag-v2.webm",
+    "bytesRemoved": 896862,
+    "sha256": "5e10af2e6589c618f8a4276302941b01bf06490b627b25591b43aa7f9de0b0f7"
+  },
+  {
+    "alias": "studies/archive/browser-exports/oni-approved-states (4).webm",
+    "canonical": "studies/oni-wave-and-fx-v4.webm",
+    "bytesRemoved": 2589611,
+    "sha256": "124c23503ea3782fffd0b30b658ec518a165d1ac0c3100b1832ea9a221c3dbc9"
+  },
+  {
+    "alias": "studies/miniature-style-v1.html",
+    "canonical": "studies/miniature-style-v3.html",
+    "bytesRemoved": 3203519,
+    "sha256": "bec4ab6dbc4e8a2c86983e5def7c4fe60ff8f2a7d83a11cd3edae16aed8c7cde"
+  }
+]

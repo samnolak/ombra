@@ -16,6 +16,22 @@ browser-sites.json
 harness/profile/agent/*.yml
 !harness/profile/agent/*.example.yml
 harness/profile/agent/mcp.json
+.omp/
+
+# ===== ONI-01 authoring material (~360 MB): kept locally; the app's sheets are in src/Ombra.App/Assets/Pets =====
+# Committed: the hand-off docs, the reference scripts and the runtime's manifest (tests/Fixtures/oni-golden.cjs)
+avalonia/tools/pets/oni-01/*.zip
+avalonia/tools/pets/oni-01/*.zip.sha256
+avalonia/tools/pets/oni-01/studies/
+avalonia/tools/pets/oni-01/exports/
+avalonia/tools/pets/oni-01/frames/
+avalonia/tools/pets/oni-01/transitions/
+avalonia/tools/pets/oni-01/approved/
+avalonia/tools/pets/oni-01/source/
+avalonia/tools/pets/oni-01/effects/
+avalonia/tools/pets/oni-01/rig/
+avalonia/tools/pets/oni-01/handoff-candidate/
+avalonia/tools/pets/oni-01/runtime/**/*.png
 
 # ===== omp RPC session / transcript dumps (runtime artifacts) =====
 # avalonia/.gitignore re-includes the recorded omp output the tests use as fixtures

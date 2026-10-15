@@ -20,10 +20,67 @@ public sealed record UsageMeterViewModel(string Label, double? Fraction, string 
     public string AccessibleName => Resets.Length > 0 ? $"{Label}: {Amount}, {Resets}" : $"{Label}: {Amount}";
 }
 
-/// <summary>One account's limits at one provider (a group of meters).</summary>
-public sealed record ProviderUsageGroupViewModel(string Provider, string Name, string Account, IReadOnlyList<UsageMeterViewModel> Meters)
+/// <summary>
+/// One account's limits at one provider (a group of meters), and its saved rate-limit resets with "Use a saved
+/// reset": asked once more in place, then spent through omp (<c>/usage reset</c>).
+/// </summary>
+public sealed partial class ProviderUsageGroupViewModel(ProviderUsageViewModel owner, ProviderUsageReport report, string name, string account,
+    IReadOnlyList<UsageMeterViewModel> meters) : ObservableObject
 {
+    public ProviderUsageReport Report { get; } = report;
+    public string Provider => Report.Provider;
+    public string Name { get; } = name;
+    public string Account { get; } = account;
+    public IReadOnlyList<UsageMeterViewModel> Meters { get; } = meters;
     public bool HasAccount => Account.Length > 0;
+
+    public bool HasSavedResets => Report.Resets is { Saved: > 0 };
+    /// <summary>"2 saved resets".</summary>
+    public string SavedResetsText => Report.Resets is { } r ? Loc.Plural(r.Saved, "{0} saved reset", "{0} saved resets") : "";
+    /// <summary>"1 usable now · the soonest expires in 3d 4h", or why none can be spent now.</summary>
+    public string SavedResetsDetail => Report.Resets is { } r ? ResetsDetail(r, DateTimeOffset.UtcNow) : "";
+    public bool CanSpendReset => Report.Resets is { Usable: > 0 } && !IsSpending;
+
+    /// <summary>"Use a saved reset" was pressed: the group asks before anything is spent.</summary>
+    [ObservableProperty] private bool _isConfirmingSpend;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanSpendReset))]
+    private bool _isSpending;
+    /// <summary>What omp answered to the last spend (kept across re-reads of the usage).</summary>
+    [ObservableProperty] private string _spendMessage = "";
+    [ObservableProperty] private bool _spendFailed;
+    public bool HasSpendMessage => SpendMessage.Length > 0;
+    partial void OnSpendMessageChanged(string value) => OnPropertyChanged(nameof(HasSpendMessage));
+
+    public string ConfirmText => Loc.F("Spend one of {0}’s saved resets now? The provider refreshes the limit it covers; a spent reset cannot be taken back.", Name);
+
+    [RelayCommand]
+    private void AskSpendReset()
+    {
+        owner.ForgetSpendMessage(this);
+        SpendMessage = "";
+        IsConfirmingSpend = true;
+    }
+
+    [RelayCommand]
+    private void CancelSpendReset() => IsConfirmingSpend = false;
+
+    [RelayCommand]
+    private Task SpendReset()
+    {
+        IsConfirmingSpend = false;
+        return owner.SpendResetAsync(this);
+    }
+
+    private static string ResetsDetail(ProviderUsageResets r, DateTimeOffset now)
+    {
+        var parts = new List<string>();
+        if (r.Usable != r.Saved) parts.Add(Loc.F("{0} usable now", r.Usable));
+        if (r.SoonestExpiry is { } at)
+            parts.Add(at > now ? Loc.F("the soonest expires in {0}", ProviderUsage.Span(at - now)) : Loc.F("expired {0}", at.ToLocalTime().ToString("d", CultureInfo.CurrentCulture)));
+        if (r.Usable == 0 && r.Unavailable is { Length: > 0 } why) parts.Add(Loc.F("unavailable: {0}", why));
+        return string.Join(" · ", parts);
+    }
 }
 
 /// <summary>
@@ -40,6 +97,8 @@ public sealed partial class ProviderUsageViewModel : ObservableObject
     private Task? _loading;
     private bool _stale = true;
     private IReadOnlyList<ProviderUsageReport> _reports = [];
+    /// <summary>omp's answer to the last spend, by provider and account, shown in that group until the next spend.</summary>
+    private readonly Dictionary<(string Provider, string? Account), (string Text, bool Failed)> _spendMessages = [];
 
     internal ProviderUsageViewModel(MainViewModel main)
     {
@@ -111,12 +170,48 @@ public sealed partial class ProviderUsageViewModel : ObservableObject
                 l.ResetsAt is { } at ? ProviderUsage.ResetsIn(at, now, l.ResetVerb) : "", l.Status == "exhausted")).ToList();
             var plan = report.Plan is { Length: > 0 } p ? Loc.F("{0} plan", CultureInfo.InvariantCulture.TextInfo.ToTitleCase(p)) : "";
             var account = string.Join(" · ", new[] { report.Account ?? "", plan }.Where(s => s.Length > 0));
-            Groups.Add(new ProviderUsageGroupViewModel(report.Provider, name, account, meters));
+            var group = new ProviderUsageGroupViewModel(this, report, name, account, meters);
+            if (_spendMessages.TryGetValue((report.Provider, report.Account), out var said)) (group.SpendMessage, group.SpendFailed) = said;
+            Groups.Add(group);
         }
         HasGroups = Groups.Count > 0;
         var oldest = _reports.Select(r => r.FetchedAt).OfType<DateTimeOffset>().DefaultIfEmpty(now).Min();
         Note = HasGroups && now - oldest >= TimeSpan.FromMinutes(1) ? Loc.F("Updated {0} ago", Age(now - oldest)) : "";
         Updated?.Invoke();
+    }
+
+    internal void ForgetSpendMessage(ProviderUsageGroupViewModel group) => _spendMessages.Remove((group.Provider, group.Report.Account));
+
+    /// <summary>
+    /// Spends one of the group's saved resets: omp lists the accounts with their ids (<c>/usage reset</c>), then spends
+    /// one of this account's; its answer stays under the group, and the limits are read again.
+    /// </summary>
+    internal async Task SpendResetAsync(ProviderUsageGroupViewModel group)
+    {
+        var key = (group.Provider, group.Report.Account);
+        group.IsSpending = true;
+        group.SpendMessage = Loc.T("Spending a saved reset…");
+        group.SpendFailed = false;
+        string text;
+        var failed = true;
+        if (!_main.CanRunOmpCommands) text = Loc.T("omp is not running: open a chat, then try again.");
+        else
+        {
+            var list = await _main.RunOmpCommandAsync(ProviderUsage.SavedResetsCommand, TimeSpan.FromMinutes(1), _main.Closing);
+            if (!list.Ok) text = list.Error ?? list.Output;
+            else if (ProviderUsage.ResetAccountFor(group.Report, ProviderUsage.ParseSavedResetAccounts(list.Output)) is not { } target)
+                text = Loc.T("omp did not list this account among the ones with saved resets.");
+            else
+            {
+                var spend = await _main.RunOmpCommandAsync(ProviderUsage.SpendResetCommand(target), TimeSpan.FromMinutes(1), _main.Closing);
+                text = spend.Ok ? spend.Output : spend.Error ?? spend.Output;
+                failed = !spend.Ok || !ProviderUsage.ResetApplied(spend.Output);
+            }
+        }
+        _spendMessages[key] = (text, failed);
+        group.IsSpending = false;
+        (group.SpendMessage, group.SpendFailed) = (text, failed);
+        await LoadAsync(force: true);
     }
 
     private static string Age(TimeSpan t) => t.TotalHours >= 1 ? Loc.F("{0}h", (int)t.TotalHours) : Loc.F("{0}m", (int)t.TotalMinutes);

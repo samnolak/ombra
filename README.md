@@ -1,8 +1,10 @@
 # Ombra
 
 A cross-platform desktop client for [oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp`), the coding agent. The
-agent itself is always the unmodified omp: the client starts it, talks to it over omp's official RPC (JSON lines over
-stdio) and shows what it does. Nothing here forks, patches or re-implements omp.
+client starts omp as a separate process and controls it over JSONL RPC on stdio. The current runtime pack ships
+upstream omp 18.8.0 unchanged. For the next release, the project maintains its own omp fork: integration fixes belong
+in the runtime when that removes client workarounds; upstream changes are reviewed and integrated deliberately.
+See the [next-release roadmap](docs/NEXT_RELEASE_ROADMAP.md).
 
 The client is built with .NET 10 and Avalonia and lives in [`avalonia/`](avalonia). It is an independent project,
 not an official product of the omp, Bun, Anthropic or OpenAI projects.
@@ -22,8 +24,8 @@ you choose to. Model providers and API keys live in omp's configuration; the app
 
 ## What it does
 
-The look and conventions follow Claude Code (warm light and dark themes, one clay accent, sentence-case wording);
-layout details follow the Codex desktop app.
+The look and layout follow the ChatGPT desktop app (Codex): neutral grey light and dark themes, one yellow accent
+taken from the logo, sentence-case wording.
 
 - **Conversation** — omp's replies as they stream; thinking folded ("Thought for 4s"); every tool call as one line
   (status dot, name, argument) with a result line ("Read 120 lines", "Found 12 files", the first lines of output);

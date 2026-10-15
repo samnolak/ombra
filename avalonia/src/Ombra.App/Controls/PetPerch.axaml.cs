@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Threading;
 using Ombra.App.Pets;
+using Ombra.App.Pets.Oni;
 using Ombra.App.ViewModels;
 
 namespace Ombra.App.Controls;
@@ -11,40 +12,42 @@ namespace Ombra.App.Controls;
 /// The pet's home in the app's window and the owner of the pet on the desktop (DataContext = <see cref="MainViewModel"/>).
 /// In the window it is a layer as big as the window where only the pet, its speech bubble and its message box
 /// (<see cref="PetStage"/>) take the pointer. The pet sits on <see cref="Anchor"/> (the message box) until it is
-/// dragged. With the desktop roam (the default) the drag lifts it at once into a window of its own
-/// (<see cref="PetWindow"/>) that follows the pointer anywhere on the user's monitors; dropped, it stays there (saved
-/// relative to its monitor) above other apps, also while this window is minimised or another app is in front. With
-/// "Inside the window" it stays in this layer (as a fraction of the window, saved) at any window size. Dropped back
-/// close to its perch, it sits there again. It tells the view model its window's height, so a short window gives the
-/// pet's band back to the conversation.
+/// dragged. A drag carries it (<see cref="OniCarry"/>): it hangs from the pointer, swings with its moves, and when let
+/// go comes down onto the spot under it with a little dust. With the desktop roam (the default) the drag lifts it at
+/// once into a window of its own (<see cref="PetWindow"/>) carried anywhere on the user's monitors; put down, it stays
+/// there (saved relative to its monitor) above other apps, also while this window is minimised or another app is in
+/// front. With "Inside the window" it stays in this layer (as a fraction of the window, saved) at any window size.
+/// Put down close to its perch, it sits there again. It tells the view model its window's height, so a short window
+/// gives the pet's band back to the conversation.
 /// </summary>
 public sealed partial class PetPerch : UserControl
 {
     public static readonly StyledProperty<Control?> AnchorProperty = AvaloniaProperty.Register<PetPerch, Control?>(nameof(Anchor));
 
-    /// <summary>Dropped this close to its perch, the pet goes back on it.</summary>
+    /// <summary>Put down this close to its perch, the pet goes back on it.</summary>
     private const double SnapDistance = 16;
 
     private TopLevel? _top;
     private PetsViewModel? _pets;
     /// <summary>Where the pet is in the window (its top-left, in this control's coordinates).</summary>
     private Point _at;
-    /// <summary>Dragged inside the window: where the pet was at the press, and where it is now.</summary>
-    private Point _pressPet;
+    /// <summary>Carried inside the window: where its box is now.</summary>
     private Point? _dragAt;
     /// <summary>The pet on the desktop; made the first time it goes there.</summary>
     private PetWindow? _window;
-    /// <summary>Dragged on the desktop: where the pet was (desktop pixels) when the drag began.</summary>
-    private PixelPoint? _desktopDrag;
     private IPetScreens? _screens;
     private bool _migrating;
+    /// <summary>The pet being carried (until it comes to rest), and whether on the desktop (in desktop pixels / <see cref="_scale"/>).</summary>
+    private OniCarry? _carry;
+    private bool _onDesktop;
+    private double _scale = 1;
 
     public PetPerch()
     {
         InitializeComponent();
         Stage.DragStarted += OnPerchDragStarted;
-        Stage.Dragged += OnPerchDragged;
-        Stage.Dropped += (_, _) => OnPerchDropped();
+        Stage.Dragged += OnDragged;
+        Stage.Dropped += (_, _) => _carry?.Release();
         // The message box moves (it grows, the sidebar opens): the perch moves with it
         LayoutUpdated += (_, _) => Place(Bounds.Size);
     }
@@ -67,6 +70,9 @@ public sealed partial class PetPerch : UserControl
 
     /// <summary>The pet on the desktop (null until it first goes there).</summary>
     internal PetWindow? DesktopWindow => _window;
+
+    /// <summary>The pet is being carried, or has not come to rest since (tests).</summary>
+    internal OniCarry? Carry => _carry;
 
     private IReadOnlyList<PetScreen> AllScreens => _screens?.All ?? [];
 
@@ -109,7 +115,7 @@ public sealed partial class PetPerch : UserControl
             case nameof(PetsViewModel.Position):
                 InvalidateArrange();
                 break;
-            case nameof(PetsViewModel.PixelScale):
+            case nameof(PetsViewModel.PetBox):
                 InvalidateArrange();
                 SyncDesktop();
                 break;
@@ -141,10 +147,28 @@ public sealed partial class PetPerch : UserControl
         return base.ArrangeOverride(finalSize);
     }
 
-    /// <summary>Where the pet's top-left can be: the window less the pet.</summary>
-    private static Size Room(Size window, Size pet) => new(Math.Max(0, window.Width - pet.Width), Math.Max(0, window.Height - pet.Height));
+    /// <summary>Drawn around the pet's box (its spirits, the sign over its head, the dust): kept inside the window and on the screens too.</summary>
+    private static Thickness Overflow(PetsViewModel pets) => OniView.OverflowFor(pets.PetHeight);
 
-    private static Point Clamp(Point p, Size room) => new(Math.Clamp(p.X, 0, room.Width), Math.Clamp(p.Y, 0, room.Height));
+    /// <summary>How far the pet's top-left can move: the window less the pet and what is drawn around it.</summary>
+    private static Size Room(Size window, Size pet, Thickness ov) =>
+        new(Math.Max(0, window.Width - pet.Width - ov.Left - ov.Right), Math.Max(0, window.Height - pet.Height - ov.Top - ov.Bottom));
+
+    private static Point Clamp(Point p, Size room, Thickness ov) =>
+        new(Math.Clamp(p.X, ov.Left, ov.Left + room.Width), Math.Clamp(p.Y, ov.Top, ov.Top + room.Height));
+
+    /// <summary>The nearest place on the monitors' work areas for the pet at <paramref name="at"/> with what is drawn around it.</summary>
+    private PixelPoint ClampOnDesktop(PixelPoint at, PetsViewModel pets)
+    {
+        var box = pets.PetBox;
+        var ov = Overflow(pets);
+        var scale = PetDesktop.Home(AllScreens, at, box)?.Scaling ?? (_top as WindowBase)?.DesktopScaling ?? 1;
+        var dx = (int)Math.Round(ov.Left * scale);
+        var dy = (int)Math.Round(ov.Top * scale);
+        var outer = new Size(box.Width + ov.Left + ov.Right, box.Height + ov.Top + ov.Bottom);
+        var p = PetDesktop.Clamp(AllScreens, new PixelPoint(at.X - dx, at.Y - dy), outer);
+        return new PixelPoint(p.X + dx, p.Y + dy);
+    }
 
     /// <summary>On the message box: its feet on the box's top edge, its right end <see cref="PetsViewModel.PetInset"/> from the box's.</summary>
     private Point? PerchAt(Size pet) =>
@@ -157,13 +181,14 @@ public sealed partial class PetPerch : UserControl
     private void Place(Size size)
     {
         if (_pets is not { } pets || !IsVisible || size.Width <= 0 || size.Height <= 0) return;
-        var pet = PetStage.PetSize(pets);
-        var room = Room(size, pet);
+        var pet = pets.PetBox;
+        var ov = Overflow(pets);
+        var room = Room(size, pet, ov);
         var at = _dragAt
-                 ?? (pets.Position is { } f ? new Point(f.X * room.Width, f.Y * room.Height) : (Point?)null)
+                 ?? (pets.Position is { } f ? new Point(ov.Left + f.X * room.Width, ov.Top + f.Y * room.Height) : (Point?)null)
                  ?? PerchAt(pet)
                  ?? new Point(room.Width - PetsViewModel.PetInset, room.Height);
-        _at = Clamp(at, room);
+        _at = Clamp(at, room, ov);
         Stage.Apply(Stage.Plan(_at, new Rect(size)), default);
         // A settings file from before the desktop roam: the pet goes to the same spot on the desktop once it is placed
         if (pets is { IsRoamDesktop: true, Position: not null } && _dragAt is null && !_migrating)
@@ -177,8 +202,8 @@ public sealed partial class PetPerch : UserControl
     {
         _migrating = false;
         if (_pets is not { IsRoamDesktop: true, Position: not null } pets || _top is null || !IsEffectivelyVisible) return;
-        var size = PetStage.PetSize(pets);
-        var at = PetDesktop.Clamp(AllScreens, this.PointToScreen(_at), size);
+        var size = pets.PetBox;
+        var at = ClampOnDesktop(this.PointToScreen(_at), pets);
         pets.MoveOnDesktop(PetDesktop.Place(AllScreens, at, size));
     }
 
@@ -187,36 +212,83 @@ public sealed partial class PetPerch : UserControl
         if (_pets is not { } pets) return;
         if (pets.IsRoamWindow)
         {
-            _pressPet = _at;
+            // Taken again while it is still coming down: the same body, caught where it is
+            if (_carry is { Moving: true } && !_onDesktop)
+            {
+                _carry.Grab(press.Local);
+                return;
+            }
+            var box = pets.PetBox;
+            var ov = Overflow(pets);
+            var room = Room(Bounds.Size, box, ov);
+            var bounds = new Rect(ov.Left + box.Width / 2, ov.Top + box.Height, room.Width, room.Height);
+            StartCarry(pets, Stage, new Point(_at.X + box.Width / 2, _at.Y + box.Height), bounds, desktop: false);
+            _carry!.Grab(press.Local);
             return;
         }
         // Off the message box onto the desktop: the pet moves into its own window at once, where it is now. This
-        // stage keeps the pointer until the drop, unseen; its message box closes (the keyboard stays in this window).
+        // stage keeps the pointer until it is let go, unseen; its message box closes (the keyboard stays in this window).
         pets.CloseChat();
-        var size = PetStage.PetSize(pets);
-        var at = PetDesktop.Clamp(AllScreens, this.PointToScreen(_at), size);
-        _desktopDrag = at;
-        Stage.Opacity = 0;
+        var at = ClampOnDesktop(this.PointToScreen(_at), pets);
         var window = EnsureDesktopWindow(pets);
         window.MoveTo(at, AllScreens);
         if (!window.IsVisible) window.Show();
+        Stage.PetShown = false;
         SyncForeground();
+        StartDesktopCarry(pets, window, at, press.Screen, (_top as WindowBase)?.DesktopScaling ?? 1);
     }
 
-    private void OnPerchDragged(PetPointer press, PetPointer now)
+    private void OnDragged(PetPointer press, PetPointer now)
     {
-        if (_desktopDrag is not null)
+        if (_carry is not { } carry) return;
+        carry.Move(_onDesktop ? new Point(now.Screen.X / _scale, now.Screen.Y / _scale) : now.Local);
+    }
+
+    /// <summary>A carry of the pet shown by <paramref name="stage"/>, its body at <paramref name="body"/>, kept inside <paramref name="bounds"/>.</summary>
+    private void StartCarry(PetsViewModel pets, PetStage stage, Point body, Rect bounds, bool desktop)
+    {
+        EndCarry();
+        _onDesktop = desktop;
+        var carry = new OniCarry(pets.Oni, body, pets.PetHeight, bounds, pets.ReduceMotion);
+        carry.Moved += () => OnCarryMoved(carry);
+        carry.Settled += () => OnCarrySettled(carry);
+        _carry = carry;
+        stage.Pet.Carry = carry;
+    }
+
+    /// <summary>The carry before this one is over (a new drag began): it no longer moves anything.</summary>
+    private void EndCarry()
+    {
+        if (_carry is null) return;
+        _carry = null;
+        Stage.Pet.Carry = null;
+        if (_window is not null) _window.Stage.Pet.Carry = null;
+    }
+
+    private void OnCarryMoved(OniCarry carry)
+    {
+        if (!ReferenceEquals(carry, _carry) || _pets is not { } pets) return;
+        var box = pets.PetBox;
+        var b = carry.Body;
+        if (_onDesktop)
         {
-            DragOnDesktop(press, now);
+            if (_window is null) return;
+            var at = new PixelPoint((int)Math.Round((b.X - box.Width / 2) * _scale), (int)Math.Round((b.Y - box.Height) * _scale));
+            _window.MoveTo(ClampOnDesktop(at, pets), AllScreens);
             return;
         }
-        _dragAt = _pressPet + (now.Local - press.Local);
+        _dragAt = new Point(b.X - box.Width / 2, b.Y - box.Height);
         Place(Bounds.Size);
     }
 
-    private void OnPerchDropped()
+    /// <summary>Put down and at rest: it stays where it is (saved), or sits on its perch again when put down close to it.</summary>
+    private void OnCarrySettled(OniCarry carry)
     {
-        if (_desktopDrag is not null)
+        if (!ReferenceEquals(carry, _carry)) return;
+        var desktop = _onDesktop;
+        EndCarry();
+        _onDesktop = false;
+        if (desktop)
         {
             DropOnDesktop();
             return;
@@ -225,16 +297,16 @@ public sealed partial class PetPerch : UserControl
         _dragAt = null;
         if (drop is not { } at || _pets is not { } pets) return;
         var size = Bounds.Size;
-        var pet = PetStage.PetSize(pets);
-        var room = Room(size, pet);
-        at = Clamp(at, room);
-        // Back on the message box when dropped close to it (and the window has room for its band)
+        var pet = pets.PetBox;
+        var ov = Overflow(pets);
+        var room = Room(size, pet, ov);
+        at = Clamp(at, room, ov);
+        // Back on the message box when put down close to it (and the window has room for its band)
         if (pets.HasRoom && PerchAt(pet) is { } perch && Math.Abs(at.X - perch.X) <= SnapDistance && Math.Abs(at.Y - perch.Y) <= SnapDistance)
             pets.ReturnToPerchCommand.Execute(null);
         else
-            pets.MoveTo(new Point(room.Width > 0 ? at.X / room.Width : 0, room.Height > 0 ? at.Y / room.Height : 0));
+            pets.MoveTo(new Point(room.Width > 0 ? (at.X - ov.Left) / room.Width : 0, room.Height > 0 ? (at.Y - ov.Top) / room.Height : 0));
         Place(size);
-        Stage.Pet.Cheer();
     }
 
     // ───────────────────────────── On the desktop ─────────────────────────────
@@ -243,9 +315,9 @@ public sealed partial class PetPerch : UserControl
     {
         if (_window is not null) return _window;
         var window = new PetWindow { DataContext = pets };
-        window.Stage.DragStarted += _ => _desktopDrag = window.At;
-        window.Stage.Dragged += DragOnDesktop;
-        window.Stage.Dropped += (_, _) => DropOnDesktop();
+        window.Stage.DragStarted += press => OnDesktopDragStarted(window, press);
+        window.Stage.Dragged += OnDragged;
+        window.Stage.Dropped += (_, _) => _carry?.Release();
         window.Activated += (_, _) => SyncForeground();
         window.Deactivated += (_, _) => SyncForeground();
         // Closed with the app's window (CloseWithApp): a new one is made if the pet goes out again
@@ -257,46 +329,63 @@ public sealed partial class PetPerch : UserControl
         return window;
     }
 
+    private void OnDesktopDragStarted(PetWindow window, PetPointer press)
+    {
+        if (_pets is not { } pets) return;
+        if (_carry is { Moving: true } carry && _onDesktop)
+        {
+            carry.Grab(new Point(press.Screen.X / _scale, press.Screen.Y / _scale));
+            return;
+        }
+        StartDesktopCarry(pets, window, window.At, press.Screen, window.DesktopScaling);
+    }
+
+    /// <summary>
+    /// Carries the desktop pet, its box's top-left at <paramref name="at"/>: in desktop pixels over
+    /// <paramref name="scale"/> (the layout units of the screen it was taken on), kept over the monitors' work areas.
+    /// </summary>
+    private void StartDesktopCarry(PetsViewModel pets, PetWindow window, PixelPoint at, PixelPoint pointer, double scale)
+    {
+        _scale = scale > 0 ? scale : 1;
+        var box = pets.PetBox;
+        var area = AllScreens.Count > 0
+            ? AllScreens.Select(s => s.WorkingArea).Aggregate((a, b) => a.Union(b))
+            : new PixelRect(-100000, -100000, 200000, 200000);
+        var bounds = new Rect(area.X / _scale + box.Width / 2, area.Y / _scale + box.Height,
+            Math.Max(0, area.Width / _scale - box.Width), Math.Max(0, area.Height / _scale - box.Height));
+        StartCarry(pets, window.Stage, new Point(at.X / _scale + box.Width / 2, at.Y / _scale + box.Height), bounds, desktop: true);
+        _carry!.Grab(new Point(pointer.X / _scale, pointer.Y / _scale));
+    }
+
     /// <summary>Shows the pet on the desktop where the view model says, or puts that window away.</summary>
     private void SyncDesktop()
     {
-        if (_desktopDrag is not null || _top is null) return; // the drag moves it; the drop says where it stays
+        if (_onDesktop || _top is null) return; // the carry moves it; where it comes to rest is where it stays
         if (_pets is not { IsOnDesktop: true, DesktopPlace: { } place } pets)
         {
             _window?.Hide();
             return;
         }
         var window = EnsureDesktopWindow(pets);
-        window.MoveTo(PetDesktop.Resolve(AllScreens, place, PetStage.PetSize(pets)), AllScreens);
+        window.MoveTo(ClampOnDesktop(PetDesktop.Resolve(AllScreens, place, pets.PetBox), pets), AllScreens);
         if (!window.IsVisible) window.Show();
         SyncForeground();
     }
 
-    /// <summary>The pointer moved: the pet follows it, kept on the monitors' work areas.</summary>
-    private void DragOnDesktop(PetPointer press, PetPointer now)
-    {
-        if (_desktopDrag is not { } from || _window is null || _pets is not { } pets) return;
-        var to = new PixelPoint(from.X + now.Screen.X - press.Screen.X, from.Y + now.Screen.Y - press.Screen.Y);
-        _window.MoveTo(PetDesktop.Clamp(AllScreens, to, PetStage.PetSize(pets)), AllScreens);
-    }
-
-    /// <summary>Dropped on the desktop: it stays there (saved), or sits on the message box again when dropped close to it.</summary>
+    /// <summary>At rest on the desktop: it stays there (saved), or sits on the message box again when put down close to it.</summary>
     private void DropOnDesktop()
     {
-        if (_desktopDrag is null || _window is null || _pets is not { } pets) return;
-        _desktopDrag = null;
-        Stage.Opacity = 1;
+        Stage.PetShown = true;
+        if (_window is null || _pets is not { } pets) return;
         var at = _window.At;
         if (NearPerch(pets, at))
         {
             pets.ReturnToPerchCommand.Execute(null);
             SyncDesktop();
-            Stage.Pet.Cheer();
             return;
         }
-        pets.MoveOnDesktop(PetDesktop.Place(AllScreens, at, PetStage.PetSize(pets)));
+        pets.MoveOnDesktop(PetDesktop.Place(AllScreens, at, pets.PetBox));
         SyncDesktop();
-        _window.Stage.Pet.Cheer();
     }
 
     /// <summary>The pet's top-left at <paramref name="at"/> on the desktop is close to its perch on the message box (seen, with room for the band).</summary>
@@ -305,7 +394,7 @@ public sealed partial class PetPerch : UserControl
         if (!pets.HasRoom || _top is not Window { IsVisible: true, WindowState: not WindowState.Minimized } top
             || Anchor is not { IsEffectivelyVisible: true } anchor || anchor.Bounds.Width <= 0)
             return false;
-        var perch = anchor.PointToScreen(PerchOn(anchor, PetStage.PetSize(pets)));
+        var perch = anchor.PointToScreen(PerchOn(anchor, pets.PetBox));
         var snap = SnapDistance * top.DesktopScaling;
         return Math.Abs(at.X - perch.X) <= snap && Math.Abs(at.Y - perch.Y) <= snap;
     }
@@ -321,6 +410,8 @@ public sealed partial class PetPerch : UserControl
 
     private void CloseDesktopWindow()
     {
+        EndCarry();
+        _onDesktop = false;
         _window?.CloseWithApp();
         _window = null;
     }

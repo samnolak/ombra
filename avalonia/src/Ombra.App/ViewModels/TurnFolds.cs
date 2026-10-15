@@ -54,7 +54,7 @@ public sealed partial class TurnFoldRowViewModel : RowViewModel
         Label = label;
         CanExpand = span.Count > 0;
         foreach (var gone in _span)
-            if (!span.Contains(gone) && gone.IsTurnFolded) gone.IsTurnFolded = false;
+            if (!span.Contains(gone)) (gone.IsTurnFolded, gone.IsInTurn) = (false, false);
         _span = new HashSet<RowViewModel>(span, ReferenceEqualityComparer.Instance);
         Apply();
     }
@@ -63,7 +63,7 @@ public sealed partial class TurnFoldRowViewModel : RowViewModel
     internal void Release()
     {
         foreach (var row in _span)
-            if (row.IsTurnFolded) row.IsTurnFolded = false;
+            (row.IsTurnFolded, row.IsInTurn) = (false, false);
         _span.Clear();
     }
 
@@ -71,9 +71,13 @@ public sealed partial class TurnFoldRowViewModel : RowViewModel
 
     private void Apply()
     {
+        // A running turn's "Activity" folds nothing, so nothing hangs under it yet
         var fold = !IsLive && !IsExpanded;
         foreach (var row in _span)
+        {
             if (row.IsTurnFolded != fold) row.IsTurnFolded = fold;
+            if (row.IsInTurn == IsLive) row.IsInTurn = !IsLive;
+        }
     }
 
     protected override void OnUpdated()

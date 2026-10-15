@@ -132,7 +132,7 @@ extension commands that omp lists itself keep going to omp.
 | `/todo …` | yes | **Done** — tasks card above the message box; Plan pane — *Panes* area; `/todo` subcommands typed |
 | `/jobs` | yes | **Done** — Background tasks pane — *Panes* area |
 | `/usage [show]` | yes | **Done** — context popover (tokens and cost, or the provider's plan limits with bars) |
-| `/usage reset …` | yes | **Done (typed)** (spend a saved Codex rate-limit reset) |
+| `/usage reset …` | yes | **Done** — the account's saved resets under its plan limits (popover and Settings → Model providers), **Use a saved reset** spends one after asking (`/usage reset` lists the account ids, then `/usage reset <provider>/<id>`); typing it works too |
 | `/context` | yes | **Done** — the context ring and its popover (the breakdown as bars) |
 | `/stats` | yes | **Done** — context popover › Usage dashboard (link to omp's local dashboard) |
 | `/changelog [full]`, `/tools` | yes | **Done (typed)** |
@@ -233,7 +233,8 @@ extension commands that omp lists itself keep going to omp.
 | `extension_ui_request` setStatus / setWidget / set_editor_text / open_url | **Done** — status in the activity tooltip, widgets above the message box, text into the message box, the sign-in link card |
 | `extension_ui_request` setTitle | **Missing** (an extension setting the window title is ignored) |
 | `config_update`, `thinking_level_changed`, `model_changed` | **Done** — model and thinking chips follow |
-| `auto_compaction_*`, `auto_retry_*`, `retry_fallback_*`, `ttsr_triggered`, `todo_reminder`, `irc_message`, `goal_updated`, `notice` | **Done** — notices in the conversation |
+| `auto_compaction_*`, `auto_retry_*`, `retry_fallback_*`, `ttsr_triggered`, `todo_reminder`, `goal_updated`, `notice` | **Done** — notices in the conversation |
+| `irc_message` | **Done** — a message card between agents (sender → recipient, folded to two lines, Markdown when open), also from the history (`irc:incoming`); a tool result omp skipped for a message that came first (`interrupt_skipped`) is a neutral *Skipped* step, not a failure |
 | `command_output` | **Done** — typed builtins: in the conversation; the GUI's own: on the session card / popover / settings pages |
 | `prompt_result`, `session_settled`, non-terminal `agent_end` | **Done** — run end detection |
 
@@ -302,8 +303,9 @@ omp's own interface for them.
   usual proxy variables at an allowlist proxy in the app (`ClientCore/Network/PrivacyProxy`, `NetworkPrivacy`).
   omp has no setting for either; proposal in [`upstream/omp-discovery-opt-in.md`](upstream/omp-discovery-opt-in.md).
 - **Dictation** — speech to text on this computer, into the message box.
-- **Pets** — a pixel companion on the message box that follows what omp does; dragged off it, it floats anywhere on
-  the desktop over other apps, like Codex's pet (Settings › Pets).
+- **Pets** — ONI, an animated companion on the message box that follows what omp does (thinking, working, a question,
+  a finished or stopped run, a failed tool, omp stopping, sleep); carried off it, it floats anywhere on the desktop over
+  other apps, like Codex's pet (Settings › Pets).
 - **Plan history** — earlier plans and every change to the todo list, kept for the session (*Panes* area).
 - **Don't ask again / Deny and say why** (Claude Code's approval options) — omp 18.8's approval is a plain
   Approve/Deny select and its own `tools.approval.<tool>: allow` can only allow a whole tool, so the client keeps the

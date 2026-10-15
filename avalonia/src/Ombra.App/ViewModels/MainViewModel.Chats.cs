@@ -19,7 +19,7 @@ public sealed partial class MainViewModel
 
     /// <summary>The shown chat belongs to no project: the header, the greeting and the starters say so.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasProjectChip), nameof(ProjectChipLabel), nameof(ProjectChipTip), nameof(GreetingStarters))]
+    [NotifyPropertyChangedFor(nameof(HasProjectChip), nameof(ProjectChipLabel), nameof(ProjectChipTip), nameof(GreetingStarters), nameof(GreetingLead), nameof(GreetingProject), nameof(GreetingTail))]
     private bool _isProjectless;
 
     /// <summary>The header's project menu: a project's name, or "No project" for a chat.</summary>
@@ -36,7 +36,31 @@ public sealed partial class MainViewModel
     {
         OnPropertyChanged(nameof(HasProjectChip));
         OnPropertyChanged(nameof(ProjectChipLabel));
+        OnPropertyChanged(nameof(GreetingLead));
+        OnPropertyChanged(nameof(GreetingProject));
+        OnPropertyChanged(nameof(GreetingTail));
     }
+
+    /// <summary>
+    /// A new session's greeting (JoJo's words) as the words before the project menu, the menu's label and what follows:
+    /// "Oh? You’re approaching ‹project›?", and without a project "Oh? You’re approaching ‹me›?" — "me" opens the same
+    /// menu. The "me" sentence is split where the translated "me" stands, so a language can bend the words around it.
+    /// </summary>
+    private (string Lead, string Project, string Tail) Greeting
+    {
+        get
+        {
+            if (!IsProjectless && ProjectName.Length > 0) return (Loc.T("Oh? You’re approaching"), ProjectName, "?");
+            var sentence = Loc.T("Oh? You’re approaching me?");
+            var me = Loc.T("me");
+            var at = sentence.LastIndexOf(me, StringComparison.Ordinal);
+            return at < 0 ? (sentence, me, "") : (sentence[..at].TrimEnd(), me, sentence[(at + me.Length)..]);
+        }
+    }
+
+    public string GreetingLead => Greeting.Lead;
+    public string GreetingProject => Greeting.Project;
+    public string GreetingTail => Greeting.Tail;
 
     /// <summary>A chat's starters: nothing in them needs a project's files.</summary>
     public IReadOnlyList<string> ChatStarterPrompts { get; } =

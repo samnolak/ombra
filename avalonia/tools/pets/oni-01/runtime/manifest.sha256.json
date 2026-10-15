@@ -1,0 +1,117 @@
+[
+  {
+    "path": "HANDOFF_PLAN.md",
+    "bytes": 6015,
+    "sha256": "3ebe44bb873db3b27eda5068c8c557a674fad19ed3545c5a67dddd4e6d7d65b1"
+  },
+  {
+    "path": "PNG_OPTIMIZATION.json",
+    "bytes": 3316,
+    "sha256": "56e2f90f4673554b227889f8cf9e0c33cd2855e6caddc6c8522c329a21698a72"
+  },
+  {
+    "path": "RUNTIME_README.md",
+    "bytes": 2038,
+    "sha256": "25d57dabfad7540e9909fb554bc058a801c236843e6e545f486adfde166ee679"
+  },
+  {
+    "path": "effects-player.cjs",
+    "bytes": 7315,
+    "sha256": "1eccdb9c3636d95a08faccf3e8d649bd0627566315dd1c5d90191b0611236e04"
+  },
+  {
+    "path": "effects/atlas-v1.png",
+    "bytes": 1396861,
+    "sha256": "5f1295734064d7337aaee0317551767828ad58994c3c07f49aa5dcefe431ddba"
+  },
+  {
+    "path": "effects/event-vfx-v3.png",
+    "bytes": 1195775,
+    "sha256": "fc04cb7f9b619836547174746866e5e8098d5e53f9a9e1ec4f466effb405548a"
+  },
+  {
+    "path": "effects/living-flames-v2.png",
+    "bytes": 1002812,
+    "sha256": "017865ed293c3c2c75a6679abf4faa441246ee09c361460ddf0db0f805569c53"
+  },
+  {
+    "path": "frames/approved-v1/idle.png",
+    "bytes": 1764774,
+    "sha256": "a66b0c8abb16fb37a6eec90d8d757e5237ed0fd23c090b9435905a2867499977"
+  },
+  {
+    "path": "frames/approved-v1/joy-torso-v11.png",
+    "bytes": 3900402,
+    "sha256": "17a72ea955b8e1eea2e3e3822434f3df0b39cdf0e5c3ec73f3d9b3f7879e1906"
+  },
+  {
+    "path": "frames/approved-v1/manifest.json",
+    "bytes": 72942,
+    "sha256": "c3a17ede1b7736957064b26522c61ffcee7fac120e3d4676d0992cb2d02353a0"
+  },
+  {
+    "path": "interaction.cjs",
+    "bytes": 4685,
+    "sha256": "1d4b58c5a6d7f7de8861a88ffe4fe4bc823bf8e74de991962d236043c68811bf"
+  },
+  {
+    "path": "runtime-contract.json",
+    "bytes": 2258,
+    "sha256": "3b269b003a5ebe31fc1e981997f916b5e5408ee610d182f3ac93eb7a71d5d1d0"
+  },
+  {
+    "path": "scenario-player.cjs",
+    "bytes": 5714,
+    "sha256": "6d00132f9af5cb50dcfec5b4db8b5dceb8f81747c06e0c1e78308ab28e05ab92"
+  },
+  {
+    "path": "states-player.cjs",
+    "bytes": 850,
+    "sha256": "897e81831cae92276218c07c519d807580ce4905ba9e929ce51a35c2e35319c7"
+  },
+  {
+    "path": "transitions/error-entry.png",
+    "bytes": 1809833,
+    "sha256": "23f19d826146bbdd6f0366fcdf46cba2882c0eb7ea811e55ba21a5220aeae686"
+  },
+  {
+    "path": "transitions/joy-entry.png",
+    "bytes": 1627444,
+    "sha256": "92060b4d53608f24cf7f08ad19837aaa3aaff7226e4227ea08514a72058183c0"
+  },
+  {
+    "path": "transitions/manifest.json",
+    "bytes": 36339,
+    "sha256": "b900089a222446ad62d8f117bf5945efc1b5a133a81d4a9839bc8a30b6ca4268"
+  },
+  {
+    "path": "transitions/pickup.png",
+    "bytes": 1780642,
+    "sha256": "f9f4aa59a94d9bde874df132d53dba0db671a84ab2b0c8518cd67e9e714784cc"
+  },
+  {
+    "path": "transitions/question.png",
+    "bytes": 1628617,
+    "sha256": "a75239156dffb9e351852c622e6a36781f36326f1c3135d67f52c5214d9af666"
+  },
+  {
+    "path": "transitions/sleep-entry.png",
+    "bytes": 1682055,
+    "sha256": "f3fe11b3a53ad4b6bd78280756089eea769e898b28d063256f63cbc4c09bb3c5"
+  },
+  {
+    "path": "transitions/think-entry.png",
+    "bytes": 1641947,
+    "sha256": "508b293e150ef590f59ec98ca458aedf74aa9f1e4076d56b96ad3dc4e3fa25fa"
+  },
+  {
+    "path": "transitions/work-entry.png",
+    "bytes": 1622270,
+    "sha256": "02a2d8544c8b8e061b8c9a97c256ae33af927d03ee3e1f1bc8f0dfe3b289f629"
+  },
+  {
+    "path": "verify-package.cjs",
+    "bytes": 622,
+    "sha256": "e3a83a10b19c1130fc9260adfb8f1f786ee9a2fb897f28e0136e0fdd58c9f717"
+  }
+]

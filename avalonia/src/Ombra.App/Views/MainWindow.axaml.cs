@@ -683,8 +683,20 @@ public sealed partial class MainWindow : Window
         CloseOnChoice(ThinkingBox);
         CloseOnChoice(AttachButton);
         CloseOnChoice(ProjectButton);
-        // The project in a new session's greeting opens the same project menu as the chip under the message box
-        GreetingProjectButton.Click += (_, _) => ProjectButton.Flyout?.ShowAt(GreetingProjectButton);
+        // The project in a new session's greeting opens the same project menu as the chip under the message box, below the
+        // words (over the starters) instead of above the chip
+        GreetingProjectButton.Click += (_, _) =>
+        {
+            if (ProjectButton.Flyout is not Avalonia.Controls.Primitives.PopupFlyoutBase menu) return;
+            menu.Placement = PlacementMode.BottomEdgeAlignedLeft;
+            menu.Closed += Restore;
+            menu.ShowAt(GreetingProjectButton);
+            void Restore(object? s, EventArgs e)
+            {
+                menu.Closed -= Restore;
+                menu.Placement = PlacementMode.TopEdgeAlignedLeft;
+            }
+        };
         CloseOnChoice(ApprovalButton, () => Vm?.ConfirmYolo == true);
         if (ApprovalButton.Flyout is { } approvals)
             approvals.Closed += (_, _) => { if (Vm is { ConfirmYolo: true } vm) vm.CancelYoloCommand.Execute(null); };
