@@ -1,0 +1,122 @@
+[
+  {
+    "file": "frames/approved-v1/idle.png",
+    "before": 1855116,
+    "after": 1764774,
+    "width": 1448,
+    "height": 1086,
+    "rgbaBytes": 6290112,
+    "pixelSha256": "94b5afd5c0e902c0ced7b1b1abef7a0a9705effdf03e4198ddb3afd6b0e95b69",
+    "pixelsIdentical": true
+  },
+  {
+    "file": "frames/approved-v1/joy-torso-v11.png",
+    "before": 4578570,
+    "after": 3900402,
+    "width": 2048,
+    "height": 2560,
+    "rgbaBytes": 20971520,
+    "pixelSha256": "2eb5b5a934e325a63abc40d1151ad48bf4ab83de99bff4445b329da9c79937e4",
+    "pixelsIdentical": true
+  },
+  {
+    "file": "transitions/work-entry.png",
+    "before": 1704221,
+    "after": 1622270,
+    "width": 1448,
+    "height": 1086,
+    "rgbaBytes": 6290112,
+    "pixelSha256": "969ff9cf15b8c52daf139527f43a399d07b4bec20f2fe582eccf2dd3b8a1f591",
+    "pixelsIdentical": true
+  },
+  {
+    "file": "transitions/think-entry.png",
+    "before": 1733487,
+    "after": 1641947,
+    "width": 1448,
+    "height": 1086,
+    "rgbaBytes": 6290112,
+    "pixelSha256": "69082af532c8bdeea2dfe296f731d3d3a3d8dc9018e0bcb7ad5fcde80cb65f4e",
+    "pixelsIdentical": true
+  },
+  {
+    "file": "transitions/question.png",
+    "before": 1722511,
+    "after": 1628617,
+    "width": 1448,
+    "height": 1086,
+    "rgbaBytes": 6290112,
+    "pixelSha256": "9d7743544ed54746101bfb43b1e3ba211d37a724a25a44989aa9bd86d1ff0baa",
+    "pixelsIdentical": true
+  },
+  {
+    "file": "transitions/sleep-entry.png",
+    "before": 1751912,
+    "after": 1682055,
+    "width": 1448,
+    "height": 1086,
+    "rgbaBytes": 6290112,
+    "pixelSha256": "36e82ea7770512c1116da9872b8883afbaa98eccab289bc0367ab1a5f85bd730",
+    "pixelsIdentical": true
+  },
+  {
+    "file": "transitions/error-entry.png",
+    "before": 1904919,
+    "after": 1809833,
+    "width": 1448,
+    "height": 1086,
+    "rgbaBytes": 6290112,
+    "pixelSha256": "249a57ac5059cde247eba51969859935fe26456e3894d761c9f85a5abf1bf226",
+    "pixelsIdentical": true
+  },
+  {
+    "file": "transitions/pickup.png",
+    "before": 1886073,
+    "after": 1780642,
+    "width": 1448,
+    "height": 1086,
+    "rgbaBytes": 6290112,
+    "pixelSha256": "3ccf346371fd4a253899d48ed4387b3491f64cb0d64947c5589fe66fae1227a5",
+    "pixelsIdentical": true
+  },
+  {
+    "file": "effects/atlas-v1.png",
+    "before": 1603844,
+    "after": 1396861,
+    "width": 1774,
+    "height": 887,
+    "rgbaBytes": 6294152,
+    "pixelSha256": "d349add09720dc65c5de8a99a8b9e51effb8d380e00ef5a588fbaa6fd749595c",
+    "pixelsIdentical": true
+  },
+  {
+    "file": "effects/living-flames-v2.png",
+    "before": 1100825,
+    "after": 1002812,
+    "width": 1261,
+    "height": 1247,
+    "rgbaBytes": 6289868,
+    "pixelSha256": "1a6dfd27f6978dfd80806cc5c0d819fc2bce3efba0a402cacc81863a1739ccae",
+    "pixelsIdentical": true
+  },
+  {
+    "file": "effects/event-vfx-v3.png",
+    "before": 1357548,
+    "after": 1195775,
+    "width": 1536,
+    "height": 1024,
+    "rgbaBytes": 6291456,
+    "pixelSha256": "c9afb0562ebff357ca08497661a324811e4148f29e17a0fa91f24d0e5beaefc5",
+    "pixelsIdentical": true
+  },
+  {
+    "file": "transitions/joy-entry.png",
+    "before": 1711097,
+    "after": 1627444,
+    "width": 1448,
+    "height": 1086,
+    "rgbaBytes": 6290112,
+    "pixelSha256": "82fe9adb47ae84f90c204f602ad5b6fb255407ab12635f2ad1ccfdf7b8ab1f26",
+    "pixelsIdentical": true
+  }
+]

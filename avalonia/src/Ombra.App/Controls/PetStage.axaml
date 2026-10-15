@@ -30,8 +30,7 @@
         </TextBox.Resources>
       </TextBox>
     </Border>
-    <ctl:PetView x:Name="Pet" Classes="perched" Look="{Binding ChosenLook}" Mood="{Binding Mood}" PixelScale="{Binding PixelScale}"
-                 Attention="{Binding Attention}" ToolTip.Tip="{Binding PetTip}"
-                 AutomationProperties.Name="{Binding AccessibleName}" />
+    <ctl:OniView x:Name="Pet" Classes="perched" Pet="{Binding Oni}" HeightPx="{Binding PetHeight}" Reduced="{Binding ReduceMotion}"
+                 ToolTip.Tip="{Binding PetTip}" AutomationProperties.Name="{Binding AccessibleName}" />
   </Canvas>
 </UserControl>

@@ -423,4 +423,52 @@ public sealed class ConversationStateTests
         s.SetPhase(SessionPhase.Stopped, T);
         Assert.Equal(SessionPhase.Stopped, s.Phase);
     }
+
+    [Fact]
+    public void A_call_omp_set_aside_for_a_message_that_came_first_is_skipped_not_failed()
+    {
+        // omp 18.8.0 (agent-loop.ts createSkippedToolResult): isError with details.source "interrupt_skipped"; its own
+        // terminal shows it neutrally. A real error of the same tool still fails.
+        const string skippedText = "Skipped due to a queued background completion (job or supervised process). Do not count this skipped result as completed work or verification.";
+        var s = new ConversationState();
+        foreach (var (id, details) in new[] { ("w1", """{"__interrupted":true,"source":"interrupt_skipped","execution":"started"}"""),
+                     ("w2", """{"__synthetic":true,"source":"interrupt_skipped","executed":false}"""), ("w3", """{"source":"other"}""") })
+        {
+            s.Apply(F($$$"""{"type":"tool_execution_start","toolCallId":"{{{id}}}","toolName":"wait","args":{}}"""), T);
+            s.Apply(F($$$"""{"type":"tool_execution_end","toolCallId":"{{{id}}}","toolName":"wait","isError":true,"result":{"content":[{"type":"text","text":"{{{skippedText}}}"}],"details":{{{details}}}}}"""), T);
+        }
+        Assert.Equal([ToolStatus.Skipped, ToolStatus.Skipped, ToolStatus.Failed], s.Snapshot().Items.OfType<ToolItem>().Select(t => t.Status));
+
+        // The same from the history
+        var h = new ConversationState();
+        h.Hydrate(JsonDocument.Parse($$$"""
+            [{"role":"assistant","content":[{"type":"toolCall","id":"w1","name":"wait","arguments":{}}]},
+             {"role":"toolResult","toolCallId":"w1","toolName":"wait","isError":true,"content":[{"type":"text","text":"{{{skippedText}}}"}],
+              "details":{"__interrupted":true,"source":"interrupt_skipped","execution":"started"}}]
+            """).RootElement);
+        Assert.Equal(ToolStatus.Skipped, h.Snapshot().Items.OfType<ToolItem>().Single().Status);
+        Assert.Equal("Skipped: a background job finished first", Ombra.App.ViewModels.ToolRowViewModel.SkippedFor(skippedText));
+    }
+
+    [Fact]
+    public void An_agents_message_is_a_message_row_with_its_words_not_omps_envelope()
+    {
+        // irc_message (omp 18.8.0 irc-bridge.ts): the content is the model's envelope ("<irc>\nIncoming IRC message from
+        // agent `X`: …"); the sender and the words are in details. Relays between two others name both.
+        var s = new ConversationState();
+        s.Apply(F("""{"type":"irc_message","message":{"role":"custom","customType":"irc:incoming","display":true,"content":"<irc>\nIncoming IRC message from agent `GallerySolutions`:\n\n**Found** it\n","details":{"id":"m1","from":"GallerySolutions","message":"**Found** it"}}}"""), T);
+        s.Apply(F("""{"type":"irc_message","message":{"role":"custom","customType":"irc:relay","display":true,"content":"[IRC `A` → `B`]\n\nhi","details":{"from":"A","to":"B","body":"hi"}}}"""), T);
+        s.Apply(F("""{"type":"irc_message","message":{"role":"custom","customType":"irc:incoming","display":true,"content":"<irc>\nIncoming IRC message from agent `C` (reply to m1):\n\nok","details":{"id":"m2","from":"C","message":"ok","replyTo":"m1"}}}"""), T);
+        Assert.Equal([("GallerySolutions", (string?)null, "**Found** it", false), ("A", "B", "hi", false), ("C", null, "ok", true)],
+            s.Snapshot().Items.OfType<AgentMessageItem>().Select(m => (m.From, m.To, m.Text, m.IsReply)));
+        Assert.Empty(s.Snapshot().Items.OfType<NoticeItem>());
+
+        // From the history: the incoming ones omp keeps with the session
+        var h = new ConversationState();
+        h.Hydrate(JsonDocument.Parse("""[{"role":"custom","customType":"irc:incoming","display":true,"content":"<irc>…","details":{"id":"m1","from":"GallerySolutions","message":"**Found** it"}}]""").RootElement);
+        Assert.Equal(("GallerySolutions", "**Found** it"), h.Snapshot().Items.OfType<AgentMessageItem>().Select(m => (m.From, m.Text)).Single());
+
+        var row = new Ombra.App.ViewModels.AgentMessageRowViewModel(new AgentMessageItem(1, "C", null, "## Result\n**Found** `it`\n- one", true));
+        Assert.Equal(("Result Found it - one", "→ omp · reply"), (row.Preview, row.Route));
+    }
 }

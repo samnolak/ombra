@@ -25,8 +25,8 @@ public readonly record struct PetLayout(Point Pet, Point Bubble, bool BubbleOnLe
 /// </summary>
 public sealed partial class PetStage : UserControl
 {
-    /// <summary>A press that moves less than this (in either direction) is a click, not a drag.</summary>
-    private const double DragThreshold = 4;
+    /// <summary>A press that moves less than this far is a click, not a drag (interaction.cjs <c>PointerGesture</c>).</summary>
+    private const double DragThreshold = 6;
     /// <summary>Between the pet and its message box; between the message box and the room's edges.</summary>
     private const double ChatGap = 6, ChatEdge = 8;
     /// <summary>A press on the pet right after its message box lost the keyboard (to that press) closes it, not reopens it.</summary>
@@ -105,8 +105,19 @@ public sealed partial class PetStage : UserControl
 
     // ───────────────────────────── Placing ─────────────────────────────
 
-    /// <summary>The pet's size at its <see cref="PetsViewModel.PixelScale"/>.</summary>
-    public static Size PetSize(PetsViewModel pets) => new(PetFrames.Width * pets.PixelScale, PetFrames.Height * pets.PixelScale);
+    /// <summary>The pet's box at its size (<see cref="OniView.BoxFor"/>).</summary>
+    public static Size PetSize(PetsViewModel pets) => pets.PetBox;
+
+    /// <summary>Its box is shown (the perch's while the pet is on the desktop is not: it only keeps the pointer).</summary>
+    public bool PetShown
+    {
+        get => Opacity > 0;
+        set
+        {
+            Opacity = value ? 1 : 0;
+            Pet.Suspended = !value;
+        }
+    }
 
     /// <summary>
     /// Where everything goes with the pet's top-left at <paramref name="at"/>, inside <paramref name="room"/> (the
@@ -127,7 +138,7 @@ public sealed partial class PetStage : UserControl
             onLeft = left >= room.X || right + b.Width > room.Right && room.X - left < right + b.Width - room.Right;
             bubble = new Point(
                 Math.Clamp(onLeft ? left : right, room.X, Math.Max(room.X, room.Right - b.Width)),
-                Math.Clamp(at.Y + (_pets?.IsSmall == true ? 2 : 8), room.Y, Math.Max(room.Y, room.Bottom - b.Height)));
+                Math.Clamp(at.Y + pet.Height * .12, room.Y, Math.Max(room.Y, room.Bottom - b.Height)));
             extent = extent.Union(new Rect(bubble, b));
         }
         if (PetChat.IsVisible)
@@ -163,10 +174,15 @@ public sealed partial class PetStage : UserControl
 
     // ───────────────────────────── Drag and click ─────────────────────────────
 
+    /// <summary>
+    /// Where the pointer is. On the desktop a mouse is read from the system: the pet's window moves every frame while
+    /// it is carried, and an event's window-relative position may be from before the last move.
+    /// </summary>
     private PetPointer PointerAt(PointerEventArgs e)
     {
         var local = e.GetPosition(this);
-        return new PetPointer(local, this.PointToScreen(local));
+        var screen = e.Pointer.Type == PointerType.Mouse && Platform.SystemPointer.Position is { } mouse ? mouse : this.PointToScreen(local);
+        return new PetPointer(local, screen);
     }
 
     private void OnPetPressed(object? sender, PointerPressedEventArgs e)
@@ -188,7 +204,7 @@ public sealed partial class PetStage : UserControl
         {
             // The window has not moved yet: the stage's own coordinates measure the press
             var d = now.Local - press.Local;
-            if (Math.Abs(d.X) < DragThreshold && Math.Abs(d.Y) < DragThreshold) return;
+            if (Math.Sqrt(d.X * d.X + d.Y * d.Y) < DragThreshold) return;
             _dragging = true;
             Pet.Classes.Set("dragging", true);
             ToolTip.SetIsOpen(Pet, false);
@@ -231,7 +247,6 @@ public sealed partial class PetStage : UserControl
             return;
         }
         pets.OpenChat();
-        Pet.Cheer();
     }
 
     // ───────────────────────────── The message box ─────────────────────────────
@@ -251,7 +266,7 @@ public sealed partial class PetStage : UserControl
             pets.SendChatCommand.Execute(null);
             if (pets.IsChatOpen) return; // not sent: the pet says why, the text stays
             RestoreFocus();
-            Pet.Cheer();
+            pets.Poke();
         }
     }
 

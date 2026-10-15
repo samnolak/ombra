@@ -179,6 +179,7 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
     <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="ctl:InnerClip.IsEnabled" Value="True" />
   </Style>
 
   <!-- ─────────────── The viewer's Changes (diff review) ─────────────── -->

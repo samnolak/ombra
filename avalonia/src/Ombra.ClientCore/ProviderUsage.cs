@@ -19,7 +19,23 @@ public sealed record ProviderUsageLimit(string Id, string Label, double? UsedFra
 /// <summary>One account's report for a provider (omp's <c>UsageReport</c>).</summary>
 /// <param name="Account">The account's e-mail or id, when omp knows it.</param>
 /// <param name="Plan">The subscription plan ("plus", "max"), when the provider says.</param>
-public sealed record ProviderUsageReport(string Provider, string? Account, string? Plan, DateTimeOffset? FetchedAt, IReadOnlyList<ProviderUsageLimit> Limits);
+/// <param name="Resets">The account's saved rate-limit resets, when the provider reports them (ChatGPT, Claude).</param>
+public sealed record ProviderUsageReport(string Provider, string? Account, string? Plan, DateTimeOffset? FetchedAt, IReadOnlyList<ProviderUsageLimit> Limits,
+    ProviderUsageResets? Resets = null);
+
+/// <summary>
+/// Saved ("banked") rate-limit resets a provider granted the account, spent on demand to refresh a used-up window
+/// (omp's <c>UsageResetCredits</c>, summarized as its <c>summarizeUsageResetCredits</c> does for <c>/usage</c>).
+/// </summary>
+/// <param name="Saved">Resets banked, including ones that cannot be spent now.</param>
+/// <param name="Usable">The ones the provider says can be spent now.</param>
+/// <param name="SoonestExpiry">When the first one still to spend expires (else when the last one expired).</param>
+/// <param name="Unavailable">omp's reason none can be spent now ("cooldown until …", "blocked by Claude 5h").</param>
+public sealed record ProviderUsageResets(int Saved, int Usable, DateTimeOffset? SoonestExpiry, string? Unavailable);
+
+/// <summary>An account <c>/usage reset</c> lists: <c>/usage reset &lt;Provider&gt;/&lt;CredentialId&gt;</c> spends one of its resets.</summary>
+/// <param name="Label">omp's name for it: the e-mail (or account id), then " · " and the organization when there is one.</param>
+public sealed record SavedResetAccount(string Provider, string CredentialId, string Label, bool Active);
 
 /// <summary><c>get_session_stats</c>: what this session spent (session-stats.ts).</summary>
 public sealed record SessionTokenStats(long Input, long Output, long CacheRead, long CacheWrite, long Total, double Cost, long PremiumRequests);
@@ -57,11 +73,90 @@ public static class ProviderUsage
                     foreach (var l in ls.EnumerateArray())
                         if (ParseLimit(l) is { } limit) limits.Add(limit);
                 if (limits.Count == 0) continue;
-                list.Add(new ProviderUsageReport(provider, account, plan, Time(Num(r, "fetchedAt")), limits));
+                var resets = r.TryGetProperty("resetCredits", out var rc) && rc.ValueKind == JsonValueKind.Object ? ParseResets(rc) : null;
+                list.Add(new ProviderUsageReport(provider, account, plan, Time(Num(r, "fetchedAt")), limits, resets));
             }
             return list;
         }
     }
+
+    /// <summary>omp's <c>summarizeUsageResetCredits</c> (pi-tui usage-display.ts, omp 18.8.0).</summary>
+    private static ProviderUsageResets? ParseResets(JsonElement rc)
+    {
+        if (Num(rc, "availableCount") is not { } available) return null;
+        var saved = Math.Max(0, (int)Math.Truncate(available));
+        var usable = Math.Max(0, (int)Math.Truncate(Num(rc, "redeemableCount") ?? available));
+        var credits = rc.TryGetProperty("credits", out var cs) && cs.ValueKind == JsonValueKind.Array
+            ? cs.EnumerateArray().Where(c => c.ValueKind == JsonValueKind.Object).ToList() : [];
+        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset? soonest = null, latestExpired = null;
+        foreach (var c in credits)
+        {
+            if (Num(c, "remainingCount") == 0 || Str(c, "status") == "redeemed" || IsoTime(Str(c, "expiresAt")) is not { } at) continue;
+            if (at > now) { if (soonest is null || at < soonest) soonest = at; }
+            else if (latestExpired is null || at > latestExpired) latestExpired = at;
+        }
+        // The credit the next spend would use: the one the provider picked, else the first usable, else the first
+        var next = Str(rc, "nextCreditId");
+        var selected = next is not null ? credits.FirstOrDefault(c => Str(c, "id") == next)
+            : credits.FirstOrDefault(c => !(c.TryGetProperty("usable", out var u) && u.ValueKind == JsonValueKind.False));
+        if (next is null && selected.ValueKind != JsonValueKind.Object) selected = credits.FirstOrDefault();
+        var hasSelected = selected.ValueKind == JsonValueKind.Object;
+        var blocking = hasSelected && selected.TryGetProperty("blocking", out var b) && b.ValueKind == JsonValueKind.Array
+            ? b.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => ResetWindow(x.GetString()!)).ToList() : [];
+        var status = hasSelected ? Str(selected, "status") : null;
+        var reason = Str(rc, "reason")
+            ?? (Str(rc, "cooldownUntil") is { } cooldown ? "cooldown until " + cooldown : null)
+            ?? (blocking.Count > 0 ? "blocked by " + string.Join(", ", blocking) : null)
+            ?? (status is not null && status != "available" ? status : null)
+            ?? (rc.TryGetProperty("eligible", out var el) && el.ValueKind == JsonValueKind.False ? "not eligible" : null)
+            ?? (saved > 0 && usable == 0 ? "not usable right now" : null);
+        return new ProviderUsageResets(saved, usable, soonest ?? latestExpired, reason);
+    }
+
+    /// <summary>omp's <c>formatUsageResetWindow</c>: a window a saved reset covers, by name.</summary>
+    private static string ResetWindow(string id) => id switch
+    {
+        "anthropic:5h" => "Claude 5h",
+        "anthropic:7d" => "Claude weekly",
+        "anthropic:7d:opus" => "Claude Opus weekly",
+        "anthropic:7d:sonnet" => "Claude Sonnet weekly",
+        _ => id,
+    };
+
+    private static DateTimeOffset? IsoTime(string? s) =>
+        s is not null && DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var t) ? t : null;
+
+    /// <summary>The command that lists the accounts with saved resets and their ids (omp's builtin, over RPC).</summary>
+    public const string SavedResetsCommand = "/usage reset";
+
+    /// <summary>The command that spends one of <paramref name="account"/>'s saved resets.</summary>
+    public static string SpendResetCommand(SavedResetAccount account) => $"/usage reset {account.Provider}/{account.CredentialId}";
+
+    /// <summary>
+    /// The accounts in <c>/usage reset</c>'s list (slash-commands/builtin-session.ts, omp 18.8.0):
+    /// <c>- dev@example.com [Codex · openai-codex/3]: 2 saved, 1 usable now (active)</c>.
+    /// </summary>
+    public static IReadOnlyList<SavedResetAccount> ParseSavedResetAccounts(string output) =>
+        [.. System.Text.RegularExpressions.Regex.Matches(output,
+                @"^- (?<label>.+?) \[[^\]\n]* · (?<provider>[a-z0-9-]+)/(?<id>\d+)\]: [^\n]*?(?<active> \(active\))?\r?$",
+                System.Text.RegularExpressions.RegexOptions.Multiline)
+            .Select(m => new SavedResetAccount(m.Groups["provider"].Value, m.Groups["id"].Value, m.Groups["label"].Value, m.Groups["active"].Success))];
+
+    /// <summary>
+    /// The listed account a usage report is about: same provider, and omp's label is the report's account (with its
+    /// organization after " · "); a report without an account matches when its provider has only one.
+    /// </summary>
+    public static SavedResetAccount? ResetAccountFor(ProviderUsageReport report, IReadOnlyList<SavedResetAccount> accounts)
+    {
+        var mine = accounts.Where(a => a.Provider == report.Provider).ToList();
+        if (report.Account is not { } account) return mine.Count == 1 ? mine[0] : null;
+        var matching = mine.Where(a => a.Label == account || a.Label.StartsWith(account + " · ", StringComparison.Ordinal)).ToList();
+        return matching.Count == 1 ? matching[0] : null;
+    }
+
+    /// <summary>True when omp's answer to <see cref="SpendResetCommand"/> says the reset was applied.</summary>
+    public static bool ResetApplied(string output) => output.StartsWith("Reset applied for ", StringComparison.Ordinal);
 
     private static ProviderUsageLimit? ParseLimit(JsonElement l)
     {
@@ -108,12 +203,14 @@ public static class ProviderUsage
     public static string ResetsIn(DateTimeOffset at, DateTimeOffset now, string verb = "resets")
     {
         var left = at - now;
-        if (left < TimeSpan.FromMinutes(1)) return verb + " soon";
-        var text = left.TotalDays >= 1 ? $"{(int)left.TotalDays}d" + (left.Hours > 0 ? $" {left.Hours}h" : "")
-            : left.TotalHours >= 1 ? $"{(int)left.TotalHours}h" + (left.Minutes > 0 ? $" {left.Minutes}m" : "")
-            : $"{(int)left.TotalMinutes}m";
-        return $"{verb} in {text}";
+        return left < TimeSpan.FromMinutes(1) ? verb + " soon" : $"{verb} in {Span(left)}";
     }
+
+    /// <summary>A time left in its two largest units: "3d 4h", "2h 10m", "45m".</summary>
+    public static string Span(TimeSpan left) =>
+        left.TotalDays >= 1 ? $"{(int)left.TotalDays}d" + (left.Hours > 0 ? $" {left.Hours}h" : "")
+        : left.TotalHours >= 1 ? $"{(int)left.TotalHours}h" + (left.Minutes > 0 ? $" {left.Minutes}m" : "")
+        : $"{(int)left.TotalMinutes}m";
 
     /// <summary>The amount when there is no fraction to draw: "$12.40 used", "1,200 of 5,000 requests".</summary>
     public static string Amount(ProviderUsageLimit l)

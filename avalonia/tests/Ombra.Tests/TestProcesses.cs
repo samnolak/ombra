@@ -51,9 +51,10 @@ internal static class TestProcesses
         return spec with { Environment = env };
     }
 
+    /// <summary>A new folder in the run's temp folder, deleted with it (<see cref="TestEnvironment"/>).</summary>
     public static string TempDir(string name)
     {
-        var dir = Path.Combine(Path.GetTempPath(), "ombra-tests", name + "-" + Guid.NewGuid().ToString("N")[..8]);
+        var dir = Path.Combine(Path.GetTempPath(), name + "-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(dir);
         return dir;
     }

@@ -1,7 +1,9 @@
 # Ombra (Avalonia client) — third-party notices
 
-Ombra is distributed under the MIT License (`LICENSE`). It is an independent client for the original omp
-(oh-my-pi); it is not an official product of the omp authors, the Bun authors, Anthropic or OpenAI.
+Ombra is distributed under the MIT License (`LICENSE`). It is an independent client for omp (oh-my-pi),
+including project-maintained derivatives when shipped; it is not an official product of the omp authors,
+the Bun authors, Anthropic or OpenAI. The runtime listed below is still upstream 18.8.0. A fork package must
+identify its upstream base and Ombra revision and retain the upstream copyright and license notices.
 
 ## Bundled in this package
 

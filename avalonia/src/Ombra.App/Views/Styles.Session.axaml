@@ -2,7 +2,8 @@
      menu, usage and model options, on the design system's tokens (Tokens.axaml), as in Styles.axaml. -->
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:ctl="using:Ombra.App.Controls">
+        xmlns:ctl="using:Ombra.App.Controls"
+        xmlns:vm="using:Ombra.App.ViewModels">
 
   <!-- ─────────────── Session menu (the title's flyout) ─────────────── -->
   <Style Selector="StackPanel.session-menu > Button.menu-item">
@@ -195,13 +196,31 @@
   <!-- ─────────────── Transcript ─────────────── -->
   <!-- Transcript rows are not selectable list items: no hover/selection chrome; one reading column, centered. Not
        clipped (Fluent clips a ListBoxItem): a tool line reaches 8 px past the column on each side, and the item's clip cut
-       its rounded hover fill into a square-cornered strip. -->
-  <Style Selector="ListBox.transcript ListBoxItem">
+       its rounded hover fill into a square-cornered strip. A row under lines that fold it ("Worked for…", a step group)
+       sits that many levels in, a guide down from each line (Controls/TreeIndent, RowViewModel.Depth). -->
+  <Style Selector="ListBox.transcript ListBoxItem" x:DataType="vm:RowViewModel">
     <Setter Property="MaxWidth" Value="768" />
     <Setter Property="Padding" Value="0" />
     <Setter Property="Focusable" Value="False" />
     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
     <Setter Property="ClipToBounds" Value="False" />
+    <Setter Property="ctl:TreeIndent.Depth" Value="{Binding Depth}" />
+    <Setter Property="Template">
+      <ControlTemplate>
+        <ctl:TreeIndent Depth="{TemplateBinding ctl:TreeIndent.Depth}" GuideBrush="{DynamicResource GuiBorderSoft}">
+          <ContentPresenter Name="PART_ContentPresenter"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{TemplateBinding CornerRadius}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            Content="{TemplateBinding Content}"
+                            Padding="{TemplateBinding Padding}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}" />
+        </ctl:TreeIndent>
+      </ControlTemplate>
+    </Setter>
   </Style>
   <Style Selector="ListBox.transcript ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
@@ -278,14 +297,21 @@
   <Style Selector="ListBox.transcript ListBoxItem:pointerover StackPanel.user-meta, ListBox.transcript ListBoxItem:focus-within StackPanel.user-meta">
     <Setter Property="Opacity" Value="1" />
   </Style>
-  <!-- "Thinking…" / "Thought for 4s": a quiet toggle with a chevron; the thoughts under a pale bar -->
+  <!-- "Thinking…" / "Thought for 4s": a step line (28 high, its icon at the column's edge, the label at the steps' text
+       edge) with a chevron; the thoughts under a pale bar that runs down from the icon -->
   <Style Selector="ToggleButton.thinking-toggle">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="MinHeight" Value="0" />
-    <Setter Property="Padding" Value="0,2" />
+    <Setter Property="Height" Value="28" />
+    <Setter Property="Padding" Value="0" />
     <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
     <Setter Property="FontWeight" Value="Normal" />
     <Setter Property="Foreground" Value="{DynamicResource GuiStepText}" />
+  </Style>
+  <Style Selector="ctl|Icon.thinking-mark">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiStepText}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Margin" Value="0,0,4,0" />
   </Style>
   <Style Selector="ToggleButton.thinking-toggle:pointerover /template/ ContentPresenter#PART_ContentPresenter, ToggleButton.thinking-toggle:checked /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="Transparent" />
@@ -309,8 +335,8 @@
   <Style Selector="Border.thinking-body">
     <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
     <Setter Property="BorderThickness" Value="2,0,0,0" />
-    <Setter Property="Padding" Value="12,0,0,0" />
-    <Setter Property="Margin" Value="1,2,0,6" />
+    <Setter Property="Padding" Value="15,0,0,0" />
+    <Setter Property="Margin" Value="7,0,0,6" />
   </Style>
   <Style Selector="Border.thinking-body SelectableTextBlock">
     <Setter Property="FontSize" Value="{DynamicResource GuiFontUi}" />
@@ -338,20 +364,21 @@
     <Setter Property="FontWeight" Value="Medium" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
-  <!-- The project in the greeting: the same words, a pale chip with a chevron (opens the project menu) -->
+  <!-- The project in the greeting: the same words on the app's chip (fill 1, a full pill, a chevron), opens the project menu -->
   <Style Selector="Button.greeting-project">
-    <Setter Property="Padding" Value="8,0,6,0" />
-    <Setter Property="Margin" Value="6,0,0,0" />
-    <Setter Property="MinHeight" Value="36" />
-    <Setter Property="Background" Value="Transparent" />
-    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
-    <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusControl}" />
+    <Setter Property="Padding" Value="14,2,10,2" />
+    <Setter Property="Margin" Value="8,0,2,0" />
+    <Setter Property="MinHeight" Value="44" />
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
   <Style Selector="Button.greeting-project:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
-    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderHover}" />
+    <Setter Property="Background" Value="{DynamicResource GuiFill1Hover}" />
+  </Style>
+  <Style Selector="Button.greeting-project:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1Pressed}" />
   </Style>
   <!-- By class, not "Button.greeting-project TextBlock": the project menu opens from this button, so its popup's text
        would match a descendant selector and render at greeting size -->
@@ -389,7 +416,7 @@
        message (its hover line of actions sits between) and ~18 px over the answer. While the turn runs it reads
        "Activity" and opens nothing (not dimmed). -->
   <Style Selector="StackPanel.turn-fold">
-    <Setter Property="Margin" Value="0,6,0,14" />
+    <Setter Property="Margin" Value="0,8,0,16" />
   </Style>
   <Style Selector="ToggleButton.turn-fold-head">
     <Setter Property="Background" Value="Transparent" />
@@ -524,10 +551,6 @@
   <Style Selector="Border.tool-chip.failed TextBlock">
     <Setter Property="Foreground" Value="{DynamicResource GuiTextError}" />
   </Style>
-  <!-- A step of a group, open under the group's line: at the same edge (Codex), no indent -->
-  <Style Selector="Border.row-step.in-group">
-    <Setter Property="Margin" Value="0" />
-  </Style>
   <!-- A command's Shell card (Codex): the code surface, radius 12, a hairline (red when the command failed); "$" and the
        command in primary text, then its output in secondary, "Exit code N" at its foot on the right -->
   <Style Selector="Border.console">
@@ -537,6 +560,7 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusCard}" />
     <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="ctl:InnerClip.IsEnabled" Value="True" />
   </Style>
   <Style Selector="StackPanel.console-body">
     <Setter Property="Margin" Value="12,8,12,10" />
@@ -600,6 +624,27 @@
   <Style Selector="Border.console.failed">
     <Setter Property="BorderBrush" Value="{DynamicResource GuiStatusError}" />
   </Style>
+  <!-- A message between agents (omp's IRC): the Shell card's surface at the conversation's edge; two preview lines in
+       secondary text while folded, the message as Markdown when open -->
+  <Style Selector="Border.agent-message">
+    <Setter Property="Margin" Value="0,8" />
+    <Setter Property="Background" Value="{DynamicResource GuiCodeBlockBg}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiCodeBlockBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusCard}" />
+    <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="ctl:InnerClip.IsEnabled" Value="True" />
+  </Style>
+  <Style Selector="TextBlock.agent-message-preview">
+    <Setter Property="Margin" Value="12,8,12,10" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="MaxLines" Value="2" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+  <Style Selector="ctl|MarkdownView.agent-message-body">
+    <Setter Property="Margin" Value="12,8,12,10" />
+  </Style>
   <Style Selector="TextBlock.console-prompt">
     <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
     <Setter Property="LineHeight" Value="19" />
@@ -657,6 +702,7 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusCard}" />
     <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="ctl:InnerClip.IsEnabled" Value="True" />
   </Style>
   <Style Selector="SelectableTextBlock.tool-output-text">
     <Setter Property="Margin" Value="12,8" />
@@ -675,6 +721,7 @@
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusCard}" />
     <Setter Property="Background" Value="{DynamicResource GuiChangeRow}" />
     <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="ctl:InnerClip.IsEnabled" Value="True" />
   </Style>
   <Style Selector="Grid.change-card-head">
     <Setter Property="MinHeight" Value="62" />
@@ -887,6 +934,7 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusCard}" />
     <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="ctl:InnerClip.IsEnabled" Value="True" />
     <Setter Property="Background" Value="{DynamicResource GuiCodeBlockBg}" />
   </Style>
   <Style Selector="Grid.diff-header">
@@ -992,6 +1040,7 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusCard}" />
     <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="ctl:InnerClip.IsEnabled" Value="True" />
     <Setter Property="Padding" Value="0" />
   </Style>
   <Style Selector="Border.md-code-head">
@@ -1103,6 +1152,7 @@
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusCard}" />
     <Setter Property="ClipToBounds" Value="True" />
+    <Setter Property="ctl:InnerClip.IsEnabled" Value="True" />
   </Style>
   <Style Selector="SelectableTextBlock.details">
     <Setter Property="Padding" Value="12,8" />

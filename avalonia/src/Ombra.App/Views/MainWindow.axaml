@@ -112,9 +112,10 @@
     <Border x:Name="SheetFrame" Grid.Column="1" Grid.ColumnSpan="2" Classes="sheet-frame" IsHitTestVisible="False" />
 
     <!-- ── Icon rail (the ChatGPT app's): left of the sidebar, full height, also while the sidebar is hidden or settings
-         are open. Plugins, MCP (Connectors) and Skills at the top, Settings at the bottom; the one whose settings page is
-         shown is lit (MainViewModel.Rail.cs). On macOS its top is under the window's traffic lights (MainWindow.Chrome.cs):
-         its empty part moves the window, as a title bar does. ── -->
+         are open. Chats, Plugins, MCP (Connectors) and Skills at the top, Settings at the bottom; Chats leaves the
+         settings for the conversation, the others open their settings page; the one shown is lit (MainViewModel.Rail.cs).
+         On macOS its top is under the window's traffic lights (MainWindow.Chrome.cs): its empty part moves the window,
+         as a title bar does. ── -->
     <Border x:Name="IconRail" Grid.Column="0" Classes="rail" chrome:WindowDecorationProperties.ElementRole="TitleBar">
       <DockPanel>
         <Button x:Name="RailSettingsButton" DockPanel.Dock="Bottom" Classes="rail-item" Classes.on="{Binding IsSettingsRailOn}"
@@ -122,6 +123,10 @@
           <ctl:Icon Data="{StaticResource IconSettings}" Size="20" />
         </Button>
         <StackPanel Spacing="4">
+          <Button x:Name="RailChatsButton" Classes="rail-item" Classes.on="{Binding IsChatsRailOn}" Command="{Binding CloseSettingsCommand}"
+                  ToolTip.Tip="{x:Static vm:MainViewModel.ChatsRailTip}" AutomationProperties.Name="{loc:T 'Chats'}">
+            <ctl:Icon Data="{StaticResource IconChat}" Size="20" />
+          </Button>
           <Button x:Name="RailPluginsButton" Classes="rail-item" Classes.on="{Binding IsPluginsRailOn}" Command="{Binding OpenPluginsPageCommand}"
                   ToolTip.Tip="{x:Static vm:MainViewModel.PluginsRailTip}" AutomationProperties.Name="{loc:T 'Plugins'}">
             <ctl:Icon Data="{StaticResource IconGrid}" Size="20" />
@@ -541,16 +546,18 @@
                  while it streams (it came and went with every message): the activity line above the composer says it.
                  Between the steps of a group (only thinking) it folds with them; before a finished turn's answer it folds
                  under the turn's "Worked for…" line. -->
-            <Border Classes="row-step" Classes.in-group="{Binding InGroup}" IsVisible="{Binding !IsFolded}">
-            <StackPanel Classes="assistant" Margin="0,6,0,6" Spacing="6" IsVisible="{Binding HasContent}" Background="Transparent"
+            <Border Classes="row-step" IsVisible="{Binding !IsFolded}">
+            <StackPanel Classes="assistant" Margin="0,10,0,10" Spacing="8" IsVisible="{Binding HasContent}" Background="Transparent"
                         ContextFlyout="{StaticResource ReplyMenu}">
-              <!-- "Thinking… 4s" while it thinks, then "Thought for 4s"; the thoughts stay folded until asked for. Open, the
-                   line stays at the top of the view while the thoughts are on screen (Controls/StickyHeader) -->
+              <!-- "Thinking… 4s" while it thinks, then "Thought for 4s", as a step line with its own icon (Codex marks each kind
+                   of entry at its start); the thoughts stay folded until asked for. Open, the line stays at the top of the
+                   view while the thoughts are on screen (Controls/StickyHeader) -->
               <StackPanel Spacing="6" IsVisible="{Binding HasThinking}">
                 <Border Classes="sticky-bar" ctl:StickyHeader.IsSticky="True">
                   <ToggleButton Classes="thinking-toggle" IsChecked="{Binding IsThinkingOpen}"
                                 AutomationProperties.Name="{loc:T 'Show thinking'}">
                     <StackPanel Orientation="Horizontal" Spacing="4">
+                      <ctl:Icon Classes="thinking-mark" Data="{StaticResource IconBrain}" Size="16" />
                       <TextBlock Classes="thinking-label" Classes.live="{Binding IsThinkingLive}" Text="{Binding ThinkingLabel}" VerticalAlignment="Center" />
                       <ctl:Icon Classes="chevron" Data="{StaticResource IconChevronRight}" Size="16" />
                     </StackPanel>
@@ -601,7 +608,7 @@
             <!-- Codex's step row: a run of tool calls as one grey line ("Read files, ran commands", or the step that runs
                  now) with the icon of its kind; open, each call follows on its own line -->
             <Border IsVisible="{Binding !IsFolded}">
-            <StackPanel Classes="tool" Margin="-8,0,-8,0">
+            <StackPanel Classes="tool" Margin="-8,2,-8,2">
               <ToggleButton Classes="tool-row group" IsChecked="{Binding IsExpanded}" HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Stretch" AutomationProperties.Name="{Binding Summary, StringFormat={loc:T 'Show the steps: {0}'}}">
                 <Grid ColumnDefinitions="Auto,*,Auto">
@@ -623,8 +630,8 @@
                  when there is more. Opened: a command's Shell card ("$ command", its output, how it exited), the change,
                  or the whole output; anything else shows its first lines under the line. Pulled out by the line's inner
                  padding so the icon sits on the text edge of the column. A step of a folded group takes no room. -->
-            <Border Classes="row-step" Classes.in-group="{Binding InGroup}" IsVisible="{Binding !IsFolded}">
-            <StackPanel Classes="tool" Margin="-8,0,-8,0">
+            <Border Classes="row-step" IsVisible="{Binding !IsFolded}">
+            <StackPanel Classes="tool" Margin="-8,2,-8,2">
               <!-- Its tooltip in words (the whole command, the file, the arguments), only while the line cuts it short -->
               <ToggleButton Classes="tool-row" IsChecked="{Binding IsExpanded}" HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Stretch" AutomationProperties.Name="{loc:T 'Show tool output'}"
@@ -791,11 +798,34 @@
               </Grid>
             </Panel>
           </DataTemplate>
+          <!-- A message between agents (omp's IRC): a card whose bar says who wrote to whom and folds it; folded, its first
+               two lines; open, the whole message as Markdown (AgentMessageRowViewModel) -->
+          <DataTemplate DataType="vm:AgentMessageRowViewModel">
+            <Border Classes="agent-message" AutomationProperties.Name="{Binding AccessibleName}">
+              <StackPanel>
+                <Button Classes="card-header" Command="{Binding ToggleCommand}" ToolTip.Tip="{loc:T 'Show or hide the message'}"
+                        AutomationProperties.Name="{Binding AccessibleName}">
+                  <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+                    <ctl:Icon Classes="card-icon" Data="{StaticResource IconComment}" Size="14" />
+                    <TextBlock Grid.Column="1" Classes="card-kind" Text="{Binding From}" />
+                    <TextBlock Grid.Column="2" Classes="card-summary" Text="{Binding Route}" TextTrimming="CharacterEllipsis" />
+                    <Panel Grid.Column="3">
+                      <ctl:Icon Classes="card-chevron" Data="{StaticResource IconChevronDown}" Size="16" IsVisible="{Binding !IsExpanded}" />
+                      <ctl:Icon Classes="card-chevron" Data="{StaticResource IconChevronUp}" Size="16" IsVisible="{Binding IsExpanded}" />
+                    </Panel>
+                  </Grid>
+                </Button>
+                <TextBlock Classes="agent-message-preview" Text="{Binding Preview}" IsVisible="{Binding !IsExpanded}" />
+                <ctl:MarkdownView Classes="agent-message-body" Markdown="{Binding Text}" IsVisible="{Binding IsExpanded}" />
+              </StackPanel>
+            </Border>
+          </DataTemplate>
         </ListBox.DataTemplates>
       </ListBox>
-      <!-- A new session (Claude Code's layout, JoJo's words): "Oh? You’re approaching <project ▾>?" over the message box (MainWindow.UpdateEmptyLayout
-           puts them together in the middle); the project opens the project menu, a starter prompt fills the box. Shown while
-           the conversation has nothing but notices. A low window drops the logo, then the starters (MainWindow.FitEmptyState). -->
+      <!-- A new session (Claude Code's layout, JoJo's words): "Oh? You’re approaching ‹project ▾›?" over the message box, and
+           in a chat outside any project "Oh? You’re approaching ‹me ▾›?" (MainWindow.UpdateEmptyLayout puts them together in
+           the middle); the project opens the project menu, a starter prompt fills the box. Shown while the conversation
+           has nothing but notices. A low window drops the logo, then the starters (MainWindow.FitEmptyState). -->
       <StackPanel x:Name="EmptyState" IsVisible="{Binding ShowGreeting}" HorizontalAlignment="Center" VerticalAlignment="Center"
                   Spacing="14" Margin="24,0,24,48" MaxWidth="640">
         <!-- What omp or the window said before the first message (a failed session change, a warning from omp's start):
@@ -803,17 +833,16 @@
         <ItemsControl x:Name="GreetingNotices" ItemsSource="{Binding GreetingNotices}" IsVisible="{Binding !!GreetingNotices.Count}" />
         <Image x:Name="GreetingLogo" Source="/Assets/icon-256.png" Width="112" Height="112" HorizontalAlignment="Center" RenderOptions.BitmapInterpolationMode="HighQuality" />
         <WrapPanel x:Name="Greeting" HorizontalAlignment="Center" ItemsAlignment="Center" ItemSpacing="0" LineSpacing="4">
-          <TextBlock Classes="greeting" Text="{loc:T 'Oh? You’re approaching me?'}" IsVisible="{Binding ProjectName, Converter={x:Static StringConverters.IsNullOrEmpty}}" />
-          <TextBlock Classes="greeting" Text="{loc:T 'Oh? You’re approaching'}" IsVisible="{Binding ProjectName, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-          <StackPanel Orientation="Horizontal" IsVisible="{Binding ProjectName, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-            <Button x:Name="GreetingProjectButton" Classes="greeting-project" ToolTip.Tip="{Binding ShownProjectPath}"
-                    AutomationProperties.Name="{Binding ProjectName, StringFormat={loc:T 'Project: {0}'}}">
-              <StackPanel Orientation="Horizontal" Spacing="4">
-                <TextBlock Classes="greeting-project-name" Text="{Binding ProjectName}" MaxWidth="280" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                <ctl:Icon Classes="greeting-project-chevron" Data="{StaticResource IconChevronDown}" Size="16" VerticalAlignment="Center" Margin="0,2,0,0" />
+          <TextBlock Classes="greeting" Text="{Binding GreetingLead}" />
+          <StackPanel Orientation="Horizontal">
+            <Button x:Name="GreetingProjectButton" Classes="greeting-project" ToolTip.Tip="{Binding ProjectChipTip}"
+                    AutomationProperties.Name="{Binding ProjectChipLabel, StringFormat={loc:T 'Project: {0}'}}">
+              <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Classes="greeting-project-name" Text="{Binding GreetingProject}" MaxWidth="280" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                <ctl:Icon Classes="greeting-project-chevron" Data="{StaticResource IconChevronDown}" Size="20" VerticalAlignment="Center" Margin="0,3,0,0" />
               </StackPanel>
             </Button>
-            <TextBlock Classes="greeting" Text="?" Margin="2,0,0,0" />
+            <TextBlock Classes="greeting" Text="{Binding GreetingTail}" />
           </StackPanel>
         </WrapPanel>
         <ItemsControl x:Name="StarterPrompts" ItemsSource="{Binding GreetingStarters}" Margin="0,4,0,0">
@@ -1662,42 +1691,48 @@
           </StackPanel>
           <Button.Flyout>
             <Flyout Placement="TopEdgeAlignedLeft">
-              <StackPanel Width="320" Spacing="2">
+              <!-- As the other menus of the message box (permission mode, thinking): a heading, rows with their icon, the
+                   name and what it is, and a tick on the current one -->
+              <StackPanel Width="340" Spacing="2">
                 <TextBlock Classes="group-label" Text="{loc:T 'Project'}" Margin="10,4,0,4" />
                 <!-- No project: a chat of its own (the sidebar's New chat) -->
-                <Button x:Name="NoProjectButton" Classes="menu-item" Classes.current="{Binding IsProjectless}" HorizontalAlignment="Stretch"
+                <Button x:Name="NoProjectButton" Classes="menu-item" HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Stretch" Command="{Binding NewChatCommand}" AutomationProperties.Name="{loc:T 'No project'}">
-                  <Grid ColumnDefinitions="Auto,*">
-                    <ctl:Icon Data="{StaticResource IconComment}" Size="16" Margin="0,0,10,0" VerticalAlignment="Top" />
-                    <StackPanel Grid.Column="1" Spacing="1">
-                      <TextBlock Text="{loc:T 'No project'}" />
-                      <TextBlock Classes="tertiary" Text="{loc:T 'A chat with an empty folder of its own'}" TextTrimming="CharacterEllipsis" />
+                  <Grid ColumnDefinitions="Auto,*,Auto">
+                    <ctl:Icon Data="{StaticResource IconComment}" Size="18" Margin="0,1,10,0" VerticalAlignment="Top" />
+                    <StackPanel Grid.Column="1" Spacing="2">
+                      <TextBlock Text="{loc:T 'No project'}" FontWeight="Medium" />
+                      <TextBlock Classes="muted" Text="{loc:T 'A chat with an empty folder of its own'}" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
+                    <ctl:Icon Grid.Column="2" Classes="menu-check" Data="{StaticResource IconCheck}" Size="16" VerticalAlignment="Top" Margin="10,1,0,0"
+                              IsVisible="{Binding IsProjectless}" />
                   </Grid>
                 </Button>
                 <ItemsControl ItemsSource="{Binding SessionGroups}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:SessionGroupViewModel">
-                      <Button Classes="menu-item" Classes.current="{Binding IsCurrentProject}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                      <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                               IsVisible="{Binding IsProject}"
                               Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).NewSessionInProjectCommand}" CommandParameter="{Binding}"
                               AutomationProperties.Name="{Binding Name}" ToolTip.Tip="{Binding ShownCwd}">
-                        <Grid ColumnDefinitions="Auto,*">
-                          <ctl:Icon Data="{StaticResource IconFolder}" Size="16" Margin="0,0,10,0" VerticalAlignment="Top" />
-                          <StackPanel Grid.Column="1" Spacing="1">
-                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                            <TextBlock Classes="tertiary" Text="{Binding ShownCwd}" TextTrimming="PrefixCharacterEllipsis" />
+                        <Grid ColumnDefinitions="Auto,*,Auto">
+                          <ctl:Icon Data="{StaticResource IconFolder}" Size="18" Margin="0,1,10,0" VerticalAlignment="Top" />
+                          <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Text="{Binding Name}" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Classes="muted" Text="{Binding ShownCwd}" TextTrimming="PrefixCharacterEllipsis" />
                           </StackPanel>
+                          <ctl:Icon Grid.Column="2" Classes="menu-check" Data="{StaticResource IconCheck}" Size="16" VerticalAlignment="Top" Margin="10,1,0,0"
+                                    IsVisible="{Binding IsCurrentProject}" />
                         </Grid>
                       </Button>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
-                <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="6,4" />
+                <Border Classes="menu-separator" />
                 <Button x:Name="OpenFolderButton" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding OpenFolderCommand}"
                         AutomationProperties.Name="{loc:T 'Open folder'}">
                   <Grid ColumnDefinitions="Auto,*">
-                    <ctl:Icon Data="{StaticResource IconPlus}" Size="16" Margin="0,0,10,0" />
+                    <ctl:Icon Data="{StaticResource IconPlus}" Size="18" Margin="0,0,10,0" />
                     <TextBlock Grid.Column="1" Text="{loc:T 'Open folder…'}" VerticalAlignment="Center" />
                   </Grid>
                 </Button>

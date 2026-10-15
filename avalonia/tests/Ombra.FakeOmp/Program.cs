@@ -77,6 +77,18 @@ static string FakeUsageJson()
                     Limit("anthropic", "7d", "Claude 7 Day", "7d", "7 Day", 168 * hour, 76 * hour, 86, "warning"),
                 },
                 metadata = new { email = "dev@example.com", orgName = "Example" },
+                // Two saved resets, one the provider lets the account spend now (omp's UsageResetCredits)
+                resetCredits = new
+                {
+                    availableCount = 2, redeemableCount = 1, nextCreditId = "grant_a",
+                    credits = new object[]
+                    {
+                        new { id = "grant_a", remainingCount = 1, usable = true, status = "available", clears = new[] { "anthropic:5h" },
+                            expiresAt = DateTimeOffset.FromUnixTimeMilliseconds(now + 72 * hour + 30 * 60_000).ToString("O") },
+                        new { id = "grant_b", remainingCount = 1, usable = false, status = "available",
+                            expiresAt = DateTimeOffset.FromUnixTimeMilliseconds(now + 240 * hour).ToString("O") },
+                    },
+                },
             },
             new
             {

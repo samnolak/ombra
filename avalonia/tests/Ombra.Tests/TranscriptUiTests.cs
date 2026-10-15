@@ -238,7 +238,7 @@ public sealed class TranscriptUiTests
         Assert.Equal(StepKind.Read, group.Kind);
         group.IsExpanded = true;
         Assert.Equal("UserRowViewModel text G:Read files, searched the code read a grep a read text read", rows.Shape());
-        Assert.True(rows.List.OfType<ToolRowViewModel>().Take(3).All(t => t.InGroup));
+        Assert.Equal([1, 1, 1, 1, 1, 0, 0], rows.List.Skip(3).Select(r => r.Depth)); // the steps and the replies between them hang under the line
 
         // A failed step ends a group (and is shown); one that fails as the second step undoes the group
         var failing = new Rows();
@@ -291,11 +291,16 @@ public sealed class TranscriptUiTests
             Reply(5, "It is in src/a.py.", at: sent.AddSeconds(78)));
         rows.Fold(running: true);
         Assert.Equal("UserRowViewModel F:Activity text G:Read a file, searched the code [read] [grep] text", rows.Shape());
+        // "Activity" folds nothing, so nothing hangs under it; a group's steps hang under the group's line
+        int[] Depths() => [.. rows.List.Select(r => r.Depth)];
+        Assert.Equal([0, 0, 0, 0, 1, 1, 0], Depths());
         rows.Fold(running: false);
         Assert.Equal("UserRowViewModel F:Worked for 1m 18s › [text] [G:Read a file, searched the code] [read] [grep] text", rows.Shape());
         var fold = rows.List.OfType<TurnFoldRowViewModel>().Single();
         fold.IsExpanded = true;
         Assert.Equal("UserRowViewModel F:Worked for 1m 18s › text G:Read a file, searched the code [read] [grep] text", rows.Shape());
+        // A tree under the finished turn's line: what it folds one level in, the group's steps two; the answer stays out
+        Assert.Equal([0, 0, 1, 1, 2, 2, 0], Depths());
         // Reconciled again (rows came, a run ended), the line keeps its place and its state
         rows.Fold(running: false);
         Assert.Same(fold, rows.List[1]);

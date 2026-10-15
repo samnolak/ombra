@@ -10,6 +10,7 @@ using Avalonia.VisualTree;
 using Ombra.App;
 using Ombra.App.Controls;
 using Ombra.App.Pets;
+using Ombra.App.Pets.Oni;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.ClientCore;
@@ -17,393 +18,189 @@ using Ombra.ClientCore;
 namespace Ombra.Tests;
 
 /// <summary>
-/// Pets: the pixel data, the mood machine (what the agent does → what the pet shows, without flicker), the control
-/// (crisp pixels, a timer only while shown), the pet on the message box (bubble, focus, where it hides), the settings
-/// round trip, and the layout of every screen with a pet.
+/// The pet, ONI: what the agent does → what it shows (held a moment against flicker, reactions that end by
+/// themselves), the view (frames only while it is seen and moving, the sheets shared and let go), carrying it, the
+/// pet on the message box (bubble, its message box, where it hides), on the desktop, the settings round trip, and the
+/// layout of every screen with a pet.
 /// </summary>
 public sealed class PetsTests
 {
     private static readonly string? Dir = Environment.GetEnvironmentVariable("OMBRA_REVIEW_DIR");
-    private static readonly DateTimeOffset T0 = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
 
-    // ───────────────────────────── Sprite data ─────────────────────────────
-
-    private static readonly MouthStyle[] Mouths = [PetArt.Smile, PetArt.SmallMouth, PetArt.Grin, PetArt.Oh, PetArt.Wavy];
-
-    [Fact]
-    public void Every_body_is_a_24_by_24_grid_of_its_palette_roles_with_a_face_on_it()
+    private sealed class ManualClock : TimeProvider
     {
-        Assert.Equal(9, PetArt.Bodies.Count);
-        Assert.Equal(PetArt.Bodies.Count, PetArt.Bodies.Select(b => b.Id).Distinct().Count());
-        foreach (var b in PetArt.Bodies)
+        public DateTimeOffset Now = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        public override DateTimeOffset GetUtcNow() => Now;
+        public void Run(double seconds, OniPet pet, double step = 1 / 60.0)
         {
-            Assert.Equal(PetArt.BodySize, b.Rows.Length);
-            foreach (var row in b.Rows)
+            for (var t = 0.0; t < seconds - 1e-9; t += step)
             {
-                Assert.Equal(PetArt.BodySize, row.Length);
-                foreach (var ch in row) Assert.True(ch is '.' or 'h' or 'd' || b.Palette.ContainsKey(ch), $"{b.Id}: '{ch}' is not in its palette");
+                Now += TimeSpan.FromSeconds(step);
+                pet.Sync();
             }
-            foreach (var role in "o123ew") Assert.True(b.Palette.ContainsKey(role), $"{b.Id} lacks role {role}");
-            Assert.All(b.Palette.Values, c => Assert.Equal(0xFFu, c >> 24)); // opaque colours only
-            Assert.All(b.Rows[^1], ch => Assert.Equal('.', ch)); // the bottom row is the contact shadow's
-            Assert.Equal(2, b.Eyes.Length);
-            foreach (var (x, y) in b.Eyes)
-                for (var dy = 0; dy < 3; dy++)
-                    for (var dx = 0; dx < 2; dx++)
-                        Assert.True(b.Rows[y + dy][x + dx] is not ('.' or 'o'), $"{b.Id}: eye at {x},{y} is off the face");
-            // Happy carets are a pixel wider each side: never touching each other
-            Assert.True(b.Eyes[0].X + 4 + PetArt.Happy.LeftDx < b.Eyes[1].X + PetArt.Happy.RightDx, $"{b.Id}: happy eyes collide");
-            if (b.Mouth is { } m)
-                foreach (var mouth in Mouths)
-                {
-                    var w = mouth.Rows.Max(r => r.Length);
-                    for (var y = 0; y < mouth.Rows.Length; y++)
-                        for (var x = 0; x < mouth.Rows[y].Length; x++)
-                            if (mouth.Rows[y][x] != '.')
-                                Assert.True(b.Rows[m.Y + y][m.X - w / 2 + x] is not ('.' or 'o'), $"{b.Id}: {mouth.Id} mouth is off the face");
-                }
-            foreach (var p in b.Twitch)
-                Assert.True(p.X >= 0 && p.Y >= 0 && p.X + p.Pixels.Length <= PetArt.BodySize && p.Y < PetArt.BodySize, $"{b.Id}: twitch off the grid");
-            Assert.NotEmpty(b.Twitch);
-            Assert.InRange(b.Hat.Y, 1, 12);
-            Assert.InRange(b.Neck, 1, PetArt.BodySize - 5);
-            Assert.NotEmpty(b.Quips);
-            Assert.False(string.IsNullOrWhiteSpace(b.DefaultName));
-        }
-        Assert.Equal(PetArt.Coats.Count, PetArt.Coats.Select(c => c.Id).Distinct().Count());
-        Assert.Equal(PetArt.Accessories.Count, PetArt.Accessories.Select(a => a.Id).Distinct().Count());
-        Assert.Equal(PetArt.Sprites.Count(), PetArt.Sprites.Select(s => s.Id).Distinct().Count());
-        foreach (var s in PetArt.Sprites)
-            foreach (var ch in s.Rows.SelectMany(r => r)) Assert.True(ch == '.' || s.Palette.ContainsKey(ch), $"{s.Id}: role '{ch}' has no colour");
-    }
-
-    /// <summary>
-    /// Good pixel art: the silhouette has a one-pixel outline. Every visible pixel on the edge of the shape (next to
-    /// transparency) is the outline or an accent (a flower, an antenna, the robot's ears); only the feet row, which
-    /// stands on the message box, may show toes.
-    /// </summary>
-    [Fact]
-    public void Every_body_has_a_one_pixel_outline()
-    {
-        foreach (var b in PetArt.Bodies)
-            for (var y = 0; y < PetArt.BodySize - 2; y++)
-                for (var x = 0; x < PetArt.BodySize; x++)
-                {
-                    var ch = b.Rows[y][x];
-                    if (ch == '.') continue;
-                    bool Clear(int xx, int yy) => xx < 0 || yy < 0 || xx >= PetArt.BodySize || yy >= PetArt.BodySize || b.Rows[yy][xx] == '.';
-                    if (Clear(x - 1, y) || Clear(x + 1, y) || Clear(x, y - 1) || Clear(x, y + 1))
-                        Assert.True(ch is 'o' or '6' or '7', $"{b.Id}: '{ch}' at {x},{y} is on the edge without an outline");
-                }
-    }
-
-    [Fact]
-    public void Every_look_renders_every_mood_inside_the_canvas()
-    {
-        var coats = new PetCoat?[] { null, PetArt.Coats[0], PetArt.Coats[^1] };
-        foreach (var body in PetArt.Bodies)
-            foreach (var coat in coats)
-                foreach (var accessory in PetArt.Accessories)
-                    foreach (var mood in Enum.GetValues<PetMood>())
-                    {
-                        var f = PetFrames.Still(new PetLook(body, coat, accessory), mood);
-                        Assert.Equal((PetFrames.Width, PetFrames.Height), (f.Width, f.Height));
-                        Assert.Equal(PetFrames.Width * PetFrames.Height, f.Pixels.Length);
-                        var ink = f.Pixels.Count(p => p >> 24 == 0xFF);
-                        Assert.True(ink > 200, $"{body.Id}/{mood}: only {ink} pixels");
-                        // The contact shadow: see-through, only under the pet
-                        Assert.Contains(f.Pixels, p => p >> 24 is > 0 and < 0x80);
-                    }
-        // Every scale is whole output pixels: 2× is each pet pixel as a 2×2 square
-        var look = new PetLook(PetArt.Cat);
-        var one = PetFrames.Still(look, PetMood.Idle);
-        var two = PetFrames.Still(look, PetMood.Idle, 2);
-        Assert.Equal((72, 48), (two.Width, two.Height));
-        for (var y = 0; y < two.Height; y++)
-            for (var x = 0; x < two.Width; x++)
-                Assert.Equal(one.Pixels[y / 2 * one.Width + x / 2], two.Pixels[y * two.Width + x]);
-        // Small: 4/3 of a screen pixel each, 48×32
-        Assert.Equal((48, 32), (PetFrames.Still(look, PetMood.Idle, 4 / 3.0).Width, PetFrames.Still(look, PetMood.Idle, 4 / 3.0).Height));
-        // A coat changes the coat and the outline, nothing else
-        var cat = PetFrames.Body(look, new PetFace(PetArt.Open));
-        var mint = PetFrames.Body(new PetLook(PetArt.Cat, PetArt.Coat("mint"), PetArt.None), new PetFace(PetArt.Open));
-        Assert.Equal(PetArt.Coat("mint")!.Mid, mint[10, 9]);
-        Assert.Equal(PetArt.Coat("mint")!.Outline, mint[1, 9]);
-        Assert.Equal(cat[10, 18], mint[10, 18]); // the belly keeps its colour
-        Assert.NotEqual(cat[10, 9], mint[10, 9]);
-    }
-
-    [Fact]
-    public void A_hop_stays_inside_the_canvas_and_the_shadow_stays_on_the_ground()
-    {
-        foreach (var body in PetArt.Bodies)
-        {
-            var look = new PetLook(body);
-            var standing = PetFrames.Render(look, new PetPose(new PetFace(PetArt.Open)));
-            var up = PetFrames.Render(look, new PetPose(new PetFace(PetArt.Open), Dy: -3, Shadow: 0.5));
-            // Up in the air: the feet row is empty but for the (smaller) shadow on the bottom rows
-            var feetRow = PetFrames.Height - 2;
-            Assert.True(up.Pixels.Skip(feetRow * PetFrames.Width).Take(PetFrames.Width).Count(p => p >> 24 == 0xFF)
-                < standing.Pixels.Skip(feetRow * PetFrames.Width).Take(PetFrames.Width).Count(p => p >> 24 == 0xFF), body.Id);
-            Assert.Contains(up.Pixels.Skip((PetFrames.Height - 1) * PetFrames.Width), p => p >> 24 is > 0 and < 0x80);
-            Assert.True(up.Pixels.Count(p => p >> 24 == 0xFF) > 200, body.Id);
         }
     }
 
-    // ───────────────────────────── Life ─────────────────────────────
-
-    private static DateTimeOffset At(double seconds) => T0 + TimeSpan.FromSeconds(seconds);
-
-    [Fact]
-    public void Blinks_come_every_two_to_six_seconds_and_sometimes_twice()
+    private static (OniPet Pet, ManualClock Clock) NewPet()
     {
-        var life = new PetLife(T0, seed: 3);
-        life.Begin(PetMood.Idle, T0);
-        var blinks = new List<(double At, bool Double)>();
-        for (var t = 0.0; t < 300; t += 0.02)
-        {
-            life.Plan(At(t));
-            if (blinks.Count == 0 || blinks[^1].At != life.NextBlink) blinks.Add((life.NextBlink, life.NextBlinkIsDouble));
-        }
-        Assert.InRange(blinks.Count, 300 / 6.5, 300 / 2.0 + 1);
-        for (var i = 1; i < blinks.Count; i++)
-            Assert.InRange(blinks[i].At - blinks[i - 1].At, 2.0, 6.0 + 0.45);
-        Assert.Contains(blinks, b => b.Double);
-        Assert.Contains(blinks, b => !b.Double);
-        // A blink shuts the eyes for a moment: half, closed, half, open
-        var fresh = new PetLife(T0, seed: 3);
-        fresh.Begin(PetMood.Idle, T0);
-        fresh.Plan(T0);
-        var b0 = fresh.NextBlink;
-        Assert.Equal(PetArt.Open, fresh.Sample(PetArt.Cat, At(b0 - 0.05)).Face.Eyes);
-        Assert.Equal(PetArt.Half, fresh.Sample(PetArt.Cat, At(b0 + 0.02)).Face.Eyes);
-        Assert.Equal(PetArt.Closed, fresh.Sample(PetArt.Cat, At(b0 + 0.08)).Face.Eyes);
-        Assert.Equal(PetArt.Open, fresh.Sample(PetArt.Cat, At(b0 + 0.2)).Face.Eyes);
+        var clock = new ManualClock();
+        return (new OniPet(OniParityTests.Spec, clock), clock);
     }
 
-    [Fact]
-    public void Idle_actions_come_every_eight_to_twenty_seconds_and_vary()
-    {
-        var life = new PetLife(T0, seed: 5);
-        life.Begin(PetMood.Idle, T0);
-        var actions = new List<(double At, PetLife.IdleAction Kind)>();
-        for (var t = 0.0; t < 600; t += 0.05)
-        {
-            life.Plan(At(t));
-            if (actions.Count == 0 || actions[^1].At != life.NextAction) actions.Add((life.NextAction, life.NextActionKind));
-        }
-        Assert.InRange(actions[0].At, 0, 20);
-        for (var i = 1; i < actions.Count; i++) Assert.InRange(actions[i].At - actions[i - 1].At, 8, 20 + 2);
-        Assert.True(actions.Select(a => a.Kind).Distinct().Count() >= 4, "idle actions all alike");
-        // A hop leaves the ground, with a smaller shadow, and lands
-        var hop = new PetLife(T0, seed: 1);
-        hop.Begin(PetMood.Idle, T0);
-        hop.Act(PetLife.IdleAction.Hop, At(1));
-        var mid = hop.Sample(PetArt.Cat, At(1.3));
-        Assert.True(mid.Dy < -1, $"hop dy {mid.Dy}");
-        Assert.True(mid.Shadow < 1);
-        Assert.Equal(0, hop.Sample(PetArt.Cat, At(1.7)).Dy, 3);
-        // A twitch changes the body's pixels (an ear, a foot)
-        foreach (var b in PetArt.Bodies)
-            Assert.False(PetFrames.Render(new PetLook(b), new PetPose(new PetFace(PetArt.Open))).Pixels.SequenceEqual(
-                PetFrames.Render(new PetLook(b), new PetPose(new PetFace(PetArt.Open, Twitch: true))).Pixels), $"{b.Id}: a twitch changes nothing");
-    }
-
-    [Fact]
-    public void Every_mood_moves_and_the_picture_changes_at_least_every_few_seconds()
-    {
-        foreach (var body in new[] { PetArt.Cat, PetArt.Ghost, PetArt.Robot })
-            foreach (var mood in Enum.GetValues<PetMood>())
-            {
-                var life = new PetLife(T0, seed: 9);
-                life.Begin(mood, T0);
-                var keys = new HashSet<string>();
-                var now = T0;
-                var wakes = 0;
-                while (now < At(8))
-                {
-                    life.Plan(now);
-                    keys.Add(PetFrames.Key(life.Sample(body, now), 2));
-                    var next = life.NextChange(body, now, 2);
-                    Assert.True(next > now);
-                    Assert.True(next - now <= TimeSpan.FromSeconds(3));
-                    now = next;
-                    wakes++;
-                }
-                Assert.True(keys.Count >= 3, $"{body.Id}/{mood}: {keys.Count} pictures in 8 s");
-                // Wakes only for a change: at most 30 a second, far fewer at rest
-                Assert.InRange(wakes, 3, 8 * 31);
-                if (mood == PetMood.Idle) Assert.True(wakes < 8 * 12, $"idle woke {wakes} times in 8 s");
-            }
-    }
-
-    [Fact]
-    public void Moods_ease_into_each_other_and_long_ones_come_to_rest()
-    {
-        var life = new PetLife(T0, seed: 2);
-        life.Begin(PetMood.Idle, T0);
-        life.SetMood(PetMood.Thinking, At(1));
-        // The thought cloud pops in (small first), then is whole
-        PetParticle Cloud(double t) => life.Sample(PetArt.Cat, At(t)).Effects.Single(p => p.Sprite == PetArt.ThoughtCloud);
-        Assert.InRange(Cloud(1.05).Scale, 0.05, 0.9);
-        Assert.Equal(1, Cloud(1.6).Scale, 3);
-        Assert.Equal(PetArt.LookUp, life.Sample(PetArt.Cat, At(1.6)).Face.Eyes);
-        // Working: the cloud shrinks away while the gear comes in
-        life.SetMood(PetMood.Working, At(3));
-        var mid = life.Sample(PetArt.Cat, At(3.1));
-        Assert.InRange(mid.Effects.Single(p => p.Sprite == PetArt.ThoughtCloud).Scale, 0.01, 0.99);
-        Assert.DoesNotContain(life.Sample(PetArt.Cat, At(3.6)).Effects, p => p.Sprite == PetArt.ThoughtCloud);
-        // Done: a happy face; Error: a wobble
-        life.SetMood(PetMood.Done, At(5));
-        Assert.Equal(PetArt.Happy, life.Sample(PetArt.Cat, At(5.6)).Face.Eyes);
-        life.SetMood(PetMood.Error, At(7));
-        Assert.Contains(Enumerable.Range(0, 10), i => Math.Abs(life.Sample(PetArt.Cat, At(7.4 + i * 0.02)).Dx) > 0.4);
-        Assert.False(life.IsResting(At(20)));
-        Assert.True(life.IsResting(At(7) + PetLife.RestAfter(PetMood.Error)));
-        // Asleep: rests after a while (no timer), a click wakes it for a moment
-        life.SetMood(PetMood.Sleeping, At(100));
-        Assert.False(life.IsResting(At(110)));
-        Assert.True(life.IsResting(At(100) + PetLife.RestAfter(PetMood.Sleeping)));
-        Assert.Equal(TimeSpan.MaxValue, PetLife.RestAfter(PetMood.Idle));
-    }
-
-    [Fact]
-    public void The_pet_looks_at_the_pointer_cheers_when_clicked_and_watches_you_type()
-    {
-        var life = new PetLife(T0, seed: 4);
-        life.Begin(PetMood.Idle, T0);
-        life.Hover(true, -10, 0, At(1));
-        Assert.Equal(-1, life.Sample(PetArt.Fox, At(1.6)).Face.LookX);
-        life.Hover(true, 10, -8, At(1.7));
-        Assert.Equal((1, -1), (life.Sample(PetArt.Fox, At(1.8)).Face.LookX, life.Sample(PetArt.Fox, At(1.8)).Face.LookY));
-        life.Hover(false, 0, 0, At(2));
-        life.Pat(At(3));
-        var pat = life.Sample(PetArt.Fox, At(3.3));
-        Assert.Equal(PetArt.Happy, pat.Face.Eyes);
-        Assert.True(pat.Dy < -1);
-        Assert.Contains(pat.Effects, p => p.Sprite == PetArt.Heart);
-        life.Attend(At(5));
-        var typing = life.Sample(PetArt.Fox, At(5.5));
-        Assert.Equal((-1, 1), (typing.Face.LookX, typing.Face.LookY));
-        Assert.Equal(0, life.Sample(PetArt.Fox, At(7.5)).Face.LookY);
-    }
-
-    // ───────────────────────────── Mood machine ─────────────────────────────
+    // ───────────────────────────── What it shows ─────────────────────────────
 
     [Fact]
     public void Thinking_and_working_in_quick_turns_do_not_flicker()
     {
-        var m = new PetMoodMachine(T0);
+        var (pet, clock) = NewPet();
         var changes = new List<(DateTimeOffset At, PetMood Mood)>();
+        var shown = pet.Mood;
         for (var i = 0; i < 60; i++)
         {
-            var at = T0 + TimeSpan.FromMilliseconds(100 * i);
-            if (m.SetBase(i % 2 == 0 ? PetMood.Thinking : PetMood.Working, at)) changes.Add((at, m.Shown));
+            clock.Now += TimeSpan.FromMilliseconds(100);
+            pet.SetBase(i % 2 == 0 ? PetMood.Thinking : PetMood.Working);
+            if (pet.Mood != shown) changes.Add((clock.Now, shown = pet.Mood));
         }
         // Idle → busy once, then it stays with what it showed first
         Assert.Single(changes);
         Assert.True(changes[0].Mood is PetMood.Thinking or PetMood.Working);
-        Assert.True(changes[0].At - T0 >= PetMoodMachine.Settle(PetMood.Thinking));
     }
 
     [Fact]
     public void A_short_idle_between_tools_is_not_shown_but_a_real_change_is()
     {
-        var m = new PetMoodMachine(T0);
-        m.SetBase(PetMood.Working, T0);
-        m.Advance(T0 + TimeSpan.FromSeconds(1));
-        Assert.Equal(PetMood.Working, m.Shown);
-        m.SetBase(PetMood.Idle, T0 + TimeSpan.FromMilliseconds(2000));
-        m.Advance(T0 + TimeSpan.FromMilliseconds(2300));
-        m.SetBase(PetMood.Working, T0 + TimeSpan.FromMilliseconds(2400));
-        m.Advance(T0 + TimeSpan.FromSeconds(4));
-        Assert.Equal(PetMood.Working, m.Shown);
+        var (pet, clock) = NewPet();
+        pet.SetBase(PetMood.Working);
+        clock.Run(1, pet);
+        Assert.Equal(PetMood.Working, pet.Mood);
+        pet.SetBase(PetMood.Idle);
+        clock.Run(.3, pet);
+        pet.SetBase(PetMood.Working);
+        clock.Run(2, pet);
+        Assert.Equal(PetMood.Working, pet.Mood);
+        Assert.Equal("working", pet.Director.Cue);
         // Thinking that lasts: shown once it held for a moment
-        m.SetBase(PetMood.Thinking, T0 + TimeSpan.FromSeconds(5));
-        Assert.Equal(PetMood.Working, m.Shown);
-        Assert.Equal(T0 + TimeSpan.FromSeconds(5) + PetMoodMachine.WithinBusy, m.NextChange(T0 + TimeSpan.FromSeconds(5)));
-        m.Advance(T0 + TimeSpan.FromSeconds(6));
-        Assert.Equal(PetMood.Thinking, m.Shown);
+        pet.SetBase(PetMood.Thinking);
+        Assert.Equal(PetMood.Working, pet.Mood);
+        Assert.Equal(clock.Now + OniPet.WithinBusy, pet.NextChange());
+        clock.Run(1, pet);
+        Assert.Equal(PetMood.Thinking, pet.Mood);
     }
 
     [Fact]
-    public void A_question_shows_at_once_and_a_finished_run_cheers_then_rests()
+    public void A_question_shows_at_once_and_a_finished_run_celebrates_then_rests()
     {
-        var m = new PetMoodMachine(T0);
-        m.SetBase(PetMood.Thinking, T0);
-        m.Advance(T0 + TimeSpan.FromSeconds(1));
-        Assert.Equal(PetMood.Thinking, m.Shown);
-        Assert.True(m.SetBase(PetMood.Waiting, T0 + TimeSpan.FromSeconds(2)));
-        Assert.Equal(PetMood.Waiting, m.Shown);
-        m.SetBase(PetMood.Thinking, T0 + TimeSpan.FromSeconds(5));
-        m.Advance(T0 + TimeSpan.FromSeconds(6));
-        // The run ends: done at once (for a while), then idle
-        var end = T0 + TimeSpan.FromSeconds(8);
-        m.SetBase(PetMood.Idle, end);
-        m.Flash(PetMood.Done, PetMoodMachine.DoneFor, end);
-        Assert.Equal(PetMood.Done, m.Shown);
-        Assert.Equal(end + PetMoodMachine.DoneFor, m.NextChange(end));
-        m.Advance(end + PetMoodMachine.DoneFor);
-        Assert.Equal(PetMood.Done, m.Shown); // idle settles before it shows
-        var next = m.NextChange(end + PetMoodMachine.DoneFor)!.Value;
-        m.Advance(next);
-        Assert.Equal(PetMood.Idle, m.Shown);
+        var (pet, clock) = NewPet();
+        pet.SetBase(PetMood.Thinking);
+        clock.Run(1, pet);
+        pet.SetBase(PetMood.Waiting);
+        Assert.Equal(PetMood.Waiting, pet.Mood);
+        Assert.Equal("waiting", pet.Director.Cue);
+        pet.SetBase(PetMood.Thinking);
+        clock.Run(2, pet);
+        // The run ends: joy at once, shown for its while once the pose is reached, then idle
+        pet.SetBase(PetMood.Idle);
+        pet.Done();
+        Assert.Equal(PetMood.Done, pet.Mood);
+        var visible = 0.0;
+        for (var i = 0; i < 8 * 60; i++)
+        {
+            clock.Run(1 / 60.0, pet);
+            if (pet.Director is { State: "joy", Mode: "loop" }) visible += 1 / 60.0;
+        }
+        Assert.InRange(visible, 1.6, 2.5);
+        Assert.Equal(PetMood.Idle, pet.Mood);
     }
 
     [Fact]
-    public void A_failed_tool_winces_briefly_and_omp_stopping_stays_an_error()
+    public void A_failed_tool_winces_briefly_omp_stopping_stays_and_a_cancel_never_celebrates()
     {
-        var m = new PetMoodMachine(T0);
-        m.SetBase(PetMood.Working, T0);
-        m.Advance(T0 + TimeSpan.FromSeconds(1));
-        var at = T0 + TimeSpan.FromSeconds(2);
-        m.Flash(PetMood.Error, PetMoodMachine.OopsFor, at);
-        Assert.Equal(PetMood.Error, m.Shown);
-        m.Advance(at + PetMoodMachine.OopsFor + TimeSpan.FromSeconds(1));
-        Assert.Equal(PetMood.Working, m.Shown);
-        m.SetBase(PetMood.Error, T0 + TimeSpan.FromSeconds(10));
-        m.Advance(T0 + TimeSpan.FromMinutes(30));
-        Assert.Equal(PetMood.Error, m.Shown); // no sleeping through a crash
+        var (pet, clock) = NewPet();
+        pet.SetBase(PetMood.Working);
+        clock.Run(1, pet);
+        pet.ToolFailed();
+        Assert.Equal(PetMood.Error, pet.Mood);
+        clock.Run(OniDirector.ToolErrorFor + .1, pet);
+        Assert.Equal(PetMood.Working, pet.Mood); // a transient error: back to work
+        // A cancel: back to idle, no joy, the wince gone
+        pet.ToolFailed();
+        pet.Aborted();
+        Assert.Equal(PetMood.Idle, pet.Mood);
+        Assert.Null(pet.Director.Flashing);
+        // omp stopped: an error that stays, no sleeping through a crash
+        pet.SetBase(PetMood.Error);
+        Assert.Equal(PetMood.Error, pet.Mood);
+        clock.Run(30, pet, step: .5);
+        clock.Now += TimeSpan.FromMinutes(30);
+        pet.Sync();
+        Assert.Equal(PetMood.Error, pet.Mood);
+        // A question and a persistent fault win over a run's end
+        pet.Done();
+        Assert.Equal(PetMood.Error, pet.Mood);
     }
 
     [Fact]
     public void Nothing_happening_puts_it_to_sleep_and_the_user_wakes_it()
     {
-        var m = new PetMoodMachine(T0);
-        Assert.Equal(T0 + PetMoodMachine.SleepAfter, m.NextChange(T0));
-        m.Advance(T0 + PetMoodMachine.SleepAfter - TimeSpan.FromSeconds(1));
-        Assert.Equal(PetMood.Idle, m.Shown);
-        m.Advance(T0 + PetMoodMachine.SleepAfter);
-        Assert.Equal(PetMood.Sleeping, m.Shown);
-        Assert.Null(m.NextChange(T0 + PetMoodMachine.SleepAfter)); // asleep: no timer at all
-        Assert.True(m.Poke(T0 + TimeSpan.FromMinutes(10)));
-        Assert.Equal(PetMood.Idle, m.Shown);
-        // Work wakes it too, at once
-        m.Advance(T0 + TimeSpan.FromMinutes(20));
-        Assert.Equal(PetMood.Sleeping, m.Shown);
-        Assert.True(m.SetBase(PetMood.Working, T0 + TimeSpan.FromMinutes(21)));
-        Assert.Equal(PetMood.Working, m.Shown);
+        var (pet, clock) = NewPet();
+        Assert.Equal(clock.Now + TimeSpan.FromSeconds(OniDirector.SleepAfter), pet.NextChange());
+        clock.Now += TimeSpan.FromSeconds(OniDirector.SleepAfter - 1);
+        pet.Sync();
+        Assert.Equal(PetMood.Idle, pet.Mood);
+        clock.Now += TimeSpan.FromSeconds(1);
+        pet.Sync();
+        Assert.Equal(PetMood.Sleeping, pet.Mood);
+        Assert.Null(pet.NextChange()); // asleep: no timer at all
+        pet.Typed();
+        Assert.Equal(PetMood.Idle, pet.Mood);
+        // Work wakes it too, at once (the busy family's settle aside)
+        pet.Sleep();
+        Assert.Equal(PetMood.Sleeping, pet.Mood);
+        pet.SetBase(PetMood.Working);
+        clock.Run(1, pet);
+        Assert.Equal(PetMood.Working, pet.Mood);
+    }
+
+    [Fact]
+    public void Carried_from_any_state_it_lands_back_into_what_is_happening_now()
+    {
+        foreach (var start in new[] { "idle", "thinking", "working", "waiting", "sleep", "error", "done" })
+        {
+            var (pet, clock) = NewPet();
+            pet.Show(start);
+            clock.Run(1, pet);
+            var before = (pet.Director.State, pet.Director.Phase);
+            pet.Carry(true);
+            // The drawing stays put the moment it is taken; then it hangs from the pointer
+            Assert.Equal(before, (pet.Director.State, pet.Director.Phase));
+            Assert.Equal("dragging", pet.Director.Cue);
+            // omp asks something while it is held: shown once it is put down
+            pet.SetBase(PetMood.Waiting);
+            Assert.Equal("dragging", pet.Director.Cue);
+            clock.Run(2, pet);
+            Assert.Equal("dragging", pet.Director.State);
+            pet.Carry(false);
+            Assert.Equal("waiting", pet.Director.Cue);
+            clock.Run(3, pet);
+            Assert.Equal(("waiting", "loop"), (pet.Director.State, pet.Director.Mode));
+        }
     }
 
     [Fact]
     public void Every_mood_stays_on_screen_for_the_minimum_under_random_input()
     {
         var rnd = new Random(7);
-        var m = new PetMoodMachine(T0);
-        var now = T0;
-        var shownAt = T0;
-        var shown = m.Shown;
-        var moods = new[] { PetMood.Idle, PetMood.Thinking, PetMood.Working, PetMood.Waiting };
+        var (pet, clock) = NewPet();
+        var shownAt = clock.Now;
+        var shown = pet.Mood;
+        var moods = new[] { PetMood.Idle, PetMood.Thinking, PetMood.Working };
         for (var i = 0; i < 3000; i++)
         {
-            now += TimeSpan.FromMilliseconds(rnd.Next(20, 400));
-            var r = rnd.Next(20);
-            if (r == 0) m.Flash(PetMood.Done, PetMoodMachine.DoneFor, now);
-            else if (r == 1) m.Flash(PetMood.Error, PetMoodMachine.OopsFor, now);
-            else m.SetBase(moods[rnd.Next(moods.Length)], now);
-            if (m.Shown == shown) continue;
-            Assert.True(now - shownAt >= PetMoodMachine.MinShow, $"{shown} lasted {(now - shownAt).TotalMilliseconds} ms");
-            (shown, shownAt) = (m.Shown, now);
+            clock.Now += TimeSpan.FromMilliseconds(rnd.Next(20, 400));
+            pet.SetBase(moods[rnd.Next(moods.Length)]);
+            if (pet.Mood == shown) continue;
+            Assert.True(clock.Now - shownAt >= OniPet.MinShow, $"{shown} lasted {(clock.Now - shownAt).TotalMilliseconds} ms");
+            (shown, shownAt) = (pet.Mood, clock.Now);
         }
     }
 
@@ -414,18 +211,78 @@ public sealed class PetsTests
     public void The_agent_state_maps_to_a_base_mood()
     {
         var user = new UserItem(1, "hi", true);
-        Assert.Equal(PetMood.Idle, PetMoodMachine.BaseMood(Snap(user), SessionPhase.Ready, false));
-        Assert.Equal(PetMood.Thinking, PetMoodMachine.BaseMood(Snap(user), SessionPhase.Running, false));
-        Assert.Equal(PetMood.Thinking, PetMoodMachine.BaseMood(Snap(user, new AssistantItem(2, "", "hmm", true, null, null)), SessionPhase.Running, false));
-        Assert.Equal(PetMood.Thinking, PetMoodMachine.BaseMood(Snap(user, new AssistantItem(2, "Writing", "", true, null, null)), SessionPhase.Running, false));
+        Assert.Equal(PetMood.Idle, PetMoods.BaseMood(Snap(user), SessionPhase.Ready, false));
+        Assert.Equal(PetMood.Thinking, PetMoods.BaseMood(Snap(user), SessionPhase.Running, false));
+        Assert.Equal(PetMood.Thinking, PetMoods.BaseMood(Snap(user, new AssistantItem(2, "", "hmm", true, null, null)), SessionPhase.Running, false));
+        Assert.Equal(PetMood.Thinking, PetMoods.BaseMood(Snap(user, new AssistantItem(2, "Writing", "", true, null, null)), SessionPhase.Running, false));
         var tool = new ToolItem(3, "t1", "bash", "{}", ToolStatus.Running, null);
-        Assert.Equal(PetMood.Working, PetMoodMachine.BaseMood(Snap(user, new AssistantItem(2, "", "", false, "toolUse", null), tool), SessionPhase.Running, false));
-        Assert.Equal(PetMood.Waiting, PetMoodMachine.BaseMood(Snap(user, tool), SessionPhase.Running, true));
-        Assert.Equal(PetMood.Error, PetMoodMachine.BaseMood(Snap(user), SessionPhase.Faulted, false));
-        Assert.Equal(PetMood.Idle, PetMoodMachine.BaseMood(Snap(user), SessionPhase.Starting, false));
+        Assert.Equal(PetMood.Working, PetMoods.BaseMood(Snap(user, new AssistantItem(2, "", "", false, "toolUse", null), tool), SessionPhase.Running, false));
+        Assert.Equal(PetMood.Waiting, PetMoods.BaseMood(Snap(user, tool), SessionPhase.Running, true));
+        Assert.Equal(PetMood.Error, PetMoods.BaseMood(Snap(user), SessionPhase.Faulted, false));
+        Assert.Equal(PetMood.Idle, PetMoods.BaseMood(Snap(user), SessionPhase.Starting, false));
     }
 
-    // ───────────────────────────── The control ─────────────────────────────
+    // ───────────────────────────── Carrying ─────────────────────────────
+
+    [Fact]
+    public void Carried_it_hangs_swings_and_comes_down_on_the_spot_under_it_with_dust()
+    {
+        var (pet, _) = NewPet();
+        // The window's floor is well below: it is put down where it is let go, not there
+        var carry = new OniCarry(pet, new Point(300, 400), 80, new Rect(52, 88, 600, 412), reduced: false);
+        carry.Grab(new Point(300, 360));
+        Assert.True(pet.Director.Carried);
+        // Held still, it is lifted a little above where it was
+        for (var i = 0; i < 60; i++) carry.Step(1 / 60.0);
+        Assert.InRange(carry.Body.Y, 400 - 80 * .22 - 1, 400 - 80 * .22 + 1);
+        Assert.True(carry.GroundDy > 15);
+        // A quick move to the right: the feet trail left (+lean)
+        var maxLean = 0.0;
+        for (var i = 1; i <= 12; i++)
+        {
+            carry.Move(new Point(300 + i * 15, 360));
+            carry.Step(1 / 60.0);
+            maxLean = Math.Max(maxLean, carry.Angle);
+        }
+        Assert.InRange(maxLean, .02, .18);
+        for (var i = 0; i < 30; i++) carry.Step(1 / 60.0);
+        var settled = false;
+        carry.Settled += () => settled = true;
+        carry.Release();
+        var dust = false;
+        for (var i = 0; i < 240 && !settled; i++)
+        {
+            carry.Step(1 / 60.0);
+            if (!(carry.DustAge < OniCarry.DustFor)) continue;
+            dust = true;
+            Assert.Equal(0, carry.GroundDy, 3); // the dust and the shadow are at its feet
+        }
+        Assert.True(settled);
+        Assert.True(dust, "no dust on landing");
+        Assert.False(pet.Director.Carried);
+        // Down where it was held, on the ground under the pointer
+        Assert.Equal(400, carry.Body.Y, 3);
+        Assert.InRange(carry.Body.X, 470, 490);
+    }
+
+    [Fact]
+    public void With_reduced_motion_it_follows_exactly_and_is_put_down_at_once()
+    {
+        var (pet, _) = NewPet();
+        var carry = new OniCarry(pet, new Point(300, 400), 80, new Rect(52, 88, 600, 312), reduced: true);
+        var settled = false;
+        carry.Settled += () => settled = true;
+        carry.Grab(new Point(300, 360));
+        carry.Move(new Point(420, 300));
+        Assert.Equal(new Point(420, 340), carry.Body);
+        Assert.Equal(0, carry.Angle);
+        carry.Release();
+        Assert.True(settled);
+        Assert.False(pet.Director.Carried);
+        Assert.Equal(new Point(420, 340), carry.Body);
+    }
+
+    // ───────────────────────────── The view ─────────────────────────────
 
     private static async Task Settle(int ms = 250)
     {
@@ -452,118 +309,110 @@ public sealed class PetsTests
     }
 
     [AvaloniaFact]
-    public async Task The_pet_is_drawn_in_crisp_square_pixels_inside_its_box()
+    public async Task It_moves_only_while_seen_rests_when_asleep_and_lets_its_sheets_go()
     {
-        var pet = new PetView { Look = new PetLook(PetArt.Cat), Mood = PetMood.Idle, PixelScale = 3, Animate = false, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top, Margin = new Thickness(30, 20, 0, 0) };
-        var w = new Window { Width = 200, Height = 120, Background = Avalonia.Media.Brushes.White, Content = pet };
+        var (pet, clock) = NewPet();
+        var view = new OniView { Pet = pet, HeightPx = 80 };
+        var host = new Border { Child = view };
+        var w = new Window { Width = 300, Height = 220, Content = host };
         w.Show();
-        await Settle();
-        Assert.Equal(new Size(PetFrames.Width * 3, PetFrames.Height * 3), pet.Bounds.Size);
-        using var frame = w.CaptureRenderedFrame()!;
+        await Until(() => view.Atlases is { IsReady: true }, "sheets decoded");
+        await Settle(100);
+        Assert.Equal(OniView.BoxFor(80), view.Bounds.Size);
+        Assert.True(view.IsPlaying);
+        host.IsVisible = false; // an ancestor hides it (settings page, pet switched off)
+        await Settle(100);
+        Assert.False(view.IsPlaying);
+        host.IsVisible = true;
+        await Settle(100);
+        Assert.True(view.IsPlaying);
+        w.WindowState = WindowState.Minimized; // minimised: no frames
+        await Settle(100);
+        Assert.False(view.IsPlaying);
+        w.WindowState = WindowState.Normal;
+        await Settle(100);
+        Assert.True(view.IsPlaying);
+        view.Reduced = true; // less motion: the still, no frames
+        await Settle(50);
+        Assert.False(view.IsPlaying);
+        Assert.True(view.LastScene?.Still);
+        view.Reduced = false;
+        await Settle(50);
+        Assert.True(view.IsPlaying);
+        // Asleep for a while: it rests on its still; woken, it plays again
+        pet.Sleep();
+        clock.Run(3, pet); // the sleep entry plays out
+        clock.Now += TimeSpan.FromSeconds(OniView.SleepRest + 5);
+        pet.Sync();
+        await Settle(100);
+        Assert.False(view.IsPlaying);
+        pet.Clicked();
+        await Settle(50);
+        Assert.True(view.IsPlaying);
+        // Another size, another set of sheets; each is let go once no view holds it (sizes no other test uses)
+        view.HeightPx = 200;
+        await Until(() => view.Atlases is { IsReady: true, Level: 224 }, "sheets for 200");
+        var first = view.Atlases!;
+        Assert.True(first.Bytes > 0);
+        view.HeightPx = 150;
+        await Until(() => view.Atlases is { IsReady: true, Level: 160 }, "sheets for 150");
+        var second = view.Atlases!;
+        await Until(() => first.IsFreed, "the first sheets freed", 10);
+        Assert.False(second.IsFreed);
+        w.Close();
+        await Settle(50);
+        Assert.False(view.IsPlaying); // detached
+        await Until(() => second.IsFreed, "the last sheets freed", 10);
+    }
+
+    [AvaloniaFact]
+    public async Task Only_the_pets_box_takes_the_pointer_and_every_size_draws()
+    {
+        var (pet, _) = NewPet();
+        var view = new OniView { Pet = pet, HeightPx = 64, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top, Margin = new Thickness(60, 60, 0, 0) };
+        var w = new Window { Width = 320, Height = 260, Content = view };
+        w.Show();
+        await Until(() => view.Atlases is { IsReady: true }, "sheets decoded");
+        foreach (var h in new[] { 64.0, 80, 96 })
+        {
+            view.HeightPx = h;
+            await Until(() => view.Atlases is { IsReady: true } a && a.Level == OniAtlases.LevelFor(h), "sheets");
+            await Settle(50);
+            var box = OniView.BoxFor(h);
+            Assert.Equal(box, view.Bounds.Size);
+            // The middle of the box is the pet; the spirits and the sign drawn around it are not
+            Assert.Same(view, w.InputHitTest(new Point(60 + box.Width / 2, 60 + box.Height / 2)));
+            Assert.NotSame(view, w.InputHitTest(new Point(60 + box.Width / 2, 60 - 10)));
+            using var frame = w.CaptureRenderedFrame()!;
+            Assert.True(Inked(frame, new PixelRect(60, 60, (int)box.Width, (int)box.Height)) > box.Width * box.Height * .1, $"nothing drawn at {h}");
+        }
+        w.Close();
+    }
+
+    /// <summary>How many pixels in <paramref name="area"/> are not the window's background.</summary>
+    private static int Inked(Bitmap frame, PixelRect area)
+    {
         var size = frame.PixelSize;
         var buf = new byte[size.Width * size.Height * 4];
         var pin = System.Runtime.InteropServices.GCHandle.Alloc(buf, System.Runtime.InteropServices.GCHandleType.Pinned);
         try { frame.CopyPixels(new PixelRect(size), pin.AddrOfPinnedObject(), buf.Length, size.Width * 4); }
         finally { pin.Free(); }
-        var expected = PetFrames.Still(new PetLook(PetArt.Cat), PetMood.Idle, 3);
-        var box = new PixelRect(30, 20, expected.Width, expected.Height);
-        int ink = 0, outside = 0;
-        for (var y = 0; y < size.Height; y++)
-            for (var x = 0; x < size.Width; x++)
+        var bg = (buf[0], buf[1], buf[2]);
+        var n = 0;
+        for (var y = area.Y; y < Math.Min(size.Height, area.Bottom); y++)
+            for (var x = area.X; x < Math.Min(size.Width, area.Right); x++)
             {
-                var p = BitConverter.ToUInt32(buf, (y * size.Width + x) * 4) | 0xFF000000;
-                if (frame.Format == Avalonia.Platform.PixelFormat.Rgba8888) p = (p & 0xFF00FF00) | ((p & 0xFF) << 16) | ((p >> 16) & 0xFF);
-                var inBox = x >= box.X && x < box.Right && y >= box.Y && y < box.Bottom;
-                if (!inBox) { if (p != 0xFFFFFFFF) outside++; continue; }
-                // Every screen pixel is exactly its pet pixel's colour (the shadow blended on white): no smoothing
-                var s = expected.Pixels[(y - box.Y) * expected.Width + (x - box.X)];
-                var a = (s >> 24) / 255.0;
-                for (var sh = 0; sh <= 16; sh += 8)
-                    Assert.InRange((double)((p >> sh) & 0xFF), ((s >> sh) & 0xFF) * a + 255 * (1 - a) - 2, ((s >> sh) & 0xFF) * a + 255 * (1 - a) + 2);
-                if (s >> 24 == 0xFF) ink++;
+                var i = (y * size.Width + x) * 4;
+                if (Math.Abs(buf[i] - bg.Item1) + Math.Abs(buf[i + 1] - bg.Item2) + Math.Abs(buf[i + 2] - bg.Item3) > 24) n++;
             }
-        Assert.Equal(0, outside);
-        Assert.Equal(expected.Pixels.Count(p => p >> 24 == 0xFF), ink);
-        w.Close();
-    }
-
-    [AvaloniaFact]
-    public async Task It_lives_only_while_shown_and_a_long_mood_comes_to_rest()
-    {
-        var pet = new PetView { Look = new PetLook(PetArt.Owl), Mood = PetMood.Idle };
-        var host = new Border { Child = pet };
-        var w = new Window { Width = 200, Height = 120, Content = host };
-        w.Show();
-        await Settle(100);
-        Assert.True(pet.IsPlaying);
-        host.IsVisible = false; // an ancestor hides it (settings page, pet switched off)
-        await Settle(100);
-        Assert.False(pet.IsPlaying);
-        host.IsVisible = true;
-        await Settle(100);
-        Assert.True(pet.IsPlaying);
-        w.WindowState = WindowState.Minimized; // minimised: no timer
-        await Settle(100);
-        Assert.False(pet.IsPlaying);
-        w.WindowState = WindowState.Normal;
-        await Settle(100);
-        Assert.True(pet.IsPlaying);
-        pet.Animate = false;
-        Assert.False(pet.IsPlaying);
-        pet.Animate = true;
-        Assert.True(pet.IsPlaying);
-
-        // On its own clock: idle life changes the picture, and the timer wakes only for a change
-        var now = T0;
-        pet.UseClock(() => now, seed: 1);
-        var keys = new HashSet<string?>();
-        for (var i = 0; i < 200; i++)
-        {
-            now += TimeSpan.FromMilliseconds(50);
-            pet.Step();
-            keys.Add(pet.FrameKey);
-        }
-        Assert.True(keys.Count >= 4, $"{keys.Count} pictures in 10 s of idle");
-        // Asleep: Zzz for a while, then it rests on a still with no timer
-        pet.Mood = PetMood.Sleeping;
-        Assert.True(pet.IsPlaying);
-        now += PetLife.RestAfter(PetMood.Sleeping) + TimeSpan.FromSeconds(1);
-        pet.Step();
-        Assert.False(pet.IsPlaying);
-        Assert.NotNull(pet.FrameKey);
-        // A new mood plays again; so does a click
-        pet.Mood = PetMood.Thinking;
-        Assert.True(pet.IsPlaying);
-        pet.Cheer();
-        Assert.True(pet.IsPlaying);
-        w.Close();
-        await Settle(50);
-        Assert.False(pet.IsPlaying); // detached
-    }
-
-    [AvaloniaFact]
-    public async Task Hovering_the_pet_turns_its_eyes_to_the_pointer()
-    {
-        var pet = new PetView { Look = new PetLook(PetArt.Cat), Mood = PetMood.Idle, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right };
-        var w = new Window { Width = 300, Height = 120, Content = pet };
-        w.Show();
-        await Settle(100);
-        var now = T0;
-        pet.UseClock(() => now, seed: 7);
-        var box = pet.Bounds;
-        w.MouseMove(new Point(box.X + 2, box.Y + 20)); // far left of its face
-        now += TimeSpan.FromSeconds(0.6);
-        pet.Step();
-        Assert.Equal(-1, pet.Life.Sample(PetArt.Cat, now).Face.LookX);
-        w.MouseMove(new Point(box.Right - 2, box.Y + 20)); // and right
-        Assert.Equal(1, pet.Life.Sample(PetArt.Cat, now).Face.LookX);
-        w.Close();
+        return n;
     }
 
     // ───────────────────────────── On the message box ─────────────────────────────
 
     private static async Task<(MainWindow w, MainViewModel vm)> Open(string scenario, double width = 1180, double height = 760, ClientSettingsStore? store = null, string? pace = null)
     {
+        Ombra.App.Platform.ReducedMotion.Override = false;
         var sessions = TestProcesses.TempDir("pets");
         var factory = TestProcesses.FakeFactory(scenario, sessions);
         Func<LaunchRequest, Ombra.Rpc.OmpLaunchSpec> launch = pace is null ? factory : req =>
@@ -597,7 +446,7 @@ public sealed class PetsTests
         var perch = w.FindControl<PetPerch>("PetPerch")!;
         var found = new List<string>();
         if (!perch.IsEffectivelyVisible) return found;
-        var own = perch.GetVisualDescendants().OfType<Visual>().Where(v => v is PetView || v.Name == "PetBubble")
+        var own = perch.GetVisualDescendants().OfType<Visual>().Where(v => v is OniView || v.Name == "PetBubble")
             .Where(v => v.IsEffectivelyVisible).Select(v => Box(v, w)).ToList();
         foreach (var c in w.GetVisualDescendants().OfType<Control>())
         {
@@ -609,6 +458,20 @@ public sealed class PetsTests
                     found.Add($"{c.GetType().Name} {(c as TextBlock)?.Text ?? c.Name} under the pet ({x})");
         }
         return found;
+    }
+
+    /// <summary>Carries the pet with the pointer from <paramref name="from"/> to <paramref name="to"/> in steps, holds it there a moment, and puts it down.</summary>
+    private static async Task Carry(Window w, Point from, Point to, bool waitToRest = true)
+    {
+        w.MouseDown(from, MouseButton.Left);
+        for (var i = 1; i <= 6; i++)
+        {
+            w.MouseMove(from + (to - from) * (i / 6.0));
+            await Settle(30);
+        }
+        await Settle(400); // held still: no speed left when let go
+        w.MouseUp(to, MouseButton.Left);
+        if (waitToRest) await Settle(1600);
     }
 
     [AvaloniaFact]
@@ -630,15 +493,22 @@ public sealed class PetsTests
         Assert.Equal(boxBox.Top + 1, petBox.Bottom, 0.5);
         Assert.InRange(boxBox.Right - petBox.Right, 16, 24);
         var center = petBox.Center;
+        var opened = 0;
+        vm.Pets.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(PetsViewModel.IsChatOpen) && vm.Pets.IsChatOpen) opened++;
+        };
         w.MouseDown(center, MouseButton.Left);
         w.MouseUp(center, MouseButton.Left);
         await Settle(100);
         // A click: the message box opens beside the pet with the keyboard in it, and the pet says something
+        Assert.Equal(1, opened);
         Assert.True(vm.Pets.IsChatOpen);
         Assert.True(chat.IsEffectivelyVisible);
         Assert.True(chat.IsFocused, "the pet's message box did not take the keyboard");
         Assert.True(vm.Pets.IsBubbleOpen);
         Assert.False(string.IsNullOrWhiteSpace(vm.Pets.BubbleText));
+        Assert.True(vm.Pets.Oni.Director.Attention > .5, "the pet did not notice the click");
         var bubble = perch.Stage.PetBubble;
         Assert.True(bubble.IsEffectivelyVisible);
         Assert.True(Box(bubble, w).Right <= petBox.Left + 1, "the bubble covers the pet");
@@ -681,7 +551,7 @@ public sealed class PetsTests
     }
 
     [AvaloniaFact]
-    public async Task Inside_the_window_the_pet_can_be_dragged_anywhere_in_it_and_stays_inside_it()
+    public async Task Inside_the_window_the_pet_is_carried_anywhere_in_it_and_stays_inside_it()
     {
         var path = Path.Combine(TestProcesses.TempDir("pets-place"), "ombra.local.json");
         var (w, vm) = await Open("normal", store: new ClientSettingsStore(path));
@@ -692,40 +562,43 @@ public sealed class PetsTests
         var from = Box(pet, w).Center;
         // A press that moves a little is still a click
         w.MouseDown(from, MouseButton.Left);
-        w.MouseMove(from + new Vector(2, 1));
-        w.MouseUp(from + new Vector(2, 1), MouseButton.Left);
+        w.MouseMove(from + new Vector(3, 3));
+        w.MouseUp(from + new Vector(3, 3), MouseButton.Left);
         await Settle(100);
         Assert.True(vm.Pets.IsChatOpen);
         Assert.False(vm.Pets.IsRoaming);
         vm.Pets.CloseChat();
-        // Dragged to the window's top left: it goes there, the message box gives the pet's band back
-        var to = new Point(200, 150);
+        // Carried to the window's top left: it hangs from the pointer, is put down there, the band goes back to the conversation
+        var to = new Point(200, 180);
         w.MouseDown(from, MouseButton.Left);
         w.MouseMove(from + new Vector(-10, -10));
-        w.MouseMove(to);
-        w.MouseUp(to, MouseButton.Left);
-        await Settle(100);
+        await Settle(60);
+        Assert.Equal("dragging", vm.Pets.Oni.Director.Cue);
         Assert.False(vm.Pets.IsChatOpen);
+        w.MouseUp(from + new Vector(-10, -10), MouseButton.Left);
+        await Settle(1600);
+        await Carry(w, Box(pet, w).Center, to);
+        Assert.False(vm.Pets.IsChatOpen); // a carry is not a click
+        Assert.False(vm.Pets.Oni.Director.Carried);
+        Assert.Null(perch.Carry);
         Assert.True(vm.Pets.IsRoaming);
-        Assert.Equal(to.X, Box(pet, w).Center.X, 1);
-        Assert.Equal(to.Y, Box(pet, w).Center.Y, 1);
+        Assert.Equal(to.X, Box(pet, w).Center.X, 3);
+        Assert.Equal(to.Y, Box(pet, w).Center.Y, 3);
         Assert.Equal(6, composer.Margin.Top);
-        // Past the window's edge: it stops at the edge of the window's content (inside the chrome's frame inset)
-        from = Box(pet, w).Center;
-        w.MouseDown(from, MouseButton.Left);
-        w.MouseMove(from + new Vector(5000, 5000));
-        w.MouseUp(from + new Vector(5000, 5000), MouseButton.Left);
-        await Settle(100);
+        // Past the window's edge: it stops where what is drawn around it (spirits, the sign, the dust) still fits in the
+        // window's content
+        await Carry(w, Box(pet, w).Center, Box(pet, w).Center + new Vector(5000, 5000));
         var content = ((Control)w.Content!).Bounds;
-        Assert.Equal(content.Right, Box(pet, w).Right, 1);
-        Assert.Equal(content.Bottom, Box(pet, w).Bottom, 1);
+        var ov = OniView.OverflowFor(vm.Pets.PetHeight);
+        Assert.Equal(content.Right - ov.Right, Box(pet, w).Right, 1);
+        Assert.Equal(content.Bottom - ov.Bottom, Box(pet, w).Bottom, 1);
         // A smaller window keeps it inside, in the same corner
         w.Width = 800;
         w.Height = 600;
         await Settle(150);
         content = ((Control)w.Content!).Bounds;
-        Assert.Equal(content.Right, Box(pet, w).Right, 1);
-        Assert.Equal(content.Bottom, Box(pet, w).Bottom, 1);
+        Assert.Equal(content.Right - ov.Right, Box(pet, w).Right, 1);
+        Assert.Equal(content.Bottom - ov.Bottom, Box(pet, w).Bottom, 1);
         // The bubble follows it (on its left, room permitting)
         vm.Pets.TalkCommand.Execute(null);
         await Settle(100);
@@ -738,8 +611,8 @@ public sealed class PetsTests
         pet = w.FindControl<PetPerch>("PetPerch")!.Stage.Pet;
         Assert.True(vm.Pets.IsRoaming);
         content = ((Control)w.Content!).Bounds;
-        Assert.Equal(content.Right, Box(pet, w).Right, 1);
-        Assert.Equal(content.Bottom, Box(pet, w).Bottom, 1);
+        Assert.Equal(content.Right - ov.Right, Box(pet, w).Right, 1);
+        Assert.Equal(content.Bottom - ov.Bottom, Box(pet, w).Bottom, 1);
         // Reset position puts it back on the message box
         vm.Pets.ReturnToPerchCommand.Execute(null);
         await Settle(150);
@@ -755,7 +628,34 @@ public sealed class PetsTests
     }
 
     [AvaloniaFact]
-    public async Task A_pet_dropped_close_to_its_perch_sits_on_it_again()
+    public async Task Losing_the_pointer_mid_carry_puts_the_pet_down_without_opening_its_message_box()
+    {
+        var (w, vm) = await Open("normal");
+        vm.Pets.SetRoamCommand.Execute("window");
+        var perch = w.FindControl<PetPerch>("PetPerch")!;
+        var pet = perch.Stage.Pet;
+        IPointer? pointer = null;
+        pet.AddHandler(InputElement.PointerPressedEvent, (_, e) => pointer = e.Pointer, Avalonia.Interactivity.RoutingStrategies.Bubble, handledEventsToo: true);
+        var from = Box(pet, w).Center;
+        w.MouseDown(from, MouseButton.Left);
+        w.MouseMove(from + new Vector(-40, -60));
+        await Settle(100);
+        Assert.True(vm.Pets.Oni.Director.Carried);
+        // The system takes the pointer away (another window, a system gesture): let go where it is
+        pointer!.Capture(null);
+        await Settle(1600);
+        Assert.False(vm.Pets.Oni.Director.Carried);
+        Assert.False(vm.Pets.IsChatOpen);
+        Assert.True(vm.Pets.IsRoaming);
+        // The release that follows is not a click either
+        w.MouseUp(from + new Vector(-40, -60), MouseButton.Left);
+        await Settle(100);
+        Assert.False(vm.Pets.IsChatOpen);
+        await Close(w, vm);
+    }
+
+    [AvaloniaFact]
+    public async Task A_pet_put_down_close_to_its_perch_sits_on_it_again()
     {
         var (w, vm) = await Open("normal");
         vm.Pets.SetRoamCommand.Execute("window");
@@ -767,12 +667,7 @@ public sealed class PetsTests
         var box = Box(w.FindControl<Border>("ComposerBox")!, w);
         var size = Box(pet, w).Size;
         var perchCenter = new Point(box.Right - PetsViewModel.PetInset - size.Width / 2, box.Top + 1 - size.Height / 2);
-        var from = Box(pet, w).Center;
-        w.MouseDown(from, MouseButton.Left);
-        w.MouseMove(from + new Vector(20, 20));
-        w.MouseMove(perchCenter + new Vector(6, -5));
-        w.MouseUp(perchCenter + new Vector(6, -5), MouseButton.Left);
-        await Settle(150);
+        await Carry(w, Box(pet, w).Center, perchCenter + new Vector(6, -5));
         Assert.False(vm.Pets.IsRoaming);
         box = Box(w.FindControl<Border>("ComposerBox")!, w);
         Assert.Equal(box.Top + 1, Box(pet, w).Bottom, 0.5);
@@ -799,14 +694,29 @@ public sealed class PetsTests
         }
     }
 
-    /// <summary>Drags the desktop pet with the pointer going from <paramref name="from"/> to <paramref name="to"/> on the desktop.</summary>
-    private static void DragOnDesktop(PetWindow pw, PixelPoint from, PixelPoint to)
+    /// <summary>
+    /// Carries the desktop pet with the mouse going from <paramref name="from"/> to <paramref name="to"/> on the desktop.
+    /// The window moves every frame under the mouse: the app reads where the mouse is on the desktop from the system,
+    /// here the simulated one.
+    /// </summary>
+    private static async Task CarryOnDesktop(PetWindow pw, PixelPoint from, PixelPoint to)
     {
-        // The window moves under the pointer: each step is where the pointer is on the desktop, seen from the window now
-        pw.MouseDown(pw.PointToClient(from), MouseButton.Left);
-        for (var i = 1; i <= 4; i++)
-            pw.MouseMove(pw.PointToClient(new PixelPoint(from.X + (to.X - from.X) * i / 4, from.Y + (to.Y - from.Y) * i / 4)));
-        pw.MouseUp(pw.PointToClient(to), MouseButton.Left);
+        var mouse = from;
+        Ombra.App.Platform.SystemPointer.Override = () => mouse;
+        try
+        {
+            pw.MouseDown(pw.PointToClient(from), MouseButton.Left);
+            for (var i = 1; i <= 6; i++)
+            {
+                mouse = new PixelPoint(from.X + (to.X - from.X) * i / 6, from.Y + (to.Y - from.Y) * i / 6);
+                pw.MouseMove(pw.PointToClient(mouse));
+                await Settle(30);
+            }
+            await Settle(400); // held still: no speed left when let go
+            pw.MouseUp(pw.PointToClient(to), MouseButton.Left);
+            await Settle(1600);
+        }
+        finally { Ombra.App.Platform.SystemPointer.Override = () => null; }
     }
 
     [Fact]
@@ -847,11 +757,11 @@ public sealed class PetsTests
     }
 
     [AvaloniaFact]
-    public async Task On_the_desktop_the_pet_goes_anywhere_on_any_monitor_and_stays_where_dropped()
+    public async Task On_the_desktop_the_pet_goes_anywhere_on_any_monitor_and_stays_where_put_down()
     {
         var path = Path.Combine(TestProcesses.TempDir("pets-desktop"), "ombra.local.json");
         var (w, vm) = await Open("normal", store: new ClientSettingsStore(path));
-        w.Position = new PixelPoint(100, 60); // the app's window covers 100…1280 × 60…820 of the laptop
+        w.Position = new PixelPoint(300, 60); // the app's window covers 300…1480 × 60…820 of the laptop
         var perch = w.FindControl<PetPerch>("PetPerch")!;
         var screens = new FakeScreens(Laptop, External);
         perch.Screens = screens;
@@ -859,8 +769,9 @@ public sealed class PetsTests
         var composer = w.FindControl<Border>("ComposerBox")!;
         var pet = perch.Stage.Pet;
         var size = PetStage.PetSize(vm.Pets);
+        var (hw, hh) = ((int)(size.Width / 2), (int)(size.Height / 2));
 
-        // Dragged off the message box: at once in a window of its own; out of the app's window, it follows the pointer
+        // Carried off the message box: at once in a window of its own; out of the app's window, it follows the pointer
         var from = Box(pet, w).Center;
         w.MouseDown(from, MouseButton.Left);
         w.MouseMove(from + new Vector(-10, -10));
@@ -868,39 +779,46 @@ public sealed class PetsTests
         Assert.NotNull(pw);
         Assert.True(pw.IsVisible);
         Assert.Equal(0, perch.Stage.Opacity); // not two pets
-        var to = new Point(-60, 300);
-        w.MouseMove(to);
+        var to = new Point(-120, 300);
+        for (var i = 1; i <= 6; i++)
+        {
+            w.MouseMove(from + (to - from) * (i / 6.0));
+            await Settle(30);
+        }
+        await Settle(400);
         w.MouseUp(to, MouseButton.Left);
-        await Settle(150);
+        await Settle(1600);
         Assert.True(vm.Pets.IsOnDesktop);
+        Assert.False(vm.Pets.Oni.Director.Carried);
         Assert.False(perch.IsEffectivelyVisible);
         Assert.Equal(1, perch.Stage.Opacity);
-        // Its middle under the pointer (two roundings to whole desktop pixels on the way)
+        // Its middle under the pointer (roundings to whole desktop pixels on the way)
         var pointer = w.PointToScreen(to);
-        Assert.InRange(pw.At.X + size.Width / 2 - pointer.X, -2, 2);
-        Assert.InRange(pw.At.Y + size.Height / 2 - pointer.Y, -2, 2);
+        Assert.InRange(pw.At.X + size.Width / 2 - pointer.X, -3, 3);
+        Assert.InRange(pw.At.Y + size.Height / 2 - pointer.Y, -3, 3);
         Assert.True(pw.At.X + size.Width < w.Position.X, "the pet is not outside the app's window");
-        // The window is the pet, so clicks around it reach the apps below; it floats, out of the taskbar
-        Assert.Equal(pw.At, pw.Position);
-        Assert.Equal((size.Width, size.Height), (pw.Width, pw.Height));
+        // The window is the pet and what is drawn around it, so clicks around it reach the apps below; it floats, out of the taskbar
+        var overflow = OniView.OverflowFor(vm.Pets.PetHeight);
+        Assert.Equal(new PixelPoint(pw.At.X - (int)overflow.Left, pw.At.Y - (int)overflow.Top), pw.Position);
+        Assert.Equal((size.Width + overflow.Left + overflow.Right, size.Height + overflow.Top + overflow.Bottom), (pw.Width, pw.Height));
         Assert.True(pw.Topmost);
         Assert.False(pw.ShowInTaskbar);
         Assert.Equal(WindowDecorations.None, pw.WindowDecorations);
         Assert.Equal(6, composer.Margin.Top); // the message box gives the pet's band back
         Assert.Equal(Laptop.Name, vm.Pets.DesktopPlace!.Screen);
 
-        // Dragged by itself onto the 4K monitor, in desktop pixels
-        DragOnDesktop(pw, new PixelPoint(pw.At.X + 36, pw.At.Y + 24), new PixelPoint(2500, 400));
-        await Settle(100);
-        Assert.Equal(new PixelPoint(2464, 376), pw.At);
-        Assert.Equal((External.Name, 2464 - 1512, 376 + 200), (vm.Pets.DesktopPlace!.Screen, vm.Pets.DesktopPlace.X, vm.Pets.DesktopPlace.Y));
-        Assert.Equal(size.Width, pw.Width); // the same size in layout units
+        // Carried by itself onto the 4K monitor, in desktop pixels
+        await CarryOnDesktop(pw, new PixelPoint(pw.At.X + hw, pw.At.Y + hh), new PixelPoint(2500, 400));
+        Assert.InRange(pw.At.X - (2500 - hw), -3, 3);
+        Assert.InRange(pw.At.Y - (400 - hh), -3, 3);
+        var at = pw.At;
+        Assert.Equal((External.Name, at.X - 1512, at.Y + 200), (vm.Pets.DesktopPlace!.Screen, vm.Pets.DesktopPlace.X, vm.Pets.DesktopPlace.Y));
 
         // Its bubble opens beside it, on the monitor's work area; the pet stays put, the window grows around it
         vm.Pets.TalkCommand.Execute(null);
         await Settle(150);
         Assert.True(pw.Stage.PetBubble.IsEffectivelyVisible);
-        Assert.Equal(new PixelPoint(2464, 376), pw.At);
+        Assert.Equal(at, pw.At);
         var petInWindow = pw.Stage.Pet.TranslatePoint(default, pw)!.Value;
         Assert.Equal(pw.At.X, pw.Position.X + (int)Math.Round(petInWindow.X * External.Scaling));
         Assert.Equal(pw.At.Y, pw.Position.Y + (int)Math.Round(petInWindow.Y * External.Scaling));
@@ -914,39 +832,37 @@ public sealed class PetsTests
         }
         vm.Pets.TalkCommand.Execute(null);
         await Settle(150);
-        Assert.Equal((size.Width, size.Height), (pw.Width, pw.Height));
 
         // The 4K monitor unplugged: the pet comes over to the laptop; plugged back, it goes back where it was left
         screens.Set(Laptop);
         await Settle(50);
-        Assert.Equal(new PixelPoint(1512 - 72, 376), pw.At);
+        Assert.Equal(new PixelPoint(1512 - (int)(size.Width + overflow.Right), at.Y), pw.At);
         screens.Set(Laptop, External);
         await Settle(50);
-        Assert.Equal(new PixelPoint(2464, 376), pw.At);
+        Assert.Equal(at, pw.At);
 
         // Nothing pops up over the pet in its little window (a tooltip there would take the next press)
         Assert.False(ToolTip.GetIsOpen(pw.Stage.Pet));
 
-        // Dragged down past the laptop's Dock: it stops on the Dock's edge
-        DragOnDesktop(pw, new PixelPoint(pw.At.X + 36, pw.At.Y + 24), new PixelPoint(700, 2000));
-        await Settle(100);
-        Assert.Equal(915 - 48, pw.At.Y);
+        // Carried down past the laptop's Dock: it stops on the Dock's edge
+        await CarryOnDesktop(pw, new PixelPoint(pw.At.X + hw, pw.At.Y + hh), new PixelPoint(700, 2000));
+        Assert.Equal(915 - (int)(size.Height + overflow.Bottom), pw.At.Y);
         Assert.Equal(Laptop.Name, vm.Pets.DesktopPlace!.Screen);
 
-        // It keeps moving behind other apps only while omp is busy; it renders again for a screen of another density
+        // It keeps moving behind other apps only while omp is busy; it takes sheets for a screen of another density
         pw.Stage.Pet.InForeground = false;
         await Settle(50);
         Assert.False(pw.Stage.Pet.IsPlaying);
-        vm.Pets.Mood = PetMood.Working;
+        vm.Pets.Oni.Show("working");
         await Settle(50);
         Assert.True(pw.Stage.Pet.IsPlaying);
-        vm.Pets.Mood = PetMood.Idle;
+        vm.Pets.Oni.Show("idle");
         await Settle(50);
         Assert.False(pw.Stage.Pet.IsPlaying);
-        Assert.Contains("|0|2|", pw.Stage.Pet.FrameKey);
+        var level = pw.Stage.Pet.Atlases!.Level;
         pw.SetRenderScaling(2);
-        await Settle(50);
-        Assert.Contains("|0|4|", pw.Stage.Pet.FrameKey);
+        await Until(() => pw.Stage.Pet.Atlases is { IsReady: true } a && a.Level == OniAtlases.LevelFor(vm.Pets.PetHeight * 2), "sheets at 2×");
+        Assert.True(pw.Stage.Pet.Atlases!.Level > level);
         pw.SetRenderScaling(1);
 
         // It stays out while the settings page covers the conversation
@@ -966,14 +882,13 @@ public sealed class PetsTests
         await Settle(100);
         pw = perch.DesktopWindow!;
         Assert.True(pw.IsVisible);
-        Assert.Equal(915 - 48, pw.At.Y);
+        Assert.Equal(915 - (int)(size.Height + OniView.OverflowFor(vm.Pets.PetHeight).Bottom), pw.At.Y);
         Assert.False(perch.IsEffectivelyVisible);
 
-        // Dropped close to its perch on the message box, it sits there again
+        // Put down close to its perch on the message box, it sits there again
         composer = w.FindControl<Border>("ComposerBox")!;
         var perchAt = composer.PointToScreen(new Point(composer.Bounds.Width - PetsViewModel.PetInset - size.Width, 1 - size.Height));
-        DragOnDesktop(pw, new PixelPoint(pw.At.X + 36, pw.At.Y + 24), new PixelPoint(perchAt.X + 36 + 6, perchAt.Y + 24 - 5));
-        await Settle(150);
+        await CarryOnDesktop(pw, new PixelPoint(pw.At.X + hw, pw.At.Y + hh), new PixelPoint(perchAt.X + hw + 6, perchAt.Y + hh - 5));
         Assert.False(vm.Pets.IsRoaming);
         Assert.False(pw.IsVisible);
         Assert.True(perch.IsEffectivelyVisible);
@@ -986,18 +901,23 @@ public sealed class PetsTests
     public async Task A_pet_left_in_the_window_by_an_older_version_moves_to_the_same_spot_on_the_desktop()
     {
         var path = Path.Combine(TestProcesses.TempDir("pets-migrate"), "ombra.local.json");
-        File.WriteAllText(path, "{ \"pet\": { \"x\": 0.25, \"y\": 0.4 } }");
+        File.WriteAllText(path, "{ \"pet\": { \"x\": 0.25, \"y\": 0.4, \"chosen\": \"cat\", \"size\": \"small\" } }");
         var (w, vm) = await Open("normal", store: new ClientSettingsStore(path));
         var perch = w.FindControl<PetPerch>("PetPerch")!;
         await Until(() => vm.Pets.IsOnDesktop, "on the desktop");
+        Assert.Equal("64", vm.Pets.Size); // the pixel pets' small
         var size = PetStage.PetSize(vm.Pets);
-        var inWindow = new Point(0.25 * (perch.Bounds.Width - size.Width), 0.4 * (perch.Bounds.Height - size.Height));
+        var ov = OniView.OverflowFor(vm.Pets.PetHeight);
+        // The fraction is of the room the window leaves the pet and what is drawn around it
+        var inWindow = new Point(ov.Left + 0.25 * (perch.Bounds.Width - size.Width - ov.Left - ov.Right),
+            ov.Top + 0.4 * (perch.Bounds.Height - size.Height - ov.Top - ov.Bottom));
         Assert.Equal(perch.PointToScreen(inWindow), perch.DesktopWindow!.At);
         Assert.True(perch.DesktopWindow.IsVisible);
         Assert.False(perch.IsEffectivelyVisible);
         await Close(w, vm);
         var pet = JsonNode.Parse(File.ReadAllText(path))!["pet"]!.AsObject();
         Assert.Null(pet["x"]);
+        Assert.Null(pet["chosen"]);
         Assert.Equal("desktop", (string?)pet["roam"]);
         Assert.NotNull(pet["desktop"]);
     }
@@ -1054,15 +974,37 @@ public sealed class PetsTests
         said.Add(vm.Pets.BubbleText);
         await Until(() => vm.Phase == SessionPhase.Ready, "run end", 60);
         await Until(() => vm.Pets.Mood == PetMood.Done, "done", 5);
-        await Until(() => vm.Pets.Mood == PetMood.Idle, "idle again", 10);
+        await Until(() => vm.Pets.Mood == PetMood.Idle, "idle again", 12);
         var moods = seen.Select(s => s.Mood).ToList();
-        Assert.Contains(PetMood.Error, moods); // the scenario's ruff call fails
+        Assert.Contains(PetMood.Error, moods); // the scenario's ruff call fails: a wince
         Assert.Contains(moods, m => m is PetMood.Working);
         Assert.Equal(PetMood.Done, moods[^2]);
+        // Base moods hold for a moment; only a reaction (the wince, the run's end) may cut in sooner
         for (var i = 2; i < seen.Count; i++)
-            Assert.True(seen[i].At - seen[i - 1].At >= TimeSpan.FromMilliseconds(650), $"{seen[i - 1].Mood} → {seen[i].Mood} after {(seen[i].At - seen[i - 1].At).TotalMilliseconds:0} ms");
+            if (seen[i].Mood is not (PetMood.Error or PetMood.Done) && seen[i - 1].Mood is not (PetMood.Error or PetMood.Done))
+                Assert.True(seen[i].At - seen[i - 1].At >= TimeSpan.FromMilliseconds(650), $"{seen[i - 1].Mood} → {seen[i].Mood} after {(seen[i].At - seen[i - 1].At).TotalMilliseconds:0} ms");
         // While busy the bubble says what the activity line says
         Assert.Matches("^(Thinking|Writing|Working|Running )", said[0]);
+        await Close(w, vm);
+    }
+
+    [AvaloniaFact]
+    public async Task A_stopped_run_goes_back_to_idle_without_celebrating()
+    {
+        var (w, vm) = await Open("slow-stream");
+        var moods = new List<PetMood>();
+        vm.Pets.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(PetsViewModel.Mood)) moods.Add(vm.Pets.Mood);
+        };
+        vm.ComposerText = "write a long answer";
+        vm.SendCommand.Execute(null);
+        await Until(() => vm.Pets.Mood is PetMood.Thinking or PetMood.Working, "busy", 20);
+        vm.AbortCommand.Execute(null);
+        await Until(() => vm.Phase == SessionPhase.Ready, "stopped", 20);
+        await Settle(1200);
+        Assert.Equal(PetMood.Idle, vm.Pets.Mood);
+        Assert.DoesNotContain(PetMood.Done, moods);
         await Close(w, vm);
     }
 
@@ -1088,7 +1030,7 @@ public sealed class PetsTests
         var composer = w.FindControl<Border>("ComposerBox")!;
         var pet = perch.Stage.Pet;
         Assert.True(perch.IsEffectivelyVisible);
-        Assert.True(pet.IsPlaying);
+        await Until(() => pet.IsPlaying, "moving");
         Assert.Equal(vm.Pets.PerchHeight - 1, composer.Margin.Top);
         await vm.OpenSettingsAtAsync("pets");
         await Settle();
@@ -1100,11 +1042,11 @@ public sealed class PetsTests
         Assert.False(perch.IsEffectivelyVisible);
         Assert.Equal(6, composer.Margin.Top); // the band goes with the pet
         vm.Pets.ShowPet = true;
-        vm.Pets.Size = "small";
+        vm.Pets.SetSizeCommand.Execute("64");
         await Settle();
         Assert.True(perch.IsEffectivelyVisible);
-        Assert.Equal(32, pet.Bounds.Height);
-        Assert.Equal(31, composer.Margin.Top);
+        Assert.Equal(OniView.BoxFor(64), pet.Bounds.Size);
+        Assert.Equal(OniView.BoxFor(64).Height - 1, composer.Margin.Top);
         await Close(w, vm);
 
         (w, vm) = await Open("no-models");
@@ -1126,9 +1068,8 @@ public sealed class PetsTests
         Assert.Equal(6, composer.Margin.Top); // as without a pet
         w.Height = PetsViewModel.MinWindowHeight + 80;
         await Until(() => perch.IsEffectivelyVisible, "the pet back in a taller window");
-        await Settle(100);
+        await Until(() => pet.IsPlaying, "moving again");
         Assert.Equal(vm.Pets.PerchHeight - 1, composer.Margin.Top);
-        Assert.True(pet.IsPlaying);
         vm.Pets.TalkCommand.Execute(null);
         Assert.True(vm.Pets.IsBubbleOpen);
         w.Height = 360;
@@ -1147,63 +1088,27 @@ public sealed class PetsTests
         var (w, vm) = await Open("normal", store: store);
         var p = vm.Pets;
         Assert.True(p.ShowPet); // on by default
-        Assert.Equal("pi", p.Chosen!.Id);
-        p.Size = "small";
+        Assert.Equal("80", p.Size);
+        Assert.False(p.ReduceMotion); // as the system says (here: no)
         Assert.True(p.IsRoamDesktop); // the default
+        p.SetSizeCommand.Execute("96");
         p.SetRoamCommand.Execute("window");
-        p.StartCreateCommand.Execute(null);
-        Assert.Equal(PetArt.Cat, p.DraftBody);
-        Assert.Equal("Natural", p.CoatOptions[0].Name);
-        Assert.DoesNotContain(p.CoatOptions, o => o.Name == "Ginger"); // the cat's own colour: no second swatch for it
-        p.ChooseBodyCommand.Execute(p.BodyOptions.First(o => o.Body == PetArt.Owl));
-        p.ChooseCoatCommand.Execute(p.CoatOptions.First(o => o.Coat?.Id == "mint"));
-        p.ChooseAccessoryCommand.Execute(p.AccessoryOptions.First(o => o.Accessory.Id == "crown"));
-        p.DraftName = "  Professor  ";
-        p.SaveEditorCommand.Execute(null);
-        Assert.Equal("Professor", p.Chosen!.Name);
-        var created = p.Chosen.Id;
-        // Customize a built-in pet: renamed and recoloured
-        p.ChoosePetCommand.Execute(p.Gallery.First(c => c.Id == "cat"));
-        p.StartCustomizeCommand.Execute(null);
-        Assert.False(p.CanChangeBody);
-        p.DraftName = "Tiger";
-        p.ChooseCoatCommand.Execute(p.CoatOptions.First(o => o.Coat?.Id == "cocoa"));
-        p.SaveEditorCommand.Execute(null);
+        p.ReduceMotion = true;
         p.ShowPet = false;
         await Close(w, vm);
 
         var json = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
         Assert.Equal("dark", (string?)json["theme"]);
         Assert.Equal(42, (int?)json["somethingElse"]);
-        Assert.NotNull(json["pet"]);
+        Assert.Equal("96", (string?)json["pet"]!["size"]);
 
         (w, vm) = await Open("normal", store: new ClientSettingsStore(path));
         p = vm.Pets;
         Assert.False(p.ShowPet);
-        Assert.Equal("small", p.Size);
+        Assert.Equal("96", p.Size);
+        Assert.Equal(96, p.PetHeight);
         Assert.True(p.IsRoamWindow);
-        Assert.Equal("cat", p.Chosen!.Id);
-        Assert.Equal("Tiger", p.Chosen.Name);
-        Assert.Equal("cocoa", p.Chosen.Look.Coat?.Id);
-        Assert.True(p.Chosen.IsChanged);
-        var mine = p.Gallery.Single(c => c.Id == created);
-        Assert.True(mine.IsCustom);
-        Assert.Equal(("Professor", "owl", "mint", "crown"), (mine.Name, mine.Look.Body.Id, mine.Look.Coat?.Id, mine.Look.Accessory.Id));
-        // Reset the cat, delete the owl
-        p.StartCustomizeCommand.Execute(null);
-        Assert.True(p.CanReset);
-        p.ResetChosenCommand.Execute(null);
-        Assert.Equal("Mochi", p.Chosen!.Name);
-        p.ChoosePetCommand.Execute(mine);
-        p.StartCustomizeCommand.Execute(null);
-        Assert.True(p.CanDelete);
-        p.DeleteChosenCommand.Execute(null);
-        Assert.Equal("pi", p.Chosen!.Id);
-        await Close(w, vm);
-
-        (w, vm) = await Open("normal", store: new ClientSettingsStore(path));
-        Assert.Equal(PetArt.Bodies.Count, vm.Pets.Gallery.Count);
-        Assert.All(vm.Pets.Gallery, c => Assert.False(c.IsChanged || c.IsCustom));
+        Assert.True(p.ReduceMotion);
         await Close(w, vm);
     }
 
@@ -1254,22 +1159,24 @@ public sealed class PetsTests
             vm.ComposerText = "explain the change";
             vm.SendCommand.Execute(null);
             await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.OfType<ToolRowViewModel>().Any(), "run");
-            // The run's "Done" flash can start just after the run reads as over: let it pass, or it takes the Idle shot
-            await Settle((int)PetMoodMachine.DoneFor.TotalMilliseconds + 300);
-            await Until(() => vm.Pets.Mood == PetMood.Idle, "settled", 10);
-            foreach (var mood in Enum.GetValues<PetMood>())
+            // The run's joy can start just after the run reads as over: let it pass, or it takes the Idle shot
+            await Until(() => vm.Pets.Mood == PetMood.Idle, "settled", 12);
+            foreach (var kind in new[] { "idle", "thinking", "working", "waiting", "done", "tool-error", "error", "sleep" })
             {
-                vm.Pets.Mood = mood;
-                await Settle(150);
-                a.Take(w, $"{tag}-mood-{mood}");
+                vm.Pets.Oni.Show(kind);
+                await Settle(900);
+                a.Take(w, $"{tag}-pose-{kind}");
             }
-            vm.Pets.Mood = PetMood.Idle;
+            vm.Pets.Oni.Show("idle");
             vm.Pets.TalkCommand.Execute(null);
             await Settle(150);
             a.Take(w, $"{tag}-bubble");
-            vm.Pets.Size = "small";
+            vm.Pets.SetSizeCommand.Execute("64");
             await Settle(150);
-            a.Take(w, $"{tag}-bubble-small");
+            a.Take(w, $"{tag}-bubble-64");
+            vm.Pets.SetSizeCommand.Execute("96");
+            await Settle(150);
+            a.Take(w, $"{tag}-bubble-96");
             await Close(w, vm);
 
             (w, vm) = await Open("approval", width, height);
@@ -1317,24 +1224,16 @@ public sealed class PetsTests
             await Settle(400);
             a.Take(w, $"{tag}-settings-pets");
             var page = w.FindControl<ScrollViewer>("SettingsScroll")!;
-            vm.Pets.StartCreateCommand.Execute(null);
-            vm.Pets.ChooseAccessoryCommand.Execute(vm.Pets.AccessoryOptions.First(o => o.Accessory.Id == "party-hat"));
-            vm.Pets.ChoosePreviewMoodCommand.Execute(vm.Pets.MoodOptions.First(o => o.Mood == PetMood.Done));
-            await Settle(400);
-            a.Take(w, $"{tag}-settings-pets-create");
+            vm.Pets.ShowPreviewCommand.Execute(vm.Pets.PreviewOptions.First(o => o.Kind == "working"));
             page.ScrollToEnd();
-            await Settle();
-            a.Take(w, $"{tag}-settings-pets-create-end");
-            vm.Pets.DraftName = "Sparky";
-            vm.Pets.SaveEditorCommand.Execute(null);
-            vm.Pets.StartCustomizeCommand.Execute(null);
-            await Settle(400);
-            page.ScrollToEnd();
-            await Settle();
-            a.Take(w, $"{tag}-settings-pets-customize-end");
+            await Settle(900);
+            a.Take(w, $"{tag}-settings-pets-preview");
+            vm.Pets.SetSizeCommand.Execute("96");
+            vm.Pets.ShowPreviewCommand.Execute(vm.Pets.PreviewOptions.First(o => o.Kind == "sleep"));
+            await Settle(900);
+            a.Take(w, $"{tag}-settings-pets-preview-96");
             page.ScrollToHome();
             vm.Pets.ShowPet = false;
-            vm.Pets.CancelEditorCommand.Execute(null);
             await Settle();
             a.Take(w, $"{tag}-settings-pets-off");
             await Close(w, vm);

@@ -369,7 +369,10 @@ public sealed partial class ConversationState
                 break;
             case "irc_message":
                 if (j.TryGetProperty("message", out var irc))
-                    AddNotice(NoticeLevel.Info, ContentText(irc, "text") is { Length: > 0 } said ? said : Compact(irc));
+                {
+                    if (AgentMessageOf(irc) is { } said) Add(said);
+                    else AddNotice(NoticeLevel.Info, ContentText(irc, "text") is { Length: > 0 } text ? text : Compact(irc));
+                }
                 break;
             case "goal_updated":
                 if (j.TryGetProperty("goal", out var goal))
@@ -481,6 +484,9 @@ public sealed partial class ConversationState
                                 _toolsByCallId[id] = row;
                             }
                     break;
+                case "custom" when Str(m, "customType") == "irc:incoming" && AgentMessageOf(m) is { } said:
+                    Add(said);
+                    break;
                 case "bashExecution": // a !command the user ran (ConversationState.Session.cs)
                     HydrateShell(m);
                     break;
@@ -490,7 +496,7 @@ public sealed partial class ConversationState
                     {
                         var err = m.TryGetProperty("isError", out var ie) && ie.ValueKind == JsonValueKind.True;
                         var changes = ChangesAtEnd(ti, m, err);
-                        Set(tr, ti with { Status = err ? ToolStatus.Failed : ToolStatus.Succeeded, Output = HeadTail(ContentText(m, "text"), MaxToolOutputChars), Diff = DiffOf(m) ?? ti.Diff,
+                        Set(tr, ti with { Status = err ? IsSkipped(m) ? ToolStatus.Skipped : ToolStatus.Failed : ToolStatus.Succeeded, Output = HeadTail(ContentText(m, "text"), MaxToolOutputChars), Diff = DiffOf(m) ?? ti.Diff,
                             ResultNote = err ? null : ResultNote(ti.Name, m), Changes = changes, Summary = SummaryOf(ti.Summary, changes) });
                     }
                     break;
@@ -694,6 +700,24 @@ public sealed partial class ConversationState
             : null;
 
     /// <summary>
+    /// A tool call omp set aside for a message that came in first (agent-loop.ts <c>createSkippedToolResult</c>): never
+    /// started, or started and given up; omp's own terminal shows it neutrally, not as an error.
+    /// </summary>
+    internal static bool IsSkipped(JsonElement result) =>
+        result.ValueKind == JsonValueKind.Object && result.TryGetProperty("details", out var d) && d.ValueKind == JsonValueKind.Object
+        && Str(d, "source") == "interrupt_skipped"
+        && (Bool(d, "__synthetic") || (Bool(d, "__interrupted") && Str(d, "execution") == "started"));
+
+    /// <summary>An IRC message (omp's CustomMessage) as a row: its sender and words from the details, not the model's envelope.</summary>
+    internal static AgentMessageItem? AgentMessageOf(JsonElement message)
+    {
+        if (message.ValueKind != JsonValueKind.Object || !message.TryGetProperty("details", out var d) || d.ValueKind != JsonValueKind.Object
+            || Str(d, "from") is not { } from || (Str(d, "message") ?? Str(d, "body")) is not { } text)
+            return null;
+        return new AgentMessageItem(0, from, Str(d, "to"), text, Str(d, "replyTo") is not null);
+    }
+
+    /// <summary>
     /// What a search found, from the counts omp's grep and glob put in the result's details ("Found 12 files", "Found 3
     /// matches in 2 files"); null for other tools and when the details say nothing.
     /// </summary>
@@ -737,7 +761,7 @@ public sealed partial class ConversationState
         if (t.Name == "todo" && hasResult && !err) RecordPlan(r, LastFrameAt); // ConversationState.Plan.cs
         var output = hasResult ? HeadTail(ResultText(r), MaxToolOutputChars) : t.Output;
         var changes = hasResult ? ChangesAtEnd(t, r, err) : err ? null : t.Changes;
-        Set(row, t with { Status = err ? ToolStatus.Failed : ToolStatus.Succeeded, Output = output, Diff = hasResult ? DiffOf(r) ?? t.Diff : t.Diff,
+        Set(row, t with { Status = err ? hasResult && IsSkipped(r) ? ToolStatus.Skipped : ToolStatus.Failed : ToolStatus.Succeeded, Output = output, Diff = hasResult ? DiffOf(r) ?? t.Diff : t.Diff,
             Took = t.StartedAt is { } s ? DateTimeOffset.UtcNow - s : null, ResultNote = hasResult && !err ? ResultNote(t.Name, r) : null,
             Changes = changes, Summary = SummaryOf(t.Summary, changes) });
     }

@@ -16,7 +16,7 @@ MAP = {
     "IconMenu": "menu",
     "IconPanelLeft": "panel-left",
     "IconCompose": "square-pen",
-    "IconBrain": "brain",                      # thinking level
+    "IconBrain": "brain",                      # thinking level, a reply's thinking
     "IconPlus": "plus",
     "IconFolder": "folder",
     "IconSearch": "search",
@@ -43,6 +43,7 @@ MAP = {
     "IconExternal": "external-link",
     "IconSelect": "square-dashed-mouse-pointer",
     "IconComment": "message-square-text",
+    "IconChat": "message-circle",              # the rail's Chats
     "IconGlobe": "globe",
     "IconDevices": "monitor-smartphone",
     "IconRotate": "rotate-ccw-square",

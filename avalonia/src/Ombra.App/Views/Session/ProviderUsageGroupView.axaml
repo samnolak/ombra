@@ -1,6 +1,8 @@
-<!-- One account's plan limits at a provider as compact meters (name, share used, bar, reset countdown); in the
+<!-- One account's plan limits at a provider as compact meters (name, share used, bar, reset countdown), then its saved
+     rate-limit resets with "Use a saved reset" (asked again in place, then spent through omp's /usage reset); in the
      context popover (UsageIndicator) and in Settings → Model providers (ProviderUsageViewModel). -->
-<UserControl xmlns="https://github.com/avaloniaui"
+<UserControl xmlns:loc="using:Ombra.App.Localization"
+             xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Ombra.App.ViewModels"
              x:Class="Ombra.App.Views.Session.ProviderUsageGroupView"
@@ -37,5 +39,24 @@
         </DataTemplate>
       </ItemsControl.ItemTemplate>
     </ItemsControl>
+    <StackPanel x:Name="SavedResets" Spacing="4" IsVisible="{Binding HasSavedResets}">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Classes="usage-label" Text="{Binding SavedResetsText}" VerticalAlignment="Center" />
+        <Button x:Name="UseSavedResetButton" Grid.Column="1" Classes="link action" Content="{loc:T 'Use a saved reset'}"
+                Command="{Binding AskSpendResetCommand}" IsVisible="{Binding CanSpendReset}" VerticalAlignment="Center"
+                ToolTip.Tip="{loc:T 'Refresh a used-up limit now with a reset the provider gave this account (omp’s /usage reset)'}" />
+      </Grid>
+      <TextBlock Classes="tertiary" Text="{Binding SavedResetsDetail}" TextWrapping="Wrap"
+                 IsVisible="{Binding SavedResetsDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+      <StackPanel x:Name="SpendResetConfirm" Spacing="6" IsVisible="{Binding IsConfirmingSpend}">
+        <TextBlock Classes="muted" Text="{Binding ConfirmText}" TextWrapping="Wrap" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button x:Name="SpendResetButton" Classes="accent" Content="{loc:T 'Use reset'}" Command="{Binding SpendResetCommand}" />
+          <Button Content="{loc:T 'Cancel'}" Command="{Binding CancelSpendResetCommand}" />
+        </StackPanel>
+      </StackPanel>
+    </StackPanel>
+    <TextBlock x:Name="SpendResetMessage" Classes="tertiary" Classes.warning="{Binding SpendFailed}" Text="{Binding SpendMessage}" TextWrapping="Wrap"
+               IsVisible="{Binding HasSpendMessage}" />
   </StackPanel>
 </UserControl>

@@ -74,13 +74,14 @@ public sealed partial class PetWindow : Window
     }
 
     /// <summary>
-    /// Sizes and places the window around the pet, its bubble and its message box, these kept on the work area of the
-    /// monitor the pet is on; the window's corner on whole desktop pixels, the pet exactly at <see cref="At"/>.
+    /// Sizes and places the window around the pet (with room for what is drawn around its box: its spirits, the sign
+    /// over its head, the dust), its bubble and its message box, these kept on the work area of the monitor the pet is
+    /// on; the window's corner on whole desktop pixels, the pet exactly at <see cref="At"/>.
     /// </summary>
     private void Relayout()
     {
         if (DataContext is not PetsViewModel pets) return;
-        var size = PetStage.PetSize(pets);
+        var size = pets.PetBox;
         var home = PetDesktop.Home(_screens, At, size);
         var scale = home?.Scaling is > 0 and var s ? s : DesktopScaling;
         var room = home is { WorkingArea: var a }
@@ -88,6 +89,7 @@ public sealed partial class PetWindow : Window
             : Unbounded;
         var layout = Stage.Plan(default, room);
         var extent = Stage.PetBubble.IsVisible || Stage.PetChat.IsVisible ? layout.Extent.Inflate(ShadowRoom) : layout.Extent;
+        extent = extent.Union(new Rect(size).Inflate(OniView.OverflowFor(pets.PetHeight)));
         var origin = new PixelPoint(At.X + (int)Math.Floor(extent.X * scale), At.Y + (int)Math.Floor(extent.Y * scale));
         var shift = new Vector((At.X - origin.X) / scale, (At.Y - origin.Y) / scale);
         Stage.Apply(layout, shift);
