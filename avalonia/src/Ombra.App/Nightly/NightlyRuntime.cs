@@ -445,6 +445,9 @@ internal sealed class NightlyRuntime : IDisposable
         process.ErrorDataReceived += (_, e) =>
         {
             if (e.Data?.Contains("ZenEmbed", StringComparison.Ordinal) == true) Services.ClientLog.Shared.Write("nightly", e.Data);
+        // Not the app's reaper's (OwnedProcesses): its SIGTERM at Ombra's quit, or at the start after a crash, would end
+        // Nightly at once, its session unwritten. Nightly quits as a user would when asked (Quit) or when Ombra is gone.
+        start.Environment.Remove(Ombra.ClientCore.OwnedProcesses.OwnerVariable);
         };
         process.OutputDataReceived += (_, _) => { };
         process.BeginErrorReadLine();
@@ -464,9 +467,11 @@ internal sealed class NightlyRuntime : IDisposable
         foreach (var line in new[]
         {
             "user_pref(\"browser.shell.checkDefaultBrowser\", false);",
-            "user_pref(\"browser.startup.page\", 0);",
+            // The previous session comes back as in a standalone Nightly: Zen's session manager keeps only the pinned
+            // tabs unless startup.page is 3 (resume). Written, not left to the default, as older runtime profiles carry 0.
+            "user_pref(\"browser.startup.page\", 3);",
             "user_pref(\"browser.startup.homepage_override.mstone\", \"ignore\");",
-            "user_pref(\"browser.sessionstore.resume_from_crash\", false);",
+            "user_pref(\"browser.sessionstore.resume_from_crash\", true);",
             "user_pref(\"toolkit.startup.max_resumed_crashes\", -1);",
             "user_pref(\"zen.welcome-screen.seen\", true);",
             // That pref sends ZenStartup to its update branch, whose "Update Complete!" toast the embedded runtime skips.

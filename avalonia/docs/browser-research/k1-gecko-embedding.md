@@ -279,6 +279,32 @@ device mode is `Command` op 7, Ombra's appearance op 8):
   Acceptance (Release Ombra, pinned package `1.23.2b-20261019095634`, cdhash `7949beed…8926`, en and ru): 96 PASS
   each, 0 FAIL, RESULT PASS, no Nightly process left. `NightlyShortcutMonitorTests` + `NightlyRuntimeTests` (with the
   new `ThemeMessageIsACommandForNoWindow`): 29 passed, 3 skipped, 0 failed.
+- **No Nightly window outside Ombra (2026-10-19).** Everything that made a new browser window — a sized
+  `window.open` (sign-in popups), ⌘N, Shift-click / Open Link in New Window, ⌘⇧P, moving a tab to a new window,
+  ⌘⇧O Library, session restore with several saved windows — put an ordinary Nightly window on screen, usually behind
+  Ombra; links from Ombra and other apps went to the system's browser, which could be the running runtime.
+  - *Stray-window trap* (`ZenEmbedHost.mm` `mStray`, `HasBrowserWindow`). While a pane shows a browser window, any
+    other `browser.xhtml` window is created embedded and never shown or sent to Ombra; `zen-embed-stray-window` is
+    notified and `ZenEmbedBrowser.sys.mjs` moves its tabs into the pane's window (`adoptTab`), then closes it
+    (private ones are just closed). Covers session restore, extensions and external URLs alike.
+  - *Tabs, not windows.* `user.js`: `browser.link.open_newwindow`=3, `.restriction`=0 (sized popups are tabs, opener
+    kept). In the pane's window `OpenBrowserWindow` opens a tab, `openLinkIn(where=window)` a tab in front,
+    `replaceTab(s)WithWindow` do nothing, `showPlacesOrganizer` is Zen's Library or the organizer in a tab; new/private
+    window and Move to New Window menu items are hidden (`zen-browser-ui.css`).
+  - *Ombra's links* (chat, cards, context menu, Open in browser) open in the Browser page (`OpenInBrowserPage`);
+    non-http stays with the system.
+  - *Runtime identity.* `pack-nightly.py` gives the packaged copy `CFBundleIdentifier`
+    `io.github.samnolak.ombra.nightly-runtime` and drops `CFBundleURLTypes`/`CFBundleDocumentTypes` before signing
+    (`--check` verifies), so LaunchServices never routes a default-browser link to it. Signing comes after the change,
+    so the pinned cdhash is the final binary's and embed trust is unchanged; Ombra never matches the bundle id. TCC
+    grants (camera, microphone, local network) are keyed to the new id: asked once again, and no longer shared with a
+    standalone Nightly.
+
+  Acceptance (`NewWindowChecks`, driver `newwindows`): windows-page, -popup-tab, -popup-opener (postMessage +
+  `window.close()` from the popup-as-tab), -shift-click, -cmd-n, -library, -ombra-link all PASS with 0 Nightly
+  windows on screen; the colour checks require the probe to have read the page's cyan first (no false PASS from an
+  unreadable shot). Relaunch with a profile holding 3 saved extra windows: 4 stray windows trapped, their tabs in the
+  Browser page, 0 on screen.
 
 ## 2. Gecko facts the options rely on (file:line in `engine/`)
 

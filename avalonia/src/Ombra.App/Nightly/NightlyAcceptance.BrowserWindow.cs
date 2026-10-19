@@ -125,6 +125,7 @@ internal static partial class NightlyAcceptance
             vm.ShowChatsCommand.Execute(null);
             Check("browser-window-hidden", await Until(() => !pane.IsEffectivelyVisible && Named<Border>("Sidebar") is not null, 10)
                 && BrowserWindow() == pane, $"panes={Panes().Count}");
+            await SessionChecks();
         }
 
         /// <summary>The Chats page's shot that <see cref="SheetMatches"/> compares with: the right panel hidden meanwhile (the
@@ -410,6 +411,9 @@ internal static partial class NightlyAcceptance
                     LogNightlyWindows(pane?.RuntimePid ?? 0);
                     break;
                 case "activate":
+                case "session": // SessionChecks: the window's tabs back after Nightly quits, and after a crash
+                    await SessionChecks();
+                    break;
                     Activate();
                     await Task.Delay(300);
                     break;
