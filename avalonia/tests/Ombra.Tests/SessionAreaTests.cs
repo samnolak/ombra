@@ -338,6 +338,49 @@ public sealed class SessionAreaTests
         await Close(e);
     }
 
+    [AvaloniaTheory]
+    [InlineData("en", false)]
+    [InlineData("ru", false)]
+    [InlineData("en", true)]
+    [InlineData("ru", true)]
+    public async Task Rewind_restores_wire_images_even_when_the_target_row_is_not_loaded(string language, bool fromRow)
+    {
+        var previous = Loc.Current;
+        var e = await OpenAsync();
+        try
+        {
+            Loc.Load(language, Path.Combine(e.Project, "settings.json"));
+            var vm = e.Vm;
+            var png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jf9sAAAAASUVORK5CYII=");
+            Assert.True(vm.TryAddImage(new ImageAttachment("dot.png", "image/png", png), "test"));
+            await Send(e, "look");
+            await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.OfType<AssistantRowViewModel>().Any(), "image reply");
+            var row = Assert.Single(vm.Rows.OfType<UserRowViewModel>());
+            if (fromRow)
+                await vm.RewindToCommand.ExecuteAsync(row);
+            else
+            {
+                // An earlier history page is absent: restoration must not depend on transcript rows.
+                vm.Rows.Clear();
+                await vm.RewindCommand.ExecuteAsync(null);
+                await ((CommunityToolkit.Mvvm.Input.IAsyncRelayCommand)vm.SessionCard!.Choices[0].Command).ExecuteAsync(null);
+            }
+            Assert.Equal(Loc.T("Rewound"), vm.SessionCard!.Title);
+            Assert.Equal("look", vm.ComposerText);
+            var restored = Assert.Single(vm.Attachments).Model;
+            Assert.Equal("image/png", restored.MimeType);
+            Assert.Equal(png, restored.Data);
+            await vm.SendCommand.ExecuteAsync(null);
+            await Until(() => vm.Phase == SessionPhase.Ready && vm.Session.Snapshot().Items.OfType<UserItem>().Any(u => u.Confirmed), "resent image");
+            Assert.Equal(png, Assert.Single(Assert.Single(vm.Session.Snapshot().Items.OfType<UserItem>()).Images).Data);
+        }
+        finally
+        {
+            Loc.Load(previous, Path.Combine(e.Project, "settings.json"));
+            await Close(e);
+        }
+    }
+
     /// <summary>
     /// The owner's duplicate chats: a reply stopped (Stop, or quitting the app mid-reply), then Rewind to here on that
     /// last message to send it again. Each time this used to copy the whole conversation into a new session file

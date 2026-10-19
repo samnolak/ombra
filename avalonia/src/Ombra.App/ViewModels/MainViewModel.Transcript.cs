@@ -51,7 +51,6 @@ public partial class MainViewModel
         var open = _open;
         var session = open.Controller;
         var occurrence = RewindOccurrenceFromEnd(Rows, row);
-        var images = row.Model is UserItem u ? u.Images : [];
         var card = new SessionCardViewModel("rewind", "IconRewind", Loc.T("Rewinding…"), "") { State = SessionCardState.Running };
         ShowCard(card);
         var messages = await session.GetBranchMessagesAsync(open.Lifetime.Token);
@@ -62,16 +61,16 @@ public partial class MainViewModel
                 secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
             return;
         }
-        var text = await session.RewindAsync(matches[^(occurrence + 1)].EntryId, open.Lifetime.Token);
+        var restored = await session.RewindAsync(matches[^(occurrence + 1)].EntryId, open.Lifetime.Token);
         ApplyIfShown(open);
         RequestCatalogRefresh();
-        if (text is null)
+        if (restored is null)
         {
             card.Finish(false, Loc.T("Not rewound"), Loc.T("omp did not rewind; the conversation shows why."),
                 secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
             return;
         }
-        PutInComposer(open, text, images);
+        PutInComposer(open, restored.Value.Text, restored.Value.Images);
         card.Finish(true, Loc.T("Rewound"), Loc.T("This chat goes on from before that message, and your message is back in the box. What came after stays in the session file as a branch (omp's /tree)."),
             secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
 
@@ -91,21 +90,6 @@ public partial class MainViewModel
     private static bool SameMessageText(string a, string b) =>
         string.Equals(a.Trim().ReplaceLineEndings("\n"), b.Trim().ReplaceLineEndings("\n"), StringComparison.Ordinal);
 
-    /// <summary>
-    /// The images of the rewind target <paramref name="index"/> of omp's branch messages, from its row in the transcript
-    /// (matched by text from the end, as <see cref="RewindOccurrenceFromEnd"/>); none when its row is not loaded.
-    /// </summary>
-    internal static IReadOnlyList<ImageAttachment> RewindImages(IList<RowViewModel> rows, IReadOnlyList<(string EntryId, string Text)> messages, int index)
-    {
-        var text = messages[index].Text;
-        var occurrence = 0;
-        for (var i = messages.Count - 1; i > index; i--)
-            if (SameMessageText(messages[i].Text, text)) occurrence++;
-        for (var i = rows.Count - 1; i >= 0; i--)
-            if (rows[i] is UserRowViewModel { Confirmed: true } user && SameMessageText(user.Text, text) && occurrence-- == 0)
-                return user.Model is UserItem u ? u.Images : [];
-        return [];
-    }
 
     /// <summary>Text (and the message's images) back into a chat's message box: the box on screen, or the chat's kept
     /// draft when another chat is shown.</summary>

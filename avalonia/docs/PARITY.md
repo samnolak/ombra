@@ -245,7 +245,7 @@ extension commands that omp lists itself keep going to omp.
 | `abort_and_restore_queue` | **Implemented in beta R0.2** — Stop withdraws runtime queued text/images into editable recovery; local originals survive limited payloads, nothing is automatically resent |
 | `abort_and_prompt` | **Done** — "Stop and send" (Alt+Shift+Enter) while omp works; a refused prompt returns its text and images to the message box. `promote_queued_message`: "Send now" on a queued follow-up |
 | `new_session`, `switch_session` | **Done** — sidebar |
-| `navigate_tree`, `get_branch_messages` | **Done** — session menu › Rewind…, a message's Rewind to here (in place) |
+| `navigate_tree`, `get_branch_messages` | **Done** — session menu › Rewind…, a message's Rewind to here (in place). Text and image bytes return from the engine into the composer, including messages outside the loaded history page |
 | `fork`, `get_entries` | **Done** — chat menu › Fork, a reply's Fork from here (`get_entries` maps the reply to its message entry) |
 | `get_state` | **Done** — model, thinking, session name, todos, context ring, model options, queue settle |
 | `set_fast_mode` | **Done** — Model menu › Fast mode |

@@ -185,11 +185,11 @@ public sealed partial class SessionController
     /// Rewinds to before one of the user's messages in place (<c>navigate_tree</c>, what omp's own /branch, /rewind and
     /// Esc Esc do): the same session file goes on from the conversation before that message, and what came after stays in
     /// it as a branch (omp's /tree). No new session file and no second chat in the list. The window reloads the history.
-    /// Returns the message's text (to edit and send again); null when omp or an extension declined.
+    /// Returns the message's text and images (to edit and send again); null when omp or an extension declined.
     /// </summary>
-    public async Task<string?> RewindAsync(string entryId, CancellationToken ct = default)
+    public async Task<(string Text, IReadOnlyList<ImageAttachment> Images)?> RewindAsync(string entryId, CancellationToken ct = default)
     {
-        string? text = null;
+        (string Text, IReadOnlyList<ImageAttachment> Images)? restored = null;
         await SessionChangeAsync(async conn =>
         {
             var r = await conn.RequestAsync("navigate_tree", w => w.WriteString("targetId", entryId), TimeSpan.FromMinutes(10), ct).ConfigureAwait(false);
@@ -199,10 +199,12 @@ public sealed partial class SessionController
                 Mutate(s => s.AddNotice(NoticeLevel.Warning, "An extension cancelled the rewind."));
                 return;
             }
-            text = r.Data is { ValueKind: JsonValueKind.Object } data ? ConversationState.Str(data, "text") ?? "" : "";
+            restored = r.Data is { ValueKind: JsonValueKind.Object } data
+                ? (ConversationState.Str(data, "text") ?? "", ConversationState.ContentImages(data, "images"))
+                : ("", []);
             await LoadSessionAsync(conn, _request.WorkingDirectory, ct, newProcess: false).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
-        return text;
+        return restored;
     }
 
     /// <summary>Asks get_state again (context usage after a compaction, the model after a change).</summary>

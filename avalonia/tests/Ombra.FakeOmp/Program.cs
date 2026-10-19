@@ -1495,7 +1495,7 @@ await foreach (var cmd in session.Commands.ReadAllAsync(session.Stopping))
         case "navigate_tree":
         {
             // Like omp (rpc-mode.ts): in place, in the same session file; refused while the session works. A user
-            // message rewinds past itself and its text comes back; any other entry becomes the leaf.
+            // message rewinds past itself and its text and images come back; any other entry becomes the leaf.
             if (streaming) { Respond(id, type, error: "Cannot rewind the session while it is busy", code: "session_busy"); break; }
             var treeTarget = cmd?["targetId"]?.GetValue<string>() ?? "";
             if (!(int.TryParse(treeTarget.TrimStart('e'), out var treeAt) && treeAt >= 0 && treeAt < history.Count)) { Respond(id, type, error: $"Entry {treeTarget} not found"); break; }
@@ -1507,7 +1507,12 @@ await foreach (var cmd in session.Commands.ReadAllAsync(session.Stopping))
             history.Clear();
             history.AddRange(treeKept);
             WriteSessionFile();
-            Respond(id, type, rewound ? new { text = treeNode?["content"]?[0]?["text"]?.GetValue<string>() ?? "", cancelled = false } : (object)new { cancelled = false });
+            Respond(id, type, rewound ? new
+            {
+                text = treeNode?["content"]?[0]?["text"]?.GetValue<string>() ?? "",
+                images = (treeNode?["content"] as JsonArray)?.Where(p => p?["type"]?.GetValue<string>() == "image").Select(p => p!.DeepClone()).ToArray() ?? [],
+                cancelled = false,
+            } : (object)new { cancelled = false });
             break;
         }
         case "get_entries":
