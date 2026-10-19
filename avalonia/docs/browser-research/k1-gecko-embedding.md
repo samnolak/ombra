@@ -340,12 +340,6 @@ device mode is `Command` op 7, Ombra's appearance op 8):
   resize, in full screen, after ⌘M and back, on the other display, and after Nightly was killed and restarted; 5 min of
   pans kept Ombra's IOSurface regions at 18–19 and its footprint at 519–520 MB.
 
-### 1d. Drag and drop (protocol 4, ids 44–45 / 123–124, 2026-10-19)
-
-Before: every drag in the Browser page began an AppKit drag from the off-screen embedded window. No drop target ever saw
-it (no dragover/drop, so no tab into a folder, no reorder, no link into the sidebar), its drag image stuck on screen over
-other windows, the page's drag session stayed stuck (dragstart, no dragend), and a tab dropped on a folder was torn off
-into a separate Nightly window (dragend with dropEffect none).
 - **Open in app (2026-10-19).** A link Ombra opens in the Browser page (`OpenInBrowserPage`), or one clicked or typed
   there, to a site whose desktop app is installed (Zoom `/j/`, Figma files, Толк rooms, `t.me`, Teams, Slack, …) goes to
   that app through LaunchServices; the tab opened for it closes, so the page shows what it showed. Nightly decides
@@ -354,6 +348,12 @@ into a separate Nightly window (dragend with dropEffect none).
   probe claims the scheme of a known app this Mac lacks (Zoom's here), Ombra's link and a click on the page reach it
   with the app URL and the page keeps its colour; the probe is unregistered and deleted afterwards.
 
+### 1d. Drag and drop (protocol 4, ids 44–45 / 123–124, 2026-10-19)
+
+Before: every drag in the Browser page began an AppKit drag from the off-screen embedded window. No drop target ever saw
+it (no dragover/drop, so no tab into a folder, no reorder, no link into the sidebar), its drag image stuck on screen over
+other windows, the page's drag session stayed stuck (dragstart, no dragend), and a tab dropped on a folder was torn off
+into a separate Nightly window (dragend with dropEffect none).
 
 Now (desktop `ZenEmbedHost.mm` "Drags", `nsDragService.mm` → `ZenEmbedHost::BeginDrag`, `nsCocoaWindow.mm`
 `doDragAction:` reads the embedder's event, `-[ChildView endDragSessionAt:operation:event:]`):
