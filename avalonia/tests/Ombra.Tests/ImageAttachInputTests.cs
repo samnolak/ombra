@@ -10,6 +10,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.ClientCore;
@@ -19,7 +20,8 @@ namespace Ombra.Tests;
 /// <summary>
 /// One image in, one attachment out, whichever way it came through the real window: ⌘V of image data (during a run, and
 /// again after sending) or of a file copied in Finder, a drop on the message box or elsewhere on the window, a queued
-/// image taken back to edit, a chat switch with persisted drafts.
+/// image taken back to edit, a chat switch with persisted drafts. An image sent without text during a run is one queue
+/// row with its thumbnail while omp reports its queue (where omp names it "[Image]"), and omp delivers it once.
 /// </summary>
 public sealed class ImageAttachInputTests
 {
@@ -232,6 +234,171 @@ public sealed class ImageAttachInputTests
         await vm.DisposeAsync();
         w.Close();
     }
+
+    // ───────────── An image without text queued while omp works ─────────────
+
+    private static async Task InLanguage(string language, Func<string, Task> body)
+    {
+        var settingsPath = Path.Combine(TestProcesses.TempDir("ia-queue-" + language), "ombra.local.json");
+        var previous = Loc.Current;
+        Loc.Load(language, settingsPath);
+        try
+        {
+            if (language == "ru") Assert.Equal("В очереди", Loc.T("Queued"));
+            await body(settingsPath);
+        }
+        finally { Loc.Load(previous, settingsPath); }
+    }
+
+    /// <summary>A run of the fake omp that reports its queue like omp (queue_update with omp's chip texts).</summary>
+    private static async Task<(MainWindow w, MainViewModel vm, SessionController s)> RunningAsync(string scenario, string settingsPath)
+    {
+        var project = TestProcesses.TempDir("ia-queue");
+        var s = new SessionController(TestProcesses.FakeFactory(scenario, Path.Combine(project, "sessions")), new LaunchRequest(project));
+        var vm = new MainViewModel(s, new AppArgs(), settings: new ClientSettingsStore(settingsPath));
+        var w = new MainWindow { DataContext = vm, Width = 1100, Height = 760 };
+        w.Show();
+        vm.OnWindowOpened();
+        await Until(() => vm.Phase == SessionPhase.Ready, "ready");
+        vm.ComposerText = "long task";
+        vm.SendCommand.Execute(null);
+        await Until(() => vm.Phase == SessionPhase.Running, "running");
+        return (w, vm, s);
+    }
+
+    private static long LastQueueUpdate(SessionController s) =>
+        s.Snapshot().DebugTail.LastOrDefault(d => d.Type == "queue_update")?.Seq ?? 0;
+
+    /// <summary>Enter in the message box holding only an image; returns once omp's queue_update listing it was applied.</summary>
+    private static async Task QueueImageOnlyAsync(MainWindow w, MainViewModel vm, SessionController s)
+    {
+        Assert.Equal("", vm.ComposerText);
+        Assert.Single(vm.Attachments);
+        var before = LastQueueUpdate(s);
+        w.Composer.Focus();
+        w.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
+        await Until(() => LastQueueUpdate(s) > before && vm.QueuedMessages.Count > 0, "omp listed the queued image");
+        await Settle();
+    }
+
+    /// <summary>One row, with the thumbnail and no "[Image]" text, labelled in the app's language.</summary>
+    private static void AssertOneImageRow(MainWindow w, MainViewModel vm, string kind)
+    {
+        var row = Assert.Single(vm.QueuedMessages);
+        Assert.Equal("", row.Text);
+        Assert.Single(row.Previews);
+        Assert.Single(row.Model.Images);
+        var container = Assert.Single(w.FindControl<ItemsControl>("QueuedList")!.GetRealizedContainers());
+        var texts = container.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).Select(t => t.Text).ToList();
+        Assert.Contains(kind, texts);
+        Assert.DoesNotContain("[Image]", texts);
+        Assert.Single(container.GetVisualDescendants().OfType<Ombra.App.Controls.ImageThumb>(), t => t.IsEffectivelyVisible);
+    }
+
+    private static Button RowButton(MainWindow w, string name) =>
+        Assert.Single(w.FindControl<ItemsControl>("QueuedList")!.GetVisualDescendants().OfType<Button>(),
+            b => b.IsEffectivelyVisible && Avalonia.Automation.AutomationProperties.GetName(b) == name);
+
+    private static void Click(MainWindow w, Control target)
+    {
+        var at = target.TranslatePoint(new Point(target.Bounds.Width / 2, target.Bounds.Height / 2), w)!.Value;
+        w.MouseMove(at);
+        w.MouseDown(at, MouseButton.Left);
+        w.MouseUp(at, MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+    }
+
+    /// <summary>The user messages omp recorded in the session file, as (text, image count).</summary>
+    private static List<(string Text, int Images)> RecordedUserMessages(SessionController s) =>
+        [.. File.ReadAllLines(s.SessionFile!)
+            .Select(l => System.Text.Json.JsonDocument.Parse(l).RootElement)
+            .Where(e => e.GetProperty("type").GetString() == "message" && e.GetProperty("message").GetProperty("role").GetString() == "user")
+            .Select(e => e.GetProperty("message").GetProperty("content"))
+            .Select(c => (string.Concat(c.EnumerateArray().Where(p => p.GetProperty("type").GetString() == "text").Select(p => p.GetProperty("text").GetString())),
+                c.EnumerateArray().Count(p => p.GetProperty("type").GetString() == "image")))];
+
+    [AvaloniaTheory]
+    [InlineData("en")]
+    [InlineData("ru")]
+    public Task An_image_sent_without_text_during_a_run_is_one_queue_row_and_is_delivered_once(string language) => InLanguage(language, async settingsPath =>
+    {
+        // omp lists it as "[Image]": the row the message box queued is that entry, not a second one
+        var (w, vm, s) = await RunningAsync("queue-update-2", settingsPath);
+        using var bmp = MakeBitmap(40, 30);
+        await w.Clipboard!.SetBitmapAsync(bmp);
+        PressPaste(w);
+        await AssertOneAsync(w, vm, "pasted while running");
+        await QueueImageOnlyAsync(w, vm, s);
+        Assert.Empty(vm.Attachments);
+        AssertOneImageRow(w, vm, Loc.T("Queued"));
+
+        // The row's ↑ (Send now): omp moves it to its steering queue, still one row with its thumbnail
+        Click(w, RowButton(w, Loc.T("Send now")));
+        await Until(() => vm.QueuedMessages.Count == 1 && vm.QueuedMessages[0].Model.Kind == QueueKind.Steer, "promoted");
+        await Settle();
+        AssertOneImageRow(w, vm, Loc.T("Steer"));
+
+        // A second message ends the run: omp delivers the image once, with its one image
+        vm.ComposerText = "next";
+        w.Composer.Focus();
+        w.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
+        await Until(() => vm.Phase == SessionPhase.Ready && vm.QueuedMessages.Count == 0 && vm.Rows.OfType<UserRowViewModel>().Any(u => u.Text == "next"), "delivered");
+        await Settle();
+        Assert.Empty(vm.QueuedMessages);
+        var sent = Assert.Single(vm.Rows.OfType<UserRowViewModel>(), u => u.HasImages);
+        Assert.Equal("", sent.Text);
+        Assert.Single(sent.Previews);
+        Assert.Equal([("long task", 0), ("", 1), ("next", 0)], RecordedUserMessages(s));
+        await vm.DisposeAsync();
+        w.Close();
+    });
+
+    [AvaloniaTheory]
+    [InlineData("en")]
+    [InlineData("ru")]
+    public Task An_image_queued_without_text_comes_back_to_edit_with_up_and_goes_with_its_x(string language) => InLanguage(language, async settingsPath =>
+    {
+        var (w, vm, s) = await RunningAsync("queue-update-3", settingsPath);
+        using var bmp = MakeBitmap(40, 30);
+        await w.Clipboard!.SetBitmapAsync(bmp);
+        PressPaste(w);
+        await AssertOneAsync(w, vm, "pasted while running");
+        await QueueImageOnlyAsync(w, vm, s);
+        AssertOneImageRow(w, vm, Loc.T("Queued"));
+
+        // ↑ in the empty box: omp gives it back, the image returns once and no row stays behind
+        var before = LastQueueUpdate(s);
+        w.Composer.Focus();
+        w.KeyPress(Key.Up, RawInputModifiers.None, PhysicalKey.ArrowUp, null);
+        await Until(() => vm.QueuedMessages.Count == 0 && vm.Attachments.Count > 0 && LastQueueUpdate(s) > before, "back in the box");
+        await Settle();
+        Assert.Empty(vm.QueuedMessages);
+        Assert.Single(vm.Attachments);
+        Assert.Equal(1, Thumbnails(w));
+        Assert.Equal("", vm.ComposerText);
+
+        // Queued again, then its ✕: omp withdraws it and the row goes for good
+        await QueueImageOnlyAsync(w, vm, s);
+        AssertOneImageRow(w, vm, Loc.T("Queued"));
+        before = LastQueueUpdate(s);
+        Click(w, RowButton(w, Loc.T("Remove queued message")));
+        await Until(() => vm.QueuedMessages.Count == 0 && LastQueueUpdate(s) > before, "removed");
+        await Settle();
+        Assert.Empty(vm.QueuedMessages);
+        Assert.Empty(vm.Attachments);
+        Assert.Equal(Loc.T("Message removed from queue"), vm.SessionCard?.Title);
+
+        // The run ends after the next message: the withdrawn image was never delivered
+        vm.ComposerText = "done";
+        w.Composer.Focus();
+        w.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
+        await Until(() => vm.Phase == SessionPhase.Ready && vm.QueuedMessages.Count == 0 && vm.Rows.OfType<UserRowViewModel>().Any(u => u.Text == "done"), "delivered");
+        await Settle();
+        Assert.DoesNotContain(vm.Rows.OfType<UserRowViewModel>(), u => u.HasImages);
+        Assert.Equal([("long task", 0), ("done", 0)], RecordedUserMessages(s));
+        await vm.DisposeAsync();
+        w.Close();
+    });
 
     /// <summary>A local file as a drop or the clipboard hands it over (Finder's file URL): Avalonia's own file item.</summary>
     private static IStorageFile LocalFile(string path) =>

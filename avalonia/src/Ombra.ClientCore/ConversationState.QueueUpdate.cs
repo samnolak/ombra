@@ -7,14 +7,17 @@ namespace Ombra.ClientCore;
 /// <c>get_state.queuedMessages</c>) list the chips in its order. A local <see cref="Enqueue"/> is an optimistic echo
 /// until omp lists it; local entries keep their images and submission id while omp lists them, entries omp no longer
 /// lists go, and entries only omp knows (queued by an extension or another client) appear. Local-only input
-/// (builtins, follow-ups waiting behind them) and recovered input are never touched.
+/// (builtins, follow-ups waiting behind them) and recovered input are never touched. omp lists chip texts only, no ids:
+/// an entry is matched by the chip omp makes of it (<see cref="Lists(string, string, bool)"/>).
 /// </summary>
 public sealed partial class ConversationState
 {
+    /// <summary>omp's chip for input with images and no text (queued-messages.ts <c>queueChipText</c>).</summary>
+    private const string ImageOnlyChip = "[Image]";
     /// <summary>Runtime entries sent to omp that no snapshot listed yet: an older snapshot must not drop them.</summary>
     private readonly HashSet<long> _awaitingEngine = [];
     /// <summary>Queued input whose delivery echo already removed its chip; a snapshot still listing it must not bring it back.</summary>
-    private List<(QueueKind Kind, string Text)> _deliveredQueued = [];
+    private List<(QueueKind Kind, string Text, bool HasImages)> _deliveredQueued = [];
     private long _queueUpdateReadAt;
     /// <summary>This omp reports its queue: a delivery echo then removes only the chip with its exact text, since the
     /// snapshot already took a delivered chip whose text omp expanded.</summary>
@@ -45,10 +48,10 @@ public sealed partial class ConversationState
         var engine = steering.Select(t => (Kind: QueueKind.Steer, Text: t))
             .Concat(followUp.Select(t => (Kind: QueueKind.FollowUp, Text: t))).ToList();
 
-        var stillListed = new List<(QueueKind, string)>();
+        var stillListed = new List<(QueueKind, string, bool)>();
         foreach (var d in _deliveredQueued)
         {
-            var i = engine.FindIndex(e => e.Text == d.Text);
+            var i = engine.FindIndex(e => Lists(e.Text, d.Text, d.HasImages));
             if (i < 0) continue;
             engine.RemoveAt(i);
             stillListed.Add(d);
@@ -64,14 +67,14 @@ public sealed partial class ConversationState
         // kind (omp expanded a template, so the chip text differs from what was sent).
         foreach (var e in engine)
         {
-            var at = local.FindIndex(i => !kinds.ContainsKey(i) && _queued[i].Kind == e.Kind && _queued[i].Text == e.Text);
+            var at = local.FindIndex(i => !kinds.ContainsKey(i) && _queued[i].Kind == e.Kind && Lists(e.Text, _queued[i]));
             if (at < 0) unmatched.Add(e);
             else kinds[local[at]] = e.Kind;
         }
         for (var n = 0; n < unmatched.Count;)
         {
             var e = unmatched[n];
-            var at = local.FindIndex(i => !kinds.ContainsKey(i) && _queued[i].Text == e.Text);
+            var at = local.FindIndex(i => !kinds.ContainsKey(i) && Lists(e.Text, _queued[i]));
             if (at < 0) { n++; continue; }
             kinds[local[at]] = e.Kind;
             unmatched.RemoveAt(n);
@@ -111,11 +114,20 @@ public sealed partial class ConversationState
         Touch();
     }
 
+    /// <summary>
+    /// Whether omp's chip <paramref name="chip"/> lists input sent with this text: omp shows the text, and
+    /// <see cref="ImageOnlyChip"/> for images sent without text.
+    /// </summary>
+    private static bool Lists(string chip, string text, bool hasImages) =>
+        chip == text || (chip == ImageOnlyChip && text.Length == 0 && hasImages);
+
+    private static bool Lists(string chip, QueuedMessage q) => Lists(chip, q.Text, q.Images.Count > 0);
+
     /// <summary>A queued entry's delivery echo arrived: its chip goes, and a snapshot from before the delivery cannot restore it.</summary>
     private void DeliverQueued(QueuedMessage q)
     {
         _awaitingEngine.Remove(q.Seq);
-        _deliveredQueued.Add((q.Kind, q.Text));
+        _deliveredQueued.Add((q.Kind, q.Text, q.Images.Count > 0));
         RemoveQueued(q.Seq);
         if (_deliveredQueued.Count > 32) _deliveredQueued.RemoveAt(0);
     }
