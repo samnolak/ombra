@@ -158,7 +158,10 @@ public sealed partial class MainViewModel
             UpdateAvailable = result.Available && !UpdateReady;
             UpdateNotes = result.Available ? result.Notes ?? "" : "";
             UpdateOmpText = result.Available && result.BringsNewOmp && result.Runtime is { } rt
-                ? Loc.F("This version moves omp to {0} (Bun {1}). After the restart it installs by itself (about 1.3 GB, verified like the first install); until then omp {2} keeps working.", rt.Omp, rt.Bun, Services.Runtime.RuntimePack.OmpVersion)
+                // A package that carries its engine (package.sh) brings the new one inside the update
+                ? RuntimeInstaller?.FindBundled() is not null
+                    ? Loc.F("This version moves omp to {0} (Bun {1}), which comes with the update: nothing more is downloaded. Until the restart omp {2} keeps working.", rt.Omp, rt.Bun, Services.Runtime.RuntimePack.OmpVersion)
+                    : Loc.F("This version moves omp to {0} (Bun {1}). After the restart it installs by itself (about 550 MB, verified like the first install); until then omp {2} keeps working.", rt.Omp, rt.Bun, Services.Runtime.RuntimePack.OmpVersion)
                 : "";
             // A quiet check that finds nothing keeps what the page said (for example "Updated to …").
             if (!quiet || result.Available) UpdateText = result.Message;

@@ -29,7 +29,10 @@ trap 'rm -rf "$WORK"' EXIT
 
 dotnet publish "$HERE/src/Ombra.App" -c Release -r "$RID" --self-contained -o "$WORK/pub" \
   -p:Version="${VERSION%%-*}" -p:InformationalVersion="$VERSION" -v q -nologo
-"$HERE/tools/package/package.sh" "$RID" "$WORK/pub" "$WORK/out" "$VERSION" >/dev/null
+# The package carries the engine; the installed pack is kept between runs (checked again each time) instead of
+# downloading it for every build
+OMBRA_ENGINE_BUILD_ROOT="${OMBRA_ENGINE_BUILD_ROOT:-$HOME/Library/Caches/Ombra-Test/engine-build}" \
+  "$HERE/tools/package/package.sh" "$RID" "$WORK/pub" "$WORK/out" "$VERSION" >/dev/null
 ditto -x -k "$WORK/out/ombra-$VERSION-$RID.zip" "$WORK/app"
 APP="$WORK/app/ombra-$VERSION-$RID/Ombra.app"
 

@@ -71,6 +71,7 @@ public static class SelfTest
         var platform = Platform.RuntimePlatform.Key(out var description);
         var installer = new RuntimeInstaller(new HttpClient { Timeout = Timeout.InfiniteTimeSpan }, RuntimePack.DefaultRoot, platform)
         {
+            BundledRoot = RuntimePack.BundledRoot,
             NetworkEnvironment = () =>
             {
                 var env = new Dictionary<string, string?>();
@@ -88,7 +89,7 @@ public static class SelfTest
                 return $"installed in {Stopwatch.GetElapsedTime(t).TotalSeconds:0} s to {runtime.Directory}";
             }).ConfigureAwait(false);
         checks.Add(new Check("runtime", runtime is not null || !args.InstallRuntime, args.InstallRuntime,
-            runtime is not null ? $"{RuntimePack.Name} ({runtime.Platform}) at {runtime.Directory}" : $"not installed (platform {platform ?? "unsupported"}; {description})"));
+            runtime is not null ? $"{RuntimePack.Name} ({runtime.Platform}) {(runtime.Bundled ? "bundled with the app" : "installed")} at {runtime.Directory}" : $"not installed (platform {platform ?? "unsupported"}; {description})"));
 
         await TryAsync(checks, "omp", true, async () =>
         {

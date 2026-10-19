@@ -644,7 +644,7 @@ public sealed class UpdateInstallTests
         await Until(() => vm.UpdateAvailable, "automatic check offered the update");
         Assert.True(vm.ShowUpdatePill);
         Assert.Equal(Loc.F("Update available: {0}", "0.2.0"), vm.UpdatePill);
-        Assert.Contains(Loc.F("This version moves omp to {0} (Bun {1}). After the restart it installs by itself (about 1.3 GB, verified like the first install); until then omp {2} keeps working.", "19.0.0", "\0", "\0").Split('\0')[0], vm.UpdateOmpText);
+        Assert.Contains(Loc.F("This version moves omp to {0} (Bun {1}). After the restart it installs by itself (about 550 MB, verified like the first install); until then omp {2} keeps working.", "19.0.0", "\0", "\0").Split('\0')[0], vm.UpdateOmpText);
 
         vm.OpenUpdatesCommand.Execute(null);
         await Until(() => vm.IsSettingsOpen, "settings open");

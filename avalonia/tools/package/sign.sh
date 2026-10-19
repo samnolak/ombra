@@ -49,6 +49,25 @@ sign_macos() {
       codesign --force --options runtime --entitlements "$ent" "$@" --sign "$identity" "$f"
     fi
   done < <(find "$APP/Contents/MacOS" -type f -print0)
+  # The bundled engine (package.sh): every Mach-O in it, before the bundle is sealed. Bun keeps its vendor's Developer ID
+  # signature when that verifies (with its own hardened-runtime exceptions for its JIT and for native add-ons); the npm
+  # prebuilt .node/.dylib files come ad-hoc signed and get this signature. An executable signed here gets Bun's exceptions
+  # (packaging/engine-entitlements.plist), never the app's.
+  local desc engine="$APP/Contents/Resources/engine" signed=0 kept=0
+  if [ -d "$engine" ]; then
+    while IFS= read -r -d '' f && IFS= read -r desc; do
+      case "$desc" in *Mach-O*) ;; *) continue ;; esac
+      if codesign --verify --strict "$f" 2>/dev/null && [[ $(codesign -dvv "$f" 2>&1) == *$'\nAuthority=Developer ID Application'* ]]; then
+        kept=$((kept + 1)); continue
+      fi
+      case "$desc" in
+        *executable*) codesign --force --options runtime --entitlements "$HERE/packaging/engine-entitlements.plist" "$@" --sign "$identity" "$f" ;;
+        *) codesign --force --options runtime "$@" --sign "$identity" "$f" ;;
+      esac
+      signed=$((signed + 1))
+    done < <(find "$engine" -type f -print0 | xargs -0 file -N -0)
+    echo "engine: $signed Mach-O signed here, $kept kept with their vendor's Developer ID signature"
+  fi
   # The current package also keeps managed DLLs/PDBs in Contents/MacOS. Deep signing
   # gives those generic nested-code signatures before sealing the enclosing bundle.
   codesign --force --deep --options runtime --entitlements "$ent" "$@" --sign "$identity" "$APP"
