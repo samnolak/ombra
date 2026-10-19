@@ -165,20 +165,6 @@ public sealed class TranscriptUiTests
         Assert.Equal(-1, MainViewModel.RewindOccurrenceFromEnd(rows, new UserRowViewModel(new UserItem(99, "missing", true))));
     }
 
-    [Fact]
-    public void Rewind_brings_back_the_images_of_the_message_it_starts_over_from()
-    {
-        var picture = new ImageAttachment("image 1", "image/png", [1, 2, 3]);
-        RowList rows = [
-            new UserRowViewModel(new UserItem(1, "look", true) { Images = [picture] }),
-            new UserRowViewModel(new UserItem(2, "look", true)),
-        ];
-        (string, string)[] messages = [("e1", "look"), ("e2", "look")];
-        Assert.Equal([picture], MainViewModel.RewindImages(rows, messages, 0));
-        Assert.Empty(MainViewModel.RewindImages(rows, messages, 1));
-        // Its row not loaded (an earlier page of the history): the text comes back alone
-        Assert.Empty(MainViewModel.RewindImages(rows, [("e0", "earlier"), .. messages], 0));
-    }
 
     [AvaloniaFact]
     public async Task Stale_history_requires_explicit_bounded_reload_and_disables_older_while_busy()

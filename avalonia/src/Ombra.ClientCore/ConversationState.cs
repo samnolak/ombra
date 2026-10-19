@@ -1477,7 +1477,7 @@ public sealed partial class ConversationState
     /// in get_messages (it resolves the blobs it stores sessions with); a part whose data is not base64 (a stored
     /// image that is gone, left as its <c>blob:sha256:</c> reference) keeps its place with no bytes.
     /// </summary>
-    private static IReadOnlyList<ImageAttachment> ContentImages(JsonElement message, string property = "content")
+    internal static IReadOnlyList<ImageAttachment> ContentImages(JsonElement message, string property = "content")
     {
         if (!message.TryGetProperty(property, out var c) || c.ValueKind != JsonValueKind.Array) return [];
         List<ImageAttachment>? images = null;

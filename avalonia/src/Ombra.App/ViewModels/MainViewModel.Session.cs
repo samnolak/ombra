@@ -297,26 +297,23 @@ public sealed partial class MainViewModel
         }
         card.State = SessionCardState.Ask;
         card.Message = Loc.T("Pick one of your messages: this chat goes on from before it, and the message comes back into the box to change and send. What came after stays in the session file as a branch; Fork keeps a separate copy instead.");
-        var rows = open == _open ? Rows.ToList() : [];
-        card.SetChoices(messages.Select((m, i) => (m, i)).Reverse().Select(x => new SessionCardChoice(OneLine(x.m.Text), "", new AsyncRelayCommand(async () =>
+        card.SetChoices(messages.Reverse().Select(m => new SessionCardChoice(OneLine(m.Text), "", new AsyncRelayCommand(async () =>
         {
-            var m = x.m;
-            var images = RewindImages(rows, messages, x.i); // MainViewModel.Transcript.cs
             card.SetChoices([]);
             card.State = SessionCardState.Running;
             card.Message = Loc.T("Rewinding…");
             card.Primary = null;
             card.Secondary = null;
-            var text = await session.RewindAsync(m.EntryId, open.Lifetime.Token);
+            var restored = await session.RewindAsync(m.EntryId, open.Lifetime.Token);
             ApplyIfShown(open);
             RequestCatalogRefresh();
-            if (text is null)
+            if (restored is null)
             {
                 card.Finish(false, Loc.T("Not rewound"), Loc.T("omp did not rewind; the conversation shows why."),
                     secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
                 return;
             }
-            PutInComposer(open, text, images); // MainViewModel.Transcript.cs
+            PutInComposer(open, restored.Value.Text, restored.Value.Images); // MainViewModel.Transcript.cs
             card.Finish(true, Loc.T("Rewound"), Loc.T("This chat goes on from before that message, and your message is back in the box. What came after stays in the session file as a branch (omp's /tree)."),
                 secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
         }))));
