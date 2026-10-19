@@ -120,6 +120,7 @@ internal static partial class NightlyAcceptance
             Check("browser-window-single", single, detail);
             await Task.Delay(600);
             Shot("p-browser-window-after");
+            await SpacesChecks(pane);
             vm.ShowChatsCommand.Execute(null);
             Check("browser-window-hidden", await Until(() => !pane.IsEffectivelyVisible && Named<Border>("Sidebar") is not null, 10)
                 && BrowserWindow() == pane, $"panes={Panes().Count}");
@@ -400,6 +401,12 @@ internal static partial class NightlyAcceptance
                     break;
                 case "wait":
                     await Task.Delay((int)D(1));
+                    break;
+                case "swipe" when pane is not null: // swipe X Y left|right: a horizontal two-finger swipe at a pane point
+                    Swipe(pane, new Point(D(1), D(2)), parts[3] == "left" ? -1 : 1);
+                    break;
+                case "spaces" when pane is not null: // SpacesChecks on the window as it is (one space, the white page shown)
+                    await SpacesChecks(pane);
                     break;
                 case "sheet" when pane is not null:
                     // The Browser page's sheet against the Chats page's at this size and theme (SheetMatches); NAME's shots.

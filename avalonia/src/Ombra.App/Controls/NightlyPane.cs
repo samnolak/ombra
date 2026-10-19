@@ -882,10 +882,12 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
     private void OnPreedit(string? text)
     {
         if (_runtime is null || _windowId == 0) return;
+        // An empty preedit with no composition (Avalonia clears it before inserting a key's text, as for ⇧ or ⌥ keys) is
+        // nothing the input method took: the key's text still comes (OnText) or the key goes as it is (OnKey).
+        if (string.IsNullOrEmpty(text) && !_composing) return;
         if (NightlyCocoa.CurrentKeyEvent() is { Type: 10 } key) _keySent = key.Identity; // the input method took the key
         if (string.IsNullOrEmpty(text))
         {
-            if (!_composing) return;
             _composing = false;
             // A commit unmarks first (insertText:), and its text comes as input after that: only a composition that ends
             // with nothing is cancelled in the page. Background: below the input the commit's text is queued at.
