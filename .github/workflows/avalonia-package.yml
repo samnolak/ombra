@@ -1,11 +1,16 @@
 name: Avalonia packages
 
 # Self-contained per-platform packages of the Avalonia client as workflow artifacts (never a public release).
+# Each package carries the engine: package.sh has the published app install the pinned pack for the package's platform
+# (integrity checks, owned source, pruning, host --self-check) and puts it into the package (<package>.engine.txt).
 # Each package is unpacked into a clean folder and checked with a HOME that has no omp, no settings and no model:
-#   --self-test: native libraries, the client installs the pinned runtime, omp starts over RPC and stops (no orphan)
+#   --self-test: native libraries, the bundled engine used with the network blocked (nothing downloaded), omp starts
+#                over RPC and stops (no orphan)
 #   GUI smoke:   the real window starts, reaches omp's first-run state, closes normally, leaves no omp behind
-# linux-arm64 and win-arm64 are cross-built only (arm64 runners are paid for private repos): NOT VERIFIED.
-# osx-x64 is run under Rosetta 2 on the arm64 runner. Signing (tools/package/sign.sh) runs only with the owner's
+# linux-arm64 and win-arm64 are cross-built only (arm64 runners are paid for private repos): NOT VERIFIED, and without
+# the engine (its self-check cannot run here): they download it on first start.
+# osx-x64 is packaged and run under Rosetta 2 on the arm64 runner (its engine is x64, for Intel Macs; under Rosetta the
+# app picks the native arm64 engine, so the smoke installs that one). Signing (tools/package/sign.sh) runs only with the owner's
 # certificates in the secrets below; without them every package is built unsigned and says so in <package>.signing.txt.
 # Manual runs only (Actions → Run workflow): the account's Actions quota is not paid for; checks run before a
 # merge in a Claude Code session (README → Build, run, test).
@@ -115,6 +120,9 @@ jobs:
           dotnet publish src/Ombra.App -c Release -r "$RID" --self-contained -o "$RUNNER_TEMP/pub" \
             -p:Version="${VERSION%%-*}" -p:InformationalVersion="$VERSION"
           du -sh "$RUNNER_TEMP/pub"
+      - name: Rosetta 2
+        if: matrix.smoke == 'rosetta'
+        run: arch -x86_64 /usr/bin/true || sudo softwareupdate --install-rosetta --agree-to-license
       - name: Package (signed only when the owner's certificates are in the secrets)
         env:
           WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
@@ -154,9 +162,6 @@ jobs:
           Remove-Item -Recurse -Force "$env:RUNNER_TEMP\signcheck", $pfx
           Get-ChildItem Cert:\LocalMachine\Root | Where-Object Thumbprint -eq $cert.Thumbprint | Remove-Item
           Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)"
-      - name: Rosetta 2
-        if: matrix.smoke == 'rosetta'
-        run: arch -x86_64 /usr/bin/true || sudo softwareupdate --install-rosetta --agree-to-license
       - name: Package smoke (clean HOME, no omp, no model)
         if: matrix.smoke != 'none'
         run: tools/package/smoke.sh "$RID" "$RUNNER_TEMP/dist" "$RUNNER_TEMP/smoke" "$VERSION"

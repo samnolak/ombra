@@ -57,6 +57,15 @@ public static partial class RuntimePack
     public static string DefaultRoot =>
         Environment.GetEnvironmentVariable("OMBRA_RUNTIME_DIR") is { Length: > 0 } root ? root
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify), "Ombra", "runtimes");
+
+    /// <summary>
+    /// Where a package carries its installed pack (tools/package/package.sh): <c>Ombra.app/Contents/Resources/engine</c>
+    /// on macOS, <c>engine</c> beside the executable elsewhere. Absent in builds run from source.
+    /// </summary>
+    public static string BundledRoot =>
+        Path.GetFileName(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory)) == "MacOS"
+            ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Resources", "engine"))
+            : Path.Combine(AppContext.BaseDirectory, "engine");
 }
 
 /// <summary>An installed owned engine; standalone CLI is reserved for explicit management/terminal actions.</summary>
@@ -69,6 +78,13 @@ public sealed record InstalledRuntime(string Directory, string Bun, string Cli, 
     public const string TranspilerCacheVariable = "BUN_RUNTIME_TRANSPILER_CACHE_PATH";
     public static string TranspilerCacheIn(string packDirectory) => Path.Combine(packDirectory, "transpiler-cache");
 
+    /// <summary>Bun's transpiler cache for this pack: in the pack's folder, or under the user's runtimes folder for the
+    /// read-only pack inside the app (writing there would break the app's code signature).</summary>
+    public string TranspilerCache { get; init; } = TranspilerCacheIn(Directory);
+
+    /// <summary>The pack shipped inside the app package, used in place.</summary>
+    public bool Bundled { get; init; }
+
     /// <summary>The pack's own <c>bunfig.toml</c>, next to its <c>package.json</c>.</summary>
     public string BunConfig => Path.Combine(Directory, "omp", "bunfig.toml");
     public string Host => Path.Combine(Directory, "omp", RuntimePack.HostEntry.Replace('/', Path.DirectorySeparatorChar));
@@ -78,7 +94,7 @@ public sealed record InstalledRuntime(string Directory, string Bun, string Cli, 
     {
         if (o.Command is not null || o.PrefixArgs.Length > 0) return o;
         var env = new Dictionary<string, string?>(o.Environment, o.Environment.Comparer);
-        env.TryAdd(TranspilerCacheVariable, TranspilerCacheIn(Directory)); // a value the user set wins
+        env.TryAdd(TranspilerCacheVariable, TranspilerCache); // a value the user set wins
         // Bun reads bunfig.toml (preload scripts) and .env from its working directory, which is the opened project:
         // a folder could run code in omp or redirect its provider traffic. Bun gets the pack's config and no env file;
         // omp still loads its own .env from the profile.
@@ -146,12 +162,41 @@ public sealed class RuntimeInstaller
     /// </summary>
     public Func<IReadOnlyDictionary<string, string?>>? NetworkEnvironment { get; set; }
 
-    /// <summary>The installed pack, or null when there is none or it is incomplete.</summary>
+    /// <summary>
+    /// Folder holding the pack built into the app package (<see cref="RuntimePack.BundledRoot"/>); null: none. A bundled
+    /// pack for this pin and platform runs in place, read-only, with its transpiler cache under <see cref="Root"/>.
+    /// </summary>
+    public string? BundledRoot { get; init; }
+
+    /// <summary>The bundled pack's folder (whether or not it exists).</summary>
+    public string? BundledDirectory => BundledRoot is null ? null : Path.Combine(BundledRoot, RuntimePack.Name);
+
+    /// <summary>
+    /// The pack to run, or null when there is none or it is incomplete. A pack this installer put in <see cref="Root"/>
+    /// while a valid bundled pack was present (Repair engine) comes first; then the bundled pack, when it was built for
+    /// this pin and this machine's platform; then a pack in <see cref="Root"/> installed without a bundle (source builds,
+    /// earlier versions).
+    /// </summary>
     public InstalledRuntime? FindInstalled()
     {
+        var own = Read(TargetDirectory, out var overridesBundled);
+        if (own is not null && overridesBundled) return own;
+        return FindBundled() ?? own;
+    }
+
+    /// <summary>The bundled pack when it matches this client's pin and this machine's platform; else null.</summary>
+    public InstalledRuntime? FindBundled()
+    {
+        if (BundledDirectory is not { } dir || Read(dir, out _) is not { } rt || rt.Platform != Platform) return null;
+        return rt with { Bundled = true, TranspilerCache = Path.Combine(Root, ".transpiler-cache", RuntimePack.Name) };
+    }
+
+    private InstalledRuntime? Read(string directory, out bool overridesBundled)
+    {
+        overridesBundled = false;
         try
         {
-            var marker = Path.Combine(TargetDirectory, Marker);
+            var marker = Path.Combine(directory, Marker);
             if (!File.Exists(marker)) return null;
             using var doc = JsonDocument.Parse(File.ReadAllText(marker));
             if (doc.RootElement.GetProperty("pack").GetString() != RuntimePack.Name) return null;
@@ -159,8 +204,9 @@ public sealed class RuntimeInstaller
                 doc.RootElement.GetProperty("sourceArtifact").GetProperty("identity").GetString() != RuntimePack.SourceIdentity ||
                 doc.RootElement.GetProperty("sourceArtifact").GetProperty("sha256").GetString() != RuntimePack.SourceSha256)
                 return null;
+            overridesBundled = doc.RootElement.TryGetProperty("overridesBundled", out var o) && o.ValueKind == JsonValueKind.True;
             var platform = doc.RootElement.GetProperty("platform").GetString() ?? "";
-            var rt = Layout(TargetDirectory, platform);
+            var rt = Layout(directory, platform);
             return rt is not null && File.Exists(rt.Bun) && File.Exists(rt.Cli) && File.Exists(rt.Host) ? rt : null;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException)
@@ -309,26 +355,15 @@ public sealed class RuntimeInstaller
                         ? "\n\n" + Loc.T("Your network inspects HTTPS connections. Turn on Settings › Advanced › Corporate network certificates, then repair the engine.")
                         : ""));
             TryDelete(cache);
+            // Before the source artifact and the self-check: the host must start from the pruned tree.
+            var pruned = RuntimePrune.Prune(ompDir, Platform, ct);
+            await File.AppendAllTextAsync(Path.Combine(staging, "install.log"), $"\npruned {pruned} bytes the engine never loads on {Platform}\n", ct).ConfigureAwait(false);
 
             progress?.Report(new RuntimeInstallProgress(Loc.T("Installing verified owned engine")));
             var sourceArtifact = await RuntimeSourceArtifact.ApplyAsync(staging, ct).ConfigureAwait(false);
 
             progress?.Report(new RuntimeInstallProgress(Loc.T("Checking owned engine")));
-            var version = new ProcessStartInfo(layout.Bun) { WorkingDirectory = ompDir };
-            foreach (var a in new[] { "--config=" + layout.BunConfig, "--no-env-file", "--no-install", layout.Host, "--self-check" })
-                version.ArgumentList.Add(a);
-            version.Environment[InstalledRuntime.TranspilerCacheVariable] = InstalledRuntime.TranspilerCacheIn(staging);
-            var v = await Run(version, TimeSpan.FromMinutes(2), ct).ConfigureAwait(false);
-            var valid = false;
-            try
-            {
-                using var check = JsonDocument.Parse(v.Output.Trim());
-                valid = check.RootElement.GetProperty("engineProtocolVersion").GetInt32() == 1 &&
-                    check.RootElement.GetProperty("ompVersion").GetString() == RuntimePack.OmpVersion;
-            }
-            catch (Exception e) when (e is JsonException or KeyNotFoundException or InvalidOperationException or FormatException) { }
-            if (v.ExitCode != 0 || !valid)
-                throw new InvalidDataException($"Owned engine did not report protocol 1 / omp {RuntimePack.OmpVersion} (exit {v.ExitCode}):\n{Tail(v.Output, 6)}");
+            await CheckHostAsync(layout, InstalledRuntime.TranspilerCacheIn(staging), ct).ConfigureAwait(false);
 
             var marker = JsonSerializer.Serialize(new
             {
@@ -342,6 +377,8 @@ public sealed class RuntimeInstaller
                 sourceArtifact,
                 ompIntegrity = RuntimePack.OmpIntegrity,
                 installedAt = DateTimeOffset.UtcNow,
+                // Installed while the app carries a valid pack of its own (Repair engine): this one is used instead.
+                overridesBundled = FindBundled() is not null,
             }, new JsonSerializerOptions { WriteIndented = true });
             await File.WriteAllTextAsync(Path.Combine(staging, Marker), marker, ct).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
@@ -371,6 +408,28 @@ public sealed class RuntimeInstaller
         {
             if (Directory.Exists(staging)) TryDelete(staging);
         }
+    }
+
+    /// <summary>Runs the owned host's <c>--self-check</c> from <paramref name="runtime"/>; it must report protocol 1 and
+    /// the pinned omp version.</summary>
+    /// <exception cref="InvalidDataException">It did not.</exception>
+    public async Task CheckHostAsync(InstalledRuntime runtime, string transpilerCache, CancellationToken ct)
+    {
+        var version = new ProcessStartInfo(runtime.Bun) { WorkingDirectory = Path.Combine(runtime.Directory, "omp") };
+        foreach (var a in new[] { "--config=" + runtime.BunConfig, "--no-env-file", "--no-install", runtime.Host, "--self-check" })
+            version.ArgumentList.Add(a);
+        version.Environment[InstalledRuntime.TranspilerCacheVariable] = transpilerCache;
+        var v = await Run(version, TimeSpan.FromMinutes(2), ct).ConfigureAwait(false);
+        var valid = false;
+        try
+        {
+            using var check = JsonDocument.Parse(v.Output.Trim());
+            valid = check.RootElement.GetProperty("engineProtocolVersion").GetInt32() == 1 &&
+                check.RootElement.GetProperty("ompVersion").GetString() == RuntimePack.OmpVersion;
+        }
+        catch (Exception e) when (e is JsonException or KeyNotFoundException or InvalidOperationException or FormatException) { }
+        if (v.ExitCode != 0 || !valid)
+            throw new InvalidDataException($"Owned engine did not report protocol 1 / omp {RuntimePack.OmpVersion} (exit {v.ExitCode}):\n{Tail(v.Output, 6)}");
     }
 
     private async Task DownloadBunAsync(BunBuild build, string exePath, IProgress<RuntimeInstallProgress>? progress, CancellationToken ct)

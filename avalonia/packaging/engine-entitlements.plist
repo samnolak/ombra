@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Hardened runtime exceptions for an executable of the bundled engine (Contents/Resources/engine) that tools/package/sign.sh
+     signs itself: those Bun's own release signature carries. JavaScriptCore's JIT needs the first three; Bun loads native
+     add-ons it did not ship (npm prebuilt .node files, the engine's side runtimes for speech and local models), so
+     library validation is off, as in Bun's release. Bun keeps its vendor signature whenever that verifies. -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-executable-page-protection</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+</dict>
+</plist>

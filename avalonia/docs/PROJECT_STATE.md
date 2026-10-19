@@ -187,12 +187,15 @@ omp 18.8.0 npm sources (pinned since 2026-10-07; 18.2.0 before it, RPC byte-iden
 ```
 dotnet build Ombra.sln                         # warnings are errors
 dotnet test tests/Ombra.Tests                  # real-omp + acceptance tests run when OMBRA_TEST_CONFIG is set
-dotnet run --project src/Ombra.App             # first run offers engine setup; or --config <ombra.local.json>
+dotnet run --project src/Ombra.App             # no bundled engine here: first run offers engine setup; or --config <ombra.local.json>
 Ombra --self-test report.json [--install-runtime]   # packaged-app check without a window
+Ombra --install-engine <root> [--engine-platform darwin-x64]   # package time: install + prune + self-check the pinned pack
 
-# Package (Linux; the same for the other RIDs)
+# Package (Linux; the same for the other RIDs). The package carries the engine (<dist>/<package>.engine.txt);
+# OMBRA_ENGINE_BUILD_ROOT=<dir> keeps the installed pack between local runs (re-checked when reused).
 dotnet publish src/Ombra.App -c Release -r linux-x64 --self-contained -o <pub> -p:Version=0.1.0 -p:InformationalVersion=<version>
 tools/package/package.sh linux-x64 <pub> <dist> <version>
+tools/package/smoke.sh linux-x64 <dist> <work> <version>   # unpacked, clean HOME, network blocked: bundled engine used
 
 # Mock environment: owned engine + harness profile + stand-in model (a scripted server, not a model)
 tools/ci/real-omp-smoke.sh <work-dir>           # installs the pinned runtime, builds the harness home, runs the real-omp tests

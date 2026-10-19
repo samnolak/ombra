@@ -48,7 +48,7 @@ public sealed partial class MainViewModel
         : RuntimeInstaller?.FindPrevious() is not null ? Loc.T("Update engine") : Loc.T("Set up engine");
 
     public string RuntimeOffer =>
-        Loc.T("Ombra's integrated engine needs setup or repair. Ombra manages its verified engine files here (about 1.3 GB on disk); no separate omp installation is required. Any previous engine files remain unchanged during setup.");
+        Loc.T("Ombra's integrated engine needs setup or repair. Ombra manages its verified engine files here (about 550 MB on disk); no separate omp installation is required. Any previous engine files remain unchanged during setup.");
 
     private void ApplyRuntimeState()
     {
@@ -71,7 +71,7 @@ public sealed partial class MainViewModel
                 (_customCommand ? Loc.T(" A developer command override is active.") : Loc.T(" Managed by Ombra.")),
             { } i when i.FindPrevious() is { } prev => Loc.F("Previous engine files are retained at {0}. Update or repair Ombra's integrated engine here to continue.", prev.Runtime.Directory) +
                 (_customCommand ? Loc.T(" A developer command override is active.") : ""),
-            _ => Loc.T("Ombra's integrated engine is not ready. Set it up or repair it here (verified engine files, about 1.3 GB on disk)."),
+            _ => Loc.T("Ombra's integrated engine is not ready. Set it up or repair it here (verified engine files, about 550 MB on disk)."),
         };
         OnPropertyChanged(nameof(InstallRuntimeLabel));
         ApplyRuntimeState();

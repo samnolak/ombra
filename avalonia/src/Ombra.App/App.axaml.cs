@@ -49,7 +49,10 @@ public sealed class App : Application
             Ombra.App.Localization.Loc.Load(Ombra.App.Localization.Loc.Resolve(options.Language, store.Path), store.Path);
             MainViewModel.ApplyTheme(options.Theme);
             var platform = Ombra.App.Platform.RuntimePlatform.Key(out _);
-            var installer = new RuntimeInstaller(new HttpClient { Timeout = Timeout.InfiniteTimeSpan }, RuntimePack.DefaultRoot, platform);
+            var installer = new RuntimeInstaller(new HttpClient { Timeout = Timeout.InfiniteTimeSpan }, RuntimePack.DefaultRoot, platform)
+            {
+                BundledRoot = RuntimePack.BundledRoot, // the package's own engine: no download on first run
+            };
             // Every launch reads settings again. An empty command requires this client's owned runtime;
             // older unpatched packs and omp on PATH are not compatible default fallbacks.
             OmpRuntimeOptions Current()

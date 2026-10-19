@@ -28,6 +28,10 @@ public sealed record AppArgs
     public bool Yes { get; init; }
     public bool Restart { get; init; }
     public string? UpdateFeed { get; init; }
+    /// <summary><c>--install-engine &lt;root&gt; [--engine-platform key]</c>: package time — install the pinned engine pack
+    /// into root for the package to carry (see <c>Services/Runtime/EngineBundleCli</c>).</summary>
+    public string? InstallEngine { get; init; }
+    public string? EnginePlatform { get; init; }
 
     /// <summary>A run a script drives and nobody watches (package smoke, benchmark): it must end, never wait without limit.</summary>
     public bool IsUnattended => SmokeExitAfterMs > 0 || ExitAfterBench || BenchLatency > 0 || BenchOut is not null;
@@ -54,6 +58,8 @@ public sealed record AppArgs
                 "--yes" => a with { Yes = true },
                 "--restart" => a with { Restart = true },
                 "--feed" => a with { UpdateFeed = Next() },
+                "--install-engine" => a with { InstallEngine = Next() },
+                "--engine-platform" => a with { EnginePlatform = Next() },
                 "--smoke-exit-after-ms" => a with { SmokeExitAfterMs = int.Parse(Next(), System.Globalization.CultureInfo.InvariantCulture) },
                 _ => a,
             };
@@ -86,11 +92,12 @@ internal static class Program
             return 0;
         }
         // Headless tools do not own or mutate the client journal, and staged --version above changes nothing.
-        if (Args.Update || Args.SelfTest)
+        if (Args.Update || Args.SelfTest || Args.InstallEngine is not null)
         {
             // Headless runtime probes/installers also launch children. The update apply helper deliberately
             // escapes this Windows job through StartIndependent; --version above never joins or creates a job.
             if (OperatingSystem.IsWindows()) OwnedProcesses.MarkThisProcess();
+            if (Args.InstallEngine is not null) return Services.Runtime.EngineBundleCli.RunAsync(Args).GetAwaiter().GetResult();
             Services.ClientLog.Shared.Write("path", LoginShellPath.Initialize().Diagnostic);
             return Args.Update ? Services.UpdateCli.RunAsync(Args).GetAwaiter().GetResult()
                 : Services.SelfTest.RunAsync(Args).GetAwaiter().GetResult();

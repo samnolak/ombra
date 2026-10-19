@@ -23,8 +23,19 @@ been run so far (see the README); Windows, macOS and arm64 are built but not yet
 
 Each package is `ombra-<version>-<platform>` (`.tar.gz` on Linux, `.zip` on Windows and macOS) and unpacks into a
 folder of the same name, with the licence notices and this guide. Every archive has a `.sha256` file next to it
-(and a `.signing.txt` that says how it was signed). Check it before you install (`sha256sum -c
-ombra-….tar.gz.sha256` on Linux, `shasum -a 256 -c …` on macOS, `Get-FileHash` on Windows).
+(and a `.signing.txt` that says how it was signed, an `.engine.txt` that says whether the engine is inside). Check it
+before you install (`sha256sum -c ombra-….tar.gz.sha256` on Linux, `shasum -a 256 -c …` on macOS, `Get-FileHash` on
+Windows).
+
+**The agent engine is part of the app.** The package carries the pinned engine (`ombra-engine-18.8.0-bun-1.4.2-v1`:
+Bun 1.4.2, the integrity-locked npm dependencies and Ombra's own coding-agent sources, checked when the package was
+built), so the first start downloads nothing and works offline. On macOS it is inside *Ombra.app*
+(`Contents/Resources/engine`) and signed with the app; elsewhere it is the `engine` folder beside the executable.
+It runs from there read-only (the app never writes into its own folder; Bun's cache goes to the runtimes folder,
+see [Where things are kept](#where-things-are-kept)), an update replaces it together with the app, and copies of
+the app each use their own. The macOS package for Apple silicon is about 265 MB to download and about 780 MB once
+unpacked. Only the linux-arm64 and win-arm64 packages (built on another CPU, where the engine's check cannot run)
+come without it and set it up on first start as below.
 
 The packages are **not signed** with a developer certificate (no signing certificate is available to this
 project yet), so the OS warns on first start:
@@ -45,10 +56,14 @@ project yet), so the OS warns on first start:
 
 ## First start
 
-1. **Agent engine not installed.** Install the managed engine from the startup card. The client downloads the
-   pinned Bun 1.4.2 and npm dependencies, verifies their integrity, then installs its complete owned coding-agent
-   sources and shared host into `ombra-engine-18.8.0-bun-1.4.2-v1`. Older packs are retained, not modified or
-   silently launched as a fallback. No separate omp application is required for GUI chats.
+1. **Agent engine.** Ready at once: the app uses the engine it carries. Only when it has none for this computer
+   (a package without the engine, a development build run from source, or an x64 package on an Apple silicon Mac, which
+   picks the native Bun) does the startup card offer to set it up: the client downloads the pinned Bun 1.4.2 and npm
+   dependencies, verifies their integrity, then installs its complete owned coding-agent sources and shared host into
+   `ombra-engine-18.8.0-bun-1.4.2-v1` in the runtimes folder (about 550 MB on disk). **Settings → Advanced → Repair
+   engine** does the same download for an app that carries its engine; the repaired copy is then used instead of the
+   app's own. Older packs are retained, not modified or silently launched as a fallback. No separate omp application
+   is required for GUI chats.
    A custom command under **Settings → Advanced** must implement Ombra's shared-engine, history and
    input-admission contracts; an ordinary upstream omp CLI is not a compatible GUI engine.
 2. **No model provider.** omp needs a model. If it has none, the window says *Connect a model provider*.
@@ -1197,9 +1212,11 @@ way). Until the first release of this client is published, the check says *No re
   Windows uses a separate copy of the app to apply updates, not PowerShell; transient access/sharing locks
   are retried for up to 60 seconds per filesystem operation.
 - **omp moves with the app.** Each version of the app runs one pinned omp. When an update brings a newer omp, the
-  Updates page says so; after the restart the app installs it by itself (about 1.3 GB, verified like the first
-  install) while omp from the previous version keeps working, then switches over once no run is active and removes
-  the old one. If that install fails, the old omp keeps working and **Settings → Advanced** offers to try again.
+  Updates page says so; the new engine comes inside the update, so it runs after the restart with nothing more to
+  download. An app without its engine (see [Install](#install)) installs it by itself after the restart (about
+  550 MB, verified like the first install) while omp from the previous version keeps working, then switches over
+  once no run is active. If that install fails, the old omp keeps working and **Settings → Advanced** offers to try
+  again.
 - Settings, sessions and omp's configuration live elsewhere and are never touched by an update.
 
 The app downloads the package to your Downloads folder instead (**Download and verify**, then replace the app
@@ -1234,7 +1251,8 @@ report. Without the variable none of this runs.
 |---|---|---|---|
 | GUI settings (`ombra.local.json`) | `%APPDATA%\Ombra` | `~/Library/Application Support/Ombra` | `~/.config/Ombra` |
 | Providers turned off for omp (`network-privacy/providers-*.yml`, one per project, rewritten at every start) | `%APPDATA%\Ombra\network-privacy` | `~/Library/Application Support/Ombra/network-privacy` | `~/.config/Ombra/network-privacy` |
-| Installed omp runtime | `%LOCALAPPDATA%\Ombra\runtimes` | `~/Library/Application Support/Ombra/runtimes` | `~/.local/share/Ombra/runtimes` |
+| The engine the app carries (read-only) | `engine\` beside `Ombra.exe` | `Ombra.app/Contents/Resources/engine` | `engine/` beside `Ombra` |
+| Engine set up or repaired from the network; Bun's transpiler cache for the app's own engine (`.transpiler-cache`) | `%LOCALAPPDATA%\Ombra\runtimes` | `~/Library/Application Support/Ombra/runtimes` | `~/.local/share/Ombra/runtimes` |
 | Dictation model | `%LOCALAPPDATA%\Ombra\speech-models` | `~/Library/Application Support/Ombra/speech-models` | `~/.local/share/Ombra/speech-models` |
 | Chats without a project (one empty folder each, deleted when the chat is closed with nothing in it) | `%LOCALAPPDATA%\Ombra\chats` | `~/Library/Application Support/Ombra/chats` | `~/.local/share/Ombra/chats` |
 | The app's own errors (`client.log`) | `%LOCALAPPDATA%\Ombra\logs` | `~/Library/Logs/Ombra` | `~/.local/share/Ombra/logs` |
