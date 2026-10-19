@@ -377,6 +377,83 @@ public sealed class PanesUiTests
             .Select(c => (c.GetProperty("type").GetString()!, c.GetProperty("subagentId").GetString()!,
                 c.TryGetProperty("message", out var m) ? m.GetString() : null)).ToList();
 
+    [AvaloniaTheory]
+    [InlineData("light", "en")]
+    [InlineData("dark", "en")]
+    [InlineData("light", "ru")]
+    [InlineData("dark", "ru")]
+    public async Task Subagent_card_hover_and_controls(string theme, string language)
+    {
+        var previous = Loc.Current;
+        var settings = Path.Combine(TestProcesses.TempDir("card-hover"), "settings.json");
+        Loc.Load(language, settings);
+        MainViewModel.ApplyTheme(theme);
+        var (w, vm) = await OpenRunningSubagents();
+        try
+        {
+            var row = vm.Tasks.Subagents.Single(r => r.Id == "sa-3");
+            var card = Named<ItemsControl>(w, "SubagentList").GetVisualDescendants().OfType<Border>()
+                .Single(b => b.Classes.Contains("task-card") && ReferenceEquals(b.DataContext, row));
+            var toggle = card.GetVisualDescendants().OfType<ToggleButton>().Single();
+            var box = (TextBox)RowControl(w, row, "SubagentMessageBox");
+            w.MouseMove(toggle.TranslatePoint(new Point(20, 20), w)!.Value);
+            await Settle();
+            Assert.True(card.IsPointerOver);
+            var hover = Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(card.Background).Color;
+            Assert.True(card.TryFindResource("GuiFill1", card.ActualThemeVariant, out var fill));
+            Assert.Equal(Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(fill).Color, hover);
+            var presenter = toggle.GetVisualDescendants().OfType<Avalonia.Controls.Presenters.ContentPresenter>()
+                .Single(p => p.Name == "PART_ContentPresenter");
+            Assert.Equal(Avalonia.Media.Colors.Transparent,
+                Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(presenter.Background).Color);
+            w.MouseMove(box.TranslatePoint(new Point(4, 4), w)!.Value);
+            await Settle();
+            Assert.True(card.IsPointerOver);
+            Assert.Equal(hover, Assert.IsAssignableFrom<Avalonia.Media.ISolidColorBrush>(card.Background).Color);
+            w.MouseMove(toggle.TranslatePoint(new Point(20, 20), w)!.Value);
+            await Settle();
+            if (Environment.GetEnvironmentVariable("OMBRA_SHOT_DIR") is { } dir)
+            {
+                Directory.CreateDirectory(dir);
+                using var frame = w.CaptureRenderedFrame();
+                Assert.NotNull(frame);
+                using var file = File.Create(Path.Combine(dir, $"card-hover-{theme}-{language}.png"));
+                frame.Save(file, new Avalonia.Media.Imaging.PngBitmapEncoderOptions());
+            }
+            Assert.Empty(LayoutAudit.Run(w, card));
+            Click(toggle);
+            Assert.True(row.IsExpanded);
+            Click(toggle);
+            Assert.False(row.IsExpanded);
+            toggle.Focus();
+            w.KeyPress(Key.Space, RawInputModifiers.None, PhysicalKey.Space, " ");
+            w.KeyRelease(Key.Space, RawInputModifiers.None, PhysicalKey.Space, " ");
+            Assert.True(row.IsExpanded);
+            Click(toggle);
+            Click(box);
+            w.KeyTextInput("keep going");
+            Assert.False(row.IsExpanded);
+            Assert.Equal("keep going", box.Text);
+            await Settle();
+            Click(RowControl(w, row, "SubagentSend"));
+            await Until(() => row.MessageText.Length == 0, "message sent without expanding");
+            Assert.False(row.IsExpanded);
+            Click(RowControl(w, row, "SubagentStop"));
+            await Until(() => !row.IsRunning, "stopped without expanding");
+            Assert.False(row.IsExpanded);
+            Assert.False(box.IsEffectivelyVisible);
+            Click(toggle);
+            Assert.True(row.IsExpanded);
+        }
+        finally
+        {
+            await vm.DisposeAsync();
+            w.Close();
+            Loc.Load(previous, settings);
+            MainViewModel.ApplyTheme("light");
+        }
+    }
+
     [AvaloniaFact]
     public async Task Stop_cancels_only_that_subagent_and_its_row_leaves_running()
     {

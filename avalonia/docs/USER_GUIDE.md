@@ -555,8 +555,10 @@ project yet), so the OS warns on first start:
     plan*, and *History* lists every change with its time — also for a session you open later. While the pane is
     open, the one-line task card above the message box is hidden: the pane shows the same list.
   - *Background tasks* — the subagents the agent starts (its task tool): what each works on, its status, how long it
-    has run, its current tool, tool calls and tokens; open one to read its task and latest output. **Show its
-    conversation** enables a live preview of the latest 40 entries, with long text shortened. It reads new complete
+    has run, its current tool, tool calls and tokens; open one to read its task and latest output. Hover highlights
+    the whole rounded card, including its message row; the summary opens details, while typing, **Send** and
+    **Stop** keep their own actions without opening details. **Show its conversation** enables a live preview of
+    the latest 40 entries, with long text shortened. It reads new complete
     transcript lines once a second while the expanded card is visible; collapsing it, scrolling it out of view,
     closing the pane or switching chats stops those reads. Reopening continues from the saved byte cursor;
     a replaced or truncated transcript resets the preview. Finished ones stay listed for the session.

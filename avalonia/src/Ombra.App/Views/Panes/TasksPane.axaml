@@ -40,7 +40,7 @@
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:SubagentRowViewModel">
-              <Border Classes="task-card" Classes.running="{Binding IsRunning}" EffectiveViewportChanged="OnCardViewportChanged" DetachedFromVisualTree="OnCardDetached">
+              <Border Classes="task-card subagent-card" Classes.running="{Binding IsRunning}" EffectiveViewportChanged="OnCardViewportChanged" DetachedFromVisualTree="OnCardDetached">
                 <StackPanel>
                   <ToggleButton Classes="task-row flat" IsChecked="{Binding IsExpanded}" AutomationProperties.Name="{Binding AccessibleName}"
                                 ToolTip.Tip="{loc:T 'Show its task, output and conversation'}">
