@@ -436,6 +436,7 @@ internal sealed class NightlyRuntime : IDisposable
         }
         else start.ArgumentList.Add($"{EmbedDocument}?pane={first}");
         start.Environment["NIGHTLY_EMBED_SERVICE"] = _channel.ServiceName;
+        start.Environment["NIGHTLY_TEAMS_SERVICE"] = NightlyTeamLink.EmbedServiceName; // its shares go through this Ombra
         start.Environment["MOZ_APP_NO_DOCK"] = "1"; // a background runtime: no Dock icon, no menu bar
         start.Environment["MOZ_LOG"] = Environment.GetEnvironmentVariable("OMBRA_NIGHTLY_MOZ_LOG") is { Length: > 0 } log ? log : "ZenEmbed:3";
         foreach (var name in new[] { "MOZ_HEADLESS", "MOZ_NO_REMOTE", "XRE_PROFILE_PATH", "NIGHTLY_EMBED_BROWSER_PANE" })
