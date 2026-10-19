@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Avalonia;
+using Ombra.ClientCore;
 
 namespace Ombra.App;
 
@@ -65,29 +66,86 @@ internal static class Program
 {
     public static readonly long StartTimestamp = Stopwatch.GetTimestamp();
     public static AppArgs Args { get; private set; } = new();
+    internal static string SettingsPath { get; private set; } = "";
+    internal static DraftStore? Drafts { get; private set; }
+    internal static bool AlreadyRunning { get; private set; }
+    internal static Exception? StartupError { get; private set; }
+    internal static bool StartupRefused => AlreadyRunning || StartupError is not null;
 
     [STAThread]
     public static int Main(string[] args)
     {
+        // The updater must not initialize UI, acquire a client lease, migrate settings or join the parent's job.
+        // Dispatch before permissive AppArgs parsing so malformed/mixed helper commands fail closed.
+        if (args.Contains("--apply-update", StringComparer.Ordinal))
+            return Services.UpdateApplyHelper.RunAsync(args).GetAwaiter().GetResult();
         Args = AppArgs.Parse(args);
         if (Args.PrintVersion)
         {
             Console.WriteLine($"Ombra {Services.UpdateChecker.ThisVersion()} {Services.UpdateChecker.ThisRid()}");
             return 0;
         }
-        // Not before --version: an OMP GUI updater runs that on the staged Ombra package, which must change nothing
-        Services.LegacyNames.MigrateData(m => Services.ClientLog.Shared.Write("rename", m));
-        if (Args.Update) return Services.UpdateCli.RunAsync(Args).GetAwaiter().GetResult();
-        if (Args.SelfTest) return Services.SelfTest.RunAsync(Args).GetAwaiter().GetResult();
-        // The window app has no visible console: its errors go to client.log (the command-line modes above print them)
-        Services.ClientLog.Shared.HookProcess();
-        if (Services.LegacyNames.RenameMacBundleAndRelaunch(args, m => Services.ClientLog.Shared.Write("rename", m))) return 0;
-        // A run nobody watches (package smoke, benchmark) waits a bounded time, then fails with the error instead of hanging
-        TimeSpan? displayLimit = Args.IsUnattended ? Platform.DisplayWait.UnattendedLimit : null;
-        if (OperatingSystem.IsMacOS())
-            Platform.DisplayWait.UntilActive(Platform.DisplayWait.MacHasActiveDisplay, Thread.Sleep, m => Services.ClientLog.Shared.Write("display", m), displayLimit);
+        // Headless tools do not own or mutate the client journal, and staged --version above changes nothing.
+        if (Args.Update || Args.SelfTest)
+        {
+            // Headless runtime probes/installers also launch children. The update apply helper deliberately
+            // escapes this Windows job through StartIndependent; --version above never joins or creates a job.
+            if (OperatingSystem.IsWindows()) OwnedProcesses.MarkThisProcess();
+            Services.ClientLog.Shared.Write("path", LoginShellPath.Initialize().Diagnostic);
+            return Args.Update ? Services.UpdateCli.RunAsync(Args).GetAwaiter().GetResult()
+                : Services.SelfTest.RunAsync(Args).GetAwaiter().GetResult();
+        }
+        ClientInstanceLease? instance = null;
+        void ReleaseOwnership()
+        {
+            try { Drafts?.Dispose(); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Console.Error.WriteLine("Draft save failed: " + e.Message); }
+            finally { Drafts = null; instance?.Dispose(); instance = null; }
+        }
         try
         {
+            try
+            {
+                SettingsPath = ClientInstanceLease.SettingsPath(Args.ConfigPath);
+                instance = ClientInstanceLease.TryAcquire(SettingsPath);
+                AlreadyRunning = instance is null;
+                if (!AlreadyRunning)
+                {
+                    // Windows migration can start cmd.exe to create a junction. Establish kernel ownership before
+                    // even that first helper; a refused second instance never joins a job or starts migration.
+                    if (OperatingSystem.IsWindows()) OwnedProcesses.MarkThisProcess();
+                    // Admission precedes all writable startup work. An explicit configuration is isolated from the
+                    // installed app's legacy migration, whether supplied by --config or OMBRA_CONFIG.
+                    if (Args.ConfigPath is null && Environment.GetEnvironmentVariable(OmpRuntimeOptions.ConfigEnvVar) is null)
+                        AlreadyRunning = !Services.LegacyNames.MigrateData(m => Services.ClientLog.Shared.Write("rename", m));
+                    if (!AlreadyRunning) Drafts = new DraftStore(DraftStore.PathFor(SettingsPath));
+                }
+            }
+            catch (DraftStoreInUseException) { AlreadyRunning = true; }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or WaitHandleCannotBeOpenedException or System.Security.SecurityException)
+            {
+                StartupError = e;
+            }
+            if (StartupRefused)
+            {
+                ReleaseOwnership(); // a refusal window must not itself prevent a later legitimate launch
+                Console.Error.WriteLine(AlreadyRunning
+                    ? $"Ombra is already using this configuration: {SettingsPath}"
+                    : $"Ombra could not acquire exclusive access to its drafts: {StartupError!.Message}");
+                if (Args.IsUnattended) return 1;
+            }
+            else
+            {
+                // A losing launch never registers process cleanup, opens a runtime, or changes user data.
+                Services.ClientLog.Shared.HookProcess();
+                if (Services.LegacyNames.RenameMacBundleAndRelaunch(args, m => Services.ClientLog.Shared.Write("rename", m), ReleaseOwnership)) return 0;
+                Services.ClientLog.Shared.Write("path", LoginShellPath.Initialize().Diagnostic);
+            }
+            // A run nobody watches waits a bounded time, rather than hanging on a sleeping display.
+            TimeSpan? displayLimit = Args.IsUnattended ? Platform.DisplayWait.UnattendedLimit : null;
+            if (OperatingSystem.IsMacOS())
+                Platform.DisplayWait.UntilActive(Platform.DisplayWait.MacHasActiveDisplay, Thread.Sleep,
+                    m => { if (StartupRefused) Console.Error.WriteLine(m); else Services.ClientLog.Shared.Write("display", m); }, displayLimit);
             return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }
         catch (InvalidOperationException e) when (OperatingSystem.IsMacOS() && Platform.DisplayWait.IsRenderTimerFailure(e))
@@ -95,6 +153,7 @@ internal static class Program
             // The display slept between the check above and Avalonia's setup, which cannot run twice in one process:
             // wait for it again and start over in a new process. A few times at most, so a render timer that fails for
             // another reason ends the app with its error in client.log instead of starting it forever.
+            if (StartupRefused) { Console.Error.WriteLine(e); return 1; }
             Services.ClientLog.Shared.Write("display", e);
             var attempt = int.TryParse(Environment.GetEnvironmentVariable(RelaunchVariable), out var n) ? n : 0;
             if (attempt >= MaxRelaunches || Args.IsUnattended || Environment.ProcessPath is not { } self) return 1;
@@ -102,9 +161,11 @@ internal static class Program
             var start = new ProcessStartInfo(self) { UseShellExecute = false };
             foreach (var arg in args) start.ArgumentList.Add(arg);
             start.Environment[RelaunchVariable] = (attempt + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            ReleaseOwnership(); // the replacement must acquire before it starts any writable startup work
             Process.Start(start)?.Dispose();
             return 0;
         }
+        finally { ReleaseOwnership(); }
     }
 
     /// <summary>How many times in a row the app started itself again after its render timer failed (see Main).</summary>

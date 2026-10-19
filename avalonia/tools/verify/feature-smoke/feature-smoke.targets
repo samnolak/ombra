@@ -1,0 +1,10 @@
+<!-- Compiles FeatureSmoke*.cs into Ombra.App for the native feature smoke only (run.sh passes it as
+     CustomAfterMicrosoftCommonTargets); a normal build never sees it. -->
+<Project>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Ombra.App'">
+    <DefineConstants>$(DefineConstants);OMBRA_FEATURE_SMOKE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Ombra.App'">
+    <Compile Include="$(MSBuildThisFileDirectory)FeatureSmoke*.cs" />
+  </ItemGroup>
+</Project>

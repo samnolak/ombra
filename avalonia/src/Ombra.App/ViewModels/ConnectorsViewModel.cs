@@ -37,11 +37,12 @@ public sealed partial class PageFeedbackViewModel(Func<Task> restart) : Observab
 }
 
 /// <summary>What a connector row says about the server (a status badge).</summary>
-public enum ConnectorState { Off, Connected, NotConnected, Pending, Testing, Failed, Replaced }
+public enum ConnectorState { Off, Connected, NotConnected, Pending, Testing, Failed, Replaced, NoTools }
 
 /// <summary>One MCP server of the Connectors page: omp's <c>/mcp list</c> line plus its entry in the config file.</summary>
 public sealed partial class McpServerRowViewModel : ObservableObject
 {
+    private static readonly SecretRedactor DisplayRedactor = new();
     private readonly ConnectorsViewModel _page;
     private bool _syncing;
 
@@ -60,6 +61,9 @@ public sealed partial class McpServerRowViewModel : ObservableObject
     /// <summary>How many of this session's tools are the server's (<c>/tools</c>): omp connected to it when it started.</summary>
     internal int SessionTools { get; set; }
 
+    /// <summary>The server as this session's omp has it now (<c>get_mcp_servers</c>); null when omp didn't say.</summary>
+    internal Ombra.Rpc.OmpMcpServer? Live { get; set; }
+
     /// <summary>The server's entry in its mcp.json (null when the file could not be read).</summary>
     internal JsonObject? Config { get; set; }
 
@@ -73,8 +77,13 @@ public sealed partial class McpServerRowViewModel : ObservableObject
     /// work on omp's own files only; the switch works (omp's disabledServers).</summary>
     public bool IsFromProjectFile => Entry.Scope == "file";
 
-    // The same words as the SSH hosts page and the form's choice: "All projects" / "This project"
-    public string ScopeLabel => Entry.Scope switch { "project" => Loc.T("This project"), "file" => SourceFile ?? Loc.T("Project file"), _ => Loc.T("All projects") };
+    // The list's scope word, as plugins and skills say it: the user's own, the project's, or the project file's name
+    public string ScopeLabel => Entry.Scope switch { "project" => Loc.T("Project"), "file" => SourceFile ?? Loc.T("Project"), _ => Loc.T("Personal") };
+
+    /// <summary>The project's own server in a folder the user has not trusted: omp leaves it out (MainViewModel.WorkspaceTrust.cs).</summary>
+    [ObservableProperty] private bool _needsTrust;
+
+    public bool IsProjectItem => Entry.Scope is "project" or "file";
 
     public string ScopeTip => Entry.Scope switch
     {
@@ -93,10 +102,11 @@ public sealed partial class McpServerRowViewModel : ObservableObject
     {
         get
         {
-            if (IsRemote) return Entry.Location;
+            if (IsRemote) return DisplayRedactor.Redact(Entry.Location);
             var command = McpConfigFile.GetString(Config, "command") ?? Entry.Location;
             var args = McpConfigFile.GetArgs(Config);
-            return args.Count == 0 ? command : command + " " + string.Join(' ', args.Select(a => a.Contains(' ', StringComparison.Ordinal) ? $"\"{a}\"" : a));
+            var detail = args.Count == 0 ? command : command + " " + string.Join(' ', args.Select(a => a.Contains(' ', StringComparison.Ordinal) ? $"\"{a}\"" : a));
+            return DisplayRedactor.Redact(detail);
         }
     }
 
@@ -122,7 +132,7 @@ public sealed partial class McpServerRowViewModel : ObservableObject
     private bool _isBusy;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsConnected), nameof(IsFailed), nameof(IsWorking), nameof(CanTest))]
+    [NotifyPropertyChangedFor(nameof(IsConnected), nameof(IsFailed), nameof(IsWorking), nameof(HasNoTools), nameof(CanTest))]
     private ConnectorState _state;
 
     [ObservableProperty] private string _stateText = "";
@@ -138,27 +148,52 @@ public sealed partial class McpServerRowViewModel : ObservableObject
     private string _tools = "";
 
     [ObservableProperty] private bool _isConfirmingRemove;
-    [ObservableProperty] private bool _isSignInOpen;
+
+    /// <summary>Sign-in state omp reports (<c>get_mcp_servers</c>): none | signed_in | signed_out | expired; empty when unknown.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAuth), nameof(AuthText), nameof(NeedsSignIn), nameof(SignInLabel), nameof(SuggestSignIn), nameof(CanSignInAgain))]
+    private string _auth = "";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SuggestSignIn), nameof(CanSignInAgain))]
+    private bool _isSigningIn;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSignInError))]
+    private string _signInError = "";
 
     public bool IsConnected => State == ConnectorState.Connected;
     public bool IsFailed => State == ConnectorState.Failed;
     public bool IsWorking => State is ConnectorState.Testing or ConnectorState.Pending;
+    /// <summary>omp connected to the server, but it offers no tools: nothing of it reaches the model.</summary>
+    public bool HasNoTools => State == ConnectorState.NoTools;
     public bool HasFailure => Failure.Length > 0;
     public bool HasTools => Tools.Length > 0;
     public bool CanTest => IsEnabled && State != ConnectorState.Testing && !IsFromProjectFile;
     public bool CanToggle => !IsBusy;
 
-    /// <summary>A remote server that needs a sign-in (OAuth configured, or the test was refused).</summary>
-    public bool SuggestSignIn => IsRemote && (UsesOAuth || Failure.Contains("401", StringComparison.Ordinal)
-                                              || Failure.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase)
-                                              || Failure.Contains("OAuth", StringComparison.OrdinalIgnoreCase));
+    public bool HasAuth => Auth is "signed_in" or "signed_out" or "expired";
+    public bool NeedsSignIn => Auth is "signed_out" or "expired";
+    public bool HasSignInError => SignInError.Length > 0;
+    public string AuthText => Auth switch { "signed_in" => Loc.T("Signed in"), "expired" => Loc.T("Sign-in expired"), "signed_out" => Loc.T("Signed out"), _ => "" };
+    public string SignInLabel => Auth is "expired" or "signed_in" ? Loc.T("Sign in again") : Loc.T("Sign in");
 
-    public string ReauthCommand => "/mcp reauth " + OmpMcp.Quote(Name);
-    public string RemoveQuestion => (Scope == "project" ? Loc.F("Remove “{0}” from this project's connectors?", Name) : Loc.F("Remove “{0}” from your connectors?", Name));
+    /// <summary>The row offers Sign in: omp says it needs one, or a remote server refused the test (401, OAuth).</summary>
+    public bool SuggestSignIn => IsEnabled && !IsSigningIn && (NeedsSignIn
+        || IsRemote && Auth != "signed_in" && (Failure.Contains("401", StringComparison.Ordinal)
+                                                || Failure.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase)
+                                                || Failure.Contains("OAuth", StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary>The menu's sign-in for a signed-in server (a new account, a new scope).</summary>
+    public bool CanSignInAgain => IsEnabled && !IsSigningIn && Auth == "signed_in";
+
+    public string RemoveQuestion => (Scope == "project" ? Loc.F("Remove the MCP server “{0}” from this project?", Name) : Loc.F("Remove the MCP server “{0}”?", Name));
 
     partial void OnIsEnabledChanged(bool value)
     {
         OnPropertyChanged(nameof(CanTest));
+        OnPropertyChanged(nameof(SuggestSignIn));
+        OnPropertyChanged(nameof(CanSignInAgain));
         if (!_syncing) _ = _page.SetEnabledAsync(this, value);
     }
 
@@ -173,32 +208,30 @@ public sealed partial class McpServerRowViewModel : ObservableObject
     {
         foreach (var p in new[] { nameof(Detail), nameof(Extras), nameof(HasExtras), nameof(UsesOAuth), nameof(CanEdit), nameof(SuggestSignIn),
                      nameof(Transport), nameof(TransportLabel), nameof(IsRemote), nameof(Name), nameof(Scope), nameof(ScopeLabel), nameof(ScopeTip),
-                     nameof(IsFromProjectFile), nameof(HasMenu), nameof(FileNote), nameof(CanTest) })
+                     nameof(IsFromProjectFile), nameof(HasMenu), nameof(FileNote), nameof(CanTest), nameof(IsProjectItem) })
             OnPropertyChanged(p);
     }
 
     [RelayCommand] private Task Test() => _page.TestAsync(this);
     [RelayCommand] private void Edit() => _page.OpenEditForm(this);
-
-    [RelayCommand]
-    private void AskRemove()
-    {
-        IsSignInOpen = false;
-        IsConfirmingRemove = true;
-    }
-
+    [RelayCommand] private void AskRemove() => IsConfirmingRemove = true;
     [RelayCommand] private void CancelRemove() => IsConfirmingRemove = false;
     [RelayCommand] private Task Remove() => _page.RemoveAsync(this);
+    [RelayCommand] private Task SignIn() => _page.SignInAsync(Name);
+    [RelayCommand] private Task CancelSignIn() => _page.CancelSignInAsync(Name);
+}
 
-    [RelayCommand]
-    private void ShowSignIn()
-    {
-        IsConfirmingRemove = false;
-        IsSignInOpen = !IsSignInOpen;
-    }
+/// <summary>omp's prompt that a connector needs the user to sign in (again): <c>mcp_auth_required</c>.</summary>
+public sealed partial class McpAuthPromptViewModel(ConnectorsViewModel page, McpAuthRequest request) : ObservableObject
+{
+    public string Server => request.Server;
+    public bool Expired => request.Expired;
+    public string Text => Expired ? Loc.F("“{0}” needs you to sign in again: its sign-in expired or was revoked.", Server)
+        : Loc.F("“{0}” needs you to sign in before omp can use its tools.", Server);
+    public string SignInLabel => Expired ? Loc.T("Sign in again") : Loc.T("Sign in");
 
-    [RelayCommand] private void CopyReauth() => _page.Copy(ReauthCommand);
-    [RelayCommand] private void OpenTerminal() => _page.OpenOmpTerminal();
+    [RelayCommand] private Task SignIn() => page.SignInAsync(Server);
+    [RelayCommand] private void Dismiss() => page.DismissPrompt(Server);
 }
 
 /// <summary>A resource or prompt a connected server offers.</summary>
@@ -256,19 +289,24 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         OptionsFeedback = new PageFeedbackViewModel(RestartOmpAsync);
         owner.SettingsCategoryShown += key =>
         {
-            if (key != "connectors") return;
+            if (key != "plugins") return;
             ClearFeedback();
             _ = RefreshAsync();
         };
         owner.PropertyChanged += OnOwnerChanged;
+        SyncPrompts();
         // Created while the page is already shown (the page asked for it late): load now.
-        if (owner.IsSettingsOpen && owner.SettingsCategory == "connectors") _ = RefreshAsync();
+        if (owner.IsSettingsOpen && owner.SettingsCategory == "plugins") _ = RefreshAsync();
     }
 
     public ObservableCollection<McpServerRowViewModel> Servers { get; } = [];
     public ObservableCollection<McpItemViewModel> Resources { get; } = [];
     public ObservableCollection<McpItemViewModel> Prompts { get; } = [];
     public ObservableCollection<SmitheryResultViewModel> SearchResults { get; } = [];
+
+    /// <summary>Connectors omp says need the user to sign in (again) (<c>mcp_auth_required</c>).</summary>
+    public ObservableCollection<McpAuthPromptViewModel> AuthPrompts { get; } = [];
+    public bool HasAuthPrompts => AuthPrompts.Count > 0;
 
     /// <summary>Feedback for the list, its rows and the form.</summary>
     public PageFeedbackViewModel Feedback { get; }
@@ -307,6 +345,10 @@ public sealed partial class ConnectorsViewModel : ObservableObject
     public bool ShowList => IsOmpRunning && LoadError.Length == 0 && Servers.Count > 0;
     public bool HasLoadError => LoadError.Length > 0;
     public bool HasOtherTools => OtherTools.Length > 0;
+
+    /// <summary>omp reconnects every connector (Reconnect all).</summary>
+    [ObservableProperty] private bool _isReconnecting;
+
     public bool CanChange => IsOmpRunning;
     public bool CanStartOmp => _owner.CanRecover;
 
@@ -342,8 +384,8 @@ public sealed partial class ConnectorsViewModel : ObservableObject
 
     [ObservableProperty] private bool _isSubmitting;
 
-    public string FormTitle => IsEditing ? Loc.F("Edit “{0}”", FormName) : Loc.T("Add a connector");
-    public string FormSubmitLabel => IsEditing ? Loc.T("Save") : Loc.T("Add connector");
+    public string FormTitle => IsEditing ? Loc.F("Edit “{0}”", FormName) : Loc.T("Add an MCP server");
+    public string FormSubmitLabel => IsEditing ? Loc.T("Save") : Loc.T("Add server");
     public bool CanEditName => !IsEditing;
     public bool FormIsStdio => FormTransport == "stdio";
     public bool FormIsRemote => !FormIsStdio;
@@ -398,6 +440,12 @@ public sealed partial class ConnectorsViewModel : ObservableObject
 
     private void OnOwnerChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(MainViewModel.McpAuthRequests))
+        {
+            SyncPrompts();
+            if (_owner.IsSettingsOpen && _owner.SettingsCategory == "plugins" && Servers.Count > 0) _ = ReloadLiveAsync();
+            return;
+        }
         if (e.PropertyName != nameof(MainViewModel.Phase)) return;
         var phase = _owner.Phase;
         var was = _lastPhase;
@@ -406,7 +454,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         // omp starts again (a restart, a crash, another session): it reads every file anew.
         if (phase == SessionPhase.Starting) RestartDone();
         if (phase == SessionPhase.Ready && was is SessionPhase.Starting or SessionPhase.Stopped or SessionPhase.Faulted or SessionPhase.NotStarted
-            && _owner.IsSettingsOpen && _owner.SettingsCategory == "connectors")
+            && _owner.IsSettingsOpen && _owner.SettingsCategory == "plugins")
             _ = RefreshAsync();
     }
 
@@ -435,17 +483,19 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             if (version != _loadVersion) return;
             if (!list.Ok || list.AgentInvoked)
             {
-                LoadError = list.Unsupported ? Loc.T("This version of omp can't list connectors. Update omp to manage them here.")
-                    : list.Error is { Length: > 0 } why && !list.AgentInvoked ? Loc.T("Couldn't read the connectors from omp: ") + why + "."
-                    : Loc.T("Couldn't read the connectors from omp. Try again.");
+                LoadError = list.Unsupported ? Loc.T("This version of omp can't list MCP servers. Update omp to manage them here.")
+                    : list.Error is { Length: > 0 } why && !list.AgentInvoked ? Loc.T("Couldn't read the MCP servers from omp: ") + why + "."
+                    : Loc.T("Couldn't read the MCP servers from omp. Try again.");
                 return;
             }
             if (OmpMcp.ParseList(list.Output) is not { } entries)
             {
-                LoadError = list.Output.Length > 0 ? list.Output : Loc.T("omp didn't return its connector list. Try again.");
+                LoadError = list.Output.Length > 0 ? list.Output : Loc.T("omp didn't return its MCP server list. Try again.");
                 return;
             }
             var tools = await _owner.RunOmpCommandAsync("/tools");
+            if (version != _loadVersion) return;
+            var live = await LiveStatesAsync();
             if (version != _loadVersion) return;
             LoadError = "";
             // omp also loads the project folder's own mcp.json and .mcp.json (discovery/mcp-json.ts), which /mcp list
@@ -472,6 +522,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
                 row.IsBusy = false;
                 row.IsConfirmingRemove = false;
                 row.SessionTools = byServer.TryGetValue(entry.Name, out var t) ? t.Count : 0;
+                row.Live = live.GetValueOrDefault(entry.Name);
                 ApplySessionState(row, keepTest: old is not null);
                 Servers.Add(row);
             }
@@ -485,6 +536,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
                 row.Notify();
                 row.IsBusy = false;
                 row.SessionTools = byServer.TryGetValue(entry.Name, out var t) ? t.Count : 0;
+                row.Live = live.GetValueOrDefault(entry.Name);
                 ApplySessionState(row, keepTest: false);
                 Servers.Add(row);
             }
@@ -523,10 +575,15 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowList));
     }
 
-    /// <summary>The badge from what this session has: tools of the server mean omp connected to it when it started.</summary>
+    /// <summary>
+    /// The badge from what this session has: omp's own state of the server when it reports it (connection, tools,
+    /// sign-in), else tools of the server in <c>/tools</c> mean omp connected to it when it started.
+    /// </summary>
     private void ApplySessionState(McpServerRowViewModel row, bool keepTest)
     {
-        var toolCount = row.SessionTools;
+        var live = row.Live;
+        row.Auth = live?.Auth ?? "";
+        var toolCount = live is { Status: "connected" } ? live.ToolCount : row.SessionTools;
         if (keepTest && row.Tested && row.IsEnabled && !_pending.Contains(row.Name)) return;
         row.Tested = false;
         row.Failure = "";
@@ -539,10 +596,39 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             (row.State, row.StateText) = (ConnectorState.Replaced, Loc.T("omp uses its built-in Exa search instead"));
         else if (toolCount > 0)
             (row.State, row.StateText) = (ConnectorState.Connected, Loc.Plural(toolCount, "Connected · {0} tool", "Connected · {0} tools"));
+        else if (live is { Status: "connected" })
+            (row.State, row.StateText) = (ConnectorState.NoTools, Loc.T("Connected · 0 tools"));
+        else if (live is { NeedsSignIn: true })
+            (row.State, row.StateText) = (ConnectorState.NotConnected, Loc.T("Not connected: sign-in needed"));
         else if (row.Scope is "project" or "file" && HasOptions && !ProjectServers)
             (row.State, row.StateText) = (ConnectorState.Off, Loc.T("Skipped: servers from project files are off"));
         else
             (row.State, row.StateText) = (ConnectorState.NotConnected, Loc.T("Not connected in this session"));
+    }
+
+    /// <summary>omp's state of each server by name; empty when this omp can't tell (an older one) or didn't answer.</summary>
+    private async Task<Dictionary<string, Ombra.Rpc.OmpMcpServer>> LiveStatesAsync()
+    {
+        try
+        {
+            var list = await _owner.GetConnectorStatesAsync();
+            return list.GroupBy(s => s.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        }
+        catch (Exception e) when (IsOmpFailure(e)) { return new(StringComparer.Ordinal); }
+    }
+
+    private static bool IsOmpFailure(Exception e) =>
+        e is Ombra.Rpc.RpcCommandException or TimeoutException or Ombra.Rpc.RpcConnectionClosedException or OmpNotRunningException or OperationCanceledException;
+
+    /// <summary>omp's states after a sign-in or a reconnect, on the rows (a test result gives way: the state is newer).</summary>
+    private void ApplyLive(IEnumerable<Ombra.Rpc.OmpMcpServer> servers)
+    {
+        foreach (var server in servers)
+            foreach (var row in Servers.Where(r => r.Name == server.Name))
+            {
+                row.Live = server;
+                ApplySessionState(row, keepTest: false);
+            }
     }
 
     /// <summary>omp's list of servers switched off by name (<c>disabledServers</c> in the user file).</summary>
@@ -740,9 +826,9 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         var args = Lines(FormArgs).ToList();
         var env = new List<KeyValuePair<string, string>>();
         var headers = new List<KeyValuePair<string, string>>();
-        if (OmpMcp.ValidateName(name) is { } bad) return (bad, args, env, headers);
+        if (OmpMcp.ValidateName(name) is { } bad) return (Loc.T(bad), args, env, headers);
         if (!IsEditing && Servers.Any(s => s.Name == name && s.Scope == FormScope))
-            return ((FormScope == "project" ? Loc.F("There is already a connector named “{0}” in this project.", name) : Loc.F("There is already a connector named “{0}” in your settings.", name)), args, env, headers);
+            return ((FormScope == "project" ? Loc.F("There is already an MCP server named “{0}” in this project.", name) : Loc.F("There is already an MCP server named “{0}” in your settings.", name)), args, env, headers);
         if (FormIsStdio)
         {
             if (FormCommand.Trim().Length == 0) return (Loc.T("Enter the command that starts the server (for example npx)."), args, env, headers);
@@ -799,7 +885,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
     {
         if (!_owner.CanRunOmpCommands)
         {
-            FormError = Loc.T("omp isn't running. Start it, then add the connector: omp checks it and saves it.");
+            FormError = Loc.T("omp isn't running. Start it, then add the server: omp checks it and saves it.");
             return;
         }
         var name = FormName.Trim();
@@ -893,6 +979,98 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         await RefreshAsync();
     }
 
+    // ── Sign-in and reconnect (omp's mcp_login / mcp_reconnect) ──
+
+    private void SyncPrompts()
+    {
+        AuthPrompts.Clear();
+        foreach (var request in _owner.McpAuthRequests) AuthPrompts.Add(new McpAuthPromptViewModel(this, request));
+        OnPropertyChanged(nameof(HasAuthPrompts));
+    }
+
+    private async Task ReloadLiveAsync()
+    {
+        var version = _loadVersion;
+        var live = await LiveStatesAsync();
+        if (version == _loadVersion) ApplyLive(live.Values);
+    }
+
+    /// <summary>
+    /// Signs in to a connector: omp sends its sign-in page, which opens in the browser (MainViewModel.Mcp.cs), and
+    /// answers when the user finished there or cancelled.
+    /// </summary>
+    internal async Task SignInAsync(string name)
+    {
+        var row = Servers.FirstOrDefault(r => r.Name == name);
+        if (row is { IsSigningIn: true }) return;
+        ClearFeedback();
+        if (row is not null)
+        {
+            row.IsSigningIn = true;
+            row.SignInError = "";
+        }
+        try
+        {
+            var server = await _owner.SignInToConnectorAsync(name);
+            if (server is not null) ApplyLive([server]);
+            Feedback.Notice = server is { Status: "connected", ToolCount: > 0 }
+                ? Loc.Plural(server.ToolCount, "Signed in to “{1}”: {0} tool ready.", "Signed in to “{1}”: {0} tools ready.", name)
+                : Loc.F("Signed in to “{0}”.", name);
+        }
+        catch (Ombra.Rpc.RpcCommandException e) when (e.Code == "mcp_login_cancelled")
+        {
+            Feedback.Notice = Loc.F("Sign-in to “{0}” cancelled.", name);
+        }
+        catch (Exception e) when (IsOmpFailure(e))
+        {
+            var why = e switch
+            {
+                Ombra.Rpc.RpcCommandException c => c.Error,
+                TimeoutException => Loc.T("The sign-in took too long. Try again."),
+                _ => Loc.T("omp isn't running."),
+            };
+            if (row is not null) row.SignInError = why;
+            else Feedback.Error = why;
+        }
+        finally
+        {
+            if (row is not null) row.IsSigningIn = false;
+        }
+    }
+
+    internal async Task CancelSignInAsync(string name)
+    {
+        try { await _owner.CancelConnectorSignInAsync(name); }
+        catch (Exception e) when (IsOmpFailure(e)) { Feedback.Error = e is Ombra.Rpc.RpcCommandException c ? c.Error : Loc.T("omp isn't running."); }
+    }
+
+    internal void DismissPrompt(string name) => _owner.DismissConnectorSignInPrompt(name);
+
+    /// <summary>omp finds its connectors again and reconnects every one (no restart; a changed mcp.json too).</summary>
+    [RelayCommand]
+    private async Task ReconnectAllAsync()
+    {
+        if (IsReconnecting) return;
+        ClearFeedback();
+        IsReconnecting = true;
+        try
+        {
+            var servers = await _owner.ReconnectConnectorsAsync();
+            _pending.Clear();
+            ApplyLive(servers);
+            var connected = servers.Count(s => s.Status == "connected");
+            Feedback.Notice = Loc.F("omp reconnected the MCP servers: {0} of {1} connected.", connected, servers.Count);
+        }
+        catch (Exception e) when (IsOmpFailure(e))
+        {
+            Feedback.Error = e is Ombra.Rpc.RpcCommandException c ? c.Error : Loc.T("omp isn't running.");
+        }
+        finally
+        {
+            IsReconnecting = false;
+        }
+    }
+
     // ── Resources and prompts ──
 
     [RelayCommand]
@@ -923,7 +1101,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             foreach (var i in resourceItems) Resources.Add(new McpItemViewModel(this, i, false));
             foreach (var i in promptItems) Prompts.Add(new McpItemViewModel(this, i, commands.Contains($"{i.Server}:{i.Name}")));
             if (Resources.Count == 0 && Prompts.Count == 0)
-                ItemsMessage = noResources == OmpMcp.NoServers ? Loc.T("No connectors are set up yet.") : Loc.T("The connected servers offer no resources or prompts.");
+                ItemsMessage = noResources == OmpMcp.NoServers ? Loc.T("No MCP servers are set up yet.") : Loc.T("The connected servers offer no resources or prompts.");
         }
         finally
         {
@@ -1000,8 +1178,8 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         NeedsRestart = true;
         foreach (var f in new[] { Feedback, OptionsFeedback }) f.ShowRestart = ReferenceEquals(f, where);
         where.RestartText = _owner.IsRunning
-            ? Loc.T("omp reads connectors when it starts. Restart it once the reply finishes.")
-            : Loc.T("omp reads connectors when it starts. Restart it to apply the change.");
+            ? Loc.T("omp reads MCP servers when it starts. Restart it once the reply finishes.")
+            : Loc.T("omp reads MCP servers when it starts. Restart it to apply the change.");
     }
 
     private async Task RestartOmpAsync()
@@ -1014,11 +1192,11 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             {
                 RestartDone();
                 _owner.Plugins.RestartDone();
-                where.Notice = Loc.T("omp restarted and read the connectors again.");
+                where.Notice = Loc.T("omp restarted and read the MCP servers again.");
                 await RefreshAsync();
             }
             // The shown chat is replying: its omp restarts when the reply ends (the other chats' already did, or do then)
-            else where.RestartText = Loc.T("omp is replying: it restarts and reads the connectors when the reply ends.");
+            else where.RestartText = Loc.T("omp is replying: it restarts and reads the MCP servers when the reply ends.");
         }
         finally
         {

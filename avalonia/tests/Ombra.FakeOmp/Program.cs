@@ -1,7 +1,7 @@
-// Scripted omp stand-in speaking the RPC wire format of omp 18.2.0 (docs/rpc.md), for tests only.
-//   Ombra.FakeOmp <scenario>
+// Scripted shared engine speaking the root engine protocol and multiplexed omp RPC, for tests only.
+// Session scenarios belong in engine_open.arguments; no child process is created for a chat.
 // Scenarios: normal | nonterminal-end | bad-chunk | crash-before-ready | no-models | exit-on-request | garbage | out-of-order | duplicate | silent |
-//            big-messages | ignore-eof | stderr-flood | slow-stream | approval | approval-timeout | ask | no-prompt-ack | queue-stream[-N] | abort-hangs | approval-chain | reload-fails-once | markdown | markdown-stream | todo
+//            big-messages | ignore-eof | stderr-flood | slow-stream | tool-flood | approval | approval-timeout | ask | no-prompt-ack | queue-stream[-N] | abort-hangs | approval-chain | reload-fails-once | markdown | markdown-stream | todo
 //            plan (each prompt moves a two-phase plan on; the third replaces it) | subagents (subagent frames, get_subagents, /jobs)
 //            recorder | recorder-fails (audio recorder stand-ins, not omp) | cli <args> (omp's CLI subcommands, see FAKE_OMP_CLI)
 using System.Collections.Concurrent;
@@ -9,7 +9,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-var scenario = args.Length > 0 ? args[0] : "normal";
+var scenario = args.Length > 0 ? args[0] : "";
+if (scenario is "draft-owner" or "client-owner" or "admission-owner") return Ombra.FakeOmp.JournalOwnershipProcess.Run(args);
+if (scenario.StartsWith("windows-owned-", StringComparison.Ordinal)) return Ombra.FakeOmp.OwnedProcessLifetimeProcess.Run(args);
 // Not omp: a stand-in for a system audio recorder (parecord / arecord) writing raw 16 kHz mono float32 to stdout.
 if (scenario == "recorder")
 {
@@ -105,16 +107,42 @@ static string FakeUsageJson()
         disabledCredentials = Array.Empty<object>(),
     });
 }
-// How this omp was started, for tests of what the app passes to every omp: FAKE_OMP_LAUNCH_LOG names a file that gets
-// one JSON line per start with the arguments and every PI_* / CMUX_* / NODE_* variable this process sees.
+// Physical process starts are separate from logical session launches, so tests can detect a spare engine.
+if (Environment.GetEnvironmentVariable("FAKE_OMP_ENGINE_LOG") is { Length: > 0 } engineLog)
+    File.AppendAllText(engineLog, JsonSerializer.Serialize(new { args, pid = Environment.ProcessId }) + "\n");
+if (scenario == "root-crash-before-ready")
+{
+    Console.Error.WriteLine("fatal: no model configured (fake shared engine)");
+    return 3;
+}
+// Crash-looping engine for automatic recovery: while FAKE_OMP_CRASH_ON_START names an existing file, every physical
+// start (already logged above) exits before the host is ready.
+if (Environment.GetEnvironmentVariable("FAKE_OMP_CRASH_ON_START") is { Length: > 0 } crashOnStart && File.Exists(crashOnStart))
+{
+    Console.Error.WriteLine("fatal: the fake shared engine crashed while starting");
+    return 3;
+}
+// A start that never becomes ready (while FAKE_OMP_HANG_ON_START names an existing file): it only reads stdin and
+// exits once its owner closes it, so a cancelled or abandoned start leaves no process behind.
+if (Environment.GetEnvironmentVariable("FAKE_OMP_HANG_ON_START") is { Length: > 0 } hangOnStart && File.Exists(hangOnStart))
+{
+    using var input = Console.OpenStandardInput();
+    input.CopyTo(Stream.Null);
+    return 4;
+}
+return await Ombra.FakeOmp.FakeEngineHost.RunAsync(RunSessionAsync, scenario == "unsupported-engine-protocol" ? 2 : 1);
+
+static async Task<int> RunSessionAsync(Ombra.FakeOmp.FakeEngineSession session, string[] args, string cwd)
+{
+var scenario = args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) ? args[0] : "normal";
 if (Environment.GetEnvironmentVariable("FAKE_OMP_LAUNCH_LOG") is { Length: > 0 } launchLog)
 {
     var seen = new JsonObject();
     foreach (System.Collections.DictionaryEntry e in Environment.GetEnvironmentVariables())
         if (e.Key is string k && (k.StartsWith("PI_", StringComparison.Ordinal) || k.StartsWith("CMUX_", StringComparison.Ordinal) || k.StartsWith("NODE_", StringComparison.Ordinal)))
             seen[k] = e.Value as string;
-    var started = new JsonObject { ["args"] = new JsonArray(args.Select(a => (JsonNode?)a).ToArray()), ["env"] = seen };
-    File.AppendAllText(launchLog, started.ToJsonString() + "\n");
+    Ombra.FakeOmp.FakeEngineHost.AppendLog(launchLog,
+        JsonSerializer.Serialize(new { args, cwd, pid = Environment.ProcessId, env = seen }) + "\n");
 }
 // Builtin slash commands answered like omp answers them over RPC: FAKE_OMP_COMMANDS names a JSON file mapping a
 // command prefix ("/mcp list") to the text it prints; each command sent is appended to FAKE_OMP_COMMAND_LOG.
@@ -122,66 +150,57 @@ var cannedCommands = Environment.GetEnvironmentVariable("FAKE_OMP_COMMANDS") is 
     ? JsonNode.Parse(File.ReadAllText(cmdFile)) as JsonObject : null;
 var resumeAt = Array.IndexOf(args, "--resume");
 var resumePath = resumeAt >= 0 && resumeAt + 1 < args.Length ? args[resumeAt + 1] : null;
-var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
-var stdin = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
-var gate = new object();
-var protocol = 1;
 var streaming = false;
 CancellationTokenSource? run = null;
+Task? activeRun = null;
 var dialogs = new ConcurrentDictionary<string, TaskCompletionSource<JsonNode?>>();
 var dialogSeq = 0;
 var stateCalls = 0;
+var wakeHold = false;
+var wakeSilent = false;
+(string? Id, object Data)? heldWake = null;
+var inputCalls = 0;
+var abortCalls = 0;
 
 // Like omp 18.2.0's tool approval (extensibility/extensions/wrapper.ts): a select that the run's abort signal does
 // not reach, answered only by extension_ui_response or by its own timeout (then the default: undefined = denied).
+// A structured Deny's reason (the owned engine's `reason`) is kept in lastDenyReason.
+string? lastDenyReason = null;
 async Task<string?> AskAsync(object request, string id, int? timeoutMs)
 {
     var tcs = new TaskCompletionSource<JsonNode?>(TaskCreationOptions.RunContinuationsAsynchronously);
     dialogs[id] = tcs;
+    using var stopped = session.Stopping.Register(() => tcs.TrySetResult(null));
     Emit(request);
     var done = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs ?? Timeout.Infinite));
     dialogs.TryRemove(id, out _);
     if (done != tcs.Task) return null;
     var r = await tcs.Task;
+    lastDenyReason = r?["reason"]?.GetValue<string>();
     return r?["cancelled"]?.GetValue<bool>() == true ? null : r?["value"]?.GetValue<string>();
 }
 
-void Emit(object frame)
-{
-    var json = JsonSerializer.Serialize(frame);
-    lock (gate)
-    {
-        if (protocol == 2 && Encoding.UTF8.GetByteCount(json) + 1 > 1024 * 1024)
-        {
-            // Official v2 chunking: 256 KiB raw slices, base64, uninterrupted sequence.
-            var bytes = Encoding.UTF8.GetBytes(json);
-            var count = (bytes.Length + 262143) / 262144;
-            for (var i = 0; i < count; i++)
-            {
-                var slice = bytes.AsSpan(i * 262144, Math.Min(262144, bytes.Length - i * 262144));
-                stdout.WriteLine(JsonSerializer.Serialize(new
-                {
-                    type = "rpc_chunk", chunkId = "rpc-1", index = i, count, byteLength = bytes.Length, data = Convert.ToBase64String(slice),
-                }));
-            }
-            return;
-        }
-        stdout.WriteLine(json);
-    }
-}
+void Emit(object frame) => session.Emit(frame);
 
-void Respond(string? id, string command, object? data = null, string? error = null)
+void Respond(string? id, string command, object? data = null, string? error = null, string? code = null)
 {
     var o = new JsonObject { ["type"] = "response", ["command"] = command, ["success"] = error is null };
     if (id is not null) o["id"] = id;
     if (data is not null) o["data"] = JsonSerializer.SerializeToNode(data);
     if (error is not null) o["error"] = error;
+    if (code is not null) o["code"] = code;
     Emit(o);
 }
+// MCP servers (FakeMcp.cs) and background jobs (FakeJobs.cs) over RPC, in every scenario, like the owned engine
+using var mcp = new Ombra.FakeOmp.FakeMcp(Emit, Respond);
+var jobs = new Ombra.FakeOmp.FakeJobs(Respond);
+var planMode = new Ombra.FakeOmp.FakePlanMode(Emit, Respond, supported: scenario != "no-plan-mode");
+var hostTools = new Ombra.FakeOmp.FakeHostTools(Emit, Respond); // FakeHostTools.cs: set_host_tools, host_tool_* frames
+var btwGoal = new Ombra.FakeOmp.FakeBtwGoal(Emit, Respond, supported: scenario != "no-goal"); // FakeBtwGoal.cs: goal, btw*, goal_updated/btw_* frames
 
 // Sessions like omp 18.2.0: <root>/<project>/<file>.jsonl with a title line and a session header (cwd).
 var sessionsRoot = Environment.GetEnvironmentVariable("FAKE_SESSION_DIR") ?? Path.Combine(Path.GetTempPath(), $"ombra-fake-{Environment.ProcessId}");
-var cwd = Environment.CurrentDirectory;
+// cwd belongs to this logical session; never mutate the process working directory.
 var history = new List<object>();
 string? sessionName = null;
 var model = (provider: "fake", id: "model");
@@ -195,13 +214,25 @@ var fastMode = false;
 CancellationTokenSource? shellAbort = null;
 var autoCompaction = true;
 var autoRetry = true;
+var contextPercent = 1.25;
+(string? Id, object Data)? heldRefresh = null;
+JsonNode? usageLimit = null;
+JsonObject? usageLimitByModel = null;
+string? freshSessionId = null;
+var holdUsageState = false;
+var heldUsageStates = new List<(string? Id, object Data)>();
+var changeUsageOnAccount = false;
+JsonNode? usageAfterAccountChange = null;
+string? remainingAccountSource = null;
 // The option setters are logged with the slash commands (FAKE_OMP_COMMAND_LOG), so tests see what reached omp
 void LogOption(string command, bool value)
 {
-    if (Environment.GetEnvironmentVariable("FAKE_OMP_COMMAND_LOG") is { Length: > 0 } log) File.AppendAllText(log, $"{command} {(value ? "true" : "false")}\n");
+    if (Environment.GetEnvironmentVariable("FAKE_OMP_COMMAND_LOG") is { Length: > 0 } log) Ombra.FakeOmp.FakeEngineHost.AppendLog(log, $"{command} {(value ? "true" : "false")}\n");
 }
 var failNextMessages = false;
 object[] todoPhases = [];
+// set_ask_dialog: the ask tool's questions come as one `ask` request ("ask-form" scenario)
+var askDialogEnabled = false;
 // "plan" and "subagents" scenarios (the side panes): which prompt this is, omp's subagent subscription and registry.
 var planStep = 0;
 var subagentLevel = "off";
@@ -209,6 +240,7 @@ var liveSubagents = new ConcurrentDictionary<string, JsonObject>();
 var commandCatalog = new object[]
 {
     new { name = "compact", description = "Compact the conversation context", source = "builtin" },
+    new { name = "fresh", description = "Reset provider stream state without changing the local transcript", source = "builtin" },
     new { name = "stats", description = "Show session statistics", source = "builtin" },
     new { name = "stats-reset", description = "Reset the statistics", source = "builtin" }, // "/stats" is also a prefix of another command
     new { name = "rename", description = "Rename the session", input = new { hint = "<name>" }, source = "builtin" },
@@ -216,8 +248,6 @@ var commandCatalog = new object[]
     new { name = "skill:systematic-debugging", description = "Debug step by step", source = "skill" },
     new { name = "model", aliases = new[] { "m" }, description = "Switch model", source = "builtin" },
 };
-// The side panes' scenarios answer /jobs, and list it as omp lists the builtins it runs over RPC
-if (scenario is "plan" or "subagents") commandCatalog = [.. commandCatalog, new { name = "jobs", description = "Show background jobs", source = "builtin" }];
 // Like omp, which lists every builtin it runs over RPC (and runs them locally, never as a turn): the ones the app's
 // settings pages and panes read, and every command a test cans.
 commandCatalog = [.. commandCatalog,
@@ -272,7 +302,10 @@ bool LoadSession(string file)
 {
     var lines = File.ReadAllLines(file);
     var header = lines.Select(l => JsonNode.Parse(l)).First(n => n?["type"]?.GetValue<string>() == "session");
-    if (!string.Equals(header!["cwd"]!.GetValue<string>(), cwd, StringComparison.Ordinal)) return false;
+    var savedCwd = header!["cwd"]!.GetValue<string>();
+    // Logical opens retain the caller's spelling; a saved header may use the same folder's resolved path.
+    if (!Ombra.ClientCore.SessionCatalog.SamePath(savedCwd, cwd)) return false;
+    cwd = savedCwd;
     history.Clear();
     sessionName = JsonNode.Parse(lines[0])?["title"]?.GetValue<string>() is { Length: > 0 } t ? t : null;
     foreach (var n in lines.Select(l => JsonNode.Parse(l)).Where(n => n?["type"]?.GetValue<string>() == "message"))
@@ -281,6 +314,7 @@ bool LoadSession(string file)
     if (history.OfType<JsonNode>().LastOrDefault(m => m["role"]?.GetValue<string>() == "toolResult" && m["toolName"]?.GetValue<string>() == "todo")?["details"]?["phases"] is JsonArray saved)
         todoPhases = [.. saved.Select(p => (object)p!.DeepClone())];
     sessionFile = file;
+    freshSessionId = null;
     sessionOnDisk = true;
     return true;
 }
@@ -312,10 +346,85 @@ else sessionFile = NewSessionFile();
 
 object Assistant(string text) => new { role = "assistant", content = new[] { new { type = "text", text } }, stopReason = "stop" };
 
+// Controllable complete-line transcript reads for live-card consumers. Held replies retain the original page.
+var subagentTranscripts = new Dictionary<string, JsonArray>();
+var subagentPaths = new Dictionary<string, string>();
+var subagentRequests = new List<object>();
+var heldSubagentReads = new List<(string? Id, object Data, string? Error)>();
+var holdSubagentReads = false;
+var malformedSubagentRead = false;
+string? subagentReadError = null;
+// cancel_subagent / steer_subagent (rpc-mode.ts): what the client asked, and canned refusals for tests.
+var subagentControls = new List<object>();
+string? cancelSubagentError = null;
+string? steerSubagentError = null;
+void SubagentLifecycle(string agentId, int index, string status, string description)
+{
+    if (subagentLevel == "off") return;
+    Emit(new JsonObject { ["type"] = "subagent_lifecycle", ["payload"] = new JsonObject
+    {
+        ["id"] = agentId, ["agent"] = "task", ["agentSource"] = "bundled", ["description"] = description, ["status"] = status,
+        ["sessionFile"] = Path.Combine(Path.GetDirectoryName(sessionFile)!, agentId + ".jsonl"), ["parentToolCallId"] = "tk1", ["index"] = index, ["detached"] = true,
+    } });
+}
+var transcriptJson = new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+JsonArray Transcript(string agentId)
+{
+    if (subagentTranscripts.TryGetValue(agentId, out var transcript)) return transcript;
+    transcript = JsonSerializer.SerializeToNode(new object[]
+    {
+        new { role = "user", content = "Find where omp's todo phases reach the client." },
+        new { role = "assistant", content = new object[] { new { type = "text", text = "Searching for the readers." }, new { type = "toolCall", id = "c1", name = "grep", arguments = new { pattern = "todoPhases" } } } },
+        new { role = "toolResult", toolCallId = "c1", content = new[] { new { type = "text", text = "src/Ombra.ClientCore/ConversationState.cs:106" } }, isError = false },
+        new { role = "assistant", content = new[] { new { type = "text", text = "Found 3 readers." } } },
+    })!.AsArray();
+    subagentTranscripts[agentId] = transcript;
+    return transcript;
+}
+
+object TranscriptPage(string agentId, long fromByte)
+{
+    var transcript = Transcript(agentId);
+    var lines = transcript.Select(message => JsonSerializer.Serialize(new { type = "message", message }, transcriptJson) + "\n").ToArray();
+    var size = lines.Sum(line => (long)Encoding.UTF8.GetByteCount(line));
+    var reset = fromByte > size;
+    if (reset) fromByte = 0;
+    var messages = new JsonArray();
+    long position = 0;
+    for (var index = 0; index < lines.Length; index++)
+    {
+        if (position >= fromByte) messages.Add(transcript[index]?.DeepClone());
+        position += Encoding.UTF8.GetByteCount(lines[index]);
+    }
+    return new
+    {
+        sessionFile = subagentPaths.GetValueOrDefault(agentId) ?? Path.Combine(Path.GetDirectoryName(sessionFile)!, agentId + ".jsonl"),
+        fromByte, nextByte = malformedSubagentRead ? -1 : size, reset, entries = Array.Empty<object>(), messages,
+    };
+}
+var messagePages = new Ombra.FakeOmp.MessagePages();
+var historyBusyOnce = scenario is "history-busy" or "history-start-busy";
+var historyStaleOnce = scenario == "history-stale";
+var historyInvalidOnce = scenario is "history-malformed" or "history-bad-cursor";
+var historyPageRequests = 0;
+var historyStartDuringLoad = scenario == "history-live-start";
+var historyPauseCatalog = false;
+string? historyHeldCatalogId = null;
+if (scenario.StartsWith("history", StringComparison.Ordinal) && resumePath is null)
+{
+    for (var index = 0; index < 350; index++)
+        history.Add(index % 2 == 0 ? new { role = "user", content = "history-" + index } : Assistant("history-" + index));
+    WriteSessionFile();
+}
+
 // steer / follow_up while streaming (omp keeps them after an explicit abort; they go with the next run).
-var queue = new ConcurrentQueue<string>();
+var queue = new ConcurrentQueue<(string Text, bool Steering, JsonArray? Images)>();
 DateTime? lastQueuedAt = null;
 var queuedCount = 0;
+// "held-admission": a prompt containing HOLD is not admitted (an input hook still working) until an abort or
+// abort_and_prompt invalidates it; it is then answered cancelled, like omp's RpcUserInputGate.
+string? heldPromptId = null;
+var heldPromptText = "";
 
 object UserMessage(string text, JsonArray? images)
 {
@@ -352,7 +461,29 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
         Emit(new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = d } });
         if (delayMs > 0) { try { await Task.Delay(delayMs, ct); } catch (OperationCanceledException) { aborted = true; break; } }
     }
-    if (!aborted && scenario == "session")
+    if (!aborted && scenario == "tool-flood")
+    {
+        // Real pipe/backpressure fixture: sessions deliberately reuse the same tool identity and arguments.
+        const string toolCallId = "shared-tool";
+        Emit(new { type = "tool_execution_start", toolCallId, toolName = "bash", args = new { command = "tool-flood" } });
+        var output = new StringBuilder(message + ": ");
+        for (var index = 1; index <= 2048; index++)
+        {
+            if (ct.IsCancellationRequested) { aborted = true; break; }
+            output.Append('x');
+            Emit(new { type = "tool_execution_update", toolCallId, toolName = "bash",
+                args = new { command = "tool-flood" },
+                partialResult = new { content = new[] { new { type = "text", text = output.ToString() } }, details = new { } } });
+            if (index == 1024)
+            {
+                Emit(new { type = "tool_stream_update", toolCallId, toolName = "bash", update = new { delta = message + ": delta" } });
+                Emit(new { type = "notice", level = "info", message = message + ": midway" });
+            }
+        }
+        Emit(new { type = "tool_execution_end", toolCallId, toolName = "bash", isError = aborted,
+            result = new { content = new[] { new { type = "text", text = message + (aborted ? ": cancelled" : ": complete") } } } });
+    }
+    else if (!aborted && scenario == "session")
     {
         // A paced, realistic turn for the frame-by-frame review: thinking, streamed text, a read, a long command with
         // live output, a message with only a tool call, an edit with a diff, a failing command, todos, a Markdown answer.
@@ -680,6 +811,42 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
         sb.Append(answer);
         Emit(new { type = "tool_execution_end", toolCallId = "t1", toolName = "ask", result = new { content = new[] { new { type = "text", text = answer } } } });
     }
+    else if (!aborted && scenario == "ask-form")
+    {
+        // The owned engine's ask tool after set_ask_dialog: every question as one `ask` request, answered with one
+        // answer per question in order (rpc-mode.ts parseAskDialogResponse). Without the opt-in: a select per question.
+        Emit(new { type = "tool_execution_start", toolCallId = "af", toolName = "ask", args = new { questions = new[] { "Which color?", "Which extras?" } } });
+        string answer;
+        if (askDialogEnabled)
+        {
+            var tcs = new TaskCompletionSource<JsonNode?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            dialogs["af1"] = tcs;
+            using (session.Stopping.Register(() => tcs.TrySetResult(null)))
+            {
+                Emit(new
+                {
+                    type = "extension_ui_request", id = "af1", method = "ask",
+                    questions = new object[]
+                    {
+                        new { id = "color", question = "Which color?", header = "Color", options = new object[] { new { label = "Red", description = "warm" }, new { label = "Blue" } }, recommended = 0 },
+                        new { id = "extras", question = "Which extras?", header = "Extras", options = new object[] { new { label = "Tests" }, new { label = "Docs", preview = "README.md" } }, multi = true },
+                    },
+                });
+                var r = await tcs.Task;
+                dialogs.TryRemove("af1", out _);
+                if (Environment.GetEnvironmentVariable("FAKE_OMP_COMMAND_LOG") is { Length: > 0 } askLog && r is not null)
+                    Ombra.FakeOmp.FakeEngineHost.AppendLog(askLog, "ask " + r.ToJsonString() + "\n");
+                answer = r?["cancelled"]?.GetValue<bool>() == true || r?["answers"] is not JsonArray answers ? "cancelled"
+                    : answers.Count != 2 || answers[0]?["id"]?.GetValue<string>() != "color" || answers[1]?["id"]?.GetValue<string>() != "extras" ? "error: answers out of order"
+                    : string.Join(" ", answers.Select(a => $"{a!["id"]}=[{string.Join(",", (a["selectedOptions"] as JsonArray ?? []).Select(o => o!.GetValue<string>()))}]"
+                        + (a["customInput"]?.GetValue<string>() is { } own ? $"+{own}" : "")));
+            }
+        }
+        else
+            answer = "color=" + (await AskAsync(new { type = "extension_ui_request", id = "afs", method = "select", title = "Which color?", options = new[] { "Red (Recommended)", "Blue" } }, "afs", null) ?? "none");
+        sb.Append(answer);
+        Emit(new { type = "tool_execution_end", toolCallId = "af", toolName = "ask", result = new { content = new[] { new { type = "text", text = answer } } } });
+    }
     else if (!aborted && scenario == "approval-chain")
     {
         // Like omp's agent loop: a denied approval fails tool 1 and the loop goes on to tool 2 before the abort
@@ -694,9 +861,10 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
     }
     else if (!aborted && scenario == "approval-rules")
     {
-        // omp 18.8's approval prompts as they are (tools/approval.ts formatApprovalPrompt with bash's and write's
-        // formatApprovalDetails): one request per line of the prompt — "write <path>" for the write tool, any other line a
-        // bash command — asked one after the other. FAKE_OMP_APPROVAL_LOG receives "<answer> <line>" for each.
+        // The owned engine's approvals: omp's text prompt (tools/approval.ts formatApprovalPrompt with bash's and write's
+        // formatApprovalDetails) plus the typed `approval` request. One request per line of the prompt — "write <path>"
+        // for the write tool, any other line a bash command — asked one after the other. FAKE_OMP_APPROVAL_LOG receives
+        // "<answer> <line>" for each, and " reason=<reason>" after a structured Deny with a reason.
         var requests = message.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         for (var r = 0; r < requests.Length; r++)
         {
@@ -707,11 +875,17 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
             Emit(new { type = "tool_execution_start", toolCallId = tid, toolName = tool, args = write ? (object)new { path = line[6..], content = "hello" } : new { command = line } });
             var did = $"ap{Interlocked.Increment(ref dialogSeq)}";
             var title = write ? $"Allow tool: write\nPath: {line[6..]}\nContent:\nhello" : $"Allow tool: bash\nCommand: {line}";
-            var choice = await AskAsync(new { type = "extension_ui_request", id = did, method = "select", title, options = new[] { "Approve", "Deny" } }, did, null);
+            string[] scopes = ["once", "session", "always"];
+            var approval = write
+                ? (object)new { tool, toolCallId = tid, risk = "write", details = new[] { $"Path: {line[6..]}", "Content:", "hello" }, scopes }
+                : new { tool, toolCallId = tid, risk = "exec", details = new[] { $"Command: {line}" }, command = line, scopes };
+            var choice = await AskAsync(new { type = "extension_ui_request", id = did, method = "select", title, options = new[] { "Approve", "Deny" }, approval }, did, null);
+            var reason = choice == "Deny" ? lastDenyReason : null;
             if (Environment.GetEnvironmentVariable("FAKE_OMP_APPROVAL_LOG") is { Length: > 0 } approvalLog)
-                File.AppendAllText(approvalLog, $"{choice ?? "(none)"} {line}\n");
+                Ombra.FakeOmp.FakeEngineHost.AppendLog(approvalLog, $"{choice ?? "(none)"} {line}{(reason is null ? "" : " reason=" + reason)}\n");
             var ok = choice == "Approve";
-            Emit(new { type = "tool_execution_end", toolCallId = tid, toolName = tool, isError = !ok, result = new { content = new[] { new { type = "text", text = ok ? "ran: " + line : "Tool call denied by user: " + tool } } } });
+            var denied = "Tool call denied by user: " + tool + (reason is null ? "" : "\nThe user said (approval prompt): " + JsonSerializer.Serialize(reason));
+            Emit(new { type = "tool_execution_end", toolCallId = tid, toolName = tool, isError = !ok, result = new { content = new[] { new { type = "text", text = ok ? "ran: " + line : denied } } } });
         }
     }
     else if (!aborted && (scenario is "approval" or "approval-timeout" || scenario == "multi" && message.Contains("APPROVE", StringComparison.Ordinal)))
@@ -720,11 +894,29 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
         var did = $"ap{Interlocked.Increment(ref dialogSeq)}";
         // Long enough that the card (deadline minus the client's 1 s margin) is seen on slow runners (CI run 18, Windows).
         var timeout = scenario == "approval-timeout" ? 4000 : (int?)null;
-        var choice = await AskAsync(new { type = "extension_ui_request", id = did, method = "select", title = "Allow tool: bash\n$ echo hi", options = new[] { "Approve", "Deny" }, timeout }, did, timeout);
+        // The owned engine sends the typed request with omp's text prompt (approval-chain keeps an older omp's text only).
+        var approval = new { tool = "bash", toolCallId = "t1", risk = "exec", details = new[] { "Command: echo hi" }, command = "echo hi", scopes = new[] { "once", "session", "always" } };
+        var choice = await AskAsync(new { type = "extension_ui_request", id = did, method = "select", title = "Allow tool: bash\n$ echo hi", options = new[] { "Approve", "Deny" }, timeout, approval }, did, timeout);
         if (choice == "Approve")
             Emit(new { type = "tool_execution_end", toolCallId = "t1", toolName = "bash", result = new { content = new[] { new { type = "text", text = "hi" } } } });
         else
             Emit(new { type = "tool_execution_end", toolCallId = "t1", toolName = "bash", isError = true, result = new { content = new[] { new { type = "text", text = "Tool call denied by user: bash" } } } });
+    }
+    else if (!aborted && message.Contains("TERMREAD", StringComparison.Ordinal) && hostTools.Has("terminal_read"))
+    {
+        // The model calls the client's terminal_read (host-tools.ts) and repeats what it got
+        var toolArgs = new JsonObject();
+        Emit(new { type = "tool_execution_start", toolCallId = "t1", toolName = "terminal_read", args = toolArgs });
+        if (await hostTools.CallAsync("terminal_read", "t1", toolArgs, ct) is { } got)
+        {
+            Emit(new { type = "tool_execution_end", toolCallId = "t1", toolName = "terminal_read", isError = got.IsError, result = new { content = new[] { new { type = "text", text = got.Text } } } });
+            sb.Append(got.IsError ? "terminal_read failed: " : "terminal says: ").Append(got.Text);
+        }
+        else
+        {
+            aborted = true;
+            Emit(new { type = "tool_execution_end", toolCallId = "t1", toolName = "terminal_read", isError = true, result = new { content = new[] { new { type = "text", text = "Host tool \"terminal_read\" was aborted" } } } });
+        }
     }
     else if (!aborted)
     {
@@ -748,12 +940,12 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
     // Queued messages are delivered before the agent stops (unless the run was aborted: then they stay queued).
     while (!aborted && queue.TryDequeue(out var queued))
     {
-        Emit(new { type = "message_start", message = UserMessage(queued, null) });
-        var reply = "followed: " + queued;
+        Emit(new { type = "message_start", message = UserMessage(queued.Text, queued.Images) });
+        var reply = "followed: " + queued.Text;
         Emit(new { type = "message_start", message = new { role = "assistant", content = Array.Empty<object>() } });
         Emit(new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = reply } });
         Emit(new { type = "message_end", message = Assistant(reply) });
-        Persist(UserMessage(queued, null));
+        Persist(UserMessage(queued.Text, queued.Images));
         Persist(Assistant(reply));
     }
     // omp is idle when it reports the end: a prompt sent right after agent_end must not be "busy".
@@ -782,40 +974,47 @@ if (scenario == "stderr-flood")
     _ = Task.Run(() => { for (var i = 0; i < 20000; i++) Console.Error.WriteLine($"noise line {i} " + new string('x', 100)); });
 
 Emit(new { type = "ready", protocolVersion = 1, supportedProtocolVersions = new[] { 1, 2 }, maxFrameBytes = 1048576, maxReassembledFrameBytes = 67108864 });
+session.MarkReady();
 Emit(new { type = "available_commands_update", commands = commandCatalog });
 if (scenario == "garbage")
 {
-    stdout.WriteLine("this is not json");
-    stdout.WriteLine("[1,2,3]");
-    stdout.WriteLine("");
+    session.WriteRaw("this is not json");
+    session.WriteRaw("[1,2,3]");
+    session.WriteRaw("");
     Emit(new { type = "some_future_event", payload = 1 });
 }
 
 var held = new List<(string? id, string type)>();
-while (true)
+try
 {
-    var line = await stdin.ReadLineAsync();
-    if (line is null)
-    {
-        if (scenario == "ignore-eof") await Task.Delay(Timeout.Infinite);
-        run?.Cancel();
-        return 0;
-    }
-    if (line.Length == 0) continue;
-    JsonNode? cmd;
-    try { cmd = JsonNode.Parse(line); }
-    catch (JsonException e) { Respond(null, "parse", error: e.Message); continue; }
+await foreach (var cmd in session.Commands.ReadAllAsync(session.Stopping))
+{
     var id = cmd?["id"]?.GetValue<string>();
     var type = cmd?["type"]?.GetValue<string>() ?? "";
+    if (type is "prompt" or "steer" or "follow_up") inputCalls++;
+    if (type is "abort" or "abort_and_restore_queue") abortCalls++;
+    if (scenario == "deferred-input" && (type is "prompt" or "steer" or "follow_up")
+        && Environment.GetEnvironmentVariable("FAKE_OMP_INPUT_LOG") is { Length: > 0 } inputLog)
+        Ombra.FakeOmp.FakeEngineHost.AppendLog(inputLog, type + " " + (cmd?["message"]?.GetValue<string>() ?? "") + "\n");
+    // Every input that reached the engine, in any scenario and across process restarts (nothing may be resent).
+    if (type is "prompt" or "steer" or "follow_up" or "abort_and_prompt"
+        && Environment.GetEnvironmentVariable("FAKE_OMP_PROMPT_LOG") is { Length: > 0 } promptLog)
+        Ombra.FakeOmp.FakeEngineHost.AppendLog(promptLog, type + " " + (cmd?["message"]?.GetValue<string>() ?? "") + "\n");
     if (type == "extension_ui_response")
     {
         // A control frame: overtakes queued commands (rpc-mode.ts dispatchRpcControlFrame). Late answers are dropped.
         if (id is not null && dialogs.TryRemove(id, out var pending)) pending.SetResult(cmd);
+        Ombra.FakeOmp.FakeMcp.OnUiResponse(cmd);
         continue;
     }
 
     if (scenario == "silent" && type != "negotiate_protocol") continue;
-    if (scenario == "exit-on-request" && type == "get_state") return 5;
+    if (scenario == "exit-on-request" && type == "get_state") Environment.Exit(5);
+    if (scenario == "invalid-admission" && type is "prompt" or "steer" or "follow_up")
+    {
+        Respond(id, type, new { inputDisposition = "not-a-disposition", agentInvoked = false });
+        continue;
+    }
     if (scenario == "out-of-order" && type is "get_state" or "get_available_models")
     {
         held.Add((id, type));
@@ -825,18 +1024,255 @@ while (true)
         continue;
     }
 
+    // "no-jobs": an omp without the job commands (answers them "Unknown command" without an id, below)
+    if (mcp.Handle(id, type, cmd) || (scenario != "no-jobs" && jobs.Handle(id, type, cmd, seeded: scenario is "subagents" or "plan" && !liveSubagents.IsEmpty))
+        || planMode.Handle(id, type, cmd) || hostTools.Handle(id, type, cmd) || btwGoal.Handle(id, type, cmd)) continue;
     switch (type)
     {
+        case "test_crash":
+            // The whole shared engine dies at once (every logical session with it), like a runtime crash.
+            Console.Error.WriteLine("fatal: the fake shared engine crashed (test_crash)");
+            Environment.Exit(cmd?["exitCode"]?.GetValue<int>() ?? 9);
+            break;
+        case "test_lease_lost":
+            // Like rpc-mode.ts when another window takes the session over: session_lease_lost {holder}, then the
+            // logical session ends (its turn aborted, its file flushed, its lease released).
+            Respond(id, type);
+            Emit(new { type = "session_lease_lost", holder = new { id = "taker", kind = cmd?["kind"]?.GetValue<string>() ?? "ombra", pid = cmd?["pid"]?.GetValue<int>() ?? 4242, since = DateTimeOffset.UtcNow.ToString("O") },
+                interrupted = cmd?["interrupted"]?.GetValue<bool>() ?? false });
+            return 0;
+        case "test_usage_control":
+            if (cmd?["clear"]?.GetValue<bool>() == true) { usageLimit = null; usageLimitByModel = null; }
+            if (cmd?.ContainsKey("usageLimit") == true) usageLimit = cmd["usageLimit"]?.DeepClone();
+            if (cmd?.ContainsKey("usageLimitByModel") == true) usageLimitByModel = cmd["usageLimitByModel"]?.DeepClone() as JsonObject;
+            if (cmd?["holdState"] is { } holdUsage) holdUsageState = holdUsage.GetValue<bool>();
+            if (cmd?.ContainsKey("accountUsage") == true)
+            {
+                changeUsageOnAccount = true;
+                usageAfterAccountChange = cmd["accountUsage"]?.DeepClone();
+            }
+            if (cmd?.ContainsKey("remainingSource") == true) remainingAccountSource = cmd["remainingSource"]?.GetValue<string>();
+            if (cmd?["sessionId"] is { } replacementSessionId) freshSessionId = replacementSessionId.GetValue<string>();
+            if (cmd?["releaseState"]?.GetValue<bool>() == true && heldUsageStates.Count > 0)
+            {
+                var pending = heldUsageStates[0];
+                heldUsageStates.RemoveAt(0);
+                Respond(pending.Id, "get_state", pending.Data);
+            }
+            Respond(id, type, new { held = heldUsageStates.Count, stateCalls });
+            break;
+        case "test_subagent_control":
+        {
+            var agentId = cmd?["subagentId"]?.GetValue<string>() ?? "sa-3";
+            if (cmd?["replace"] is JsonArray replacement) subagentTranscripts[agentId] = (JsonArray)replacement.DeepClone();
+            if (cmd?["append"] is JsonArray additions)
+                foreach (var message in additions) Transcript(agentId).Add(message?.DeepClone());
+            if (cmd?["sessionFile"] is { } transcriptPath) subagentPaths[agentId] = transcriptPath.GetValue<string>();
+            if (cmd?["hold"] is { } hold) holdSubagentReads = hold.GetValue<bool>();
+            if (cmd?["malformed"] is { } malformed) malformedSubagentRead = malformed.GetValue<bool>();
+            if (cmd?.ContainsKey("error") == true) subagentReadError = cmd["error"]?.GetValue<string>();
+            if (cmd?["release"]?.GetValue<bool>() == true)
+            {
+                foreach (var pending in heldSubagentReads) Respond(pending.Id, "get_subagent_messages", pending.Data, pending.Error);
+                heldSubagentReads.Clear();
+            }
+            // "crash": omp dies with its subagents (no lifecycle end for them)
+            if (cmd?["crash"]?.GetValue<bool>() == true)
+            {
+                Console.Error.WriteLine("fatal: the fake omp crashed with subagents running");
+                Environment.Exit(9);
+            }
+            if (cmd?.ContainsKey("cancelError") == true) cancelSubagentError = cmd["cancelError"]?.GetValue<string>();
+            if (cmd?.ContainsKey("steerError") == true) steerSubagentError = cmd["steerError"]?.GetValue<string>();
+            // "start": more background subagents that keep running (as omp's registry lists them)
+            if (cmd?["start"] is JsonArray starts)
+                foreach (var started in starts)
+                {
+                    var startId = started!.GetValue<string>();
+                    var startIndex = 10 + liveSubagents.Count;
+                    liveSubagents[startId] = new JsonObject
+                    {
+                        ["id"] = startId, ["index"] = startIndex, ["agent"] = "task", ["agentSource"] = "bundled", ["status"] = "running",
+                        ["task"] = "Background work " + startId, ["description"] = "Background work " + startId, ["lastUpdate"] = 1,
+                        ["sessionFile"] = Path.Combine(Path.GetDirectoryName(sessionFile)!, startId + ".jsonl"), ["parentToolCallId"] = "tk1",
+                    };
+                    SubagentLifecycle(startId, startIndex, "started", "Background work " + startId);
+                }
+            Respond(id, type, new { requests = subagentRequests, held = heldSubagentReads.Count, controls = subagentControls });
+            break;
+        }
+        case "test_wake_control":
+            if (cmd?["streaming"] is { } wakeStreaming) streaming = wakeStreaming.GetValue<bool>();
+            if (cmd?["hold"] is { } holdWake) wakeHold = holdWake.GetValue<bool>();
+            if (cmd?["silent"] is { } silentWake) wakeSilent = silentWake.GetValue<bool>();
+            if (cmd?["event"] is { } wakeEvent) Emit(new { type = wakeEvent.GetValue<string>() });
+            if (cmd?["release"]?.GetValue<bool>() == true && heldWake is { } wakeReply)
+            {
+                heldWake = null;
+                Respond(wakeReply.Id, "get_state", wakeReply.Data);
+            }
+            Respond(id, type, new { stateCalls, inputCalls, abortCalls, held = heldWake is not null });
+            break;
+        case "test_engine_session_keys":
+            Respond(id, type, new { sessionKeys = session.EngineSessionKeys });
+            break;
+        case "test_state_refresh":
+            contextPercent = cmd?["percent"]?.GetValue<double>() ?? 20;
+            Emit(new { type = cmd?["event"]?.GetValue<string>() ?? "auto_compaction_end" });
+            Respond(id, type);
+            break;
+        case "test_release_refresh":
+            if (heldRefresh is { } refreshReply)
+            {
+                Respond(refreshReply.Id, "get_state", refreshReply.Data);
+                heldRefresh = null;
+            }
+            Respond(id, type, new { stateCalls });
+            break;
         case "negotiate_protocol":
             Respond(id, type, new { protocolVersion = 2 });
-            protocol = 2;
+            break;
+        case "set_event_filter":
+            Respond(id, type, new { events = (string[]?)null, messageUpdates = "delta" });
+            break;
+        case "set_ask_dialog":
+            askDialogEnabled = cmd?["enabled"]?.GetValue<bool>() == true;
+            Respond(id, type, new { enabled = askDialogEnabled });
+            break;
+        case "set_todos":
+            // Like the owned engine: replaces the list as sent, answers with it; no event follows.
+            todoPhases = cmd?["phases"] is JsonArray sentPhases ? [.. sentPhases.Select(p => (object)p!.DeepClone())] : [];
+            if (Environment.GetEnvironmentVariable("FAKE_OMP_COMMAND_LOG") is { Length: > 0 } todoLog)
+                Ombra.FakeOmp.FakeEngineHost.AppendLog(todoLog, "set_todos " + cmd?["phases"]?.ToJsonString() + "\n");
+            Respond(id, type, new { todoPhases });
+            break;
+        case "editor_trust":
+            Respond(id, type);
+            break;
+        case "editor_document":
+            if (cmd?["action"]?.GetValue<string>() == "request")
+                Respond(id, type, error: "The fake engine does not run language servers");
+            else
+                Respond(id, type, new { });
             break;
         case "get_state":
             // "todo-state-glitch": the second get_state (the first refresh after start) succeeds without data.
-            if (scenario == "todo-state-glitch" && ++stateCalls == 2) { Respond(id, type); break; }
-            Respond(id, type, new { model = new { provider = model.provider, id = model.id, name = model.id }, thinkingLevel = thinking, isStreaming = streaming, sessionId = Path.GetFileNameWithoutExtension(sessionFile), sessionFile, sessionName, messageCount = history.Count, queuedMessageCount = queue.Count, todoPhases, contextUsage = new { tokens = 1600, contextWindow = 128000, percent = 1.25 }, fastModeEnabled = fastMode, fastModeActive = fastMode, autoCompactionEnabled = autoCompaction, isCompacting = false });
+            stateCalls++;
+            if (scenario == "todo-state-glitch" && stateCalls == 2) { Respond(id, type); break; }
+            var stateData = JsonSerializer.SerializeToNode(new { model = new { provider = model.provider, id = model.id, name = model.id }, thinkingLevel = thinking, isStreaming = streaming, sessionId = Path.GetFileNameWithoutExtension(sessionFile), sessionFile, sessionName, messageCount = history.Count, queuedMessageCount = queue.Count, todoPhases, contextUsage = new { tokens = 1600, contextWindow = 128000, percent = contextPercent }, fastModeEnabled = fastMode, fastModeActive = fastMode, autoCompactionEnabled = autoCompaction, isCompacting = false })!.AsObject();
+            var reportedUsageLimit = usageLimitByModel?.ContainsKey(model.provider + "/" + model.id) == true
+                ? usageLimitByModel[model.provider + "/" + model.id] : usageLimitByModel?.ContainsKey(model.id) == true
+                ? usageLimitByModel[model.id] : usageLimit;
+            if (Environment.GetEnvironmentVariable("FAKE_OMP_USAGE_LIMIT") is { Length: > 0 } usageFile)
+                reportedUsageLimit = File.Exists(usageFile) ? JsonNode.Parse(File.ReadAllText(usageFile)) : null;
+            if (reportedUsageLimit is not null) stateData["usageLimit"] = reportedUsageLimit.DeepClone();
+            if (freshSessionId is not null) stateData["sessionId"] = freshSessionId;
+            if (planMode.State() is { } planState) stateData["planMode"] = planState;
+            if (btwGoal.TryGoalState(out var goalState)) stateData["goal"] = goalState;
+            // Ombra's engine reports what --untrusted-project left out of the folder (null without the flag)
+            if (Array.IndexOf(args, "--untrusted-project") >= 0)
+                stateData["untrustedProject"] = new JsonObject { ["items"] = Environment.GetEnvironmentVariable("FAKE_UNTRUSTED_ITEMS") is { Length: > 0 } itemsFile && File.Exists(itemsFile) ? JsonNode.Parse(File.ReadAllText(itemsFile)) : new JsonArray() };
+            if (holdUsageState) { heldUsageStates.Add((id, stateData)); break; }
+            if (wakeSilent) break;
+            if (wakeHold) { heldWake = (id, stateData); break; }
+            if (scenario == "compaction-refresh-race" && stateCalls == 2)
+            {
+                contextPercent = 20;
+                model = ("new", "model");
+                thinking = "high";
+                sessionName = "compacted";
+                Emit(new { type = "config_update", model = new { provider = model.provider, id = model.id }, thinkingLevel = thinking });
+                Emit(new { type = "session_info_update", title = sessionName });
+                for (var refreshIndex = 0; refreshIndex < 64; refreshIndex++) Emit(new { type = "auto_compaction_end", skipped = true });
+            }
+            if (scenario == "compaction-refresh-race" && stateCalls == 3)
+            {
+                heldRefresh = (id, stateData);
+                Emit(new { type = "notice", level = "info", message = "refresh held" });
+                break;
+            }
+            Respond(id, type, stateData);
+            if (historyStartDuringLoad)
+            {
+                historyStartDuringLoad = false;
+                historyPauseCatalog = true;
+                streaming = true;
+                model = ("new", "model");
+                thinking = "high";
+                sessionName = "new title";
+                Emit(new { type = "agent_start" });
+                var user = UserMessage("new streaming user", null);
+                Persist(user);
+                Emit(new { type = "message_start", message = user });
+                Emit(new { type = "message_start", message = new { role = "assistant", content = Array.Empty<object>() } });
+                Emit(new { type = "message_update", assistantMessageEvent = new { type = "text_delta", delta = "streaming response" } });
+                Emit(new { type = "config_update", model = new { provider = "new", id = "model" }, thinkingLevel = thinking });
+                Emit(new { type = "session_info_update", title = sessionName });
+            }
             if (scenario == "duplicate") Respond(id, type, new { duplicate = true });
             break;
+        case "get_messages_page":
+        {
+            historyPageRequests++;
+            var cursor = cmd?["cursor"]?.GetValue<string>();
+            var limit = cmd?["limit"]?.GetValue<int>() ?? 100;
+            if (Environment.GetEnvironmentVariable("FAKE_HISTORY_LOG") is { Length: > 0 } historyLog)
+                Ombra.FakeOmp.FakeEngineHost.AppendLog(historyLog, JsonSerializer.Serialize(new { type, cursor, limit }) + "\n");
+            if (scenario == "history-incompatible") { Respond(id, type, new { messages = history.Take(limit), totalMessages = history.Count }); break; }
+            if (streaming || (historyBusyOnce && (cursor is not null || scenario == "history-start-busy")))
+            {
+                historyBusyOnce = false;
+                Respond(id, type, error: "Cannot page messages while the session is changing", code: "session_busy");
+                break;
+            }
+            if (cursor is not null && historyStaleOnce)
+            {
+                historyStaleOnce = false;
+                Respond(id, type, error: "RPC message cursor is stale", code: "stale_cursor");
+                break;
+            }
+            if (failNextMessages) { failNextMessages = false; Respond(id, type, error: "history temporarily unavailable"); break; }
+            try
+            {
+                IReadOnlyList<object> source = scenario == "big-messages"
+                    ? new object[] { new { role = "user", content = "hi" }, Assistant(new string('a', 3 * 1024 * 1024 + 17) + "é漢") }
+                    : history;
+                var page = messagePages.Page(source, freshSessionId ?? Path.GetFileNameWithoutExtension(sessionFile), cursor, limit);
+                if (historyInvalidOnce && historyPageRequests > 1)
+                {
+                    historyInvalidOnce = false;
+                    var invalidPage = JsonSerializer.SerializeToNode(page)!.AsObject();
+                    if (scenario == "history-bad-cursor") invalidPage["nextCursor"] = new string('a', 2049);
+                    else invalidPage["messages"]!.AsArray()[^1] = JsonSerializer.SerializeToNode(new
+                    {
+                        role = "assistant", content = new[] { new { type = "toolCall", id = "malformed", name = "write",
+                            arguments = new { path = cwd + Path.DirectorySeparatorChar + "bad\0path", content = "invalid" } } },
+                    });
+                    page = invalidPage;
+                }
+                if (scenario == "history-replay" && cursor is null && source.Count >= 2)
+                {
+                    // These already-persisted messages precede the snapshot response on stdout but may still be
+                    // waiting in the consumer's event queue when its request continuation runs.
+                    Emit(new { type = "message_start", message = source[^2] });
+                    Emit(new { type = "message_start", message = new { role = "assistant", content = Array.Empty<object>() } });
+                    Emit(new { type = "message_update", assistantMessageEvent = new { type = "text_delta",
+                        delta = JsonSerializer.SerializeToNode(source[^1])?["content"]?[0]?["text"]?.GetValue<string>() ?? "" } });
+                    Emit(new { type = "message_end", message = source[^1] });
+                }
+                if (int.TryParse(Environment.GetEnvironmentVariable("FAKE_HISTORY_PAGE_DELAY_MS"), out var pageDelay) && pageDelay > 0)
+                {
+                    var responseId = id;
+                    _ = Task.Run(async () => { await Task.Delay(pageDelay); Respond(responseId, "get_messages_page", page); });
+                }
+                else Respond(id, type, page);
+            }
+            catch (InvalidOperationException error) when (error.Message == "stale_cursor")
+            {
+                Respond(id, type, error: "RPC message cursor is stale", code: "stale_cursor");
+            }
+            break;
+        }
         case "get_messages":
             if (scenario == "big-messages")
             {
@@ -851,28 +1287,127 @@ while (true)
             else Respond(id, type, new { messages = history });
             break;
         case "steer" or "follow_up":
-            queue.Enqueue(cmd?["message"]?.GetValue<string>() ?? "");
+            if (scenario == "deferred-input" && cmd?["message"]?.GetValue<string>() is { } hookInput)
+            {
+                // Input hooks are allowed to consume or empty a submission before any queue/agent events.
+                if (hookInput is "input-hook:handled" or "input-hook:empty")
+                {
+                    Respond(id, type, new { inputDisposition = "local", agentInvoked = false });
+                    break;
+                }
+                if (hookInput == "input-hook:cancelled")
+                {
+                    Respond(id, type, new { inputDisposition = "cancelled", agentInvoked = false });
+                    break;
+                }
+                if (hookInput == "input-hook:agent")
+                {
+                    // The hook consumed the original input, but admitted its own turn before the ACK. Agent
+                    // frames can still arrive later; the client must not let the next FIFO head overtake them.
+                    streaming = true;
+                    run = new CancellationTokenSource();
+                    var extensionToken = run.Token;
+                    Respond(id, type, new { inputDisposition = "local", agentInvoked = true });
+                    activeRun = Task.Run(async () =>
+                    {
+                        try { await RunAgentAsync("extension-created turn", extensionToken, 100, 20); }
+                        catch (Exception e) { Console.Error.WriteLine("fake extension turn failed: " + e); }
+                    });
+                    break;
+                }
+            }
+            queue.Enqueue((cmd?["message"]?.GetValue<string>() ?? "", type == "steer", cmd?["images"]?.DeepClone() as JsonArray));
             lastQueuedAt = DateTime.UtcNow;
             Interlocked.Increment(ref queuedCount);
-            Respond(id, type);
+            Respond(id, type, new { inputDisposition = "admitted", agentInvoked = true });
+            // The runtime schedules idle drain for both follow_up and steer, including when the UI still
+            // shows a just-finished command as Running. Only recovery scenarios deliberately hold the queue.
+            if (!scenario.StartsWith("queue-recovery", StringComparison.Ordinal) && !streaming && queue.TryDequeue(out var idleInput))
+            {
+                streaming = true;
+                run = new CancellationTokenSource();
+                var idleToken = run.Token;
+                activeRun = Task.Run(async () =>
+                {
+                    try { await RunAgentAsync(idleInput.Text, idleToken, 50, 0, idleInput.Images); }
+                    catch (Exception e) { Console.Error.WriteLine("fake idle drain failed: " + e); }
+                });
+            }
             break;
         case "remove_queued_message":
         {
             // omp 18.4.4+: withdraws the first pending message with that text (steer and follow-up share one queue here)
             var withdrawText = cmd?["message"]?.GetValue<string>() ?? "";
-            var stillQueued = new List<string>();
+            var stillQueued = new List<(string Text, bool Steering, JsonArray? Images)>();
             var withdrawn = false;
+            JsonArray? withdrawnImages = null;
             while (queue.TryDequeue(out var pending))
             {
-                if (!withdrawn && pending == withdrawText) withdrawn = true;
+                if (!withdrawn && pending.Text == withdrawText && pending.Steering == (cmd?["queue"]?.GetValue<string>() == "steering"))
+                {
+                    withdrawn = true;
+                    withdrawnImages = pending.Images;
+                }
                 else stillQueued.Add(pending);
             }
             foreach (var pending in stillQueued) queue.Enqueue(pending);
-            Respond(id, type, new { removed = withdrawn });
+            Respond(id, type, new { removed = withdrawn, images = withdrawnImages });
+            break;
+        }
+        case "promote_queued_message":
+        {
+            // The first follow-up with that text becomes a steer while omp streams; when idle it is delivered alone now.
+            var promoteText = cmd?["message"]?.GetValue<string>() ?? "";
+            var remaining = new List<(string Text, bool Steering, JsonArray? Images)>();
+            (string Text, bool Steering, JsonArray? Images)? promoted = null;
+            while (queue.TryDequeue(out var pending))
+            {
+                if (promoted is null && !pending.Steering && pending.Text == promoteText)
+                {
+                    promoted = pending;
+                    if (streaming) remaining.Add(pending with { Steering = true });
+                }
+                else remaining.Add(pending);
+            }
+            foreach (var pending in remaining) queue.Enqueue(pending);
+            Respond(id, type, new { promoted = promoted is not null });
+            if (promoted is { } now && !streaming)
+            {
+                Emit(new { type = "agent_start" });
+                Emit(new { type = "message_start", message = UserMessage(now.Text, now.Images) });
+                var reply = "followed: " + now.Text;
+                Emit(new { type = "message_start", message = new { role = "assistant", content = Array.Empty<object>() } });
+                Emit(new { type = "message_update", assistantMessageEvent = new { type = "text_delta", contentIndex = 0, delta = reply } });
+                Emit(new { type = "message_end", message = Assistant(reply) });
+                Persist(UserMessage(now.Text, now.Images));
+                Persist(Assistant(reply));
+                streaming = false;
+                Emit(new { type = "agent_end", messages = Array.Empty<object>() });
+            }
             break;
         }
         case "get_available_commands":
+            if (historyPauseCatalog)
+            {
+                historyHeldCatalogId = id;
+                Emit(new { type = "history_catalog_held" });
+                break;
+            }
             Respond(id, type, new { commands = commandCatalog });
+            break;
+        case "history_release_start":
+            historyPauseCatalog = false;
+            Respond(historyHeldCatalogId, "get_available_commands", new { commands = commandCatalog });
+            historyHeldCatalogId = null;
+            Respond(id, type);
+            break;
+        case "history_finish_start":
+            var historyFinal = Assistant("streaming response");
+            Persist(historyFinal);
+            Emit(new { type = "message_end", message = historyFinal });
+            streaming = false;
+            Emit(new { type = "agent_end", messages = Array.Empty<object>(), isTerminal = true });
+            Respond(id, type);
             break;
         case "get_available_models":
             Respond(id, type, new
@@ -936,14 +1471,46 @@ while (true)
             var kept = history.Take(at).ToList();
             history.Clear();
             sessionFile = NewSessionFile();
+            freshSessionId = null;
             history.AddRange(kept);
             WriteSessionFile(); // omp forces a branch's file into existence at once
             Respond(id, type, new { text = chosen, cancelled = false });
             break;
+        case "get_entries":
+            // Like omp: every entry in append order (here one branch: e0 → e1 → …) and the leaf
+            Respond(id, type, new
+            {
+                entries = history.Select((m, i) => new { type = "message", id = $"e{i}", parentId = i == 0 ? null : $"e{i - 1}", timestamp = DateTimeOffset.UtcNow.ToString("O"), message = m }),
+                leafId = history.Count == 0 ? null : $"e{history.Count - 1}",
+            });
+            break;
+        case "fork":
+        {
+            // rpc-mode.ts: refused while the session works ("fork-busy": always, like a running background job);
+            // a new session file with the conversation up to that message, inclusive (all of it without one)
+            if (streaming || scenario == "fork-busy") { Respond(id, type, error: "Cannot fork the session while it is busy", code: "session_busy"); break; }
+            var forkAt = history.Count - 1;
+            if (cmd?["entryId"]?.GetValue<string>() is { } forkEntry
+                && !(int.TryParse(forkEntry.TrimStart('e'), out forkAt) && forkAt >= 0 && forkAt < history.Count))
+            {
+                Respond(id, type, error: $"Invalid entry ID for forking: {forkEntry}");
+                break;
+            }
+            if (Environment.GetEnvironmentVariable("FAKE_OMP_COMMAND_LOG") is { Length: > 0 } forkLog)
+                Ombra.FakeOmp.FakeEngineHost.AppendLog(forkLog, "fork " + (cmd?["entryId"]?.GetValue<string>() ?? "(latest)") + "\n");
+            var forked = history.Take(forkAt + 1).ToList();
+            history.Clear();
+            sessionFile = NewSessionFile();
+            freshSessionId = null;
+            history.AddRange(forked);
+            WriteSessionFile();
+            Respond(id, type, new { cancelled = false });
+            break;
+        }
         case "bash":
             // Like omp: answered when the command ends (off the command queue); "sleep" waits until abort_bash
             var shell = cmd?["command"]?.GetValue<string>() ?? "";
-            if (Environment.GetEnvironmentVariable("FAKE_OMP_COMMAND_LOG") is { Length: > 0 } shellLog) File.AppendAllText(shellLog, "bash " + shell + "\n");
+            if (Environment.GetEnvironmentVariable("FAKE_OMP_COMMAND_LOG") is { Length: > 0 } shellLog) Ombra.FakeOmp.FakeEngineHost.AppendLog(shellLog, "bash " + shell + "\n");
             var shellId = id;
             shellAbort = new CancellationTokenSource();
             var shellToken = shellAbort.Token;
@@ -969,7 +1536,7 @@ while (true)
             long input = turns == 0 ? 0 : 12_480 + 3_100L * turns, output = 820L * turns, cacheRead = 9_600L * Math.Max(0, turns - 1);
             Respond(id, type, new
             {
-                sessionId = Path.GetFileNameWithoutExtension(sessionFile), userMessages = (turns + 1) / 2, assistantMessages = turns / 2,
+                sessionId = freshSessionId ?? Path.GetFileNameWithoutExtension(sessionFile), userMessages = (turns + 1) / 2, assistantMessages = turns / 2,
                 toolCalls = 0, toolResults = 0, totalMessages = turns,
                 tokens = new { input, output, cacheRead, cacheWrite = 0, total = input + output + cacheRead },
                 premiumRequests = 0, cost = Math.Round(input * 3e-6 + output * 15e-6 + cacheRead * 0.3e-6, 6), sessionFile,
@@ -986,7 +1553,12 @@ while (true)
             {
                 Emit(new { type = "extension_ui_request", id = "u1", method = "open_url", url = "https://example.invalid/oauth?state=abc" });
                 var code = await AskAsync(new { type = "extension_ui_request", id = "c1", method = "input", title = "Paste the code", placeholder = "code" }, "c1", null);
-                if (code == "1234") { signedIn = true; Respond(loginId, "login", new { providerId = "fakeauth" }); }
+                if (code == "1234")
+                {
+                    signedIn = true;
+                    if (changeUsageOnAccount) { usageLimit = usageAfterAccountChange?.DeepClone(); usageLimitByModel = null; }
+                    Respond(loginId, "login", new { providerId = "fakeauth" });
+                }
                 else Respond(loginId, "login", error: "Login cancelled");
             });
             break;
@@ -1001,18 +1573,32 @@ while (true)
             break;
         case "logout":
             var credentialId = cmd?["credentialId"]?.GetValue<int>();
-            if (signedIn && credentialId == 1) { signedIn = false; Respond(id, type, new { }); }
+            if (signedIn && credentialId == 1)
+            {
+                signedIn = remainingAccountSource is not null;
+                if (changeUsageOnAccount) { usageLimit = usageAfterAccountChange?.DeepClone(); usageLimitByModel = null; }
+                Respond(id, type, new { remainingSource = remainingAccountSource });
+            }
             else Respond(id, type, error: $"Credential {credentialId} is not stored for {cmd?["providerId"]?.GetValue<string>()}");
             break;
         case "new_session":
             history.Clear();
             sessionName = null;
+            freshSessionId = null;
             sessionFile = NewSessionFile();
+            if (scenario == "history-live-switch") historyStartDuringLoad = true;
             Respond(id, type, new { cancelled = false });
             break;
         case "switch_session":
             var target = cmd?["sessionPath"]?.GetValue<string>() ?? "";
             if (File.Exists(target) && !HeaderIsValid(target)) { Respond(id, type, error: Refusal(target)); break; }
+            if (Ombra.FakeOmp.FakeEngineHost.LeaseHolder(target) is { } switchHolder)
+            {
+                // rpc-mode.ts: the target's writer lease belongs to another process; nothing changes here
+                Emit(new { type = "response", id, command = type, success = false, error = "This session is open in another window",
+                    code = "session_lease_held", data = new System.Text.Json.Nodes.JsonObject { ["sessionId"] = "held", ["holder"] = switchHolder } });
+                break;
+            }
             var switched = File.Exists(target) && LoadSession(target);
             if (switched && scenario == "reload-fails-once") failNextMessages = true;
             Respond(id, type, new { cancelled = !switched });
@@ -1032,19 +1618,53 @@ while (true)
             if (scenario == "bad-chunk")
             {
                 // A v2 chunk sequence that never completes, interrupted by a normal frame: the stream is broken.
-                stdout.WriteLine("""{"type":"rpc_chunk","chunkId":"x","index":0,"count":2,"byteLength":2000000,"data":"AAAA"}""");
+                session.WriteRaw("""{"type":"rpc_chunk","chunkId":"x","index":0,"count":2,"byteLength":2000000,"data":"AAAA"}""");
                 Emit(new { type = "agent_start" });
                 break;
             }
             if (scenario == "no-prompt-ack") break; // the request stays pending until the client gives up
+            if (scenario == "held-admission" && cmd?["message"]?.GetValue<string>()?.Contains("HOLD", StringComparison.Ordinal) == true)
+            {
+                heldPromptId = id;
+                heldPromptText = cmd?["message"]?.GetValue<string>() ?? "";
+                break;
+            }
             var slash = cmd?["message"]?.GetValue<string>() ?? "";
             if (slash.StartsWith('/') && Environment.GetEnvironmentVariable("FAKE_OMP_COMMAND_LOG") is { Length: > 0 } commandLog)
-                File.AppendAllText(commandLog, slash + "\n");
+                Ombra.FakeOmp.FakeEngineHost.AppendLog(commandLog, slash + "\n");
+            if (slash == "/fresh")
+            {
+                freshSessionId = Guid.NewGuid().ToString();
+                Emit(new { type = "command_output", text = "Fresh provider session started (1 provider state pruned)." });
+                Respond(id, type, new { inputDisposition = "local", agentInvoked = false });
+                break;
+            }
+            if (scenario is "compaction-refresh" or "compaction-refresh-failed" && slash is "/compact" or "/compact immediate")
+            {
+                var compactionOutput = scenario == "compaction-refresh-failed"
+                    ? "Compaction failed: Nothing to compact (session too small)"
+                    : "Compaction complete. Tokens: 1600 -> 320 (saved 1280).";
+                if (slash == "/compact immediate")
+                {
+                    contextPercent = 0.25;
+                    Emit(new { type = "command_output", text = compactionOutput });
+                    Respond(id, type, new { inputDisposition = "local", agentInvoked = false });
+                    break;
+                }
+                Respond(id, type, new { inputDisposition = "local", agentInvoked = false });
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(100);
+                    contextPercent = 0.25;
+                    Emit(new { type = "command_output", text = compactionOutput });
+                });
+                break;
+            }
             // omp 18.2.0's answers to the status reads the model menu makes when it opens (a local builtin, never a turn)
             if (cannedCommands?.ContainsKey(slash) != true && slash is "/extended-context status" or "/advisor status")
             {
                 Emit(new { type = "command_output", text = slash == "/advisor status" ? "Advisor is disabled." : "Extended context is off." });
-                Respond(id, type, new { agentInvoked = false });
+                Respond(id, type, new { inputDisposition = "local", agentInvoked = false });
                 break;
             }
             if (slash.StartsWith('/') && cannedCommands?.Where(kv => slash == kv.Key || slash.StartsWith(kv.Key + " ", StringComparison.Ordinal)).OrderByDescending(kv => kv.Key.Length).FirstOrDefault() is { Key: not null } canned)
@@ -1056,7 +1676,7 @@ while (true)
                     if (part.Length > 0 || spec is null) Emit(new { type = "command_output", text = part });
                 var invoked = spec?["agentInvoked"]?.GetValue<bool>() == true && !streaming;
                 if (invoked) streaming = true;
-                Respond(id, type, new { agentInvoked = invoked });
+                Respond(id, type, new { inputDisposition = "local", agentInvoked = invoked });
                 if (spec?["later"]?.GetValue<string>() is { } later)
                 {
                     var laterMs = spec["laterMs"]?.GetValue<int>() ?? 300;
@@ -1066,7 +1686,7 @@ while (true)
                 {
                     run = new CancellationTokenSource();
                     var token = run.Token;
-                    _ = Task.Run(async () =>
+                    activeRun = Task.Run(async () =>
                     {
                         try { await RunAgentAsync("(retried turn)", token, 20, 0); }
                         catch (Exception e) { Console.Error.WriteLine("fake agent failed: " + e); }
@@ -1074,39 +1694,30 @@ while (true)
                 }
                 break;
             }
-            if (scenario is "subagents" or "plan" && slash.StartsWith("/jobs", StringComparison.Ordinal))
-            {
-                // omp's /jobs listing (slash-commands/builtin-session.ts)
-                Emit(new { type = "command_output", text = liveSubagents.IsEmpty
-                    ? "No background jobs running. (Background jobs run async tools — e.g. long-running bash, debug, or task subagents that would otherwise tie up a turn. They appear here while alive and for ~5 minutes after.)"
-                    : "Background Jobs\nRunning: 2\n\nRunning Jobs\n  [bg-1] bash (running) — 2m\n    npm run dev\n  [bg-2] task (running) — 1m\n    Watch the dev server\n\nRecent Jobs\n  [bg-0] bash (completed) — 4m\n    npm test -- --watch=false" });
-                Respond(id, type, new { agentInvoked = false });
-                break;
-            }
             if (slash.StartsWith("/stats", StringComparison.Ordinal))
             {
                 // A local-only builtin: output frames, then done without an agent run.
                 Emit(new { type = "command_output", text = "Messages: " + history.Count + "\nTokens: 1600" });
-                Respond(id, type, new { agentInvoked = false });
+                Respond(id, type, new { inputDisposition = "local", agentInvoked = false });
                 break;
             }
             if (slash.StartsWith("/rename ", StringComparison.Ordinal))
             {
                 sessionName = slash["/rename ".Length..].Trim();
-                Emit(new { type = "session_info_update", title = sessionName, sessionId = Path.GetFileNameWithoutExtension(sessionFile) });
-                Respond(id, type, new { agentInvoked = false });
+                Emit(new { type = "session_info_update", title = sessionName, sessionId = freshSessionId ?? Path.GetFileNameWithoutExtension(sessionFile) });
+                Respond(id, type, new { inputDisposition = "local", agentInvoked = false });
                 break;
             }
             if (LocalBuiltinOutput(slash) is { } printed)
             {
                 if (printed.Length > 0) Emit(new { type = "command_output", text = printed });
-                Respond(id, type, new { agentInvoked = false });
+                Respond(id, type, new { inputDisposition = "local", agentInvoked = false });
                 break;
             }
             if (streaming) { Respond(id, type, error: "Agent is busy"); break; }
             // Like omp: the run exists as soon as the prompt is accepted (abort then waits for it).
             streaming = true;
-            Respond(id, type);
+            Respond(id, type, new { inputDisposition = "admitted", agentInvoked = true });
             run = new CancellationTokenSource();
             var msg = cmd?["message"]?.GetValue<string>() ?? "";
             // "multi": "FOREVER" streams until stopped, "LONG" for FAKE_OMP_LONG_DELTAS deltas 25 ms apart (default 120: 3 s)
@@ -1114,14 +1725,14 @@ while (true)
             var (n, delay) = scenario switch
             {
                 "slow-stream" or "abort-hangs" => (100000, 20),
-                "multi" when msg.Contains("FOREVER", StringComparison.Ordinal) => (100000, 20),
-                "multi" when msg.Contains("LONG", StringComparison.Ordinal) => (longDeltas, 25),
+                "multi" or "deferred-input" when msg.Contains("FOREVER", StringComparison.Ordinal) => (100000, 20),
+                "multi" or "deferred-input" when msg.Contains("LONG", StringComparison.Ordinal) => (longDeltas, 25),
                 _ when scenario.StartsWith("queue-stream", StringComparison.Ordinal) => (60, 20),
-                "markdown" or "markdown-stream" or "session" or "showcase" or "explore" or "plan" or "subagents" => (0, 0),
+                "markdown" or "markdown-stream" or "session" or "showcase" or "explore" or "plan" or "subagents" or "tool-flood" => (0, 0),
                 _ => (50, 0),
             };
             var promptImages = cmd?["images"] as JsonArray;
-            _ = Task.Run(async () =>
+            activeRun = Task.Run(async () =>
             {
                 try { await RunAgentAsync(msg, run.Token, n, delay, promptImages); }
                 catch (Exception e) { Console.Error.WriteLine("fake agent failed: " + e); }
@@ -1135,33 +1746,146 @@ while (true)
             Respond(id, type, new { subagents = new JsonArray(liveSubagents.Values.OrderBy(s => s["index"]!.GetValue<int>()).Select(s => (JsonNode)s.DeepClone()).ToArray()) });
             break;
         case "get_subagent_messages" when scenario == "subagents":
-            if (cmd?["subagentId"]?.GetValue<string>() is not ("sa-1" or "sa-2" or "sa-3")) { Respond(id, type, error: $"Unknown subagent or session file unavailable: {cmd?["subagentId"]}"); break; }
-            Respond(id, type, new
+        {
+            var agentId = cmd?["subagentId"]?.GetValue<string>() ?? "";
+            if (agentId is not ("sa-1" or "sa-2" or "sa-3")) { Respond(id, type, error: $"Unknown subagent or session file unavailable: {agentId}"); break; }
+            var fromByte = cmd?["fromByte"]?.GetValue<long>() ?? 0;
+            subagentRequests.Add(new { subagentId = agentId, fromByte });
+            if (Environment.GetEnvironmentVariable("FAKE_OMP_SUBAGENT_CONTROL") is { Length: > 0 } controlFile
+                && File.Exists(controlFile) && JsonNode.Parse(File.ReadAllText(controlFile)) is JsonObject control)
             {
-                sessionFile = "sa.jsonl", fromByte = 0, nextByte = 10, reset = false, entries = Array.Empty<object>(),
-                messages = new object[]
+                if (control["messages"] is JsonArray messages) subagentTranscripts[agentId] = (JsonArray)messages.DeepClone();
+                if (control["sessionFile"] is { } path) subagentPaths[agentId] = path.GetValue<string>();
+                subagentReadError = control["error"]?.GetValue<string>();
+                malformedSubagentRead = control["malformed"]?.GetValue<bool>() == true;
+                holdSubagentReads = control["hold"]?.GetValue<bool>() == true;
+            }
+            var page = TranscriptPage(agentId, fromByte);
+            if (holdSubagentReads) heldSubagentReads.Add((id, page, subagentReadError));
+            else Respond(id, type, page, subagentReadError);
+        }
+            break;
+        case "cancel_subagent" when scenario == "subagents":
+        {
+            // Like omp: true when it was still running (its lifecycle then reports "aborted"), false when it had ended
+            var agentId = cmd?["subagentId"]?.GetValue<string>() ?? "";
+            subagentControls.Add(new { type, subagentId = agentId });
+            if (cancelSubagentError is { } cancelError) { Respond(id, type, error: cancelError); break; }
+            var cancelled = liveSubagents.TryRemove(agentId, out var stopped);
+            Respond(id, type, new { cancelled });
+            if (cancelled) SubagentLifecycle(agentId, stopped!["index"]!.GetValue<int>(), "aborted", stopped["description"]?.GetValue<string>() ?? agentId);
+            break;
+        }
+        case "steer_subagent" when scenario == "subagents":
+        {
+            var agentId = cmd?["subagentId"]?.GetValue<string>() ?? "";
+            var message = cmd?["message"]?.GetValue<string>() ?? "";
+            subagentControls.Add(new { type, subagentId = agentId, message });
+            if (steerSubagentError is { } steerError) Respond(id, type, error: steerError);
+            else if (!liveSubagents.ContainsKey(agentId)) Respond(id, type, error: $"Subagent {agentId} is not running");
+            else Respond(id, type);
+            break;
+        }
+        case "abort_and_restore_queue":
+        {
+            var restored = new List<(string Text, bool Steering, JsonArray? Images)>();
+            while (queue.TryDequeue(out var pending)) restored.Add(pending);
+            run?.Cancel();
+            var imagesDropped = scenario == "queue-recovery-images-dropped";
+            var truncated = scenario == "queue-recovery-truncated";
+            if (truncated && restored.Count > 1) restored.RemoveRange(1, restored.Count - 1);
+            _ = Task.Run(async () =>
+            {
+                while (streaming) await Task.Delay(5);
+                Respond(id, type, new
                 {
-                    new { role = "user", content = "Find where omp's todo phases reach the client." },
-                    new { role = "assistant", content = new object[] { new { type = "text", text = "Searching for the readers." }, new { type = "toolCall", id = "c1", name = "grep", arguments = new { pattern = "todoPhases" } } } },
-                    new { role = "toolResult", toolCallId = "c1", content = new[] { new { type = "text", text = "src/Ombra.ClientCore/ConversationState.cs:106" } }, isError = false },
-                    new { role = "assistant", content = new[] { new { type = "text", text = "Found 3 readers." } } },
-                },
+                    steering = restored.Where(q => q.Steering).Select(q => new { text = q.Text, images = imagesDropped ? null : q.Images }).ToArray(),
+                    followUp = restored.Where(q => !q.Steering).Select(q => new { text = q.Text, images = imagesDropped ? null : q.Images }).ToArray(),
+                    truncated,
+                    imagesDropped,
+                });
             });
             break;
+        }
         case "abort" when scenario == "abort-hangs":
             // A tool that ignores the abort signal: omp never becomes idle, so abort is never answered.
             break;
         case "abort":
             // Answered once the agent is idle; the reader keeps going meanwhile (control frames still arrive).
             run?.Cancel();
+            if (heldPromptId is { } heldBeforeAbort)
+            {
+                heldPromptId = null;
+                Respond(heldBeforeAbort, "prompt", new { inputDisposition = "cancelled", agentInvoked = false });
+            }
             _ = Task.Run(async () =>
             {
                 while (streaming) await Task.Delay(5);
                 Respond(id, type);
             });
             break;
+        case "abort_and_prompt":
+        {
+            // Like abort, then prompt once idle: answered when the new message is admitted (or refused)
+            run?.Cancel();
+            var replacement = cmd?["message"]?.GetValue<string>() ?? "";
+            var replacementImages = cmd?["images"]?.DeepClone() as JsonArray;
+            // The invalidated prompt is answered first; its replacement starts a little later, so the client handles the
+            // stale acknowledgement while the replacement's run is still pending. Replacement markers reorder this:
+            // "LATE-CANCEL": the replacement runs (and is echoed) before the held prompt's cancelled answer;
+            // "ADMIT-LATE": the held prompt was admitted after all: its run's start, echo and end arrive after the
+            // interrupt, then a "replaced run ended" notice, and the replacement is admitted 1.5 s later (slow images).
+            var superseded = heldPromptId;
+            var supersededText = heldPromptText;
+            heldPromptId = null;
+            var lateCancel = superseded is not null && replacement.Contains("LATE-CANCEL", StringComparison.Ordinal);
+            var admitLate = superseded is not null && replacement.Contains("ADMIT-LATE", StringComparison.Ordinal);
+            if (admitLate)
+            {
+                Emit(new { type = "agent_start" });
+                Emit(new { type = "message_start", message = UserMessage(supersededText, null) });
+                Persist(UserMessage(supersededText, null));
+                Emit(new { type = "agent_end", messages = Array.Empty<object>() });
+                Emit(new { type = "notice", level = "info", message = "replaced run ended" });
+                Respond(superseded, "prompt", new { inputDisposition = "admitted", agentInvoked = true });
+            }
+            else if (superseded is not null && !lateCancel) Respond(superseded, "prompt", new { inputDisposition = "cancelled", agentInvoked = false });
+            _ = Task.Run(async () =>
+            {
+                if (admitLate) await Task.Delay(1500);
+                else if (superseded is not null && !lateCancel) await Task.Delay(300);
+                while (streaming) await Task.Delay(5);
+                if (replacement.Contains("REJECT", StringComparison.Ordinal)) { Respond(id, type, error: "abort_and_prompt rejected (fake)"); return; }
+                streaming = true;
+                Respond(id, type, new { inputDisposition = "admitted", agentInvoked = true });
+                run = new CancellationTokenSource();
+                var replacementToken = run.Token;
+                var replacementRun = Task.Run(async () =>
+                {
+                    try { await RunAgentAsync(replacement, replacementToken, 50, 0, replacementImages); }
+                    catch (Exception e) { Console.Error.WriteLine("fake agent failed: " + e); }
+                });
+                activeRun = replacementRun;
+                if (lateCancel)
+                {
+                    await replacementRun;
+                    Respond(superseded, "prompt", new { inputDisposition = "cancelled", agentInvoked = false });
+                }
+            });
+            break;
+        }
         default:
             Respond(null, type, error: $"Unknown command: {type}");
             break;
     }
+}
+}
+finally
+{
+    run?.Cancel();
+    shellAbort?.Cancel();
+    foreach (var dialog in dialogs.Values) dialog.TrySetResult(null);
+    if (activeRun is not null) await activeRun;
+}
+return 0;
 }

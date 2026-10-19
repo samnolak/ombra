@@ -29,6 +29,10 @@ public sealed partial class TerminalViewModel(TerminalKind kind, string title, s
     /// <summary>Held while the tab's process runs (strict network privacy's sign-in allowance for <c>omp login</c>).</summary>
     public IDisposable? Lease { get; init; }
 
+    /// <summary>The tab's last lines (at most the count given), oldest first; set by the view that owns the terminal,
+    /// null while there is none. UI thread only.</summary>
+    public Func<int, IReadOnlyList<string>>? ReadLines { get; set; }
+
     public void OnExited(int code)
     {
         HasExited = true;

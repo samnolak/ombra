@@ -9,6 +9,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
 using Ombra.App.Controls;
+using Ombra.App.Localization;
 using Ombra.App.Pets;
 using Ombra.App.Pets.Oni;
 using Ombra.App.ViewModels;
@@ -433,15 +434,15 @@ public sealed class PetsTests
 
     private static async Task Close(MainWindow w, MainViewModel vm)
     {
-        await vm.DisposeAsync();
-        w.Close();
+        try { await vm.DisposeAsync(); }
+        finally { w.Close(); }
     }
 
     private static Rect Box(Visual v, Visual root) =>
         v.TransformToVisual(root) is { } m ? new Rect(v.Bounds.Size).TransformToAABB(m) : default;
 
     /// <summary>The pet and its bubble cover no text, field or button of the window (they are in their own band).</summary>
-    private static List<string> PetCovers(MainWindow w)
+    internal static List<string> PetCovers(MainWindow w)
     {
         var perch = w.FindControl<PetPerch>("PetPerch")!;
         var found = new List<string>();
@@ -451,8 +452,9 @@ public sealed class PetsTests
         foreach (var c in w.GetVisualDescendants().OfType<Control>())
         {
             if (c is not (TextBlock or TextBox or Button or Icon) || !c.IsEffectivelyVisible || c.Bounds.Width < 1 || perch.IsVisualAncestorOf(c)) continue;
-            if (c.FindAncestorOfType<ScrollViewer>() is { } sv && Box(sv, w).Intersect(Box(c, w)) is { Width: < 1 }) continue; // scrolled out of view
-            var r = Box(c, w);
+            // What shows of it: its box within every clipping ancestor (a card scrolled under the pet's band is cut there)
+            var r = c.GetVisualAncestors().OfType<Control>().Where(a => a.ClipToBounds).Aggregate(Box(c, w), (b, a) => b.Intersect(Box(a, w)));
+            if (r.Width < 1 || r.Height < 1) continue; // scrolled or cut out of view
             foreach (var o in own)
                 if (o.Intersect(r) is { Width: > 0.5, Height: > 0.5 } x)
                     found.Add($"{c.GetType().Name} {(c as TextBlock)?.Text ?? c.Name} under the pet ({x})");
@@ -460,18 +462,43 @@ public sealed class PetsTests
         return found;
     }
 
-    /// <summary>Carries the pet with the pointer from <paramref name="from"/> to <paramref name="to"/> in steps, holds it there a moment, and puts it down.</summary>
-    private static async Task Carry(Window w, Point from, Point to, bool waitToRest = true)
+    // Drive the same frame step as OniView's animation callback without making carry physics depend on
+    // wall time or how often a loaded headless dispatcher managed to render during a sleep.
+    private static void AdvanceCarry(MainWindow w, int frames)
+    {
+        var pet = w.FindControl<PetPerch>("PetPerch")!.Stage.Pet;
+        for (var i = 0; i < frames; i++) pet.Advance(1 / 60.0);
+        w.UpdateLayout();
+    }
+
+    private static void LandCarry(MainWindow w)
+    {
+        var perch = w.FindControl<PetPerch>("PetPerch")!;
+        // The same four simulated seconds as the carry physics test, ending at the Settled event.
+        for (var i = 0; i < 240 && perch.Carry is not null; i++)
+        {
+            perch.Stage.Pet.Advance(1 / 60.0);
+            w.UpdateLayout();
+        }
+        Assert.Null(perch.Carry);
+        // Returning to the perch restores the composer's band. Its new bounds are observed in
+        // PetPerch.LayoutUpdated, which updates the stage's Canvas coordinates after that layout
+        // pass; arrange those coordinates too before callers inspect the pet's actual bounds.
+        w.UpdateLayout();
+    }
+
+    /// <summary>Carries the pet in fixed frame steps, holds it still, and puts it down.</summary>
+    private static void Carry(MainWindow w, Point from, Point to)
     {
         w.MouseDown(from, MouseButton.Left);
         for (var i = 1; i <= 6; i++)
         {
             w.MouseMove(from + (to - from) * (i / 6.0));
-            await Settle(30);
+            AdvanceCarry(w, 2);
         }
-        await Settle(400); // held still: no speed left when let go
+        AdvanceCarry(w, 24); // held still: no speed left when let go
         w.MouseUp(to, MouseButton.Left);
-        if (waitToRest) await Settle(1600);
+        LandCarry(w);
     }
 
     [AvaloniaFact]
@@ -555,76 +582,82 @@ public sealed class PetsTests
     {
         var path = Path.Combine(TestProcesses.TempDir("pets-place"), "ombra.local.json");
         var (w, vm) = await Open("normal", store: new ClientSettingsStore(path));
-        vm.Pets.SetRoamCommand.Execute("window");
-        var perch = w.FindControl<PetPerch>("PetPerch")!;
-        var pet = perch.Stage.Pet;
-        var composer = w.FindControl<Border>("ComposerBox")!;
-        var from = Box(pet, w).Center;
-        // A press that moves a little is still a click
-        w.MouseDown(from, MouseButton.Left);
-        w.MouseMove(from + new Vector(3, 3));
-        w.MouseUp(from + new Vector(3, 3), MouseButton.Left);
-        await Settle(100);
-        Assert.True(vm.Pets.IsChatOpen);
-        Assert.False(vm.Pets.IsRoaming);
-        vm.Pets.CloseChat();
-        // Carried to the window's top left: it hangs from the pointer, is put down there, the band goes back to the conversation
-        var to = new Point(200, 180);
-        w.MouseDown(from, MouseButton.Left);
-        w.MouseMove(from + new Vector(-10, -10));
-        await Settle(60);
-        Assert.Equal("dragging", vm.Pets.Oni.Director.Cue);
-        Assert.False(vm.Pets.IsChatOpen);
-        w.MouseUp(from + new Vector(-10, -10), MouseButton.Left);
-        await Settle(1600);
-        await Carry(w, Box(pet, w).Center, to);
-        Assert.False(vm.Pets.IsChatOpen); // a carry is not a click
-        Assert.False(vm.Pets.Oni.Director.Carried);
-        Assert.Null(perch.Carry);
-        Assert.True(vm.Pets.IsRoaming);
-        Assert.Equal(to.X, Box(pet, w).Center.X, 3);
-        Assert.Equal(to.Y, Box(pet, w).Center.Y, 3);
-        Assert.Equal(6, composer.Margin.Top);
-        // Past the window's edge: it stops where what is drawn around it (spirits, the sign, the dust) still fits in the
-        // window's content
-        await Carry(w, Box(pet, w).Center, Box(pet, w).Center + new Vector(5000, 5000));
-        var content = ((Control)w.Content!).Bounds;
-        var ov = OniView.OverflowFor(vm.Pets.PetHeight);
-        Assert.Equal(content.Right - ov.Right, Box(pet, w).Right, 1);
-        Assert.Equal(content.Bottom - ov.Bottom, Box(pet, w).Bottom, 1);
-        // A smaller window keeps it inside, in the same corner
-        w.Width = 800;
-        w.Height = 600;
-        await Settle(150);
-        content = ((Control)w.Content!).Bounds;
-        Assert.Equal(content.Right - ov.Right, Box(pet, w).Right, 1);
-        Assert.Equal(content.Bottom - ov.Bottom, Box(pet, w).Bottom, 1);
-        // The bubble follows it (on its left, room permitting)
-        vm.Pets.TalkCommand.Execute(null);
-        await Settle(100);
-        var bubble = Box(perch.Stage.PetBubble, w);
-        Assert.True(bubble.Right <= Box(pet, w).Left + 1 && bubble.Right >= Box(pet, w).Left - 4, "the bubble is not beside the pet");
-        await Close(w, vm);
+        try
+        {
+            vm.Pets.SetRoamCommand.Execute("window");
+            var perch = w.FindControl<PetPerch>("PetPerch")!;
+            var pet = perch.Stage.Pet;
+            var composer = w.FindControl<Border>("ComposerBox")!;
+            var from = Box(pet, w).Center;
+            // A press that moves a little is still a click
+            w.MouseDown(from, MouseButton.Left);
+            w.MouseMove(from + new Vector(3, 3));
+            w.MouseUp(from + new Vector(3, 3), MouseButton.Left);
+            await Settle(100);
+            Assert.True(vm.Pets.IsChatOpen);
+            Assert.False(vm.Pets.IsRoaming);
+            vm.Pets.CloseChat();
+            // Carried to the window's top left: it hangs from the pointer, is put down there, the band goes back to the conversation
+            var to = new Point(200, 180);
+            w.MouseDown(from, MouseButton.Left);
+            w.MouseMove(from + new Vector(-10, -10));
+            AdvanceCarry(w, 4);
+            Assert.Equal("dragging", vm.Pets.Oni.Director.Cue);
+            Assert.False(vm.Pets.IsChatOpen);
+            w.MouseUp(from + new Vector(-10, -10), MouseButton.Left);
+            LandCarry(w);
+            Carry(w, Box(pet, w).Center, to);
+            Assert.False(vm.Pets.IsChatOpen); // a carry is not a click
+            Assert.False(vm.Pets.Oni.Director.Carried);
+            Assert.Null(perch.Carry);
+            Assert.True(vm.Pets.IsRoaming);
+            Assert.Equal(to.X, Box(pet, w).Center.X, 3);
+            Assert.Equal(to.Y, Box(pet, w).Center.Y, 3);
+            Assert.Equal(6, composer.Margin.Top);
+            // Past the window's edge: it stops where what is drawn around it (spirits, the sign, the dust) still fits in the
+            // window's content
+            Carry(w, Box(pet, w).Center, Box(pet, w).Center + new Vector(5000, 5000));
+            var content = ((Control)w.Content!).Bounds;
+            var ov = OniView.OverflowFor(vm.Pets.PetHeight);
+            Assert.Equal(content.Right - ov.Right, Box(pet, w).Right, 1);
+            Assert.Equal(content.Bottom - ov.Bottom, Box(pet, w).Bottom, 1);
+            // A smaller window keeps it inside, in the same corner
+            w.Width = 800;
+            w.Height = 600;
+            await Settle(150);
+            content = ((Control)w.Content!).Bounds;
+            Assert.Equal(content.Right - ov.Right, Box(pet, w).Right, 1);
+            Assert.Equal(content.Bottom - ov.Bottom, Box(pet, w).Bottom, 1);
+            // The bubble follows it (on its left, room permitting)
+            vm.Pets.TalkCommand.Execute(null);
+            await Settle(100);
+            var bubble = Box(perch.Stage.PetBubble, w);
+            Assert.True(bubble.Right <= Box(pet, w).Left + 1 && bubble.Right >= Box(pet, w).Left - 4, "the bubble is not beside the pet");
+            await Close(w, vm);
 
-        // The place survives a restart
-        (w, vm) = await Open("normal", width: 800, height: 600, store: new ClientSettingsStore(path));
-        pet = w.FindControl<PetPerch>("PetPerch")!.Stage.Pet;
-        Assert.True(vm.Pets.IsRoaming);
-        content = ((Control)w.Content!).Bounds;
-        Assert.Equal(content.Right - ov.Right, Box(pet, w).Right, 1);
-        Assert.Equal(content.Bottom - ov.Bottom, Box(pet, w).Bottom, 1);
-        // Reset position puts it back on the message box
-        vm.Pets.ReturnToPerchCommand.Execute(null);
-        await Settle(150);
-        Assert.False(vm.Pets.IsRoaming);
-        Assert.False(vm.Pets.ReturnToPerchCommand.CanExecute(null));
-        var boxBox = Box(w.FindControl<Border>("ComposerBox")!, w);
-        Assert.Equal(boxBox.Top + 1, Box(pet, w).Bottom, 0.5);
-        await Close(w, vm);
+            // The place survives a restart
+            (w, vm) = await Open("normal", width: 800, height: 600, store: new ClientSettingsStore(path));
+            pet = w.FindControl<PetPerch>("PetPerch")!.Stage.Pet;
+            Assert.True(vm.Pets.IsRoaming);
+            content = ((Control)w.Content!).Bounds;
+            Assert.Equal(content.Right - ov.Right, Box(pet, w).Right, 1);
+            Assert.Equal(content.Bottom - ov.Bottom, Box(pet, w).Bottom, 1);
+            // Reset position puts it back on the message box
+            vm.Pets.ReturnToPerchCommand.Execute(null);
+            await Settle(150);
+            Assert.False(vm.Pets.IsRoaming);
+            Assert.False(vm.Pets.ReturnToPerchCommand.CanExecute(null));
+            var boxBox = Box(w.FindControl<Border>("ComposerBox")!, w);
+            Assert.Equal(boxBox.Top + 1, Box(pet, w).Bottom, 0.5);
+            await Close(w, vm);
 
-        (w, vm) = await Open("normal", store: new ClientSettingsStore(path));
-        Assert.False(vm.Pets.IsRoaming);
-        await Close(w, vm);
+            (w, vm) = await Open("normal", store: new ClientSettingsStore(path));
+            Assert.False(vm.Pets.IsRoaming);
+        }
+        finally
+        {
+            await Close(w, vm);
+        }
     }
 
     [AvaloniaFact]
@@ -639,11 +672,11 @@ public sealed class PetsTests
         var from = Box(pet, w).Center;
         w.MouseDown(from, MouseButton.Left);
         w.MouseMove(from + new Vector(-40, -60));
-        await Settle(100);
+        AdvanceCarry(w, 6);
         Assert.True(vm.Pets.Oni.Director.Carried);
         // The system takes the pointer away (another window, a system gesture): let go where it is
         pointer!.Capture(null);
-        await Settle(1600);
+        LandCarry(w);
         Assert.False(vm.Pets.Oni.Director.Carried);
         Assert.False(vm.Pets.IsChatOpen);
         Assert.True(vm.Pets.IsRoaming);
@@ -658,21 +691,27 @@ public sealed class PetsTests
     public async Task A_pet_put_down_close_to_its_perch_sits_on_it_again()
     {
         var (w, vm) = await Open("normal");
-        vm.Pets.SetRoamCommand.Execute("window");
-        var pet = w.FindControl<PetPerch>("PetPerch")!.Stage.Pet;
-        vm.Pets.MoveTo(new Point(0.5, 0.5));
-        await Settle(150);
-        Assert.True(vm.Pets.IsRoaming);
-        // Where the perch is now (the band is gone while the pet is elsewhere): its feet on the message box
-        var box = Box(w.FindControl<Border>("ComposerBox")!, w);
-        var size = Box(pet, w).Size;
-        var perchCenter = new Point(box.Right - PetsViewModel.PetInset - size.Width / 2, box.Top + 1 - size.Height / 2);
-        await Carry(w, Box(pet, w).Center, perchCenter + new Vector(6, -5));
-        Assert.False(vm.Pets.IsRoaming);
-        box = Box(w.FindControl<Border>("ComposerBox")!, w);
-        Assert.Equal(box.Top + 1, Box(pet, w).Bottom, 0.5);
-        Assert.Equal(vm.Pets.PerchHeight - 1, w.FindControl<Border>("ComposerBox")!.Margin.Top);
-        await Close(w, vm);
+        try
+        {
+            vm.Pets.SetRoamCommand.Execute("window");
+            var pet = w.FindControl<PetPerch>("PetPerch")!.Stage.Pet;
+            vm.Pets.MoveTo(new Point(0.5, 0.5));
+            await Settle(150);
+            Assert.True(vm.Pets.IsRoaming);
+            // Where the perch is now (the band is gone while the pet is elsewhere): its feet on the message box
+            var box = Box(w.FindControl<Border>("ComposerBox")!, w);
+            var size = Box(pet, w).Size;
+            var perchCenter = new Point(box.Right - PetsViewModel.PetInset - size.Width / 2, box.Top + 1 - size.Height / 2);
+            Carry(w, Box(pet, w).Center, perchCenter + new Vector(6, -5));
+            Assert.False(vm.Pets.IsRoaming);
+            box = Box(w.FindControl<Border>("ComposerBox")!, w);
+            Assert.Equal(box.Top + 1, Box(pet, w).Bottom, 0.5);
+            Assert.Equal(vm.Pets.PerchHeight - 1, w.FindControl<Border>("ComposerBox")!.Margin.Top);
+        }
+        finally
+        {
+            await Close(w, vm);
+        }
     }
 
     // ───────────────────────────── On the desktop ─────────────────────────────
@@ -984,7 +1023,8 @@ public sealed class PetsTests
             if (seen[i].Mood is not (PetMood.Error or PetMood.Done) && seen[i - 1].Mood is not (PetMood.Error or PetMood.Done))
                 Assert.True(seen[i].At - seen[i - 1].At >= TimeSpan.FromMilliseconds(650), $"{seen[i - 1].Mood} → {seen[i].Mood} after {(seen[i].At - seen[i - 1].At).TotalMilliseconds:0} ms");
         // While busy the bubble says what the activity line says
-        Assert.Matches("^(Thinking|Writing|Working|Running )", said[0]);
+        var busy = new[] { Loc.T("Thinking"), Loc.T("Writing"), Loc.T("Working"), Loc.F("Running {0}", "") }.Select(System.Text.RegularExpressions.Regex.Escape);
+        Assert.Matches("^(" + string.Join("|", busy) + ")", said[0]);
         await Close(w, vm);
     }
 
@@ -1017,7 +1057,7 @@ public sealed class PetsTests
         await Until(() => vm.HasDialog, "approval");
         await Until(() => vm.Pets.Mood == PetMood.Waiting, "waiting", 5);
         vm.Pets.TalkCommand.Execute(null);
-        Assert.Contains("approval", vm.Pets.BubbleText);
+        Assert.Equal(Loc.F("omp needs your approval, {0}.", Loc.T("just above")), vm.Pets.BubbleText);
         Assert.Empty(PetCovers(w));
         await Close(w, vm);
     }

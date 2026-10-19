@@ -43,7 +43,7 @@ check "package-smoke-$RID (self-test, runtime install, omp over RPC, window star
 # ── RUNTIME: the real omp suite on this Mac (installs the pinned runtime with the client's own installer) ─────
 tools/ci/real-omp-smoke.sh "$WORK/omp" > "$WORK/real-omp.log" 2>&1
 check "real-omp (startup, stdin/stdout RPC, protocol v2, prompt, stream, abort, shutdown, paths)" $? "$(grep -E '^\s*(Passed|Failed|Skipped):' "$WORK/real-omp.log" | tr -s ' ' | tr '\n' ' ')"
-RT=$WORK/omp/runtimes/omp-18.8.0-bun-1.4.2
+RT=$WORK/omp/runtimes/ombra-engine-18.8.0-bun-1.4.2-v1
 
 # $SHELL: zsh (macOS default) and a non-macOS path; the packaged app's self-test must still start a shell.
 APP_DIR="$WORK/smoke/unpacked/ombra-$V-$RID/Ombra.app"; APP="$APP_DIR/Contents/MacOS/Ombra"
@@ -66,7 +66,8 @@ exec /usr/bin/osascript "\$@"
 EOF
 chmod +x "$WORK/shim/osascript"
 cat > "$WORK/pkg.json" <<EOF
-{ "command": "$RT/bun/bun", "prefixArgs": ["--no-install", "$RT/omp/node_modules/@oh-my-pi/pi-coding-agent/src/cli.ts"],
+{ "command": "$RT/bun/bun", "prefixArgs": ["--config=$RT/omp/bunfig.toml", "--no-env-file", "--no-install", "$RT/omp/engine/host.ts"],
+  "managementPrefixArgs": ["--config=$RT/omp/bunfig.toml", "--no-env-file", "--no-install", "$RT/omp/engine/coding-agent/src/cli.ts"],
   "profile": "harness", "workingDirectory": "$WORK/pkg-work",
   "environment": { "HOME": "$H", "QWEN_LOCAL_API_KEY": "dummy-not-a-secret" } }
 EOF

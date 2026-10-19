@@ -14,18 +14,23 @@ public partial class MainViewModel
     public Func<IReadOnlyList<string>, string?, OmpLaunchSpec>? OmpCliLaunch { get; init; }
 
     /// <summary>The open session's project folder, when it exists (null before omp reports it).</summary>
-    public string? ProjectFolder => ProjectDirectory() ?? (Session.CurrentLaunch.WorkingDirectory is { } d && Directory.Exists(d) ? d : null);
+    public string? ProjectFolder => IsReadOnly ? null : ProjectDirectory() ?? (Session.CurrentLaunch.WorkingDirectory is { } d && Directory.Exists(d) ? d : null);
 
     /// <summary>True while omp runs and can take commands.</summary>
-    public bool CanRunOmpCommands => Session.Connection is not null && Phase is not (SessionPhase.Starting or SessionPhase.Stopped or SessionPhase.Faulted);
+    public bool CanRunOmpCommands => !IsReadOnly && Session.Connection is not null && Phase is not (SessionPhase.Starting or SessionPhase.Stopped or SessionPhase.Faulted);
 
     /// <summary>Runs an omp builtin such as "/mcp list" or "/usage" and returns what it printed (see <see cref="OmpBuiltins"/>).</summary>
-    public Task<SlashCommandResult> RunOmpCommandAsync(string command, TimeSpan? timeout = null, CancellationToken ct = default) =>
-        Session.RunSlashCommandAsync(command, timeout, ct);
+    public async Task<SlashCommandResult> RunOmpCommandAsync(string command, TimeSpan? timeout = null, CancellationToken ct = default)
+    {
+        using var admission = AdmitWorktreeChat(null);
+        if (admission is null) return new(false, "", Error: Loc.T("Worktree removal is in progress. Try again when it finishes."));
+        return await Session.RunSlashCommandAsync(command, timeout, ct);
+    }
 
     /// <summary>Runs <c>omp &lt;args&gt;</c> (e.g. "plugin", "list", "--json") in the project folder.</summary>
     public Task<OmpCliResult> RunOmpCliAsync(IReadOnlyList<string> args, TimeSpan? timeout = null, CancellationToken ct = default)
     {
+        if (IsReadOnly) return Task.FromResult(new OmpCliResult(-1, "", Loc.T("This conversation is read only.")));
         if (OmpCliLaunch is not { } launch) return Task.FromResult(new OmpCliResult(-1, "", Loc.T("The app couldn't start omp's command-line tool.")));
         OmpLaunchSpec spec;
         try { spec = launch(args, ProjectFolder); }

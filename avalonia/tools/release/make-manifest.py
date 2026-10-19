@@ -6,7 +6,7 @@
 Every ombra-<version>-<rid>.(tar.gz|zip) in <dist-dir> becomes an asset (size and SHA-256 computed here; a
 <package>.sha256 next to it must agree). The URL of each package is <base-url>/<file>; the default base URL is the
 GitHub release of v<version> in --repo (or $GITHUB_REPOSITORY). "runtime" names the pinned omp pack this version
-brings (RuntimePack.Name in the client source, with its runtime/packs/<name>/pack.json), so a client can tell the
+brings (RuntimePack.Name in the client source, with its SourceDirectoryName under runtime/packs), so a client can tell the
 user that omp moves too. Sign the result with tools/release/sign-manifest.sh.
 """
 import argparse, hashlib, json, os, re, sys
@@ -20,9 +20,10 @@ RIDS = "linux-x64|linux-arm64|win-x64|win-arm64|osx-arm64|osx-x64"
 def runtime_pack():
     src = open(os.path.join(AVALONIA, "src/Ombra.App/Services/Runtime/RuntimePack.cs"), encoding="utf-8").read()
     name = re.search(r'public const string Name = "([^"]+)";', src).group(1)
-    pack = json.load(open(os.path.join(ROOT, "runtime/packs", name, "pack.json"), encoding="utf-8"))
+    directory = re.search(r'public const string SourceDirectoryName = "([^"]+)";', src).group(1)
+    pack = json.load(open(os.path.join(ROOT, "runtime/packs", directory, "pack.json"), encoding="utf-8"))
     if pack["name"] != name:
-        sys.exit(f"runtime/packs/{name}/pack.json names {pack['name']}")
+        sys.exit(f"runtime/packs/{directory}/pack.json names {pack['name']}, expected {name}")
     return {"pack": name, "omp": pack["omp"]["version"], "bun": pack["bun"]["version"]}
 
 

@@ -26,10 +26,10 @@ public partial class MainViewModel
     public IReadOnlyList<SettingsCategoryViewModel> SettingsCategories { get; } =
     [
         new("general", Loc.T("General"), "IconSettings"),
+        new("account", Loc.T("Account"), "IconUser"),
         new("permissions", Loc.T("Permissions"), "IconShield"),
         new("providers", Loc.T("Model providers"), "IconKey", "omp"),
-        new("connectors", Loc.T("Connectors"), "IconPlug"),
-        new("plugins", Loc.T("Plugins and skills"), "IconGrid"),
+        new("plugins", Loc.T("Plugins"), "IconGrid"),
         new("computer", Loc.T("Computer use"), "IconMonitor"),
         new("git", Loc.T("Git and worktrees"), "IconBranch"),
         new("ssh", Loc.T("SSH hosts"), "IconServer"),
@@ -49,7 +49,6 @@ public partial class MainViewModel
     partial void OnSettingsCategoryChanged(string value)
     {
         foreach (var c in SettingsCategories) c.IsCurrent = c.Key == value;
-        SettingsAnchor = null; // another page: the rail's Skills no longer applies (MainViewModel.Rail.cs)
         OnRailChanged();
         if (IsSettingsOpen) SettingsCategoryShown?.Invoke(value);
     }
@@ -58,7 +57,6 @@ public partial class MainViewModel
     {
         foreach (var c in SettingsCategories) c.IsCurrent = c.Key == SettingsCategory;
         OnPropertyChanged(nameof(ShowSidebar)); // the settings page's own navigation takes the sidebar's place
-        if (!value) SettingsAnchor = null;
         OnRailChanged();
         if (value) SettingsCategoryShown?.Invoke(SettingsCategory);
     }
@@ -69,7 +67,7 @@ public partial class MainViewModel
         if (key is not null && SettingsCategories.Any(c => c.Key == key)) SettingsCategory = key;
     }
 
-    /// <summary>Opens the settings on one page (e.g. "connectors" from the "+" menu).</summary>
+    /// <summary>Opens the settings on one page (e.g. "git" from the branch chip).</summary>
     public async Task OpenSettingsAtAsync(string key)
     {
         ShowSettingsCategory(key);

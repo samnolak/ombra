@@ -31,8 +31,14 @@ public partial class PreviewPanel : UserControl
     private readonly Dictionary<PreviewTab, Uri> _pending = [];
     /// <summary>Pop-up tabs: the engine's own web view of each, hosted as it is.</summary>
     private readonly Dictionary<PreviewTab, PopupViewHost> _popups = [];
+    /// <summary>Tabs shown by the embedded Nightly runtime (<see cref="PreviewViewModel.UseNightly"/>, macOS), one pane each.</summary>
+    private readonly Dictionary<PreviewTab, Control> _nightly = [];
 
-    public PreviewPanel() => InitializeComponent();
+    public PreviewPanel()
+    {
+        InitializeComponent();
+        WireBrowserKeys();
+    }
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
 
@@ -54,8 +60,9 @@ public partial class PreviewPanel : UserControl
             old.ForwardRequested -= OnForwardRequested;
             old.OpenExternallyRequested -= OnOpenExternallyRequested;
             old.PropertyChanged -= OnVmPropertyChanged;
-            old.Annotations.CollectionChanged -= OnAnnotationsChanged;
-            old.AnnotationEdited -= OnAnnotationEdited;
+            old.Marks.Items.CollectionChanged -= OnAnnotationsChanged;
+            old.Marks.Edited -= OnAnnotationEdited;
+            old.PinsChanged -= OnAnnotationEdited;
             foreach (var t in old.Tabs)
             {
                 t.RunScript = null;
@@ -80,8 +87,9 @@ public partial class PreviewPanel : UserControl
             vm.ForwardRequested += OnForwardRequested;
             vm.OpenExternallyRequested += OnOpenExternallyRequested;
             vm.PropertyChanged += OnVmPropertyChanged;
-            vm.Annotations.CollectionChanged += OnAnnotationsChanged;
-            vm.AnnotationEdited += OnAnnotationEdited;
+            vm.Marks.Items.CollectionChanged += OnAnnotationsChanged;
+            vm.Marks.Edited += OnAnnotationEdited;
+            vm.PinsChanged += OnAnnotationEdited;
             vm.Dialogs.PropertyChanged += OnDialogsPropertyChanged;
             vm.Dialogs.PickFiles = PickFilesAsync;
             vm.Dialogs.CaptureSnapshot = CaptureDialogSnapshotAsync; // the page behind a card (null while no web view)
@@ -92,8 +100,9 @@ public partial class PreviewPanel : UserControl
             // Pages chosen while the panel was not in a window yet (or by an earlier panel).
             foreach (var t in vm.Tabs)
             {
-                if (t.IsPopup) HostPopup(t);
+                if (t.Popup is not null) HostPopup(t);
                 else if (_webs.TryGetValue(t, out var web)) Connect(t, web);
+                else if (_nightly.ContainsKey(t)) continue;
                 else if ((t == vm.ActiveTab ? vm.CurrentUrl : t.Url) is { } current) NavigateTab(t, current);
             }
             ShowActiveTab();
@@ -137,6 +146,11 @@ public partial class PreviewPanel : UserControl
             popup.Navigate(uri);
             return;
         }
+        if (_nightly.TryGetValue(tab, out var pane))
+        {
+            if (OperatingSystem.IsMacOS()) ((NightlyPane)pane).Navigate(uri);
+            return;
+        }
         if (_webs.TryGetValue(tab, out var web))
         {
             web.Navigate(uri);
@@ -149,6 +163,7 @@ public partial class PreviewPanel : UserControl
     private void OnReloadRequested()
     {
         if (_vm?.ActiveTab.Popup is { } popup) popup.Reload();
+        else if (OperatingSystem.IsMacOS() && ActiveNightly() is { } pane) pane.Reload();
         else if (_web is not null) _web.Refresh();
         else if (_vm?.CurrentUrl is { } uri) OnNavigationRequested(uri);
     }
@@ -156,12 +171,14 @@ public partial class PreviewPanel : UserControl
     private void OnBackRequested()
     {
         if (_vm?.ActiveTab.Popup is { } popup) popup.GoBack();
+        else if (OperatingSystem.IsMacOS() && ActiveNightly() is { } pane) pane.GoBack();
         else _web?.GoBack();
     }
 
     private void OnForwardRequested()
     {
         if (_vm?.ActiveTab.Popup is { } popup) popup.GoForward();
+        else if (OperatingSystem.IsMacOS() && ActiveNightly() is { } pane) pane.GoForward();
         else _web?.GoForward();
     }
 
@@ -183,6 +200,18 @@ public partial class PreviewPanel : UserControl
             return;
         }
         LayoutUpdated -= OnLayoutUpdatedWhilePending;
+        if (_vm.UseNightly && OperatingSystem.IsMacOS())
+        {
+            // The Nightly runtime draws into the panel itself: no platform web view, no engine probe.
+            foreach (var (tab, uri) in _pending.ToList())
+            {
+                _pending.Remove(tab);
+                if (tab.IsClosed) continue;
+                if (_nightly.TryGetValue(tab, out var existing)) ((NightlyPane)existing).Navigate(uri);
+                else CreateNightlyPane(tab, uri);
+            }
+            return;
+        }
         var probe = Probe(top);
         if (!probe.Available)
         {
@@ -247,14 +276,19 @@ public partial class PreviewPanel : UserControl
 
     /// <summary>
     /// The page's size: the one omp asked for its tab (top-left, Tern), else the device chosen in the toolbar (centred,
-    /// a little below the toolbar), else the pane's. A pane smaller than either limits it.
+    /// a little below the toolbar), else the pane's. A web view smaller than either limits it; a Nightly pane gives the
+    /// page that size anyway and scales it down to fit (<see cref="NightlyPane.Viewport"/>).
     /// </summary>
-    private void ApplyViewport(PreviewTab tab, NativeWebView web)
+    private void ApplyViewport(PreviewTab tab, Control web)
     {
         var omp = tab.Viewport;
         var size = omp ?? _vm?.DeviceViewport;
-        web.MaxWidth = size?.Width ?? double.PositiveInfinity;
-        web.MaxHeight = size?.Height ?? double.PositiveInfinity;
+        if (OperatingSystem.IsMacOS() && web is NightlyPane pane) pane.Viewport = size is { } v ? new Size(v.Width, v.Height) : null;
+        else
+        {
+            web.MaxWidth = size?.Width ?? double.PositiveInfinity;
+            web.MaxHeight = size?.Height ?? double.PositiveInfinity;
+        }
         web.HorizontalAlignment = size is null ? Avalonia.Layout.HorizontalAlignment.Stretch
             : omp is null ? Avalonia.Layout.HorizontalAlignment.Center : Avalonia.Layout.HorizontalAlignment.Left;
         web.VerticalAlignment = size is null ? Avalonia.Layout.VerticalAlignment.Stretch : Avalonia.Layout.VerticalAlignment.Top;
@@ -274,12 +308,13 @@ public partial class PreviewPanel : UserControl
         if (_vm is not { } vm) return;
         _web = _webs.GetValueOrDefault(vm.ActiveTab);
         foreach (var (tab, web) in _webs) web.IsVisible = tab == vm.ActiveTab;
+        foreach (var (tab, pane) in _nightly) pane.IsVisible = tab == vm.ActiveTab;
         foreach (var (tab, host) in _popups) host.IsVisible = tab == vm.ActiveTab;
         _ = SyncAnnotationsAsync();
     }
 
     /// <summary>A new tab: the keyboard goes to the address box, its text selected (as browsers do).</summary>
-    private void FocusAddress() =>
+    internal void FocusAddress() =>
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             var box = this.FindControl<TextBox>("AddressBox")!;
@@ -298,6 +333,12 @@ public partial class PreviewPanel : UserControl
     {
         _pending.Remove(tab);
         if (_popups.Remove(tab, out var host)) this.FindControl<Panel>("WebHost")!.Children.Remove(host);
+        if (_nightly.Remove(tab, out var pane))
+        {
+            DropNightly(pane);
+            ShowActiveTab();
+            return;
+        }
         if (!_webs.Remove(tab, out var web))
         {
             ShowActiveTab();
@@ -359,6 +400,97 @@ public partial class PreviewPanel : UserControl
         foreach (var (tab, web) in _webs)
             if (ReferenceEquals(web, sender)) return tab;
         return null;
+    }
+
+    // ── Nightly (Settings › General › Agent browser: Nightly, experimental) ──
+
+    [System.Runtime.Versioning.SupportedOSPlatform("macos")]
+    private NightlyPane? ActiveNightly() => _vm is { } vm ? _nightly.GetValueOrDefault(vm.ActiveTab) as NightlyPane : null;
+
+    /// <summary>A tab shown by the Nightly runtime: its pane loads <paramref name="uri"/> once its window exists, or shows
+    /// <paramref name="adoptWindow"/>, a window a page opened; the page's address, title and history come back to the
+    /// toolbar, and the windows its page opens become tabs next to it. The agent's browser drives it through the pane's
+    /// <see cref="NightlyPane.Agent"/>: scripts, native input and screenshots over the embed channel.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("macos")]
+    private void CreateNightlyPane(PreviewTab tab, Uri? uri, uint adoptWindow = 0)
+    {
+        var pane = new NightlyPane { IsVisible = tab == _vm?.ActiveTab, AdoptWindow = adoptWindow, Page = tab.Page };
+        _nightly[tab] = pane;
+        tab.RunScript = pane.Agent.RunScriptAsync;
+        tab.CaptureScreenshot = pane.Agent.CaptureAsync;
+        tab.SetNative(null, pane.Agent, pane.Agent);
+        // The device mode: the window at the device's size (Nightly lays the page out at the window's size; the pane
+        // scales it down where the panel is smaller), and what the page emulates (pixel ratio, user agent, touch,
+        // viewport rules), sent before its first page loads.
+        ApplyViewport(tab, pane);
+        pane.Device = _vm?.EmbedDevice;
+        tab.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(PreviewTab.Viewport) && _nightly.ContainsKey(tab)) ApplyViewport(tab, pane);
+        };
+        pane.PopupWindowOpened += window =>
+        {
+            if (_vm is not { } vm || tab.IsClosed || !_nightly.ContainsKey(tab)) return;
+            CreateNightlyPane(vm.OpenNightlyPopupTab(tab), null, window);
+        };
+        pane.PageClosed += () =>
+        {
+            if (_vm is { } vm && !tab.IsClosed && _nightly.ContainsKey(tab)) vm.CloseTabCommand.Execute(tab);
+        };
+        // Nightly cannot show pages: the built-in preview shows them, with the reason (next turn: the panes go then).
+        pane.RuntimeUnusable += reason => Avalonia.Threading.Dispatcher.UIThread.Post(() => _vm?.ReportNightlyUnusable(reason));
+        pane.LocationChanged += location =>
+        {
+            if (_vm is not { } vm || tab.IsClosed || !_nightly.ContainsKey(tab)) return;
+            var at = Uri.TryCreate(location.Url, UriKind.Absolute, out var u) ? u : null;
+            if (location.Flags.HasFlag(Nightly.NightlyProtocol.LocationFlags.Loading))
+            {
+                vm.OnNavigationStarted(tab, at);
+                return;
+            }
+            vm.OnNavigationCompleted(tab, at, success: true,
+                location.Flags.HasFlag(Nightly.NightlyProtocol.LocationFlags.CanGoBack),
+                location.Flags.HasFlag(Nightly.NightlyProtocol.LocationFlags.CanGoForward));
+            if (tab == vm.ActiveTab) vm.Title = location.Title;
+            else tab.Title = location.Title;
+        };
+        this.FindControl<Panel>("WebHost")!.Children.Add(pane);
+        if (uri is not null) pane.Navigate(uri);
+        ShowActiveTab();
+    }
+
+    private void DropNightly(Control pane)
+    {
+        this.FindControl<Panel>("WebHost")!.Children.Remove(pane);
+        if (OperatingSystem.IsMacOS()) ((NightlyPane)pane).Close();
+    }
+
+    /// <summary>The engine setting changed: every open page (not the engine's own pop-ups) loads again in the chosen engine.</summary>
+    private void SwitchEngine()
+    {
+        if (_vm is not { } vm) return;
+        var pages = vm.Tabs.Where(t => t.Popup is null && !t.IsClosed)
+            .Select(t => (Tab: t, Url: t == vm.ActiveTab ? vm.CurrentUrl : t.Url))
+            .Where(p => p.Url is not null).ToList();
+        foreach (var (tab, pane) in _nightly.ToList())
+        {
+            _nightly.Remove(tab);
+            DropNightly(pane);
+            tab.RunScript = null;
+            tab.CaptureScreenshot = null;
+            tab.SetNative(null, null, null);
+        }
+        foreach (var (tab, web) in _webs.ToList())
+        {
+            _webs.Remove(tab);
+            Drop(web);
+            tab.RunScript = null;
+            tab.CaptureScreenshot = null;
+            tab.SetNative(null, null, null);
+        }
+        _web = null;
+        foreach (var (tab, url) in pages) NavigateTab(tab, url!);
+        ShowActiveTab();
     }
 
     // ── Native hooks (Platform/BrowserHooks.cs): the page's questions go to the tab's BrowserPageHooks (cards, downloads, pop-ups) ──
@@ -479,6 +611,11 @@ public partial class PreviewPanel : UserControl
         try
         {
             await web.InvokeScript($"window.__ompAnnotate&&(__ompAnnotate.setMode({mode}),__ompAnnotate.setPins({vm.PinsJson(vm.CurrentUrl)}))");
+            // A team member's mark asked for (MainViewModel.SharedMarks.cs): scroll to its pin once the page has it
+            if (vm.PendingReveal is { } id
+                && await web.InvokeScript($"window.__ompAnnotate?String(__ompAnnotate.reveal({System.Text.Json.JsonSerializer.Serialize(id)})):'false'") is { } shown
+                && shown.Contains("true", StringComparison.Ordinal) && vm.PendingReveal == id)
+                vm.PendingReveal = null;
         }
         catch (Exception)
         {
@@ -504,11 +641,19 @@ public partial class PreviewPanel : UserControl
             case nameof(PreviewViewModel.ActiveTab):
                 ShowActiveTab();
                 return;
+            case nameof(PreviewViewModel.UseNightly):
+                SwitchEngine();
+                return;
             case nameof(PreviewViewModel.DeviceViewport):
                 foreach (var (t, w) in _webs) ApplyViewport(t, w);
+                foreach (var (t, p) in _nightly) ApplyViewport(t, p);
                 return;
             case nameof(PreviewViewModel.DeviceUserAgent):
                 foreach (var (t, w) in _webs) ApplyUserAgent(t, w);
+                return;
+            case nameof(PreviewViewModel.EmbedDevice):
+                if (OperatingSystem.IsMacOS())
+                    foreach (var p in _nightly.Values) ((NightlyPane)p).Device = _vm?.EmbedDevice;
                 return;
             case not nameof(PreviewViewModel.IsAnnotating):
                 return;
@@ -546,6 +691,7 @@ public partial class PreviewPanel : UserControl
     /// <summary>The page as a picture for the card's background: the engine's own snapshot (no screen capture).</summary>
     private async Task<Avalonia.Media.Imaging.Bitmap?> CaptureDialogSnapshotAsync(CancellationToken ct)
     {
+        if (_vm?.UseNightly == true) return null; // the Nightly pane stays live under the card (Avalonia composes it)
         var handle = _vm?.ActiveTab is { } active && _popups.TryGetValue(active, out var host) ? host.Handle : _web?.TryGetPlatformHandle();
         if (handle is null) return null;
         var shot = await Platform.WebViewSnapshot.CaptureAsync(handle, ct);

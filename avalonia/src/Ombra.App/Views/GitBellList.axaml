@@ -1,0 +1,97 @@
+<!-- The bell's list (Views/GitBellButton): per repository of an open chat, what teammates pushed that I do not have, how
+     safe an update is and what to do; then the team Inbox's waiting items. DataContext: GitBellViewModel. -->
+<UserControl xmlns:loc="using:Ombra.App.Localization"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
+             x:Class="Ombra.App.Views.GitBellList"
+             x:DataType="vm:GitBellViewModel">
+  <UserControl.Styles>
+    <!-- A repository's or an Inbox item's row: a hairline card on the menu card (radius 8, as the menu's rows) -->
+    <Style Selector="Border.bell-row">
+      <Setter Property="Padding" Value="12,10" />
+      <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusControl}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+  </UserControl.Styles>
+  <ScrollViewer MaxHeight="560" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel x:Name="BellList" Width="380" Spacing="8" Margin="4">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Classes="menu-heading" Text="{loc:T 'Notifications'}" VerticalAlignment="Center" />
+        <!-- Fetches every open chat's repository now, untrusted folders too (the background watch skips those) -->
+        <Button x:Name="BellCheckNow" Grid.Column="1" Classes="flat sm" Content="{loc:T 'Check now'}" Command="{Binding CheckNowCommand}"
+                ToolTip.Tip="{loc:T 'git fetch for every open project now, including folders you have not trusted'}" />
+      </Grid>
+      <TextBlock x:Name="BellEmpty" Classes="muted" Text="{loc:T 'Nothing new: your branches are up to date and nothing waits in the Inbox.'}"
+                 TextWrapping="Wrap" IsVisible="{Binding IsEmpty}" Margin="8,0" />
+
+      <ItemsControl x:Name="BellRepos" ItemsSource="{Binding Repos}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Spacing="8" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:RepoUpdateRow">
+            <Border Classes="bell-row" Classes.warning="{Binding IsWarning}">
+              <StackPanel Spacing="4">
+                <Grid ColumnDefinitions="Auto,*">
+                  <ctl:Icon Data="{StaticResource IconBranch}" Size="16" Margin="0,1,8,0" VerticalAlignment="Top" />
+                  <TextBlock Grid.Column="1" Text="{Binding Title}" FontWeight="Medium" TextWrapping="Wrap" />
+                </Grid>
+                <TextBlock Classes="tertiary" Text="{Binding FilesText}" TextWrapping="Wrap" IsVisible="{Binding HasIncoming}" />
+                <TextBlock Classes="tertiary" Text="{Binding DefaultText}" TextWrapping="Wrap" IsVisible="{Binding HasDefault}" />
+                <TextBlock Classes="warning" Text="{Binding Error}" TextWrapping="Wrap" IsVisible="{Binding HasError}" FontSize="{DynamicResource GuiFontCaption}" />
+                <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasIncoming}">
+                  <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,0,8,0" VerticalAlignment="Top" IsVisible="{Binding IsWarning}" />
+                  <TextBlock Grid.Column="1" Classes.warning="{Binding IsWarning}" Classes.tertiary="{Binding !IsWarning}" Text="{Binding RiskText}" TextWrapping="Wrap"
+                             FontSize="{DynamicResource GuiFontCaption}" />
+                </Grid>
+                <TextBlock Classes="warning mono" Text="{Binding OverlapText}" TextWrapping="Wrap" IsVisible="{Binding HasOverlap}" FontSize="{DynamicResource GuiFontCaption}" />
+                <TextBlock Classes="tertiary" Text="{Binding Message}" TextWrapping="Wrap" IsVisible="{Binding HasMessage}" />
+                <WrapPanel ItemSpacing="6" LineSpacing="6" Margin="0,4,0,0">
+                  <Button x:Name="BellUpdate" Classes="accent sm" Content="{loc:T 'Update'}" Command="{Binding UpdateCommand}" IsVisible="{Binding CanUpdate}" />
+                  <Button x:Name="BellUpdateKeep" Classes="accent sm" Content="{loc:T 'Update (keep my changes)'}" Command="{Binding UpdateCommand}" IsVisible="{Binding CanUpdateKeepingChanges}" />
+                  <Button x:Name="BellAskAgent" Classes="accent sm" Content="{loc:T 'Ask the agent to update'}" Command="{Binding AskAgentCommand}" IsVisible="{Binding CanAskAgent}" />
+                  <Button x:Name="BellShowIncoming" Classes="outline sm" Content="{loc:T 'Show incoming changes'}" Command="{Binding ShowIncomingCommand}" IsVisible="{Binding HasNews}" />
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <TextBlock Classes="menu-heading" Text="{loc:T 'Team Inbox'}" IsVisible="{Binding HasTeam}" />
+      <ItemsControl x:Name="BellTeam" ItemsSource="{Binding Team}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Spacing="8" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:TeamInboxRow">
+            <Border Classes="bell-row">
+              <StackPanel Spacing="4">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <ctl:Icon Data="{StaticResource IconUsers}" Size="16" Margin="0,1,8,0" VerticalAlignment="Top" />
+                  <TextBlock Grid.Column="1" Text="{Binding Headline}" FontWeight="Medium" TextWrapping="Wrap" />
+                  <TextBlock Grid.Column="2" Classes="tertiary" Text="{Binding When}" Margin="8,0,0,0" />
+                </Grid>
+                <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />
+                <TextBlock Classes="tertiary" Text="{Binding Comment}" TextWrapping="Wrap" IsVisible="{Binding HasComment}" />
+                <WrapPanel ItemSpacing="6" LineSpacing="6" Margin="0,4,0,0">
+                  <Button Classes="accent sm" Content="{loc:T 'Accept'}" Command="{Binding AcceptCommand}" />
+                  <Button Classes="outline sm" Content="{loc:T 'Decline'}" Command="{Binding DeclineCommand}" />
+                  <Button Classes="flat sm" Content="{loc:T 'Open Inbox'}"
+                          Command="{Binding $parent[ItemsControl].((vm:GitBellViewModel)DataContext).OpenTeamCommand}" />
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

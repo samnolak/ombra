@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
@@ -6,16 +7,18 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.ClientCore;
+using Ombra.Rpc;
 
 namespace Ombra.Tests;
 
 /// <summary>
-/// Several chats at once in the real window over the fake omp ("multi": the message decides
-/// the turn — FOREVER streams until stopped, LONG streams for 3 s, APPROVE asks an approval, CRASH exits mid-reply). Each
-/// chat runs its own omp; switching never stops one, and coming back finds a chat as it was left.
+/// Several chats at once in the real window over one fake shared engine ("multi": the message decides
+/// the turn — FOREVER streams until stopped, LONG streams for 3 s, APPROVE asks an approval, CRASH exits mid-reply).
+/// Switching or stopping a logical chat preserves its peers; a host crash faults every chat and requires explicit recovery.
 /// </summary>
 public sealed class MultiSessionTests
 {
@@ -72,7 +75,7 @@ public sealed class MultiSessionTests
             && vm.Rows.OfType<AssistantRowViewModel>().LastOrDefault() is { HasText: true }, "reply to " + text);
     }
 
-    /// <summary>A new chat (⌘N) while the shown one may be working; waits until its omp is ready.</summary>
+    /// <summary>A new chat (⌘N) while the shown one may be working; waits until its logical session is ready.</summary>
     private static async Task<SessionController> NewChatAsync(MainViewModel vm)
     {
         var before = vm.Session;
@@ -104,6 +107,82 @@ public sealed class MultiSessionTests
     private static double? Top(Control? c, Visual to) => c?.IsEffectivelyVisible == true ? c.TranslatePoint(default, to)?.Y : null;
 
     [AvaloniaFact]
+    public async Task Extension_status_and_widgets_stay_safe_when_switching_chats()
+    {
+        const string controls = "日本語 e\u0301 👩‍💻 \u001b]0;title\u0007 \u009b31m\u009dosc\u009c\r\n\t";
+        const string visible = "日本語 e\u0301 👩‍💻 ␛]0;title␇ ⟦U+009B⟧31m⟦U+009D⟧osc⟦U+009C⟧\r\n\t";
+        var (w, vm, _, _, _) = await OpenAsync();
+        var observed = new List<string>();
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(vm.WidgetsText)) observed.Add(vm.WidgetsText);
+            if (e.PropertyName == nameof(vm.StatusDetail)) observed.Add(vm.StatusDetail);
+        };
+        static void Publish(SessionController session, string text)
+        {
+            var status = JsonSerializer.SerializeToElement(new
+            {
+                type = "extension_ui_request", id = "status", method = "setStatus", statusKey = "test", statusText = text,
+            });
+            var widget = JsonSerializer.SerializeToElement(new
+            {
+                type = "extension_ui_request", id = "widget", method = "setWidget", widgetKey = "test", widgetLines = new[] { text },
+            });
+            session.Mutate(state =>
+            {
+                state.Apply(new RpcFrame("extension_ui_request", null, status, Stopwatch.GetTimestamp(), 0), DateTimeOffset.UtcNow);
+                state.Apply(new RpcFrame("extension_ui_request", null, widget, Stopwatch.GetTimestamp(), 0), DateTimeOffset.UtcNow);
+            });
+        }
+        static SessionItemViewModel SessionRow(SessionController session) => new(new SessionSummary(
+            session.SessionFile!, "test", session.CurrentLaunch.WorkingDirectory!, "Control safety", DateTimeOffset.UtcNow));
+        void AssertShown(string prefix)
+        {
+            Frame(w);
+            Assert.Equal(prefix + visible, vm.WidgetsText);
+            Assert.Contains(prefix + visible, vm.StatusDetail);
+            Assert.Contains(w.GetVisualDescendants().OfType<SelectableTextBlock>(),
+                t => t.IsEffectivelyVisible && t.Text == prefix + visible);
+            Assert.Equal(vm.StatusDetail, ToolTip.GetTip(w.FindControl<Grid>("ActivityLine")!));
+        }
+        try
+        {
+            await RunAsync(vm, "keep chat A");
+            var a = vm.Session;
+            Publish(a, "A " + controls);
+            vm.Apply(a.Snapshot());
+            AssertShown("A ");
+            var original = a.Snapshot();
+            var b = await NewChatAsync(vm);
+            Assert.Empty(vm.WidgetsText);
+            await RunAsync(vm, "keep chat B");
+            Publish(b, "B " + controls);
+            vm.Apply(b.Snapshot());
+            AssertShown("B ");
+
+            // EnterSession restores its cached widget text before Apply sees unchanged widget records.
+            foreach (var (session, prefix) in new[] { (a, "A "), (b, "B "), (a, "A ") })
+            {
+                await vm.OpenSessionCommand.ExecuteAsync(SessionRow(session));
+                Assert.Same(session, vm.Session);
+                AssertShown(prefix);
+                Assert.Equal(prefix + controls, session.Snapshot().ExtensionStatus["test"]);
+                Assert.Equal(prefix + controls, Assert.Single(session.Snapshot().Widgets).Lines[0]);
+            }
+            Assert.Equal("A " + controls, original.ExtensionStatus["test"]);
+            Assert.Equal("A " + controls, Assert.Single(original.Widgets).Lines[0]);
+            Assert.NotEmpty(observed);
+            Assert.All(observed, text => Assert.DoesNotContain(text,
+                c => char.IsControl(c) && c is not ('\r' or '\n' or '\t')));
+        }
+        finally
+        {
+            await vm.DisposeAsync();
+            w.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public async Task A_chat_streams_on_while_another_is_used_and_comes_back_whole_where_it_was_left()
     {
         var root = TestProcesses.TempDir("multi-sessions");
@@ -132,9 +211,9 @@ public sealed class MultiSessionTests
         var heldTop = Top(held, sv)!.Value;
         var rowsOfA = vm.Rows.ToList();
 
-        // Another chat while A works: an omp of its own; A's run goes on in its own
+        // Another logical chat shares the engine while A's run continues independently.
         var b = await NewChatAsync(vm);
-        Assert.NotEqual(aPid, b.ProcessId);
+        Assert.Equal(aPid, b.ProcessId);
         Assert.Equal(aPid, a.ProcessId);
         Assert.Equal(SessionPhase.Running, a.Snapshot().Phase);
         var streamedWhenLeft = ReplyText(a.Snapshot()).Length;
@@ -180,8 +259,8 @@ public sealed class MultiSessionTests
         await Until(() => a.Snapshot().Dialogs.Count == 1, "A asks for an approval");
         await Until(() => Row(vm, file)?.Status == SessionStatus.Waiting, "A marked as needing an answer");
         Assert.False(vm.HasDialog); // A's question is not shown over B
-        await Until(() => n.Calls.Any(c => c.Title.StartsWith("omp needs your approval", StringComparison.Ordinal)), "the notification");
-        var call = n.Calls.Single(c => c.Title.StartsWith("omp needs your approval", StringComparison.Ordinal));
+        await Until(() => n.Calls.Any(c => c.Title.StartsWith(Loc.T("omp needs your approval"), StringComparison.Ordinal)), "the notification");
+        var call = n.Calls.Single(c => c.Title.StartsWith(Loc.T("omp needs your approval"), StringComparison.Ordinal));
         Assert.Contains("first in A", call.Title); // whose question it is
 
         call.Clicked();
@@ -272,14 +351,14 @@ public sealed class MultiSessionTests
         vm.DeleteSessionItemCommand.Execute(Row(vm, file));
         var card = vm.SessionCard!;
         Assert.Equal("delete", card.Kind);
-        Assert.Contains("omp is working in it", card.Message);
-        Assert.Equal("Stop and delete", card.Primary!.Label);
+        Assert.Contains(Loc.T("omp is working in it: deleting stops its run, then the conversation's file and its artifacts are deleted. This cannot be undone."), card.Message);
+        Assert.Equal(Loc.T("Stop and delete"), card.Primary!.Label);
         Assert.True(Alive(pid), "nothing happens before the answer");
         Assert.Equal(SessionPhase.Running, a.Snapshot().Phase);
 
         card.Primary.Command.Execute(null);
         await Until(() => !File.Exists(file) && !vm.OpenChats.Contains(a), "deleted");
-        await Until(() => !Alive(pid), "A's omp stopped");
+        Assert.True(Alive(pid), "closing one logical session keeps the engine alive");
         await Until(() => Row(vm, file) is null, "gone from the sidebar");
         await vm.DisposeAsync();
         w.Close();
@@ -303,52 +382,68 @@ public sealed class MultiSessionTests
         // The idle chats (B in the background, C shown) restart with it at once. The shown phase alone said nothing: it
         // still read Ready from before the restart until the next update was applied, so the header's mode was the old one.
         await Until(() => b.CurrentLaunch.ApprovalMode == "always-ask" && c.CurrentLaunch.ApprovalMode == "always-ask"
-            && b.ProcessId != pidB && c.ProcessId != pidC && c.Snapshot().Phase == SessionPhase.Ready
+            && b.ProcessId == pidB && c.ProcessId == pidC && c.Snapshot().Phase == SessionPhase.Ready
             && vm.Phase == SessionPhase.Ready && vm.ApprovalMode == "always-ask", "idle chats restarted, the header showing the new mode");
         // The working one keeps its run, and the user is told
         Assert.Equal(pidA, a.ProcessId);
         Assert.Equal("write", a.CurrentLaunch.ApprovalMode);
         Assert.Equal(SessionPhase.Running, a.Snapshot().Phase);
-        await Until(() => vm.SessionCard?.Message.Contains("switches when its run ends", StringComparison.Ordinal) == true, "told about the working chat");
+        await Until(() => vm.SessionCard?.Message.Contains(Loc.T("A chat that is working (marked in the sidebar) switches when its run ends: omp restarts then."), StringComparison.Ordinal) == true, "told about the working chat");
         Assert.Equal(["first in B"], b.Snapshot().Items.OfType<UserItem>().Select(u => u.Text)); // restarted on its session
 
         // A's run ends: it switches then
         await vm.OpenSessionCommand.ExecuteAsync(Row(vm, fileA));
         Assert.Equal("always-ask", vm.ShownApprovalMode); // its menu shows the mode waiting for the run to end
         vm.AbortCommand.Execute(null);
-        await Until(() => a.CurrentLaunch.ApprovalMode == "always-ask" && a.ProcessId != pidA && a.Snapshot().Phase == SessionPhase.Ready
+        await Until(() => a.CurrentLaunch.ApprovalMode == "always-ask" && a.ProcessId == pidA && a.Snapshot().Phase == SessionPhase.Ready
             && vm.Phase == SessionPhase.Ready && vm.ApprovalMode == "always-ask", "A restarted after its run, the header showing the new mode");
         await vm.DisposeAsync();
         w.Close();
     }
 
     [AvaloniaFact]
-    public async Task Over_the_process_limit_an_idle_chat_closes_and_a_working_one_never_does()
+    public async Task Opening_chats_keeps_idle_and_working_sessions_in_one_engine()
     {
         var (w, vm, _, _, _) = await OpenAsync();
-        vm.SetMaxOpenSessionsCommand.Execute("2");
         await RunAsync(vm, "first in A");
         var a = vm.Session;
         await SendAsync(vm, "FOREVER in A");
         var b = await NewChatAsync(vm);
         await RunAsync(vm, "first in B");
-        var fileB = b.SessionFile!;
-        var pidB = b.ProcessId;
-        // A third chat: two would be over the limit with A working, so B (idle) closes; A (the oldest) keeps running
         var c = await NewChatAsync(vm);
-        await Until(() => !vm.OpenChats.Contains(b) && !Alive(pidB), "B closed for the limit");
-        Assert.Equal([a, c], vm.OpenChats);
+        Assert.Equal([a, b, c], vm.OpenChats);
         Assert.Equal(SessionPhase.Running, a.Snapshot().Phase);
-        // A fourth: nothing idle may go (A works, C has a draft): the limit waits rather than lose either
-        await RunAsync(vm, "first in C");
-        vm.ComposerText = "a draft in C";
-        var d = await NewChatAsync(vm);
-        Assert.Equal([a, c, d], vm.OpenChats);
-        // B opens again from the sidebar, in an omp of its own
-        await Until(() => Row(vm, fileB) is not null, "B listed");
-        await vm.OpenSessionCommand.ExecuteAsync(Row(vm, fileB));
-        await Until(() => vm.Session.SessionFile == fileB && vm.Rows.OfType<UserRowViewModel>().Any(u => u.Text == "first in B"), "B reopened");
+        Assert.Equal(SessionPhase.Ready, b.Snapshot().Phase);
+        Assert.Equal(a.ProcessId, b.ProcessId);
+        Assert.Equal(a.ProcessId, c.ProcessId);
+        vm.ToggleDebugCommand.Execute(null);
+        Assert.StartsWith(Loc.T("1 omp process"), vm.OmpProcessesText);
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Process_settings_wait_for_all_chats_then_restart_the_shared_engine()
+    {
+        var (w, vm, _, _, _) = await OpenAsync();
+        await RunAsync(vm, "first in A");
+        var a = vm.Session;
+        await SendAsync(vm, "FOREVER in A");
+        var b = await NewChatAsync(vm);
+        await RunAsync(vm, "first in B");
+        var pid = a.ProcessId;
+        Assert.False(await vm.RestartEnginesAsync());
+        Assert.Equal(2, vm.PendingEngineRestarts);
+        Assert.Equal(pid, b.ProcessId);
         Assert.Equal(SessionPhase.Running, a.Snapshot().Phase);
+        await a.AbortAsync();
+        await Until(() => a.Snapshot().Phase == SessionPhase.Ready && b.Snapshot().Phase == SessionPhase.Ready
+            && a.ProcessId != pid && a.ProcessId == b.ProcessId, "all chats resumed in the replacement engine");
+        Assert.Equal(0, vm.PendingEngineRestarts);
+        Assert.Equal("write", a.CurrentLaunch.ApprovalMode);
+        Assert.Equal("write", b.CurrentLaunch.ApprovalMode);
+        Assert.Contains(a.Snapshot().Items, i => i is UserItem { Text: "first in A" });
+        Assert.Contains(b.Snapshot().Items, i => i is UserItem { Text: "first in B" });
         await vm.DisposeAsync();
         w.Close();
     }
@@ -371,7 +466,7 @@ public sealed class MultiSessionTests
         // The chat that works is in the background: the question names it
         w.Close();
         await Until(() => vm.SessionCard is { Kind: "quit" }, "asked before quitting");
-        Assert.Equal("omp is still working in “first in A”", vm.SessionCard!.Title);
+        Assert.Equal(Loc.F("omp is still working in “{0}”", "first in A"), vm.SessionCard!.Title);
         vm.SessionCard.Primary!.Command.Execute(null);
         await Until(() => pids.All(p => !Alive(p)), "every omp stopped", 20);
         Assert.Equal(SessionPhase.Stopped, a.Snapshot().Phase);
@@ -379,37 +474,71 @@ public sealed class MultiSessionTests
     }
 
     [AvaloniaFact]
-    public async Task An_omp_that_crashes_in_a_background_chat_leaves_the_others_running()
+    public async Task A_shared_engine_crash_in_a_background_chat_requires_explicit_recovery_without_resending()
     {
         var (w, vm, n, _, _) = await OpenAsync();
-        await RunAsync(vm, "first in A");
-        var a = vm.Session;
-        var file = a.SessionFile!;
-        // The crash comes a moment after the message: by then another chat is shown
-        vm.ComposerText = "LONG then CRASH";
-        vm.SendCommand.Execute(null);
-        vm.NewChatCommand.Execute(null);
-        await Until(() => vm.Session != a, "B shown");
-        await Until(() => a.Snapshot().Phase == SessionPhase.Faulted, "A's omp crashed");
-        await Until(() => Row(vm, file)?.Status == SessionStatus.Error, "A marked as stopped by an error");
-        Assert.True(Row(vm, file)!.IsFailed);
-        Assert.Contains(n.Calls, c => c.Title.StartsWith("omp stopped", StringComparison.Ordinal));
+        try
+        {
+            await RunAsync(vm, "first in A");
+            var a = vm.Session;
+            var fileA = a.SessionFile!;
+            var b = await NewChatAsync(vm);
+            await RunAsync(vm, "first in B");
+            var fileB = b.SessionFile!;
+            var pid = a.ProcessId;
+            Assert.NotNull(pid);
+            Assert.Equal(pid, b.ProcessId);
+            vm.ComposerText = "B's unsent draft";
 
-        // B is unaffected
-        await Until(() => vm.Phase == SessionPhase.Ready, "B ready");
-        await RunAsync(vm, "hello from B");
-        Assert.Equal(SessionPhase.Ready, vm.Session.Snapshot().Phase);
+            await vm.OpenSessionCommand.ExecuteAsync(Row(vm, fileA));
+            Assert.Same(a, vm.Session);
+            var notifications = n.Calls.Count;
+            await SendAsync(vm, "FOREVER in A");
+            Assert.True(await a.QueueAsync(QueueKind.FollowUp, "A's unsent queued input", []));
+            await vm.OpenSessionCommand.ExecuteAsync(Row(vm, fileB));
+            Assert.Same(b, vm.Session);
+            Assert.Contains(a.Snapshot().Queued, input => input.Text == "A's unsent queued input" && !input.Recovered);
+            // Crash only after A is queued and in the background; a timed crash can beat queue admission.
+            using (var process = Process.GetProcessById(pid.Value)) process.Kill();
 
-        // Opening A offers to start it again, which brings it back on its session
-        await vm.OpenSessionCommand.ExecuteAsync(Row(vm, file));
-        Assert.Equal(a, vm.Session);
-        Assert.True(vm.CanRecover);
-        Assert.True(vm.ShowRecoverCard);
-        await vm.RecoverCommand.ExecuteAsync(null);
-        await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.OfType<UserRowViewModel>().Any(u => u.Text == "first in A"), "A recovered");
-        await Until(() => Row(vm, file)?.Status == SessionStatus.None, "A no longer marked");
-        await vm.DisposeAsync();
-        w.Close();
+            await Until(() => a.Snapshot().Phase == SessionPhase.Faulted && vm.Phase == SessionPhase.Faulted,
+                "the shared host crash faults both chats");
+            await Until(() => Row(vm, fileA)?.Status == SessionStatus.Error && Row(vm, fileB)?.Status == SessionStatus.Error,
+                "both chats marked as stopped by an error");
+            await Until(() => n.Calls.Count > notifications, "the background crash is announced");
+            Assert.False(Alive(pid));
+            Assert.True(vm.CanRecover);
+            Assert.True(vm.ShowRecoverCard);
+            Assert.Equal("B's unsent draft", vm.ComposerText);
+
+            // Recovering the shown chat starts one replacement host, not its failed peer or any saved input.
+            await vm.RecoverCommand.ExecuteAsync(null);
+            await Until(() => vm.Phase == SessionPhase.Ready, "B explicitly recovered");
+            Assert.NotEqual(pid, b.ProcessId);
+            Assert.Equal(SessionPhase.Faulted, a.Snapshot().Phase);
+            Assert.Equal("B's unsent draft", vm.ComposerText);
+            Assert.Equal(["first in B"], b.Snapshot().Items.OfType<UserItem>().Select(item => item.Text));
+            await RunAsync(vm, "hello from B");
+
+            await vm.OpenSessionCommand.ExecuteAsync(Row(vm, fileA));
+            Assert.Same(a, vm.Session);
+            Assert.True(vm.CanRecover);
+            Assert.True(vm.ShowRecoverCard);
+            Assert.Equal("A's unsent queued input", vm.ComposerText);
+            await vm.RecoverCommand.ExecuteAsync(null);
+            await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.OfType<UserRowViewModel>().Any(u => u.Text == "first in A"),
+                "A explicitly recovered on its saved session");
+            Assert.Equal(b.ProcessId, a.ProcessId);
+            Assert.Equal("A's unsent queued input", vm.ComposerText);
+            Assert.DoesNotContain(a.Snapshot().Items.OfType<UserItem>(), item => item.Text == "A's unsent queued input");
+            Assert.Contains(b.Snapshot().Items, item => item is UserItem { Text: "hello from B" });
+            await Until(() => Row(vm, fileA)?.Status == SessionStatus.None, "A no longer marked");
+        }
+        finally
+        {
+            await vm.DisposeAsync();
+            w.Close();
+        }
     }
 
     [AvaloniaFact]
@@ -555,8 +684,6 @@ public sealed class MultiSessionTests
         await Until(() => vm.OpenChats.Count == 1, "the failed chat closed");
         Assert.Equal([a], vm.OpenChats);
         Assert.Equal(SessionCardState.Failed, vm.SessionCard?.State);
-        Assert.Equal("Couldn't open “Damaged chat”", vm.SessionCard!.Title);
-        Assert.Contains("the session header is missing or malformed", vm.SessionCard.Message);
         Assert.True(Row(vm, fileA)!.IsCurrent);
         Assert.False(Row(vm, damaged)!.IsCurrent);
         Assert.Equal(SessionStatus.None, Row(vm, damaged)!.Status);
@@ -588,20 +715,77 @@ public sealed class MultiSessionTests
     }
 
     [AvaloniaFact]
-    public async Task A_chat_that_becomes_idle_over_the_limit_is_closed_then()
+    public async Task Status_chips_back_forward_and_next_waiting_move_between_chats()
     {
-        // Review R4 #4: the limit was checked only when a chat opened, so chats that were busy then stayed over it.
+        var (w, vm, _, _, _) = await OpenAsync();
+        await RunAsync(vm, "first in A");
+        var a = vm.Session;
+        await NewChatAsync(vm);
+        await RunAsync(vm, "first in B");
+        var b = vm.Session;
+        await NewChatAsync(vm);
+        await RunAsync(vm, "first in C");
+        var c = vm.Session;
+        await Until(() => vm.Sessions.Count == 3, "three listed");
+        string FileOf(SessionController s) => s.SessionFile!;
+
+        // ⌘[ goes back through the chats shown, ⌘] forward again
+        Assert.True(vm.NavigateHistory(back: true));
+        await Until(() => vm.Session == b, "back to B");
+        Assert.True(vm.NavigateHistory(back: true));
+        await Until(() => vm.Session == a, "back to A");
+        Assert.True(vm.NavigateHistory(back: false));
+        await Until(() => vm.Session == b, "forward to B");
+        Assert.True(vm.NavigateHistory(back: false));
+        await Until(() => vm.Session == c, "forward to C");
+        Assert.False(vm.NavigateHistory(back: false));
+
+        // ⌘1–9: a row of the sidebar by its place (⌘2 when the first row is the chat shown)
+        var listed = vm.SessionGroups.SelectMany(g => g.Items).Select(i => i.Model.Path).ToList();
+        var target = listed[0] == FileOf(c) ? 2 : 1;
+        Assert.True(vm.OpenNthSession(target));
+        await Until(() => vm.Session.SessionFile == listed[target - 1] && vm.Phase == SessionPhase.Ready, "row " + target);
+        Assert.False(vm.OpenNthSession(9)); // only three
+
+        // A asks for an approval in the background: the Needs input chip keeps only it; ⌥⌘A opens it
+        var asker = a;
+        if (vm.Session != a) await vm.OpenSessionCommand.ExecuteAsync(Row(vm, FileOf(a)));
+        await Until(() => vm.Session == a && vm.Phase == SessionPhase.Ready, "A shown");
+        await SendAsync(vm, "APPROVE in A");
+        await Until(() => vm.Session.Snapshot().Dialogs.Count > 0, "approval asked");
+        await vm.OpenSessionCommand.ExecuteAsync(Row(vm, FileOf(c)));
+        await Until(() => vm.Session == c && Row(vm, FileOf(a))!.Status == SessionStatus.Waiting, "A waits");
+
+        vm.IsSessionSearchOpen = true;
+        Frame(w);
+        Assert.True(w.FindControl<WrapPanel>("StatusFilterChips")!.IsEffectivelyVisible);
+        vm.SetStatusFilterCommand.Execute(SessionStatusFilter.NeedsInput);
+        Assert.Equal([FileOf(asker)], vm.Sessions.Select(s => s.Model.Path));
+        vm.SetStatusFilterCommand.Execute(SessionStatusFilter.Errors);
+        Assert.Empty(vm.Sessions);
+        Assert.True(vm.ShowNoSessionMatch);
+        vm.SetStatusFilterCommand.Execute(SessionStatusFilter.Errors); // again: all
+        Assert.Equal(SessionStatusFilter.All, vm.StatusFilter);
+        Assert.Equal(3, vm.Sessions.Count);
+
+        Assert.True(vm.OpenNextWaiting());
+        await Until(() => vm.Session == asker, "the waiting chat");
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task A_chat_that_becomes_idle_keeps_its_logical_session()
+    {
         var (w, vm, _, _, _) = await OpenAsync();
         await RunAsync(vm, "first in A");
         var a = vm.Session;
         await SendAsync(vm, "LONG in A");
         var b = await NewChatAsync(vm);
         await RunAsync(vm, "first in B");
-        vm.SetMaxOpenSessionsCommand.Execute("1");
-        Assert.Contains(a, vm.OpenChats); // working: kept for now
-        var pidA = a.ProcessId;
-        await Until(() => !vm.OpenChats.Contains(a) && !Alive(pidA), "A closed once its run ended", 30);
-        Assert.Equal([b], vm.OpenChats);
+        await Until(() => a.Snapshot().Phase == SessionPhase.Ready, "A finished", 30);
+        Assert.Equal([a, b], vm.OpenChats);
+        Assert.Equal(a.ProcessId, b.ProcessId);
         await vm.DisposeAsync();
         w.Close();
     }
@@ -645,7 +829,7 @@ public sealed class MultiSessionTests
         // A new chat from a working one, left untouched: it closes, and its row goes with it
         var untouched = await NewChatAsync(vm);
         var untouchedFile = untouched.SessionFile!;
-        await Until(() => Row(vm, untouchedFile) is { IsCurrent: true, Title: "New chat" }, "the new chat listed");
+        await Until(() => Row(vm, untouchedFile) is { IsCurrent: true } row && row.Title == Loc.T("New chat"), "the new chat listed");
         await vm.OpenSessionCommand.ExecuteAsync(Row(vm, chats[0].File));
         Assert.DoesNotContain(untouched, vm.OpenChats);
         Assert.Null(Row(vm, untouchedFile));
@@ -669,7 +853,7 @@ public sealed class MultiSessionTests
         Assert.Equal(SessionStatus.Unread, Row(vm, chats[1].File)!.Status); // B's reply is still unseen
 
         // Quitting counts the one chat still working
-        Assert.Equal("omp is still working in “FOREVER first in C”", vm.QuitWarning(0)!.Title);
+        Assert.Equal(Loc.F("omp is still working in “{0}”", "FOREVER first in C"), vm.QuitWarning(0)!.Title);
         await vm.DisposeAsync();
         w.Close();
     }
@@ -716,64 +900,21 @@ public sealed class MultiSessionTests
         w.Close();
     }
 
-    /// <summary>A window whose spare omp starts as soon as its first chat is ready.</summary>
-    private static async Task<(MainWindow W, MainViewModel Vm)> OpenWithSpareAsync()
-    {
-        var cwd = SessionCatalog.ResolveLinks(TestProcesses.TempDir("multi-project"));
-        var s = new SessionController(TestProcesses.FakeFactory("multi", TestProcesses.TempDir("multi-sessions")), new LaunchRequest(cwd, ApprovalMode: "write"));
-        var vm = new MainViewModel(s, new AppArgs()) { SpareDelay = TimeSpan.Zero };
-        var w = new MainWindow { DataContext = vm, Width = 1180, Height = 760, Notifier = new AttentionTests.RecordingNotifier() };
-        w.Show();
-        vm.OnWindowOpened();
-        await Until(() => vm.Phase == SessionPhase.Ready, "ready");
-        return (w, vm);
-    }
-
     [AvaloniaFact]
-    public async Task New_chat_takes_over_the_ready_spare_and_can_send_at_once()
+    public async Task New_chat_uses_shared_engine_and_current_permission_mode()
     {
-        var (w, vm) = await OpenWithSpareAsync();
+        var (w, vm, _, _, _) = await OpenAsync();
         await RunAsync(vm, "first in the project");
-        await Until(() => vm.Spare?.Snapshot().Phase == SessionPhase.Ready, "the spare ready");
-        var spare = vm.Spare!;
         var project = vm.Session;
-
-        // The click shows the spare's omp, ready: no omp starts, and the message box sends at once
-        vm.NewChatCommand.Execute(null);
-        Assert.Same(spare, vm.Session);
-        Assert.Equal(SessionPhase.Ready, vm.Phase);
-        Assert.True(vm.IsProjectless);
-        Assert.Equal([project, spare], vm.OpenChats);
-        vm.ComposerText = "hello in a chat";
-        Assert.True(vm.SendCommand.CanExecute(null));
-        vm.ComposerText = "";
-
-        // Listed under Chats, apart from the project; and the next spare is prepared
-        await Until(() => vm.SessionGroups.SingleOrDefault(g => g.IsChatsGroup) is { Items: [{ IsCurrent: true }] }, "the chat under Chats");
-        Assert.Contains(vm.SessionGroups, g => g.IsProject && g.Items.Any(i => i.Title == "first in the project"));
-        await Until(() => vm.Spare is { } next && next != spare && next.Snapshot().Phase == SessionPhase.Ready, "the next spare");
-        await RunAsync(vm, "hello in a chat");
-        await vm.DisposeAsync();
-        w.Close();
-    }
-
-    [AvaloniaFact]
-    public async Task A_spare_started_with_another_permission_mode_is_not_served()
-    {
-        var (w, vm) = await OpenWithSpareAsync();
-        await RunAsync(vm, "first in the project");
-        await Until(() => vm.Spare?.Snapshot().Phase == SessionPhase.Ready, "the spare ready");
-        var stale = vm.Spare!;
-        var stalePid = stale.ProcessId;
+        var pid = project.ProcessId;
         await vm.SetApprovalModeCommand.ExecuteAsync("always-ask");
-        await Until(() => vm.Phase == SessionPhase.Ready && vm.Session.CurrentLaunch.ApprovalMode == "always-ask", "the project's omp switched");
-
-        vm.NewChatCommand.Execute(null);
-        Assert.NotSame(stale, vm.Session);
-        Assert.Equal("always-ask", vm.Session.CurrentLaunch.ApprovalMode);
+        await Until(() => vm.Phase == SessionPhase.Ready && project.CurrentLaunch.ApprovalMode == "always-ask", "permissions switched");
+        var chat = await NewChatAsync(vm);
+        Assert.Equal(pid, chat.ProcessId);
+        Assert.Equal("always-ask", chat.CurrentLaunch.ApprovalMode);
         Assert.True(vm.IsProjectless);
-        await Until(() => vm.Phase == SessionPhase.Ready, "the new chat's own omp ready");
-        await Until(() => !Alive(stalePid), "the stale spare stopped");
+        Assert.Equal([project, chat], vm.OpenChats);
+        await RunAsync(vm, "hello in a chat");
         await vm.DisposeAsync();
         w.Close();
     }

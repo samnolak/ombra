@@ -1,3 +1,4 @@
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore;
 
@@ -55,18 +56,19 @@ public class WorkspaceParsersTests
         Assert.Equal(1, s.Conflicts);
         Assert.Equal(7, s.ChangedFiles);
         Assert.False(s.Clean);
-        Assert.Equal("7 files changed · 3 staged · 2 untracked · 1 with conflicts", GitSettingsViewModel.ChangesText(s));
+        Assert.Equal(Loc.Plural(7, "{0} file changed", "{0} files changed") + " · " + Loc.F("{0} staged", 3) + " · " + Loc.F("{0} untracked", 2) + " · " + Loc.F("{0} with conflicts", 1),
+            GitSettingsViewModel.ChangesText(s));
 
         var detached = WorkspaceParsers.ParseGitStatus("# branch.oid abcdef1234\n# branch.head (detached)\n");
         Assert.True(detached.Detached);
         Assert.Null(detached.Branch);
         Assert.True(detached.Clean);
-        Assert.Equal("No uncommitted changes", GitSettingsViewModel.ChangesText(detached));
+        Assert.Equal(Loc.T("No uncommitted changes"), GitSettingsViewModel.ChangesText(detached));
 
         var fresh = WorkspaceParsers.ParseGitStatus("# branch.oid (initial)\n# branch.head main\n? README.md\n");
         Assert.True(fresh.Unborn);
         Assert.Null(fresh.Upstream);
-        Assert.Equal("1 file changed · 1 untracked", GitSettingsViewModel.ChangesText(fresh));
+        Assert.Equal(Loc.Plural(1, "{0} file changed", "{0} files changed") + " · " + Loc.F("{0} untracked", 1), GitSettingsViewModel.ChangesText(fresh));
     }
 
     [Fact]
@@ -106,8 +108,8 @@ public class WorkspaceParsersTests
         Assert.True(list[3].Prunable);
 
         var row = new WorktreeRowViewModel(null!, list[2], isCurrent: false);
-        Assert.Equal("No branch (at 3333333)", row.Title);
-        Assert.Equal("Locked", row.Tag);
+        Assert.Equal(Loc.F("No branch (at {0})", "3333333"), row.Title);
+        Assert.Equal(Loc.T("Locked"), row.Tag);
     }
 
     [Fact]
@@ -213,7 +215,7 @@ public class WorkspaceParsersTests
         }
         else Assert.Empty(ran); // no X server to ask
         if (display is null && wayland is null) Assert.Single(checks);
-        else Assert.Contains(checks, c => c.Title.StartsWith("Accessibility", StringComparison.Ordinal));
+        else Assert.Contains(checks, c => c.Title.StartsWith(Loc.T("Accessibility (AT-SPI)"), StringComparison.Ordinal));
     }
 
     [Fact]
@@ -221,7 +223,7 @@ public class WorkspaceParsersTests
     {
         Task<ToolResult> None(ToolCommand c, CancellationToken _) => throw new InvalidOperationException("no tool runs");
         var mac = await ComputerChecks.RunAsync(None, _ => null, CancellationToken.None, "macos");
-        Assert.Equal(["Screen Recording", "Accessibility"], mac.Select(c => c.Title));
+        Assert.Equal([Loc.T("Screen Recording"), Loc.T("Accessibility")], mac.Select(c => c.Title));
         if (!OperatingSystem.IsMacOS())
         {
             Assert.All(mac, c => Assert.Equal(CheckState.Unknown, c.State));

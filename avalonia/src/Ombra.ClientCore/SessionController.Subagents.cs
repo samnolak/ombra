@@ -12,6 +12,8 @@ namespace Ombra.ClientCore;
 public sealed partial class SessionController
 {
     private static readonly TimeSpan SubagentRequestTimeout = TimeSpan.FromSeconds(15);
+    /// <summary>omp holds the steer answer until the subagent takes the message (its setup between turns included).</summary>
+    private static readonly TimeSpan SubagentSteerTimeout = TimeSpan.FromSeconds(60);
 
     /// <summary>Called once omp is up (start, restart, recovery): subscribe, then take what already runs.</summary>
     private async Task SubscribeSubagentsAsync(RpcConnection conn)
@@ -46,20 +48,75 @@ public sealed partial class SessionController
         }
     }
 
-    /// <summary>A subagent's own conversation (the newest messages), or the reason it could not be read.</summary>
-    public async Task<(IReadOnlyList<SubagentMessage> Messages, string? Error)> GetSubagentMessagesAsync(string subagentId, CancellationToken ct = default)
+    /// <summary>Reads complete transcript lines from a byte cursor; errors leave the caller's cursor unchanged.</summary>
+    public async Task<(SubagentMessagesPage? Page, string? Error)> GetSubagentMessagesAsync(string subagentId, long fromByte = 0, CancellationToken ct = default)
     {
-        if (_omp?.Connection is not { } conn) return ([], "omp is not running");
-        if (Snapshot().SigningIn is { } provider) return ([], $"omp is busy with the sign-in to {provider}");
+        ArgumentOutOfRangeException.ThrowIfNegative(fromByte);
+        if (_omp?.Connection is not { } conn) return (null, "omp is not running");
+        if (Snapshot().SigningIn is { } provider) return (null, $"omp is busy with the sign-in to {provider}");
         try
         {
-            var r = await conn.RequestAsync("get_subagent_messages", w => w.WriteString("subagentId", subagentId), SubagentRequestTimeout, ct).ConfigureAwait(false);
-            if (!r.Success) return ([], r.Error ?? "omp could not read it");
-            return r.Data is { ValueKind: System.Text.Json.JsonValueKind.Object } d ? (ConversationState.ParseSubagentMessages(d), null) : ([], null);
+            var r = await conn.RequestAsync("get_subagent_messages", w =>
+            {
+                w.WriteString("subagentId", subagentId);
+                w.WriteNumber("fromByte", fromByte);
+            }, SubagentRequestTimeout, ct).ConfigureAwait(false);
+            if (!r.Success) return (null, r.Error ?? "omp could not read it");
+            return r.Data is { } d && ConversationState.ParseSubagentMessagesPage(d, fromByte) is { } page
+                ? (page, null) : (null, "omp returned an invalid subagent transcript");
         }
         catch (Exception e) when (e is TimeoutException or RpcConnectionClosedException)
         {
-            return ([], e.Message);
+            return (null, e.Message);
+        }
+    }
+
+    /// <summary>
+    /// Stops one subagent (<c>cancel_subagent</c>). omp answers whether it was still running: when it was, the row
+    /// ends as stopped now (omp's lifecycle frame confirms); when not, the list is read again. Null on success.
+    /// </summary>
+    public async Task<string?> CancelSubagentAsync(string subagentId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(subagentId);
+        if (_omp?.Connection is not { } conn) return "omp is not running";
+        if (Snapshot().SigningIn is { } provider) return $"omp is busy with the sign-in to {provider}";
+        try
+        {
+            var r = await conn.RequestAsync("cancel_subagent", w => w.WriteString("subagentId", subagentId), SubagentRequestTimeout, ct).ConfigureAwait(false);
+            if (!r.Success) return r.Error ?? "omp could not stop it";
+            if (r.Data is { ValueKind: System.Text.Json.JsonValueKind.Object } d && d.TryGetProperty("cancelled", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.True)
+                Mutate(s => s.EndRunningSubagents("aborted", Now, subagentId));
+            else await RefreshSubagentsAsync(ct).ConfigureAwait(false);
+            return null;
+        }
+        catch (Exception e) when (e is TimeoutException or RpcConnectionClosedException)
+        {
+            return e.Message;
+        }
+    }
+
+    /// <summary>
+    /// Sends a message to a running subagent (<c>steer_subagent</c>); omp answers once the subagent took it, which
+    /// between its turns can take a while. Null on success, else why it was not delivered.
+    /// </summary>
+    public async Task<string?> SteerSubagentAsync(string subagentId, string message, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(subagentId);
+        if (string.IsNullOrWhiteSpace(message)) return "the message is empty";
+        if (_omp?.Connection is not { } conn) return "omp is not running";
+        if (Snapshot().SigningIn is { } provider) return $"omp is busy with the sign-in to {provider}";
+        try
+        {
+            var r = await conn.RequestAsync("steer_subagent", w =>
+            {
+                w.WriteString("subagentId", subagentId);
+                w.WriteString("message", message);
+            }, SubagentSteerTimeout, ct).ConfigureAwait(false);
+            return r.Success ? null : r.Error ?? "omp could not deliver it";
+        }
+        catch (Exception e) when (e is TimeoutException or RpcConnectionClosedException)
+        {
+            return e.Message;
         }
     }
 }

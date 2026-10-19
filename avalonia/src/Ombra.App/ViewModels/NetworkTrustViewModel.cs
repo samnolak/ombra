@@ -15,9 +15,9 @@ public sealed record ConnectionCheckTarget(string Host, string Url)
 
 /// <summary>
 /// Settings › Advanced › Corporate network certificates (<see cref="CorporateTrust"/>). Nothing runs until the user asks:
-/// "Set up…" explains what changes first, Enable saves the mode (and, for a file, the app's validated copy) and starts
-/// every chat's omp again (idle ones now, working ones after their run); Turn off removes the mode and only the file the
-/// app made. The connection check is separate and sends one request without a key. Logs carry codes only.
+/// "Set up…" explains what changes first, Enable saves the mode (and, for a file, the app's validated copy) and restarts
+/// the shared engine after all chats are idle; Turn off removes the mode and only the file the app made.
+/// The connection check is separate and sends one request without a key. Logs carry codes only.
 /// </summary>
 public sealed partial class NetworkTrustViewModel : ObservableObject
 {
@@ -89,7 +89,7 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
 
     public bool HasChosenFile => ChosenFile is not null;
     public bool ChosenFileOk => ChosenFile?.Ok == true;
-    public string ChosenFileText => ChosenFile?.Message ?? "";
+    public string ChosenFileText => ChosenFile is { } c ? Loc.F(c.Format, c.Args) : "";
 
     /// <summary>What blocks Enable on the card (the user's own variable); empty when nothing does.</summary>
     [ObservableProperty]
@@ -179,7 +179,9 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
                 return Loc.T("On, but your own NODE_EXTRA_CA_CERTS decides, so the app adds nothing.");
             case CorporateTrust.PemMode:
                 var check = CorporateCaFile.Validate(o.CorporateTrustBundle!, Now());
-                return check.Ok ? Loc.T("On: omp also trusts ") + check.Message : Loc.T("On, but the certificate file needs attention: ") + check.Message;
+                return check.Ok
+                    ? Loc.Plural(check.Count, "On: omp also trusts {0} certificate authority, valid until {1:d MMMM yyyy}.", "On: omp also trusts {0} certificate authorities, valid until {1:d MMMM yyyy}.", check.ValidUntil)
+                    : Loc.T("On, but the certificate file needs attention: ") + Loc.F(check.Format, check.Args);
             default:
                 return OffText;
         }
@@ -388,7 +390,7 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
         MessageIsError = error;
     }
 
-    /// <summary>Every chat's omp starts again with the change: idle ones now, working ones after their run.</summary>
+    /// <summary>Applies the change to the shared engine after every chat finishes its current work.</summary>
     private async Task RestartAsync(bool changed, string done)
     {
         if (!changed)
@@ -405,7 +407,7 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
 
     private bool _watching;
 
-    /// <summary>The note follows the chats that restart after their run until none is left.</summary>
+    /// <summary>The note remains until the coordinated shared-engine restart finishes.</summary>
     private async Task WatchPendingAsync()
     {
         if (_watching) return;
@@ -426,10 +428,8 @@ public sealed partial class NetworkTrustViewModel : ObservableObject
     private void UpdateRestartNote()
     {
         var notes = new List<string>();
-        var pending = _main.PendingEngineRestarts;
-        if (pending > 0)
-            notes.Add(pending == 1 ? Loc.T("A chat that is working (marked in the sidebar) restarts omp with the change when its run ends.")
-                : Loc.F("{0} chats that are working (marked in the sidebar) restart omp with the change when their runs end.", pending));
+        if (_main.PendingEngineRestarts > 0)
+            notes.Add(Loc.T("Saved. All chats will restart together after their current work finishes."));
         if (_main.OpenOmpTerminals > 0 && HasMessage)
             notes.Add(Loc.T("omp terminal tabs that are already open keep the previous setting until you open them again."));
         RestartNote = string.Join(" ", notes);

@@ -6,6 +6,8 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+    <!-- Do not execute assemblies supplied through DOTNET_STARTUP_HOOKS before startup admission. -->
+    <StartupHookSupport>false</StartupHookSupport>
     <!-- Platform/*WebViewSnapshot.cs: the web engines' snapshot calls (Objective-C blocks, COM, GLib callbacks) -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Precompiled startup code: 0.70 s instead of 1.37 s to a painted window on Linux (docs/research results). -->
@@ -22,21 +24,41 @@
     <PackageReference Include="Markdig" Version="1.4.0" />
     <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.8" />
     <PackageReference Include="PortAudioSharp2" Version="1.0.6" />
+    <PackageReference Include="QRCoder" Version="1.8.1" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Ombra.ClientCore\Ombra.ClientCore.csproj" />
+    <ProjectReference Include="..\..\vendor\AvaloniaEdit\src\AvaloniaEdit\AvaloniaEdit.csproj" />
+    <ProjectReference Include="..\..\vendor\AvaloniaEdit\src\AvaloniaEdit.TextMate\AvaloniaEdit.TextMate.csproj" />
     <InternalsVisibleTo Include="Ombra.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- macOS: TLS 1.3 through Network.framework (SecureTransport has none). The team server in IP mode is TLS 1.3-only
+         (SERVER_DESIGN §6.2); see docs/PLATFORM_NOTES.md. No effect on Windows/Linux. -->
+    <RuntimeHostConfigurationOption Include="System.Net.Security.UseNetworkFramework" Value="true" />
   </ItemGroup>
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="..\..\vendor\NOTICE.txt;..\..\vendor\editor-sources.json;..\..\vendor\Onigwrap-THIRD-PARTY-NOTICES.txt"
+             Link="licenses\editor\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\vendor\AvaloniaEdit\LICENSE" Link="licenses\editor\AvaloniaEdit-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\vendor\AvaloniaEdit\AVALONEDIT-NOTICE.txt" Link="licenses\editor\AVALONEDIT-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\vendor\TextMateSharp\LICENSE.md" Link="licenses\editor\TextMateSharp-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\vendor\TextMateSharp\src\TextMateSharp.Grammars\Resources\Grammars\swift\LICENSE.md" Link="licenses\editor\Swift-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- The pinned runtime pack the client installs (RuntimePack): the same files in runtime/packs that CI installs. -->
     <EmbeddedResource Include="Controls\Preview\annotate.js" LogicalName="preview/annotate.js" />
     <EmbeddedResource Include="Localization\*.json" LogicalName="localization/%(Filename).json" />
-    <EmbeddedResource Include="..\..\..\runtime\packs\omp-18.8.0-bun-1.4.2\package.json" LogicalName="runtime-pack/package.json" />
-    <EmbeddedResource Include="..\..\..\runtime\packs\omp-18.8.0-bun-1.4.2\bun.lock" LogicalName="runtime-pack/bun.lock" />
-    <EmbeddedResource Include="..\..\..\runtime\packs\omp-18.8.0-bun-1.4.2\bunfig.toml" LogicalName="runtime-pack/bunfig.toml" />
+    <EmbeddedResource Include="..\..\..\runtime\packs\ombra-engine-18.8.0-bun-1.4.2-v1\package.json" LogicalName="runtime-pack/package.json" />
+    <EmbeddedResource Include="..\..\..\runtime\packs\ombra-engine-18.8.0-bun-1.4.2-v1\bun.lock" LogicalName="runtime-pack/bun.lock" />
+    <EmbeddedResource Include="..\..\..\runtime\packs\ombra-engine-18.8.0-bun-1.4.2-v1\bunfig.toml" LogicalName="runtime-pack/bunfig.toml" />
+    <EmbeddedResource Include="..\..\..\runtime\packs\ombra-engine-18.8.0-bun-1.4.2-v1\pack.json" LogicalName="runtime-pack/pack.json" />
     <EmbeddedResource Include="..\..\packaging\update-signing.pub" LogicalName="update-signing.pub" />
+    <!-- The pinned Nightly runtime package (runtime/nightly/pack-nightly.py): NightlyRuntimePackage. -->
+    <EmbeddedResource Include="..\..\..\runtime\nightly\nightly-runtime.json" LogicalName="nightly-runtime.json" />
   </ItemGroup>
+  <Import Project="..\..\..\runtime\packs\ombra-engine-18.8.0-bun-1.4.2-v1\engine-resources.props" />
 </Project>

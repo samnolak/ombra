@@ -30,28 +30,33 @@ public sealed partial class SecretRedactor
         text = SecretJson().Replace(text, m => m.Groups[1].Value + Mask + "\"");
         text = UrlCredentials().Replace(text, m => m.Groups[1].Value + Mask + "@");
         text = ApiKeyArgument().Replace(text, m => m.Groups[1].Value + Mask);
+        text = InviteSecret().Replace(text, m => m.Groups[1].Value + Mask);
         if (_home is not null) text = text.Replace(_home, "~", StringComparison.Ordinal);
         return text;
     }
 
     /// <summary>Provider key formats: OpenAI / Anthropic (sk-…), GitHub, Slack, AWS access key ids, Google API keys, JWTs.</summary>
-    [GeneratedRegex(@"\b(?:sk-[A-Za-z0-9_\-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9\-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{30,}|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,})")]
+    [GeneratedRegex(@"\b(?:sk-[A-Za-z0-9_\-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9\-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{30,}|eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,})", RegexOptions.NonBacktracking)]
     private static partial Regex KnownTokens();
 
-    [GeneratedRegex(@"(?i)\b((?:bearer|basic|token)\s+)[A-Za-z0-9_\-\.=+/]{8,}")]
+    [GeneratedRegex(@"(?i)\b((?:bearer|basic|token)\s+)[A-Za-z0-9_\-\.=+/]{8,}", RegexOptions.NonBacktracking)]
     private static partial Regex Bearer();
 
     /// <summary><c>ANTHROPIC_API_KEY=…</c>, <c>password: …</c>, <c>x-api-key: …</c>.</summary>
-    [GeneratedRegex(@"(?i)\b([A-Z0-9_\-]*(?:API[_\-]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|AUTHORIZATION)[A-Z0-9_\-]*\s*[=:]\s*)(?!\[redacted\])[^\s""',;]{8,}")]
+    [GeneratedRegex(@"(?i)\b([A-Z0-9_\-]*(?:API[_\-]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|AUTHORIZATION)[A-Z0-9_\-]*\s*[=:]\s*)[^\s""',;]{8,}", RegexOptions.NonBacktracking)]
     private static partial Regex SecretAssignment();
 
     /// <summary><c>"apiKey": "…"</c> and similar JSON / YAML-in-JSON pairs.</summary>
-    [GeneratedRegex(@"(?i)(""[A-Za-z0-9_\-]*(?:api[_\-]?key|token|secret|password|credential|authorization)[A-Za-z0-9_\-]*""\s*:\s*"")(?!\[redacted\])[^""]{3,}""")]
+    [GeneratedRegex(@"(?i)(""[A-Za-z0-9_\-]*(?:api[_\-]?key|token|secret|password|credential|authorization)[A-Za-z0-9_\-]*""\s*:\s*"")[^""]{3,}""", RegexOptions.NonBacktracking)]
     private static partial Regex SecretJson();
 
-    [GeneratedRegex(@"(?i)\b([a-z][a-z0-9+.\-]*://[^\s/:@]+:)[^\s/@]+@")]
+    [GeneratedRegex(@"(?i)\b([a-z][a-z0-9+.\-]*://[^\s/:@]+:)[^\s/?#""'<>]+@", RegexOptions.NonBacktracking)]
     private static partial Regex UrlCredentials();
 
-    [GeneratedRegex(@"(?i)(--api-key(?:=|\s+))(?!\[redacted\])\S+")]
+    [GeneratedRegex(@"(?i)(--api-key(?:=|\s+))(?:""[^""]*""|'[^']*'|\S+)", RegexOptions.NonBacktracking)]
     private static partial Regex ApiKeyArgument();
+
+    /// <summary>R2-06: the invite secret lives only in the link fragment (<c>ombra://join?…#k=…</c>).</summary>
+    [GeneratedRegex(@"(?i)(#k=)[A-Za-z0-9_\-]+", RegexOptions.NonBacktracking)]
+    private static partial Regex InviteSecret();
 }

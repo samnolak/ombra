@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using Avalonia.Headless.XUnit;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore;
 using Ombra.ClientCore.Browser;
@@ -71,6 +72,18 @@ public sealed class AgentBrowserTests
             ClosedByOmp = true;
             return Task.CompletedTask;
         }
+
+        public List<AgentDeviceRequest?> Devices { get; } = [];
+
+        public IReadOnlyList<AgentDevicePreset> DevicePresets { get; } = [new("Pixel 8", 412, 915, 2.625, "android")];
+
+        public Task<AgentDeviceState> SetDeviceAsync(AgentDeviceRequest? device, CancellationToken ct)
+        {
+            Devices.Add(device);
+            return Task.FromResult(device is null
+                ? new AgentDeviceState(null, null, null, 0, false, "desktop", false, true)
+                : new AgentDeviceState(device.Preset, device.Width ?? 412, device.Height ?? 915, device.PixelRatio ?? 2.625, device.Touch ?? true, "android", false, true));
+        }
     }
 
     /// <summary>The pane: a <see cref="FakePage"/> per tab omp opens.</summary>
@@ -87,24 +100,68 @@ public sealed class AgentBrowserTests
         }
     }
 
-    private static async Task<JsonObject> Call(AgentBrowserBridge bridge, string method, JsonObject? p = null)
+    private static async Task<JsonObject> Call(AgentBrowserBridge bridge, string method, JsonObject? p = null, string id = "1")
     {
-        var line = new JsonObject { ["id"] = "1", ["method"] = method, ["params"] = p ?? new JsonObject() }.ToJsonString();
+        var line = new JsonObject { ["id"] = id, ["method"] = method, ["params"] = p ?? new JsonObject() }.ToJsonString();
         return (JsonObject)JsonNode.Parse(await bridge.HandleLineAsync(line, CancellationToken.None))!;
+    }
+
+    /// <summary>A test-side browser handle carries the exact surface returned by open, like the runtime handle.</summary>
+    private readonly record struct BrowserHandle(AgentBrowserBridge Bridge, string Surface);
+
+    private static Task<JsonObject> Call(BrowserHandle handle, string method, JsonObject? parameters = null)
+    {
+        parameters ??= new JsonObject();
+        parameters["surface_id"] ??= handle.Surface;
+        return Call(handle.Bridge, method, parameters);
     }
 
     private static string Code(JsonObject answer) => answer["error"]?["code"]?.GetValue<string>() ?? "ok";
 
     private static string Text(JsonObject answer) => answer["error"]?["message"]?.GetValue<string>() ?? "";
 
-    private static async Task<(AgentBrowserBridge bridge, FakePage page, string surface)> Opened(string url = "http://localhost:3000/")
+    private static async Task<(BrowserHandle bridge, FakePage page, string surface)> Opened(string url = "http://localhost:3000/")
     {
         var host = new FakeHost();
         var bridge = new AgentBrowserBridge(host);
         var open = await Call(bridge, "browser.open_split", new JsonObject { ["url"] = url, ["focus"] = false });
         Assert.True(open["ok"]!.GetValue<bool>(), open.ToJsonString());
         var surface = open["result"]!["surface_id"]!.GetValue<string>();
-        return (bridge, host.Tabs.Single(t => t.Surface == surface).Page, surface);
+        return (new BrowserHandle(bridge, surface), host.Tabs.Single(t => t.Surface == surface).Page, surface);
+    }
+
+    /// <summary>omp's tab.emulate({ device | viewport }) on the cmux backend: browser.devices and browser.set_device.</summary>
+    [Fact]
+    public async Task The_agent_lists_and_sets_the_preview_device()
+    {
+        var (bridge, page, _) = await Opened();
+        var list = await Call(bridge, "browser.devices");
+        Assert.Equal("Pixel 8", list["result"]!["devices"]![0]!["name"]!.GetValue<string>());
+        Assert.Equal(2.625, list["result"]!["devices"]![0]!["dpr"]!.GetValue<double>());
+
+        var set = await Call(bridge, "browser.set_device", new JsonObject { ["preset"] = "Pixel 8", ["landscape"] = false });
+        Assert.Equal("ok", Code(set));
+        Assert.Equal(new AgentDeviceRequest(Preset: "Pixel 8", Landscape: false), page.Devices[^1]);
+        Assert.Equal(412, set["result"]!["width"]!.GetValue<int>());
+        Assert.True(set["result"]!["emulated"]!.GetValue<bool>());
+
+        await Call(bridge, "browser.set_device", new JsonObject { ["width"] = 390, ["height"] = 844, ["dpr"] = 3, ["touch"] = true, ["platform"] = "iphone" });
+        Assert.Equal(new AgentDeviceRequest(Width: 390, Height: 844, PixelRatio: 3, Touch: true, Platform: "iphone"), page.Devices[^1]);
+        var cleared = await Call(bridge, "browser.set_device", new JsonObject { ["clear"] = true });
+        Assert.Null(page.Devices[^1]);
+        Assert.Null(cleared["result"]!["width"]);
+
+        // Refused before the page is asked: half a size, a fractional one, a ratio out of range, nothing at all
+        var count = page.Devices.Count;
+        foreach (var bad in new[]
+        {
+            new JsonObject { ["width"] = 390 },
+            new JsonObject { ["width"] = 390.5, ["height"] = 844 },
+            new JsonObject { ["dpr"] = 11 },
+            new JsonObject(),
+        })
+            Assert.Equal("invalid_params", Code(await Call(bridge, "browser.set_device", bad)));
+        Assert.Equal(count, page.Devices.Count);
     }
 
     [Fact]
@@ -151,7 +208,7 @@ public sealed class AgentBrowserTests
     [Fact]
     public async Task Every_tab_stays_valid_beside_the_others_until_it_is_closed()
     {
-        // R6: two omp processes (or two tabs of one) each keep their own page; neither evicts the other
+        // Two logical sessions keep explicit page handles; neither can fall through to the other's newest tab.
         var host = new FakeHost();
         var bridge = new AgentBrowserBridge(host);
         async Task<string> Open(string url) =>
@@ -165,6 +222,8 @@ public sealed class AgentBrowserTests
             (await Call(bridge, "browser.url.get", new JsonObject { ["surface_id"] = surface }))["result"]!["url"]!.GetValue<string>();
         Assert.Equal("http://localhost:3000/a", await Url(a));
         Assert.Equal("http://localhost:4000/b", await Url(b));
+        Assert.Equal("invalid_params", Code(await Call(bridge, "browser.url.get")));
+        Assert.Equal("invalid_params", Code(await Call(bridge, "browser.press", new JsonObject { ["key"] = "Enter" })));
 
         // Each request goes to its own tab's page
         await Call(bridge, "browser.click", new JsonObject { ["surface_id"] = a, ["selector"] = "#save" });
@@ -187,7 +246,31 @@ public sealed class AgentBrowserTests
         var closed = await Call(bridge, "browser.eval", new JsonObject { ["surface_id"] = a, ["script"] = "1" });
         Assert.Equal("not_found", Code(closed));
         Assert.Contains("user closed this tab", Text(closed));
-        Assert.Equal("not_found", Code(await Call(bridge, "browser.url.get")));
+        Assert.Equal("invalid_params", Code(await Call(bridge, "browser.url.get")));
+    }
+
+    [Fact]
+    public async Task Concurrent_browser_dialog_answers_keep_their_surface_and_request_identity()
+    {
+        var host = new FakeHost { NewPage = () => new FakePage { Dialogs = new DialogBroker() } };
+        using var bridge = new AgentBrowserBridge(host);
+        var left = await Call(bridge, "browser.open_split", new JsonObject { ["url"] = "http://localhost:3000/a" });
+        var right = await Call(bridge, "browser.open_split", new JsonObject { ["url"] = "http://localhost:4000/b" });
+        var leftId = left["result"]!["surface_id"]!.GetValue<string>();
+        var rightId = right["result"]!["surface_id"]!.GetValue<string>();
+        var leftAnswer = host.Tabs[0].Page.Dialogs!.ConfirmAsync(new ConfirmRequest("left") { CausedByAgent = true }, CancellationToken.None);
+        var rightAnswer = host.Tabs[1].Page.Dialogs!.ConfirmAsync(new ConfirmRequest("right") { CausedByAgent = true }, CancellationToken.None);
+        Assert.Equal("invalid_params", Code(await Call(bridge, "browser.press", new JsonObject { ["key"] = "Enter" })));
+        Assert.False(leftAnswer.IsCompleted);
+        Assert.False(rightAnswer.IsCompleted);
+        var responses = await Task.WhenAll(
+            Call(bridge, "browser.press", new JsonObject { ["surface_id"] = leftId, ["key"] = "Enter" }, id: "left-request"),
+            Call(bridge, "browser.press", new JsonObject { ["surface_id"] = rightId, ["key"] = "Escape" }, id: "right-request"));
+        Assert.Equal("left-request", responses[0]["id"]!.GetValue<string>());
+        Assert.Equal("right-request", responses[1]["id"]!.GetValue<string>());
+        Assert.All(responses, response => Assert.Equal("ok", Code(response)));
+        Assert.True(await leftAnswer.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.False(await rightAnswer.WaitAsync(TimeSpan.FromSeconds(5)));
     }
 
     [Fact]
@@ -296,7 +379,7 @@ public sealed class AgentBrowserTests
 
         // No tab open: refused before the page is asked
         var none = new FakeHost();
-        Assert.Equal("not_found", (await Call(new AgentBrowserBridge(none), "browser.screenshot"))["error"]!["code"]!.GetValue<string>());
+        Assert.Equal("not_found", (await Call(new AgentBrowserBridge(none), "browser.screenshot", new JsonObject { ["surface_id"] = "closed-surface" }))["error"]!["code"]!.GetValue<string>());
         Assert.Empty(none.Tabs);
     }
 
@@ -335,7 +418,7 @@ public sealed class AgentBrowserTests
         Assert.Equal("invalid_params", file["error"]!["code"]!.GetValue<string>());
 
         var none = new AgentBrowserBridge(new FakeHost());
-        Assert.Equal("not_found", (await Call(none, "browser.eval", new JsonObject { ["script"] = "1" }))["error"]!["code"]!.GetValue<string>());
+        Assert.Equal("not_found", (await Call(none, "browser.eval", new JsonObject { ["surface_id"] = "closed-surface", ["script"] = "1" }))["error"]!["code"]!.GetValue<string>());
     }
 
     [Fact]
@@ -400,7 +483,7 @@ public sealed class AgentBrowserTests
         vm.OnNavigationStarted(new Uri("http://localhost:5173/"));
         Assert.False(vm.LoadFailed);
 
-        Assert.Contains("Only http and https", vm.NavigateForAgent("file:///tmp/index.html"));
+        Assert.Contains(Loc.F("Only http and https pages open in the preview (not \"{0}:\").", "file"), vm.NavigateForAgent("file:///tmp/index.html"));
         Assert.Null(vm.ActiveTab.RunScript); // no web view in a headless window: the bridge says "no page"
 
         vm.NoteAgentActivity();
@@ -505,8 +588,9 @@ public sealed class AgentBrowserTests
     {
         var broker = new DialogBroker();
         var host = new FakeHost { NewPage = () => new FakePage { HasPage = false, Dialogs = broker } };
-        var bridge = new AgentBrowserBridge(host) { HandOffAfter = TimeSpan.FromMilliseconds(300) };
-        await Call(bridge, "browser.open_split", new JsonObject { ["url"] = "http://localhost:3000/" });
+        var rawBridge = new AgentBrowserBridge(host) { HandOffAfter = TimeSpan.FromMilliseconds(300) };
+        var opened = await Call(rawBridge, "browser.open_split", new JsonObject { ["url"] = "http://localhost:3000/" });
+        var bridge = new BrowserHandle(rawBridge, opened["result"]!["surface_id"]!.GetValue<string>());
         var page = host.Tabs[0].Page;
 
         // A click whose handler calls alert(): accepted (OK) as omp would, and the click goes on

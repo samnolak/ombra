@@ -57,22 +57,13 @@ public sealed partial class MainViewModel
         Preview.ToggleDeviceCommand.Execute(null);
     }
 
-    /// <summary>The comments on the page, as text after the message; they are cleared once taken.</summary>
-    private string TakeAnnotations()
-    {
-        if (Preview.Annotations.Count == 0) return "";
-        var text = PreviewViewModel.BuildPrompt(Preview.Annotations);
-        Preview.IsAnnotating = false;
-        Preview.Annotations.Clear();
-        return text;
-    }
 
     private PreviewViewModel NewPreview()
     {
         // "Always allow on this site" and the download folder are kept next to the client settings (this run only without them)
         var folder = _settings?.Path is { } settingsPath ? Path.GetDirectoryName(settingsPath) : null;
         var p = new PreviewViewModel(new Ombra.ClientCore.Browser.BrowserSiteSettings(
-            string.IsNullOrEmpty(folder) ? null : Path.Combine(folder, "browser-sites.json")));
+            string.IsNullOrEmpty(folder) ? null : Path.Combine(folder, "browser-sites.json"))) { Marks = Marks };
         p.ShowRequested += () => IsPreviewOpen = true;
         // The right panel's strip lists the browser's pages: it follows their list and the page shown
         p.Tabs.CollectionChanged += (_, _) => SyncPageTabs();
@@ -80,12 +71,7 @@ public sealed partial class MainViewModel
         {
             if (e.PropertyName == nameof(PreviewViewModel.ActiveTab)) SyncActiveTab();
         };
-        // Comments on the page go with the next message: they count as content, and the panel's Send sends it
-        p.Annotations.CollectionChanged += (_, _) =>
-        {
-            SendCommand.NotifyCanExecuteChanged();
-            SteerCommand.NotifyCanExecuteChanged();
-        };
+        // Marks on the page are the chat's marks (MainViewModel.Marks.cs): the panel's pins follow the same list
         return p;
     }
 

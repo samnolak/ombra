@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Ombra.Core.Interop/Ombra.Core.Interop.csproj" />
+    <Project Path="src/Ombra.Server.Cli/Ombra.Server.Cli.csproj" />
+    <Project Path="src/Ombra.Server.Contracts/Ombra.Server.Contracts.csproj" />
+    <Project Path="src/Ombra.Server/Ombra.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Ombra.Core.Interop.Tests/Ombra.Core.Interop.Tests.csproj" />
+    <Project Path="tests/Ombra.Server.Tests/Ombra.Server.Tests.csproj" />
+  </Folder>
+</Solution>

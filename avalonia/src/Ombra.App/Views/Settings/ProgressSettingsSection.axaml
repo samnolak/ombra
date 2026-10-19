@@ -1,0 +1,50 @@
+<!-- Settings › Account: P3 progress sharing per local project (ViewModels/Team/TeamProgressViewModel). Off by default;
+     the task title is a second, separate opt-in. The caption says what leaves the machine and what never does. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Ombra.App.Localization"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             x:Class="Ombra.App.Views.Settings.ProgressSettingsSection"
+             x:DataType="vm:TeamProgressViewModel">
+  <Border x:Name="ProgressSettingsCard" Classes="section-card" IsVisible="{Binding IsAvailable}">
+    <StackPanel Spacing="12">
+      <TextBlock Classes="section" Text="{loc:T 'Share progress with the team'}" />
+      <TextBlock Classes="muted" TextWrapping="Wrap"
+                 Text="{loc:T 'Per project, off by default. Shared: you, the project, working / waiting for input / idle, and when it changed; the current task title only if you turn it on. Never shared: prompts, replies, file contents, diffs.'}" />
+      <Border Classes="ws-note error" IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}">
+        <SelectableTextBlock Text="{Binding Error}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+      </Border>
+      <TextBlock Classes="muted" IsVisible="{Binding !HasProjects}" Text="{loc:T 'No projects yet: open a session in a folder first.'}" />
+      <ItemsControl x:Name="ProgressProjects" ItemsSource="{Binding Projects}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:ProgressProjectRow">
+            <StackPanel Margin="0,6" Spacing="6">
+              <Grid ColumnDefinitions="*,Auto,Auto">
+                <StackPanel Spacing="2" Margin="0,0,12,0" VerticalAlignment="Center">
+                  <TextBlock Classes="ws-title" Text="{Binding Name}" />
+                  <TextBlock x:Name="ProgressProjectPath" Classes="tertiary" Text="{Binding ShownPath}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Path}" />
+                </StackPanel>
+                <ComboBox Grid.Column="1" MinWidth="200" ItemsSource="{Binding Choices}" SelectedItem="{Binding Selected}" VerticalAlignment="Center"
+                          ToolTip.Tip="{loc:T 'Team project'}" />
+                <Button Grid.Column="2" Margin="8,0,0,0" Content="{loc:T 'New team project'}" Command="{Binding CreateCommand}"
+                        IsVisible="{Binding CanCreate}" VerticalAlignment="Center" />
+              </Grid>
+              <StackPanel Spacing="8" IsVisible="{Binding IsBound}">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                  <TextBlock Text="{loc:T 'Share progress'}" VerticalAlignment="Center" />
+                  <ToggleButton x:Name="ShareProgressSwitch" Grid.Column="1" Classes="switch" IsChecked="{Binding Share}" VerticalAlignment="Center"
+                                AutomationProperties.Name="{loc:T 'Share progress'}" />
+                </Grid>
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" IsEnabled="{Binding Share}">
+                  <TextBlock Classes.muted="{Binding !Share}" Text="{loc:T 'Include the current task title'}" VerticalAlignment="Center" />
+                  <ToggleButton x:Name="ShareTaskSwitch" Grid.Column="1" Classes="switch" IsChecked="{Binding ShareTask}" VerticalAlignment="Center"
+                                AutomationProperties.Name="{loc:T 'Include the current task title'}" />
+                </Grid>
+              </StackPanel>
+            </StackPanel>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+  </Border>
+</UserControl>

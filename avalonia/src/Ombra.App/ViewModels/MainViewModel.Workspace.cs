@@ -22,6 +22,61 @@ public sealed partial class MainViewModel
     public SshSettingsViewModel SshSettings => _sshSettings ??= new SshSettingsViewModel(this);
     public BranchChipViewModel BranchChip => _branchChip ??= new BranchChipViewModel(this);
 
+    // UI-thread operation scopes bridge asynchronous starts/moves and Git's asynchronous preparation.
+    // A null admission path means /wt has not reported its destination yet.
+    private readonly List<WorktreeOperation> _worktreeOperations = [];
+
+    private sealed class WorktreeOperation(MainViewModel owner, string? path, bool removal) : IDisposable
+    {
+        public string? Path { get; } = path;
+        public bool Removal { get; } = removal;
+        public void Dispose() => owner._worktreeOperations.Remove(this);
+    }
+
+    internal static bool WorktreeContainsPath(string root, string? cwd)
+    {
+        if (string.IsNullOrWhiteSpace(cwd)) return false;
+        for (var directory = SessionCatalog.ResolveLinks(Path.GetFullPath(cwd));
+             directory is not null; directory = Path.GetDirectoryName(directory))
+            if (SessionCatalog.SamePath(directory, root)) return true;
+        return false;
+    }
+
+    internal IDisposable? ReserveWorktreeRemoval(string path)
+    {
+        var canonical = SessionCatalog.ResolveLinks(Path.GetFullPath(path));
+        // Raw builtins can be deferred behind an agent run. Do not infer their eventual
+        // destination: wait for all hosted work and queued input to settle instead.
+        if (OpenChats.Any(c => c.Snapshot() is var s
+            && (!SessionHost.IsIdle(s) || s.Queued.Count > 0 || c.ShouldQueueSubmission("")))) return null;
+        if (_worktreeOperations.Any(o => o.Path is null || WorktreeContainsPath(canonical, o.Path)
+            || o.Removal && WorktreeContainsPath(o.Path, canonical))) return null;
+        var operation = new WorktreeOperation(this, canonical, removal: true);
+        _worktreeOperations.Add(operation);
+        return operation;
+    }
+
+    private IDisposable? AdmitWorktreeChat(string? cwd)
+    {
+        var canonical = cwd is null ? null : SessionCatalog.ResolveLinks(Path.GetFullPath(cwd));
+        if (_worktreeOperations.Any(o => o.Removal && (canonical is null || WorktreeContainsPath(o.Path!, canonical))))
+        {
+            ShowBrief("IconAlert", Loc.T("Worktree removal in progress"),
+                Loc.T("Wait for worktree removal to finish before sending input, running commands or opening a conversation there."));
+            return null;
+        }
+        // The bell's update holds the repository while git writes its files (MainViewModel.GitBell.cs)
+        if (GitUpdating(cwd ?? Session.CurrentLaunch.WorkingDirectory))
+        {
+            ShowBrief("IconAlert", Loc.T("Updating from the remote"),
+                Loc.T("The repository is being updated from its remote. Send when it finishes: your message stays in the box."));
+            return null;
+        }
+        var operation = new WorktreeOperation(this, canonical, removal: false);
+        _worktreeOperations.Add(operation);
+        return operation;
+    }
+
     /// <summary>Ends with the window: work started by the settings pages stops with it.</summary>
     internal CancellationToken Lifetime
     {
@@ -41,8 +96,15 @@ public sealed partial class MainViewModel
         return t;
     }
 
-    /// <summary>Puts <paramref name="text"/> on the clipboard (the view does it).</summary>
-    internal void CopyText(string text) => CopyTextRequested?.Invoke(text);
+    /// <summary>Copy feedback is emitted only after the view confirms the clipboard write.</summary>
+    internal void CopyText(string text) => _ = CopyTextAsync(text);
+
+    internal async Task<bool> CopyTextAsync(string text, string? title = null, string message = "", bool notify = true)
+    {
+        if (text.Length == 0 || CopyTextRequested is not { } copy || !await copy(text)) return false;
+        if (notify) ShowBrief("IconCopy", title ?? Loc.T("Copied"), message);
+        return true;
+    }
 
     internal void OpenExternal(string url) => OpenUrlRequested?.Invoke(url);
 
@@ -55,6 +117,8 @@ public sealed partial class MainViewModel
     {
         if (!CanRunOmpCommands) return (false, Loc.T("omp isn't running. Start it, then try again."));
         if (IsRunning) return (false, Loc.T("omp is replying. Try again when the reply ends."));
+        using var admission = AdmitWorktreeChat(null);
+        if (admission is null) return (false, Loc.T("Worktree removal is in progress. Try again when it finishes."));
         // This chat's omp throughout: another chat may be shown by the time omp has made the worktree
         var open = _open;
         var session = open.Controller;
@@ -65,6 +129,7 @@ public sealed partial class MainViewModel
         try
         {
             await session.FollowSessionMoveAsync(moved.Path, Lifetime);
+            await FollowTrustAfterMoveAsync(open, moved.Path); // MainViewModel.WorkspaceTrust.cs
             ApplyIfShown(open);
             RequestCatalogRefresh();
         }

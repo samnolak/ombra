@@ -168,7 +168,7 @@
     <Setter Property="Width" Value="2" />
     <Setter Property="HorizontalAlignment" Value="Center" />
   </Style>
-  <Style Selector="Border.sidebar-grip:pointerover Border.sidebar-grip-line, Border.sidebar-grip.dragging Border.sidebar-grip-line">
+  <Style Selector="Border.sidebar-grip:pointerover Border.sidebar-grip-line, Border.sidebar-grip:focus-visible Border.sidebar-grip-line, Border.sidebar-grip.dragging Border.sidebar-grip-line">
     <Setter Property="Background" Value="{DynamicResource GuiFocus}" />
   </Style>
   <Style Selector="Border.sidebar.drawer Border.sidebar-grip">
@@ -212,6 +212,14 @@
     <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
   </Style>
+  <!-- The hairline before the embedded products (ChatGPT's apps divider): icon-wide, centred, a gap above and below -->
+  <Style Selector="Border.rail-separator">
+    <Setter Property="Width" Value="24" />
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Margin" Value="0,6" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="Background" Value="{DynamicResource GuiBorder}" />
+  </Style>
 
   <!-- ─────────────── Header: the chat's title after the project's folder ─────────────── -->
   <Style Selector="TextBlock.header-title">
@@ -228,6 +236,13 @@
   <Style Selector="Border.panel-strip">
     <Setter Property="Height" Value="{DynamicResource GuiChromeBand}" />
     <Setter Property="Padding" Value="8,0,8,0" />
+    <!-- hit-testable: on macOS its empty part moves the window (a title-bar area) -->
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <!-- The Browser page's tabs (Controls/PreviewPanel, MainWindow's BrowserPage): the same row in the band -->
+  <Style Selector="DockPanel.preview-tab-strip">
+    <Setter Property="Height" Value="{DynamicResource GuiChromeBand}" />
+    <Setter Property="Margin" Value="8,0,8,0" />
     <!-- hit-testable: on macOS its empty part moves the window (a title-bar area) -->
     <Setter Property="Background" Value="Transparent" />
   </Style>
@@ -496,12 +511,13 @@
   </Style>
 
   <!-- ─────────────── macOS: the band is the window's title bar (MainWindow.Chrome.cs) ───────────────
-       The traffic lights sit over the window's top left, centred in the band (16–76 × 15–29, MainWindow.PlaceTrafficLights),
-       over the rail (52 px, its buttons already under the band) and the start of the band: what is in the band there starts
-       after them — the sidebar's top row (or the header while the sidebar is hidden, or the narrow settings page's header
-       row) 40 px in. The title-bar
-       areas are hit-testable (transparent) so that their empty part moves the window; the settings page's scroller is
-       too, so that its empty part does not. In full screen the lights are hidden and none of this applies. -->
+       The traffic lights sit over the window's top left, centred in the band (16–70 × 14–30: MainWindow.PlaceTrafficLights,
+       held there through AppKit's own title-bar layouts by Platform/Mac/MacTrafficLights), over the rail (52 px, its
+       buttons already under the band) and the start of the band: what is in the band there starts after them — the
+       sidebar's top row (or, while the sidebar is hidden, the header or the Browser page's tabs; or the narrow settings
+       page's header row) 40 px in. The title-bar areas are hit-testable (transparent) so that their empty part moves the
+       window; the settings page's scroller is too, so that its empty part does not. In full screen the lights are hidden
+       and none of this applies. -->
   <Style Selector=":is(Window).traffic-lights Grid.sidebar-header">
     <Setter Property="Margin" Value="40,0,8,0" />
   </Style>
@@ -510,6 +526,9 @@
   </Style>
   <Style Selector=":is(Window).traffic-lights Border.header.settings-narrow-header">
     <Setter Property="Padding" Value="40,0,16,0" />
+  </Style>
+  <Style Selector=":is(Window).traffic-lights Border.browser-page.sidebar-hidden DockPanel.preview-tab-strip">
+    <Setter Property="Margin" Value="40,0,8,0" />
   </Style>
   <Style Selector=":is(Window).traffic-lights ScrollViewer#SettingsScroll">
     <Setter Property="Background" Value="Transparent" />

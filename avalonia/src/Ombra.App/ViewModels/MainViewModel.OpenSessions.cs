@@ -9,7 +9,7 @@ using Ombra.ClientCore;
 namespace Ombra.App.ViewModels;
 
 /// <summary>
-/// Several chats at once. Each open chat has its own omp process (a <see cref="SessionController"/> in
+/// Several chats at once. Each open chat has a logical engine session (a <see cref="SessionController"/> in
 /// <see cref="_host"/>) that keeps working while another chat is shown. The window shows one, <see cref="_open"/>: its
 /// updates are applied in full, up to 30 times a second. The others are looked at at most once a second, for their dot
 /// in the sidebar and a notification when one finishes, asks something or stops. Showing another chat keeps what the
@@ -37,28 +37,29 @@ public sealed partial class MainViewModel
     /// <summary>Every open chat's omp, the one used longest ago first (the shown one included).</summary>
     internal IReadOnlyList<SessionController> OpenChats => _host.All;
 
-    private OpenSession Register(SessionController c)
+    private OpenSession Register(SessionController c, bool recoverUnfiled = false)
     {
         var open = new OpenSession(c, _cts.Token);
         _opens[c] = open;
+        c.PrepareLaunch = PrepareDraftWorkingDirectory;
+        c.HostTools = HostToolList; // MainViewModel.HostTools.cs
+        InitializeDraft(open, recoverUnfiled);
         return open;
     }
 
     /// <summary>The open chat that has <paramref name="sessionFile"/> (or is opening it), or null.</summary>
-    private OpenSession? FindOpen(string sessionFile)
+    private OpenSession? FindOpen(string sessionFile, bool? readOnly = null)
     {
+        if (readOnly is null) return FindOpen(sessionFile, readOnly: false) ?? FindOpen(sessionFile, readOnly: true);
         foreach (var o in _opens.Values)
-            if (o.OpeningFile is { } f && SessionCatalog.SamePath(f, sessionFile)) return o;
-        return _host.Find(sessionFile) is { } c ? _opens.GetValueOrDefault(c) : null;
+            if ((readOnly is null || o.Controller.CurrentLaunch.ReadOnly == readOnly)
+                && (o.OpeningFile ?? o.Controller.SessionFile ?? o.Controller.CurrentLaunch.ResumeSessionFile) is { } file
+                && SessionCatalog.SamePath(file, sessionFile)) return o;
+        return null;
     }
 
-    /// <summary>The process limit may close this chat: not shown (the host checks), idle, nothing typed or under way.</summary>
-    private bool MayClose(SessionController c) =>
-        _opens.TryGetValue(c, out var o) && o.HasNoDraft && o.Card is not { IsRunning: true } && o.OpeningFile is null
-        && SessionHost.IsIdle(c.Snapshot());
-
     private bool HasNoDraft(OpenSession open) => open != _open ? open.HasNoDraft
-        : ComposerText.Trim().Length == 0 && Attachments.Count == 0 && PastedTexts.Count == 0 && CodeComments.Count == 0;
+        : ComposerText.Trim().Length == 0 && Attachments.Count == 0 && PastedTexts.Count == 0 && !Marks.HasMarks;
 
     /// <summary>A new chat nothing was said or typed in, with omp idle: another chat can take its place (and its omp).</summary>
     private bool IsUntouched(OpenSession open)
@@ -136,13 +137,18 @@ public sealed partial class MainViewModel
     {
         if (open == _open) Apply(s);
         else NoticeInBackground(open, s);
+        CheckProjectTrust(open); // MainViewModel.WorkspaceTrust.cs
     }
 
-    private static async Task OnUiAsync(Action update)
+    private async Task OnUiAsync(Action update)
     {
+        if (IsClosing) return;
         try
         {
-            await Dispatcher.UIThread.InvokeAsync(update, DispatcherPriority.Background);
+            await UiDispatcher.InvokeAsync(() =>
+            {
+                if (!IsClosing) update();
+            }, DispatcherPriority.Background, Lifetime);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
@@ -157,6 +163,7 @@ public sealed partial class MainViewModel
         if (IsClosing || !_opens.ContainsKey(open.Controller)) return;
         var before = open.Seen;
         if (before is not null && s.Version < before.Version) return;
+        RecoverRuntimeInput(open, s);
         open.Seen = s;
         CheckAttention(open, s);
         WhenIdle(open, s);
@@ -166,8 +173,6 @@ public sealed partial class MainViewModel
         // A run that started or ended, or a new file, changes the list (its order by the last message, a first title); so
         // does a name omp gave the session meanwhile (the row of a chat omp has no file for yet is named from the chat)
         if (before?.Phase != s.Phase || before.SessionFile != s.SessionFile || before.SessionName != s.SessionName) RequestCatalogRefresh();
-        // A chat that just became idle (a run ended, an omp finished starting) may be over the process limit now
-        if (before?.Phase != s.Phase && SessionHost.IsIdle(s)) _host.Trim();
     }
 
     /// <summary>Applies the chat's newest snapshot when it is the one shown (after a command that changed it).</summary>
@@ -188,16 +193,16 @@ public sealed partial class MainViewModel
         EnterSession(target, windowCard);
         // A new chat left untouched would only hold an omp: nothing in it can be opened again
         if (IsUntouched(leaving)) _ = CloseSessionAsync(leaving);
-        else _host.Trim(); // the chat left may be the idle one over the limit now
     }
 
     /// <summary>
-    /// A new chat with its own omp, shown at once. The chats open so far keep running; idle ones over the process limit
-    /// are closed (a working one never is).
+    /// A new logical session, shown at once. The chats open so far keep running in the shared engine.
     /// </summary>
     private async Task StartNewSessionAsync(LaunchRequest request)
     {
-        var (open, leaving) = ShowNewChat(() => _host.Open(request));
+        using var admission = AdmitWorktreeChat(request.WorkingDirectory);
+        if (admission is null) return;
+        var (open, leaving) = ShowNewChat(() => _host.Open(request), preserveLeaving: request.ResumeSessionFile is not null);
         try
         {
             await StartSessionAsync(open);
@@ -212,32 +217,25 @@ public sealed partial class MainViewModel
             Console.Error.WriteLine("omp start failed: " + e.Message);
         }
         if (request.ResumeSessionFile is { } file && open.Controller.Snapshot() is { Phase: SessionPhase.Faulted, StartFailed: true } failed
-            && _opens.ContainsKey(leaving.Controller))
+            && failed.StartProblem != StartProblem.SessionModelUnavailable && _opens.ContainsKey(leaving.Controller))
         {
             ReturnFromFailedOpen(open, leaving, file, failed);
             return;
         }
         ApplyIfShown(open);
-        RequestCatalogRefresh();
-    }
-
-    /// <summary>A new chat in an omp that is ready already (the host's spare): shown at once, and usable at once.</summary>
-    private void ShowStartedChat(SessionController started)
-    {
-        var (open, _) = ShowNewChat(() => _host.Adopt(started));
-        open.Pump = Task.Run(() => PumpAsync(open));
+        if (request.ResumeSessionFile is not null && IsUntouched(leaving)) _ = CloseSessionAsync(leaving);
         RequestCatalogRefresh();
     }
 
     /// <summary>Leaves the shown chat for the new one <paramref name="add"/> puts in the host, and shows it; the chat left
     /// goes when nothing was said or typed in it (it would only hold an omp).</summary>
-    private (OpenSession Open, OpenSession Left) ShowNewChat(Func<SessionController> add)
+    private (OpenSession Open, OpenSession Left) ShowNewChat(Func<SessionController> add, bool preserveLeaving = false)
     {
         var leaving = _open;
         var windowCard = LeaveSession(leaving); // first: whether the chat left may be closed depends on its draft
         var open = Register(add());
         EnterSession(open, windowCard);
-        if (IsUntouched(leaving)) _ = CloseSessionAsync(leaving);
+        if (!preserveLeaving && IsUntouched(leaving)) _ = CloseSessionAsync(leaving);
         return (open, leaving);
     }
 
@@ -272,11 +270,23 @@ public sealed partial class MainViewModel
     /// (the shown chat's own omp when that chat is still untouched).</summary>
     private async Task OpenSavedSessionAsync(string file, string cwd)
     {
+        if (FindOpen(file, readOnly: false) is { } live)
+        {
+            ShowSession(live);
+            return;
+        }
         if (FindOpen(file) is { } open)
         {
             ShowSession(open);
             return;
         }
+        if (!Directory.Exists(cwd))
+        {
+            OfferMissingSessionFolder(file, cwd, IsProjectless ? null : ProjectFolder);
+            return;
+        }
+        using var admission = AdmitWorktreeChat(cwd);
+        if (admission is null) return;
         if (!IsUntouched(_open))
         {
             await StartNewSessionAsync(NewLaunch(cwd, file));
@@ -303,9 +313,67 @@ public sealed partial class MainViewModel
         RequestCatalogRefresh();
     }
 
+    public bool IsReadOnly => Session.CurrentLaunch.ReadOnly;
+    private bool CanMutateSession() => !IsReadOnly;
+    private bool? _appliedReadOnly;
+    public string ReadOnlyExplanation => Loc.F("Read only — the saved conversation is unchanged. Source folder: {0}",
+        _open.Last?.Cwd ?? Session.CurrentLaunch.WorkingDirectory ?? "");
+
+    [RelayCommand]
+    private void OpenReadOnlyInProject()
+    {
+        if (!IsReadOnly || ShownFile is not { } file) return;
+        OfferMissingSessionFolder(file, Session.CurrentLaunch.WorkingDirectory ?? "", _open.ReadOnlyResumeProject);
+    }
+
+    private void OfferMissingSessionFolder(string file, string sourceFolder, string? currentProject)
+    {
+        // Capture the offered destination now. Navigation while the card is open must not change the user's choice.
+        var target = currentProject is not null && Directory.Exists(currentProject) ? currentProject : null;
+        var card = new SessionCardViewModel("missing-session-folder", "IconAlert", Loc.T("Session folder is unavailable"),
+            Loc.T("Open this conversation in an existing project, or read its saved messages without changing the original."))
+        {
+            State = SessionCardState.Ask,
+            Detail = target is null ? sourceFolder : Loc.F("Source: {0}\nOpen in: {1}", sourceFolder, target),
+        };
+        card.Primary = new SessionCardAction(target is null ? Loc.T("Choose project folder…") : Loc.T("Open in current project"),
+            new AsyncRelayCommand(async () =>
+            {
+                var destination = target;
+                if (destination is null)
+                {
+                    if (PickFolderRequested is not { } pick || await pick() is not { } selected) return;
+                    destination = selected;
+                }
+                if (!Directory.Exists(destination))
+                {
+                    card.Message = Loc.T("The selected folder is unavailable. Choose an existing project folder.");
+                    return;
+                }
+                if (FindOpen(file, readOnly: false) is { } existing)
+                {
+                    CloseSessionCard();
+                    ShowSession(existing);
+                    return;
+                }
+                CloseSessionCard();
+                await StartNewSessionAsync(NewLaunch(destination, file));
+            }));
+        card.Secondary = new SessionCardAction(Loc.T("Read only"), new AsyncRelayCommand(async () =>
+        {
+            CloseSessionCard();
+            if (FindOpen(file, readOnly: true) is { } existing) ShowSession(existing);
+            else await StartNewSessionAsync(NewLaunch(sourceFolder, file) with { ReadOnly = true });
+            if (FindOpen(file, readOnly: true) is { } reader) reader.ReadOnlyResumeProject = target;
+        }));
+        ShowCard(card);
+    }
+
     /// <summary>A new chat in <paramref name="folder"/>, beside the chats already open (in the untouched shown chat's omp).</summary>
     private async Task OpenProjectAsync(string folder)
     {
+        using var admission = AdmitWorktreeChat(folder);
+        if (admission is null) return;
         if (!IsUntouched(_open))
         {
             await StartNewSessionAsync(NewLaunch(folder));
@@ -330,6 +398,8 @@ public sealed partial class MainViewModel
     private async Task CloseSessionAsync(OpenSession open)
     {
         if (open == _open || !_opens.ContainsKey(open.Controller)) return;
+        SaveDraft(open);
+        if (!FlushDrafts()) return;
         open.Lifetime.Cancel(); // a start still under way stops its omp instead of finishing it
         await _host.CloseAsync(open.Controller);
     }
@@ -338,6 +408,12 @@ public sealed partial class MainViewModel
     private void OnHostClosed(SessionController c)
     {
         if (!_opens.Remove(c, out var open)) return;
+        UpdateDockAttention();
+        PersistKnownDraftIdentity(open);
+        c.QueueCheckpoint = null;
+        c.SubmissionDelivered = null;
+        c.PrepareLaunch = null;
+        c.HostTools = [];
         open.Dispose();
         // A chat omp had no file for (a new one left untouched, say) has nothing to open again: its row goes now, not at
         // the next rescan (until then a click on it started an empty chat on a file that never existed, and kept the row)
@@ -351,6 +427,9 @@ public sealed partial class MainViewModel
     /// </summary>
     private SessionCardViewModel? LeaveSession(OpenSession open)
     {
+        RecordLeft(open); // MainViewModel.SidebarNav.cs: ⌘[ comes back to it
+        SaveDraft(open);
+        FlushDrafts();
         open.ScrollAnchor = SaveScrollRequested?.Invoke();
         if (_mention is not null) EndMention();
         IsCommandMenuOpen = false;
@@ -360,15 +439,14 @@ public sealed partial class MainViewModel
         open.ComposerMessage = ComposerMessage;
         open.Attachments = [.. Attachments];
         open.PastedTexts = [.. PastedTexts];
-        open.CodeComments = [.. CodeComments];
+        open.Marks = [.. Marks.Items];
         open.Queued = [.. QueuedMessages];
         open.Dialog = CurrentDialog;
         open.PendingUrl = PendingUrl;
         open.PendingUrlInstructions = PendingUrlInstructions;
         open.PendingApprovalMode = PendingApprovalMode;
         // A brief note goes with its moment; a card that asks or works stays with its chat
-        _cardTimer?.Stop();
-        _cardTimer = null;
+        DropTimedCards();
         var windowCard = SessionCard is { Kind: "quit" } quit ? quit : null;
         open.Card = SessionCard is { Kind: not ("brief" or "quit") } card ? card : null;
         open.Seen = open.Last ?? open.Seen;
@@ -378,33 +456,37 @@ public sealed partial class MainViewModel
     /// <summary>Shows a chat: its rows and draft as they were left, then its newest snapshot applied in full.</summary>
     private void EnterSession(OpenSession open, SessionCardViewModel? windowCard)
     {
+        _changingDraft = true;
         Volatile.Write(ref _open, open);
+        IsRenaming = false;
+        IsModelMenuOpen = false;
         _rows.ResetTo(open.Rows);
         open.Rows = [];
         ComposerText = open.ComposerText;
         ComposerMessage = open.ComposerMessage;
         Refill(Attachments, open.Attachments);
         Refill(PastedTexts, open.PastedTexts);
-        Refill(CodeComments, open.CodeComments);
+        Refill(Marks.Items, open.Marks);
         Refill(QueuedMessages, open.Queued);
         open.Attachments = [];
         open.PastedTexts = [];
-        open.CodeComments = [];
+        open.Marks = [];
         open.Queued = [];
-        OnPropertyChanged(nameof(HasCodeComments));
         OnPropertyChanged(nameof(HasQueued));
         AttachmentsChanged();
         CurrentDialog = open.Dialog;
         open.Dialog = null;
+        _changingDraft = false;
         SessionCard = windowCard ?? open.Card;
         if (windowCard is null) open.Card = null;
         PendingUrl = open.PendingUrl;
         PendingUrlInstructions = open.PendingUrlInstructions;
         PendingApprovalMode = open.PendingApprovalMode;
         open.Unread = false;
+        ClearMarkedUnread(open.Controller.SessionFile ?? open.Controller.CurrentLaunch.ResumeSessionFile);
         // What the window derived from the chat shown before is derived again from this one (its own omp: its model's
         // thinking levels, its pins, its counts of ended runs)
-        WidgetsText = string.Join("\n", (open.Last?.Widgets ?? []).SelectMany(w => w.Lines));
+        WidgetsText = WidgetText(open.Last?.Widgets ?? []);
         _paneRunsEnded = -1;
         _pinsFor = null;
         _thinkingFetchedFor = null;
@@ -421,6 +503,8 @@ public sealed partial class MainViewModel
         if (_tasksCreated) Tasks.OnSessionShown(); // its own omp's background jobs
         WakeFront();
         RefreshOmpProcesses();
+        // The keyboard goes with the chat: typing after a switch writes in its message box
+        FocusComposerRequested?.Invoke();
     }
 
     private static void Refill<T>(System.Collections.ObjectModel.ObservableCollection<T> list, List<T> items)
@@ -452,107 +536,74 @@ public sealed partial class MainViewModel
     private List<(OpenSession Open, SessionSnapshot Snapshot)> WorkingSessions() =>
         [.. _opens.Values.Select(o => (o, s: o.Controller.Snapshot())).Where(x => x.s.Phase is SessionPhase.Running or SessionPhase.Aborting || x.s.Dialogs.Count > 0)];
 
-    /// <summary>
-    /// Starts every chat's omp again so it reads changed settings: an idle one now, one that is working (or starting)
-    /// once it is idle (<see cref="WhenIdle"/>), so no run is cut short. True when the shown chat's omp restarted now.
-    /// The spare, started with the old settings, is replaced (MainViewModel.Chats.cs).
-    /// </summary>
-    private async Task<bool> RestartAllSessionsAsync()
+    private long _engineRestartRequested;
+    private long _engineRestartApplied;
+    private bool _engineRestartPending => _engineRestartRequested != _engineRestartApplied;
+    private bool _engineRestarting;
+
+    /// <summary>Process settings apply together: wait until every logical session is idle before restarting the engine.</summary>
+    private Task<bool> RestartAllSessionsAsync()
     {
-        ReplaceSpare(again: true);
-        var restarts = new List<Task>();
-        var shownNow = false;
-        foreach (var open in _opens.Values.ToList())
-        {
-            var s = open.Controller.Snapshot();
-            if (s.Phase == SessionPhase.NotStarted) continue; // its start reads the settings as they are now
-            if (!SessionHost.IsIdle(s))
-            {
-                open.RestartWhenIdle = true;
-                continue;
-            }
-            shownNow |= open == _open;
-            restarts.Add(RestartSessionAsync(open));
-        }
-        await Task.WhenAll(restarts);
-        return shownNow;
+        if (IsReadOnly) return Task.FromResult(false);
+        _engineRestartRequested++;
+        _host.SetRestartPending(true);
+        return ApplyEngineRestartAsync();
     }
 
-    private async Task RestartSessionAsync(OpenSession open)
+    private async Task<bool> ApplyEngineRestartAsync()
     {
-        open.RestartWhenIdle = false;
+        if (_engineRestarting || _host.All.Any(c => !SessionHost.IsIdle(c.Snapshot()))) return false;
+        _engineRestarting = true;
         try
         {
-            await open.Controller.RecoverAsync(open.Lifetime.Token);
-            ApplyIfShown(open);
+            while (_engineRestartPending && _host.All.All(c => SessionHost.IsIdle(c.Snapshot())))
+            {
+                var generation = _engineRestartRequested;
+                await _host.RestartEngineAsync(_cts.Token);
+                _engineRestartApplied = generation;
+                ApplyIfShown(_open);
+                // Saves can arrive while restart awaits startup. Drain them here: a Ready snapshot may have
+                // already been consumed while _engineRestarting was true, so no later UI wake-up is guaranteed.
+            }
+            return !_engineRestartPending;
         }
-        catch (OperationCanceledException) when (open.Lifetime.IsCancellationRequested)
+        finally
         {
-            // The chat (or the window) closed meanwhile: its omp is not started again
+            _engineRestarting = false;
+            if (!_engineRestartPending) _host.SetRestartPending(false);
         }
     }
 
-    /// <summary>Called with each of a chat's snapshots: a restart that waited for its run happens once it is idle.</summary>
+    /// <summary>A deferred process-wide change becomes safe only after all chats finish their work.</summary>
     private void WhenIdle(OpenSession open, SessionSnapshot s)
     {
-        if (!open.RestartWhenIdle) return;
-        // An omp that is not running reads the settings when the user starts it again
-        if (s.Phase is SessionPhase.Faulted or SessionPhase.Stopped) open.RestartWhenIdle = false;
-        else if (s.Phase == SessionPhase.Ready && SessionHost.IsIdle(s)) _ = RestartSessionAsync(open);
+        if (_engineRestartPending && !_engineRestarting && _host.All.All(c => SessionHost.IsIdle(c.Snapshot())))
+            _ = ApplyDeferredEngineRestartAsync();
     }
 
-    /// <summary>Stops and starts again each idle chat's omp (before the runtime it runs from is replaced); the spare,
-    /// which runs from it too, goes (the restart after the install prepares the next one).</summary>
-    private async Task ForceStopReadySessionsAsync(CancellationToken ct)
+    private async Task ApplyDeferredEngineRestartAsync()
     {
-        ReplaceSpare(again: false);
-        foreach (var open in _opens.Values.ToList())
-            if (open.Controller.Snapshot().Phase == SessionPhase.Ready) await open.Controller.ForceStopAsync(ct);
+        try { await ApplyEngineRestartAsync(); }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch (Exception e) { SettingsMessage = Loc.T("Couldn’t restart omp: ") + e.Message; }
     }
 
-    // ───────────── The process limit (Settings → General) and the processes in the event panel ─────────────
+    /// <summary>Releases the shared executable before replacing the installed runtime.</summary>
+    private Task ForceStopReadySessionsAsync(CancellationToken ct) => _host.StopEngineAsync(ct);
 
-    /// <summary>The segment of the process limit that is chosen (its number is the converter's parameter).</summary>
-    public static readonly Avalonia.Data.Converters.IValueConverter IsMaxOpenSessions =
-        new Avalonia.Data.Converters.FuncValueConverter<int, string, bool>((n, choice) => choice == n.ToString(CultureInfo.InvariantCulture));
-
-    /// <summary>How many chats keep their omp running before idle ones are closed.</summary>
-    [ObservableProperty] private int _maxOpenSessions = SessionHost.DefaultMaxProcesses;
-
-    private int LoadMaxOpenSessions()
-    {
-        int? saved = null;
-        try { saved = _settings?.Load().MaxOpenSessions; }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
-        {
-            // The default; the settings page reports the file's problem when it opens.
-        }
-        return MaxOpenSessions = saved is > 0 ? saved.Value : SessionHost.DefaultMaxProcesses;
-    }
-
-    [RelayCommand]
-    private void SetMaxOpenSessions(string? value)
-    {
-        if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var n) || n < 1 || n == MaxOpenSessions) return;
-        MaxOpenSessions = n;
-        _host.MaxProcesses = n;
-        _host.Trim();
-        Persist(o => o with { MaxOpenSessions = n == SessionHost.DefaultMaxProcesses ? null : n });
-    }
-
-    /// <summary>The event panel's count of omp processes and the memory they hold ("3 omp processes · 640 MB").</summary>
+    /// <summary>The shared engine's process count and memory, counted once across all logical chats.</summary>
     [ObservableProperty] private string _ompProcessesText = "";
 
     private long _processesReadAt;
 
-    /// <summary>Reads the omp processes' memory again while the event panel is open (at most every 2 s).</summary>
+    /// <summary>Reads shared engine memory while the event panel is open (at most every 2 s).</summary>
     private void RefreshOmpProcesses(bool force = true)
     {
         if (!IsDebugVisible || (!force && Stopwatch.GetElapsedTime(_processesReadAt) < TimeSpan.FromSeconds(2))) return;
         _processesReadAt = Stopwatch.GetTimestamp();
-        var pids = _opens.Keys.Select(c => c.ProcessId).OfType<int>().ToList();
+        var enginePid = _host.EngineProcessId;
         long bytes = 0;
-        foreach (var pid in pids)
+        if (enginePid is { } pid)
         {
             try
             {
@@ -564,7 +615,7 @@ public sealed partial class MainViewModel
                 // Exited meanwhile
             }
         }
-        OmpProcessesText = (pids.Count == 1 ? Loc.T("1 omp process") : Loc.F("{0} omp processes", pids.Count))
+        OmpProcessesText = (enginePid.HasValue ? Loc.T("1 omp process") : Loc.F("{0} omp processes", 0))
             + (bytes > 0 ? string.Create(CultureInfo.InvariantCulture, $" · {bytes / 1048576} ") + Loc.T("MB") : "");
     }
 

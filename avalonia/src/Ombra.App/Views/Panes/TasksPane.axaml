@@ -1,6 +1,7 @@
 <!-- The Background tasks pane: omp's subagents (its task tool) as they run and after they end — status, how long,
      what each does now, tools and tokens; a card opens to its task, latest output and own conversation — then omp's
-     background jobs (/jobs: long commands, async tasks). DataContext: TasksViewModel. -->
+     background jobs (get_jobs: long commands, async tasks) with Stop, their output and "waiting for input".
+     DataContext: TasksViewModel. -->
 <UserControl xmlns:loc="using:Ombra.App.Localization"
              xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -28,14 +29,18 @@
 
       <!-- Subagents -->
       <StackPanel x:Name="SubagentsSection" Spacing="8" IsVisible="{Binding HasSubagents}">
-        <TextBlock Classes="pane-group" Text="{loc:T 'Subagents'}" Margin="8,0" />
+        <Grid ColumnDefinitions="*,Auto" Margin="8,0">
+          <TextBlock Classes="pane-group" Text="{loc:T 'Subagents'}" VerticalAlignment="Center" />
+          <Button x:Name="StopAllSubagents" Grid.Column="1" Classes="link action" Content="{loc:T 'Stop all'}" Command="{Binding StopAllCommand}"
+                  IsVisible="{Binding CanStopAll}" Padding="0" MinHeight="0" ToolTip.Tip="{loc:T 'Stop every running subagent'}" />
+        </Grid>
         <ItemsControl x:Name="SubagentList" ItemsSource="{Binding Subagents}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:SubagentRowViewModel">
-              <Border Classes="task-card" Classes.running="{Binding IsRunning}">
+              <Border Classes="task-card" Classes.running="{Binding IsRunning}" EffectiveViewportChanged="OnCardViewportChanged" DetachedFromVisualTree="OnCardDetached">
                 <StackPanel>
                   <ToggleButton Classes="task-row flat" IsChecked="{Binding IsExpanded}" AutomationProperties.Name="{Binding AccessibleName}"
                                 ToolTip.Tip="{loc:T 'Show its task, output and conversation'}">
@@ -65,6 +70,23 @@
                       </Grid>
                     </StackPanel>
                   </ToggleButton>
+                  <!-- Running: stop it, or tell it something; a failure stays on the card -->
+                  <Grid ColumnDefinitions="*,Auto,Auto" Margin="12,0,12,10" IsVisible="{Binding IsRunning}">
+                    <TextBox x:Name="SubagentMessageBox" Text="{Binding MessageText}" Watermark="{loc:T 'Message this subagent…'}"
+                             AutomationProperties.Name="{loc:T 'Message this subagent'}" IsEnabled="{Binding !IsSending}">
+                      <TextBox.KeyBindings>
+                        <KeyBinding Gesture="Enter" Command="{Binding SendMessageCommand}" />
+                      </TextBox.KeyBindings>
+                    </TextBox>
+                    <Button x:Name="SubagentSend" Grid.Column="1" Classes="flat" Content="{loc:T 'Send'}" Command="{Binding SendMessageCommand}"
+                            IsEnabled="{Binding CanSend}" Margin="6,0,0,0" ToolTip.Tip="{loc:T 'Send it to this subagent while it works'}" />
+                    <Button x:Name="SubagentStop" Grid.Column="2" Classes="flat" Content="{loc:T 'Stop'}" Command="{Binding StopCommand}"
+                            IsEnabled="{Binding CanStop}" Margin="6,0,0,0" ToolTip.Tip="{loc:T 'Stop this subagent'}" />
+                  </Grid>
+                  <Grid ColumnDefinitions="Auto,*" Margin="12,0,12,10" IsVisible="{Binding HasActionError}">
+                    <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="15" Margin="0,1,6,0" VerticalAlignment="Top" />
+                    <TextBlock Grid.Column="1" Classes="plan-note" Text="{Binding ActionError}" TextWrapping="Wrap" />
+                  </Grid>
                   <!-- Open: the task, what it used and printed lately, its own conversation -->
                   <StackPanel IsVisible="{Binding IsExpanded}" Margin="12,0,12,12" Spacing="10">
                     <StackPanel Spacing="4" IsVisible="{Binding HasTask}">
@@ -85,6 +107,7 @@
                     </StackPanel>
                     <StackPanel Spacing="6">
                       <TextBlock Classes="pane-group" Text="{loc:T 'Conversation'}" IsVisible="{Binding MessagesLoaded}" />
+                      <TextBlock Classes="muted" Text="{loc:T 'Live preview · latest 40 entries; long text is shortened'}" IsVisible="{Binding MessagesLoaded}" TextWrapping="Wrap" />
                       <Button Classes="link action" Content="{loc:T 'Show its conversation'}" Command="{Binding LoadMessagesCommand}" IsVisible="{Binding !MessagesLoaded}"
                               IsEnabled="{Binding !IsLoadingMessages}" HorizontalAlignment="Left" Padding="0" MinHeight="0"
                               ToolTip.Tip="{loc:T 'The subagent’s own messages and tool calls, as omp saved them'}" />
@@ -106,8 +129,6 @@
                           </DataTemplate>
                         </ItemsControl.ItemTemplate>
                       </ItemsControl>
-                      <Button Classes="link action" Content="{loc:T 'Read again'}" Command="{Binding LoadMessagesCommand}" IsVisible="{Binding MessagesLoaded}"
-                              IsEnabled="{Binding !IsLoadingMessages}" HorizontalAlignment="Left" Padding="0" MinHeight="0" />
                     </StackPanel>
                   </StackPanel>
                 </StackPanel>
@@ -117,12 +138,11 @@
         </ItemsControl>
       </StackPanel>
 
-      <!-- Background jobs (omp's /jobs) -->
+      <!-- Background jobs (omp's get_jobs) -->
       <StackPanel x:Name="JobsSection" Spacing="8">
         <StackPanel.IsVisible>
           <MultiBinding Converter="{x:Static BoolConverters.Or}">
             <Binding Path="HasJobs" />
-            <Binding Path="HasJobsText" />
             <Binding Path="HasJobsError" />
           </MultiBinding>
         </StackPanel.IsVisible>
@@ -131,9 +151,6 @@
           <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,1,8,0" VerticalAlignment="Top" />
           <TextBlock Grid.Column="1" Classes="muted" Text="{Binding JobsError}" TextWrapping="Wrap" />
         </Grid>
-        <Border Classes="task-code" IsVisible="{Binding HasJobsText}">
-          <SelectableTextBlock Classes="mono" Text="{Binding JobsText}" TextWrapping="Wrap" />
-        </Border>
         <ItemsControl x:Name="JobList" ItemsSource="{Binding Jobs}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
@@ -151,6 +168,30 @@
                       </StackPanel>
                     </Border>
                     <TextBlock Classes="task-line" Text="{Binding Detail}" VerticalAlignment="Center" />
+                  </StackPanel>
+                  <!-- Quiet on what looks like a prompt: a background command cannot be answered from here -->
+                  <Grid x:Name="JobWaiting" ColumnDefinitions="Auto,*" IsVisible="{Binding IsWaitingForInput}">
+                    <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="15" Margin="0,1,6,0" VerticalAlignment="Top" />
+                    <TextBlock Grid.Column="1" Classes="plan-note" TextWrapping="Wrap"
+                               Text="{loc:T 'It seems to wait for input: its last line looks like a question. A background command can’t be answered; stop it, or ask the agent to run it without prompts.'}" />
+                  </Grid>
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Button x:Name="JobOutputToggle" Classes="flat" Content="{Binding OutputToggleText}" Command="{Binding ToggleOutputCommand}"
+                            ToolTip.Tip="{loc:T 'What it printed, the latest part first, updated while it runs'}" />
+                    <Button x:Name="JobStop" Classes="flat" Content="{loc:T 'Stop'}" Command="{Binding StopCommand}"
+                            IsVisible="{Binding IsRunning}" IsEnabled="{Binding CanStop}" ToolTip.Tip="{loc:T 'Stop this job'}" />
+                  </StackPanel>
+                  <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasActionError}">
+                    <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="15" Margin="0,1,6,0" VerticalAlignment="Top" />
+                    <TextBlock Grid.Column="1" Classes="plan-note" Text="{Binding ActionError}" TextWrapping="Wrap" />
+                  </Grid>
+                  <StackPanel Spacing="4" IsVisible="{Binding IsOutputShown}">
+                    <TextBlock Classes="muted" Text="{loc:T 'Reading…'}" IsVisible="{Binding IsLoadingOutput}" />
+                    <TextBlock Classes="muted" Text="{Binding OutputNote}" IsVisible="{Binding HasOutputNote}" TextWrapping="Wrap" />
+                    <Border Classes="task-code" IsVisible="{Binding HasOutput}">
+                      <SelectableTextBlock x:Name="JobOutputText" Classes="mono" Text="{Binding OutputText}" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource GuiTextSecondary}" />
+                    </Border>
                   </StackPanel>
                 </StackPanel>
               </Border>

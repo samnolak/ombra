@@ -378,8 +378,8 @@ public sealed partial class BrowserDialogCardViewModel : ObservableObject
     internal static string FormatSize(long bytes) => bytes switch
     {
         < 1024 => Loc.F("{0} bytes", bytes),
-        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
-        < 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024):0.#} MB",
-        _ => $"{bytes / (1024.0 * 1024 * 1024):0.##} GB",
+        < 1024 * 1024 => Loc.F("{0} KB", $"{bytes / 1024.0:0.#}"),
+        < 1024L * 1024 * 1024 => Loc.F("{0} MB", $"{bytes / (1024.0 * 1024):0.#}"),
+        _ => Loc.F("{0} GB", $"{bytes / (1024.0 * 1024 * 1024):0.##}"),
     };
 }

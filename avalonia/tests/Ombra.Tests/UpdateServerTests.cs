@@ -8,6 +8,7 @@ using System.Text.Json;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.Services;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore;
@@ -86,6 +87,13 @@ public sealed class UpdateServerTests
                 await tls.WriteAsync(route.Body.AsMemory(0, send), _stop.Token);
                 await tls.FlushAsync(_stop.Token);
                 // CutHalfway: the connection closes here, short of the announced Content-Length.
+                if (route.Behaviour == Behaviour.CutHalfway) return;
+                // Like a real server: close_notify, then read until the client closes. Dropping the socket with the
+                // client's TLS records unread resets the connection, and a Network.framework client (macOS) then
+                // loses the tail of the response ("response ended prematurely").
+                await tls.ShutdownAsync();
+                var sink = new byte[4096];
+                while (await tls.ReadAsync(sink, _stop.Token) > 0) { }
             }
             catch (Exception) { }
         }
@@ -226,12 +234,12 @@ public sealed class UpdateServerTests
         var downloads = Path.Combine(installed, "Downloads");
         var vm = Settings(new UpdateChecker(Client(ca), server.Url("update.json"), "0.0.1", r.Rid, TestSigning.PublicKey), downloads);
 
-        Assert.StartsWith($"Version {r.Version} is available (you have 0.0.1).", await CheckAsync(vm));
+        Assert.StartsWith(Loc.F("Version {0} is available (you have {1}).", r.Version, "0.0.1"), await CheckAsync(vm));
         Assert.True(vm.UpdateAvailable);
         Assert.Equal(["update.json", "update.json.sig"], server.Requests); // the check downloads nothing else
         vm.DownloadUpdateCommand.Execute(null);
         await Until(() => !vm.IsUpdateBusy && vm.DownloadedUpdate is not null, "downloaded");
-        Assert.StartsWith("Downloaded and verified", vm.UpdateText);
+        Assert.StartsWith(Loc.F("Downloaded and verified (SHA-256 matches the release): {0}", ""), vm.UpdateText);
         Assert.Equal(Path.Combine(downloads, r.File), vm.DownloadedUpdate);
         Assert.Equal(r.Package, File.ReadAllBytes(vm.DownloadedUpdate!));
         Assert.Single(Directory.GetFiles(downloads)); // no .part left
@@ -250,7 +258,7 @@ public sealed class UpdateServerTests
         var r = TestRelease();
         Serve(server, Manifest(server, r));
         var vm = Settings(new UpdateChecker(Client(ca), server.Url("update.json"), r.Version, r.Rid, TestSigning.PublicKey), TestProcesses.TempDir("upd-same"));
-        Assert.Equal($"Ombra {r.Version} is up to date.", await CheckAsync(vm));
+        Assert.Equal(Loc.F("Ombra {0} is up to date.", r.Version), await CheckAsync(vm));
         Assert.False(vm.UpdateAvailable);
         await vm.DisposeAsync();
     }
@@ -262,7 +270,7 @@ public sealed class UpdateServerTests
         int port;
         await using (var gone = new ReleaseServer(cert)) port = gone.Port; // now nothing listens there
         var down = Settings(new UpdateChecker(Client(ca), $"https://127.0.0.1:{port}/update.json", "0.1.0", "linux-x64", TestSigning.PublicKey), TestProcesses.TempDir("upd-down"));
-        Assert.StartsWith("Could not check for updates:", await CheckAsync(down));
+        Assert.StartsWith(Loc.F("Could not check for updates: {0}", ""), await CheckAsync(down));
         await down.DisposeAsync();
 
         await using var server = new ReleaseServer(cert);
@@ -270,13 +278,13 @@ public sealed class UpdateServerTests
         var silent = Settings(new UpdateChecker(Client(ca), server.Url("update.json"), "0.1.0", "linux-x64", TestSigning.PublicKey) { StallTimeout = TimeSpan.FromSeconds(2) },
             TestProcesses.TempDir("upd-silent"));
         var started = DateTime.UtcNow;
-        Assert.Equal("Could not check for updates: the update server did not answer within 2 s", await CheckAsync(silent));
+        Assert.Equal(Loc.F("Could not check for updates: {0}", "the update server did not answer within 2 s"), await CheckAsync(silent));
         Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(30));
         await silent.DisposeAsync();
 
         // A feed address that is not published is an answer, not an error.
         var missing = Settings(new UpdateChecker(Client(ca), server.Url("nothing-here.json"), "0.1.0", "linux-x64", TestSigning.PublicKey), TestProcesses.TempDir("upd-404"));
-        Assert.Equal("No release is published yet.", await CheckAsync(missing));
+        Assert.Equal(Loc.T("No release is published yet."), await CheckAsync(missing));
         await missing.DisposeAsync();
     }
 
@@ -289,7 +297,7 @@ public sealed class UpdateServerTests
         var r = TestRelease();
         Serve(server, Manifest(server, r));
         var vm = Settings(new UpdateChecker(Client(otherCa), server.Url("update.json"), "0.0.1", r.Rid, TestSigning.PublicKey), TestProcesses.TempDir("upd-untrusted"));
-        Assert.StartsWith("Could not check for updates:", await CheckAsync(vm));
+        Assert.StartsWith(Loc.F("Could not check for updates: {0}", ""), await CheckAsync(vm));
         Assert.False(vm.UpdateAvailable);
         await vm.DisposeAsync();
     }
@@ -306,7 +314,7 @@ public sealed class UpdateServerTests
         var vm = Settings(new UpdateChecker(Client(ca), server.Url("update.json"), "0.0.1", r.Rid, TestSigning.PublicKey), downloads);
         await CheckAsync(vm);
         vm.DownloadUpdateCommand.Execute(null);
-        await Until(() => !vm.IsUpdateBusy && vm.UpdateText.StartsWith("Download failed", StringComparison.Ordinal), "download refused");
+        await Until(() => !vm.IsUpdateBusy && vm.UpdateText.StartsWith(Loc.F("Download failed, nothing was kept: {0}", ""), StringComparison.Ordinal), "download refused");
         Assert.Contains("does not match the manifest", vm.UpdateText);
         Assert.Null(vm.DownloadedUpdate);
         Assert.Empty(Directory.GetFiles(downloads));
@@ -325,7 +333,7 @@ public sealed class UpdateServerTests
         var vm = Settings(new UpdateChecker(Client(ca), server.Url("update.json"), "0.0.1", r.Rid, TestSigning.PublicKey), downloads);
         await CheckAsync(vm);
         vm.DownloadUpdateCommand.Execute(null);
-        await Until(() => !vm.IsUpdateBusy && vm.UpdateText.StartsWith("Download failed", StringComparison.Ordinal), "download failed");
+        await Until(() => !vm.IsUpdateBusy && vm.UpdateText.StartsWith(Loc.F("Download failed, nothing was kept: {0}", ""), StringComparison.Ordinal), "download failed");
         Assert.Null(vm.DownloadedUpdate);
         Assert.Empty(Directory.GetFiles(downloads)); // no partial file, no .part
 
@@ -350,7 +358,7 @@ public sealed class UpdateServerTests
         var vm = Settings(new UpdateChecker(Client(ca), server.Url("update.json"), "0.0.1", r.Rid, TestSigning.PublicKey) { StallTimeout = TimeSpan.FromSeconds(2) }, downloads);
         await CheckAsync(vm);
         vm.DownloadUpdateCommand.Execute(null);
-        await Until(() => !vm.IsUpdateBusy && vm.UpdateText.StartsWith("Download failed", StringComparison.Ordinal), "stalled download failed", 30);
+        await Until(() => !vm.IsUpdateBusy && vm.UpdateText.StartsWith(Loc.F("Download failed, nothing was kept: {0}", ""), StringComparison.Ordinal), "stalled download failed", 30);
         Assert.Contains("sent nothing for 2 s", vm.UpdateText);
         Assert.Empty(Directory.GetFiles(downloads));
         await vm.DisposeAsync();
@@ -367,7 +375,7 @@ public sealed class UpdateServerTests
         await using var server = new ReleaseServer(cert);
         Serve(server, Encoding.UTF8.GetBytes(manifest));
         var vm = Settings(new UpdateChecker(Client(ca), server.Url("update.json"), "0.1.0", "linux-x64", TestSigning.PublicKey), TestProcesses.TempDir("upd-corrupt"));
-        Assert.StartsWith("Could not check for updates:", await CheckAsync(vm));
+        Assert.StartsWith(Loc.F("Could not check for updates: {0}", ""), await CheckAsync(vm));
         Assert.False(vm.UpdateAvailable);
         Assert.False(vm.DownloadUpdateCommand.CanExecute(null));
         await vm.DisposeAsync();

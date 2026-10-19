@@ -6,6 +6,7 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.VisualTree;
 using Ombra.App.Controls;
+using Ombra.App.ViewModels;
 
 namespace Ombra.App.Views;
 
@@ -26,6 +27,7 @@ internal sealed class ChatScrollController
 
     private readonly ScrollViewer _scroll;
     private readonly TranscriptPanel? _rows;
+    private int? _historyGestureId;
 
     public ChatScrollController(ScrollViewer scroll, InputElement keySource, TranscriptPanel? rows)
     {
@@ -41,13 +43,26 @@ internal sealed class ChatScrollController
         // view back down); after it moved (bubbling, once the presenter has scrolled), down may have reached the bottom.
         _scroll.AddHandler(InputElement.PointerWheelChangedEvent, (_, e) => { if (e.Delta.Y > 0) LeaveIfScrollable(); },
             RoutingStrategies.Tunnel, handledEventsToo: true);
-        _scroll.AddHandler(InputElement.PointerWheelChangedEvent, (_, e) => { if (e.Delta.Y < 0) FollowIfAtBottom(); },
+        _scroll.AddHandler(InputElement.PointerWheelChangedEvent, (_, e) => { if (e.Delta.Y < 0) FollowIfAtBottom(); else if (e.Delta.Y > 0) RequestOlderNearTop(); },
             RoutingStrategies.Bubble, handledEventsToo: true);
         // Touch scrolling: a negative delta moves towards the start
         _scroll.AddHandler(InputElement.ScrollGestureEvent, (_, e) => { if (e.Delta.Y < 0) LeaveIfScrollable(); },
             RoutingStrategies.Tunnel, handledEventsToo: true);
-        _scroll.AddHandler(InputElement.ScrollGestureEvent, (_, e) => { if (e.Delta.Y > 0) FollowIfAtBottom(); },
+        _scroll.AddHandler(InputElement.ScrollGestureEvent, (_, e) =>
+        {
+            if (e.Delta.Y > 0) FollowIfAtBottom();
+            else if (e.Delta.Y < 0 && _scroll.Offset.Y <= 160 && _historyGestureId != e.Id)
+            {
+                // A fast page may finish before the next delta of this same gesture arrives.
+                _historyGestureId = e.Id;
+                RequestOlderNearTop();
+            }
+        },
             RoutingStrategies.Bubble, handledEventsToo: true);
+        _scroll.AddHandler(InputElement.ScrollGestureEndedEvent, (_, e) =>
+        {
+            if (_historyGestureId == e.Id) _historyGestureId = null;
+        }, RoutingStrategies.Bubble, handledEventsToo: true);
         // The ScrollViewer's own bar (the rows hold scroll viewers of their own: code blocks, diffs)
         if (_scroll.GetVisualDescendants().OfType<ScrollBar>().FirstOrDefault(b => b.TemplatedParent == _scroll && b.Orientation == Orientation.Vertical) is { } bar)
             bar.Scroll += OnScrollBarScroll;
@@ -66,6 +81,16 @@ internal sealed class ChatScrollController
     /// <summary>Raised when <see cref="IsFollowing"/> changes (the "Jump to latest" button shows while it is off).</summary>
     public event Action? FollowingChanged;
 
+    /// <summary>Only reader input raises this, never layout or a page arriving: one gesture requests at most one page.</summary>
+    public event Action? OlderMessagesRequested;
+
+    public void ReadHistory() => SetFollowing(false);
+
+    private void RequestOlderNearTop()
+    {
+        if (_scroll.Offset.Y <= 160) OlderMessagesRequested?.Invoke();
+    }
+
     /// <summary>To the latest message, following it again: "Jump to latest", a message sent, a conversation opened.</summary>
     public void FollowLatest()
     {
@@ -79,7 +104,14 @@ internal sealed class ChatScrollController
         if (IsFollowing || rows.TranslatePoint(default, _scroll) is not { } origin) return ChatScrollAnchor.Latest;
         // The view's top in the panel's coordinates (the panel starts below the list's padding, moved up by the offset)
         var (row, into) = rows.RowAtOffset(-origin.Y);
-        return new ChatScrollAnchor(false, row, into);
+        var item = rows.ItemAtRow(row);
+        var member = item switch
+        {
+            StepGroupRowViewModel group => (RowViewModel)group.Leader,
+            TurnFoldRowViewModel fold => fold.User,
+            _ => null,
+        };
+        return new ChatScrollAnchor(false, row, into, item, member);
     }
 
     /// <summary>
@@ -96,21 +128,72 @@ internal sealed class ChatScrollController
             return;
         }
         SetFollowing(false);
+        var row = anchor.Item is { } item ? rows.IndexOfRow(item) : anchor.Row;
+        if (row < 0 && anchor.Member is { } member)
+        {
+            // A regroup can merge/remove a synthetic header; its retained step still identifies this place.
+            if (member.Group is { } group) row = rows.IndexOfRow(group);
+            if (row < 0) row = rows.IndexOfRow(member);
+        }
+        if (row < 0) { FollowLatest(); return; }
         try
         {
             for (var pass = 0; pass < 4; pass++)
             {
                 // The rows are realized where the view is going, not where the last chat's was
-                rows.PendingTop = rows.TopOfRow(anchor.Row) + anchor.IntoRow;
+                rows.PendingTop = rows.TopOfRow(row) + anchor.IntoRow;
                 _scroll.UpdateLayout();
                 if (rows.TranslatePoint(default, _scroll) is not { } origin) return;
-                var delta = rows.TopOfRow(anchor.Row) + anchor.IntoRow + origin.Y;
+                var delta = rows.TopOfRow(row) + anchor.IntoRow + origin.Y;
                 var y = Math.Clamp(_scroll.Offset.Y + delta, 0, Bottom);
                 if (Math.Abs(y - _scroll.Offset.Y) < 0.5) return;
                 _scroll.SetCurrentValue(ScrollViewer.OffsetProperty, new Vector(_scroll.Offset.X, y));
             }
         }
         finally { rows.PendingTop = null; }
+    }
+
+    /// <summary>
+    /// Find in chat: a place in a row (<paramref name="place"/>: its rectangle in the row's container, the whole row when
+    /// it gives none) brought into view a third of the way down, unless it is on screen already (then nothing moves). The
+    /// row is realized where the view is going, as <see cref="Restore"/> does, however far it is and whether or not it was
+    /// ever built. Leaves the latest message unless the place is at the bottom.
+    /// </summary>
+    public void Reveal(TranscriptPanel rows, int row, Func<int, Control?> containerAt, Func<Control, Rect?> place)
+    {
+        _scroll.UpdateLayout();
+        var view = _scroll.Viewport.Height;
+        if (row < 0 || view <= 0) return;
+        if (Where() is { } now && now.Top >= 0 && now.Top + Math.Min(now.Height, view) <= view) return;
+        SetFollowing(false);
+        var lead = Math.Floor(view / 3);
+        try
+        {
+            for (var pass = 0; pass < 4; pass++)
+            {
+                // Where the place is in the panel: from its container when built, else from the row's estimated top
+                var inPanel = Where() is { } at && rows.TranslatePoint(default, _scroll) is { } origin ? at.Top - origin.Y : rows.TopOfRow(row);
+                rows.PendingTop = Math.Max(0, inPanel - lead);
+                // The rows are realized where the view is going (nothing else may have asked for a layout)
+                rows.InvalidateMeasure();
+                _scroll.UpdateLayout();
+                if (Where() is not { } there) continue;
+                var y = Math.Clamp(_scroll.Offset.Y + there.Top - lead, 0, Bottom);
+                if (Math.Abs(y - _scroll.Offset.Y) < 0.5) break;
+                _scroll.SetCurrentValue(ScrollViewer.OffsetProperty, new Vector(_scroll.Offset.X, y));
+            }
+        }
+        finally { rows.PendingTop = null; }
+        _scroll.UpdateLayout();
+        if (_scroll.Offset.Y >= Bottom - 0.5) SetFollowing(true);
+
+        // The place in the view's coordinates; null while its row is not built
+        Rect? Where()
+        {
+            if (containerAt(row) is not { IsVisible: true } container || container.TranslatePoint(default, _scroll) is not { } top) return null;
+            var r = place(container) ?? new Rect(container.Bounds.Size);
+            return new Rect(r.X, top.Y + r.Y, r.Width, r.Height);
+        }
     }
 
     private double Bottom => Math.Max(0, _scroll.Extent.Height - _scroll.Viewport.Height);
@@ -173,9 +256,11 @@ internal sealed class ChatScrollController
         {
             case ScrollEventType.SmallDecrement or ScrollEventType.LargeDecrement:
                 LeaveIfScrollable();
+                RequestOlderNearTop();
                 break;
             case ScrollEventType.ThumbTrack when _scroll.Offset.Y < Bottom - ReattachDistance:
                 SetFollowing(false);
+                RequestOlderNearTop();
                 break;
             default:
                 FollowIfAtBottom();
@@ -198,7 +283,7 @@ internal sealed class ChatScrollController
                 FollowLatest();
                 break;
             case Key.Home:
-                ScrollBy(-y);
+                ScrollBy(-Math.Max(y, 1));
                 break;
             case Key.PageUp:
                 ScrollBy(-page);
@@ -222,6 +307,7 @@ internal sealed class ChatScrollController
     {
         if (delta < 0) LeaveIfScrollable();
         _scroll.SetCurrentValue(ScrollViewer.OffsetProperty, new Vector(_scroll.Offset.X, Math.Clamp(_scroll.Offset.Y + delta, 0, Bottom)));
+        if (delta < 0) RequestOlderNearTop();
         if (delta > 0) FollowIfAtBottom();
     }
 
@@ -240,7 +326,7 @@ internal sealed class ChatScrollController
 
 /// <summary>Where a reader was in a conversation: following its latest message, or a row at the top of the view and how
 /// far into that row (by row, not by pixel: the rows are measured again when the chat is shown again).</summary>
-internal sealed record ChatScrollAnchor(bool Following, int Row, double IntoRow)
+internal sealed record ChatScrollAnchor(bool Following, int Row, double IntoRow, object? Item = null, RowViewModel? Member = null)
 {
     public static ChatScrollAnchor Latest { get; } = new(true, 0, 0);
 }

@@ -1,8 +1,8 @@
 # Ombra — user guide
 
-Ombra is a desktop client for the original **omp** coding agent (oh-my-pi). The agent itself is always the
-unmodified omp; the GUI starts it, talks to it over omp's own RPC and shows what it does. Nothing here replaces
-or patches omp.
+Ombra is a desktop coding app with an owned engine derived from **omp** (oh-my-pi).
+Its integrated source runs independent chat sessions in one app-managed host. You do not need to
+launch a separate omp application for each chat; upstream changes are reviewed before integration.
 
 ## Requirements
 
@@ -45,13 +45,12 @@ project yet), so the OS warns on first start:
 
 ## First start
 
-1. **omp not found.** If omp is not on your PATH and you have not set one, the window says *Install omp to get
-   started* and offers **Install omp 18.8.0**. The client downloads Bun 1.4.2 and omp 18.8.0 from the npm registry,
-   checks them against the versions and hashes pinned in the app, and keeps them in the app's own folder (about
-   1.3 GB on disk). Nothing global is changed. If you already have omp, choose **Use my own omp…** and set its
-   command in **Settings → Advanced** instead; a command you set always wins over the installed one. Newer omp
-   releases than 18.8.0 may exist on npm, but this client is verified only with 18.8.0 — another version may work or
-   may miss features.
+1. **Agent engine not installed.** Install the managed engine from the startup card. The client downloads the
+   pinned Bun 1.4.2 and npm dependencies, verifies their integrity, then installs its complete owned coding-agent
+   sources and shared host into `ombra-engine-18.8.0-bun-1.4.2-v1`. Older packs are retained, not modified or
+   silently launched as a fallback. No separate omp application is required for GUI chats.
+   A custom command under **Settings → Advanced** must implement Ombra's shared-engine, history and
+   input-admission contracts; an ordinary upstream omp CLI is not a compatible GUI engine.
 2. **No model provider.** omp needs a model. If it has none, the window says *Connect a model provider*.
    **Open omp setup** runs `omp login` in the terminal beside the conversation, with the keyboard already in it:
    pick a provider (arrow keys, Enter) and finish in the browser (or paste an API key the way omp describes), then
@@ -67,6 +66,9 @@ project yet), so the OS warns on first start:
   the app in English): copy it to `<code>.json` (e.g. `de.json`), set `"name"` and translate the values; it is offered
   after reopening Settings, and a file named like a built-in language (`ru.json`) overrides only the texts it has.
   The new language shows after the app is restarted.
+  Plural entries use the English plural key followed by `|one`, `|few`, `|many`, or `|other`; keep `{0}` for the count.
+  Russian selects integer CLDR one/few/many (including 11–14 and 21–24); English and other language files retain
+  their one/other fallback. The category suffix belongs to the key, never to the displayed translation.
 - **Sessions** — the sidebar lists omp's sessions of all your projects, grouped by project folder, and the chats
   that belong to no project under **Chats** (after pinned projects, before the other projects). Sessions are
   ordered by their last message (yours or the agent's), newest first, and groups by their newest session; opening a
@@ -74,30 +76,52 @@ project yet), so the OS warns on first start:
   the date), or a dot for a chat that is open: green and pulsing while omp works in it, an amber raised hand when it
   waits for your approval or answer, yellow for a reply you have not seen yet, red when its omp stopped with an error. A **pinned** session stays in its own
   project (or Chats), at its top, marked with a pin (pins are omp's own, so `/pin` and omp's session picker agree). **Search** filters by title or
-  folder. Click a session to continue it; the list updates in place as omp writes, so a hover, an open row menu and
-  the scroll position stay put.
-  **Several chats at once**: every chat you open runs its own omp, and it keeps working while you read or write in
-  another one — a chat never waits for another's run, and changing chats never stops one. Coming back to a chat shows
+  folder at once; after a short pause in typing it also searches what was said in the sessions (your messages and the
+  agent's answers; not tool output or thinking). Sessions found only by their messages come under the title matches in
+  each group, with the words around the match and the match emphasized; clicking one opens it with **Find in chat** on
+  your query, at its newest match. Each keystroke cancels the search before it. Sessions that could not be read are
+  named in a notice under the search box, and the rows already found stay listed. Click a session to continue it; the
+  list updates in place as omp writes, so a hover, an open row menu and the scroll position stay put.
+  If the session folder or a file cannot be read, a notice says the list may be out of date: previously listed
+  sessions stay visible while readable updates are merged. The same refresh retries failures up to three times
+  (after 250 ms, 1 s and 4 s); **Retry** starts another refresh. A complete successful scan removes deleted sessions
+  and clears the notice. Scans read at most the 500 newest files: reaching that cap also shows an incomplete-list
+  notice and retains older known sessions, rather than treating them as deleted. Switching session roots / profiles
+  does not carry the previous root's cached list into the new one.
+  Session summaries are cached in a private settings-sidecar file, including across restarts. Each refresh checks
+  file size and modification time; unchanged journals are not reopened. Returning focus to the window reconciles
+  external additions, edits and deletions. A missing or damaged cache is rebuilt from the session files; it is not
+  a backup of the conversation.
+  **Several chats at once**: each chat is an independent logical session in the window's shared agent engine.
+  It keeps working while you read or write in another one; changing chats never stops a run. Coming back shows
   it as you left it: the whole reply that came meanwhile, your place in the conversation (or its end, if you were
   following it), what you had typed and attached in its message box, a card or question it showed. A chat in the
   background that finishes, asks something or stops with an error gets its dot and a notification (see
-  Notifications); a question waits for you in that chat. Chats in different projects run side by side. Up to
-  **Settings → General → Chats kept running** (4 by default) keep their omp; opening one more closes the idle chat
-  you used longest ago (its omp stops; the chat is still in the list and opens again when you click it). A chat that
-  is working, waiting for you or has something typed in its message box is never closed for that.
+  Notifications); a question waits for you in that chat. Chats in different projects run side by side.
+  Closing or stopping one chat does not stop the others. There is no per-chat process limit or spare omp.
+  A failure of the shared engine affects its open chats; unsent input is recovered, never automatically resent.
+  After an OS wake notification, Ombra reads the state of every live chat, including background chats.
+  It does not resend queued input, abort work or restart the engine; read-only transcripts are excluded.
+  If the engine does not answer, a notice asks you to check the connection and use Stop or restart explicitly.
+  Missing OS notification support is reported rather than silently treated as working.
   **New chat** (Ctrl/⌘+N, the button above the search) starts a chat outside any project, as ChatGPT, Claude and
   Codex do: it gets an empty folder of its own in the app's data folder (see *Where things are kept*), the header and
   the chip under the message box read *No project*, and its project menu offers a new session in one of your
-  projects or **Open folder…** instead. It opens at once and takes a message right away: the app keeps one omp
-  started ahead of time for it (a few seconds after the first chat is ready, and again after each new chat), so the
-  first message does not wait for omp to start. That spare omp is not a chat (it is not listed and does not count
-  towards *Chats kept running*); a settings change that restarts omp replaces it. A chat's folder is deleted when the
-  chat is closed with nothing in it (an empty folder, no session file). A project's **+** (or its menu's *New session
-  here*) starts a session in that project, in a new omp, while the open chats go on; `/new` does the same in the
-  current project (in a chat without a project, a new chat). A new chat is listed as soon as it is open — omp saves
+  projects or **Open folder…** instead. A new logical session reuses the already loaded engine, without starting
+  another omp CLI. A chat's folder is deleted when the chat is closed with nothing in it (an empty folder, no
+  session file). A project's **+** (or its menu's *New session here*) starts a session in that project while the
+  other chats go on; `/new` does the same in the current project (in a chat without a project, a new chat).
+  A new chat is listed as soon as it is open — omp saves
   its file only once the first reply is complete, but the row is there before, so a chat you leave while its first
   reply streams stays one click away. A
   session omp cannot open (a damaged file) leaves you where you were, with a card saying why.
+  If its working folder was deleted, choose **Open in current project** or **Read only**. Without an available
+  current project, choose an existing folder instead. Dismissing the choice preserves your current chat and draft.
+  Read-only mode shows the saved conversation's active branch, with older-page loading and explicit reload.
+  It does not start a logical agent session, load project extensions, claim its draft, or write the source file.
+  Input and mutation actions are disabled. If the file changes while paging, the current view stays intact;
+  **Reload latest messages** adopts the new history. The read-only banner can open a separate writable session
+  in the explicitly chosen project; it never silently converts the reader into a writer.
   Ctrl+Tab and Ctrl+Shift+Tab go to the next and previous session. Hover a session for **Pin**
   and **⋯** (or right-click it): **Rename** (opens it and edits its name in the header), **Pin / Unpin**, **Copy path**
   (the session file) and **Delete…**, after a confirmation; deleting the open session works like the session menu's
@@ -129,29 +153,90 @@ project yet), so the OS warns on first start:
 - **Permissions** — the mode chip under the message box says when omp asks before running tools: *Ask permissions*
   (edits and commands ask), *Accept edits* (edits run, commands ask; the default) or *Bypass permissions* (nothing
   asks). The mode colours the chip, the box's border while you type and the Send button: grey, violet, red. Shift+Tab
-  in the message box steps through the modes; Bypass always asks for a second confirmation first. Changing the mode
+  in the message box steps through the modes (**Plan mode**, below, comes between Accept edits and Bypass when omp
+  offers it); Bypass always asks for a second confirmation first. Changing the mode
   restarts omp with it, in every open chat: once you stop pressing Shift+Tab, and never in the middle of a run (a chat
-  that works switches when its run ends; a note says so when that chat is in the background). When omp asks, a card in the conversation says what it wants (*omp wants to run a command*) and
-  shows the command or file, with **Allow** / **Deny** (keys 1 / 2 or Alt/⌥+A / Alt/⌥+D; 1–9 pick an answer to a
-  question, omp's suggestion carries a *Recommended* badge); Esc closes the card without answering.
-  *Don't ask again for …* allows the request and keeps a rule for **This session** (until the app quits), **This
+  that works switches when its run ends; a note says so when that chat is in the background). When omp asks, a card in the conversation says what it wants (*omp wants to run a command*),
+  tags what the call may do (*Reads only*, *Changes files*, *Runs programs*), gives the tool's reason, an MCP origin
+  and any provider safety checks, and shows the complete command or file details in a scrolling box you can select and
+  copy, with **Allow** / **Deny** (localized Alt/⌥ access keys; 1 / 2 with focus in the
+  card; 1–9 pick an answer to a question). Keyboard approval is guarded for 500 ms after a new card or window
+  activation, and requires a released key before a fresh press; a hint explains when to release and press again.
+  Typing `1` in the composer cannot approve a command. Positive mouse actions also wait 500 ms and require
+  a fresh press and release on the same card; replacing the card or opening an overlay cancels that gesture.
+  **Deny** remains available immediately.
+  Esc closes the card without answering.
+  *Don't ask again for …* (only the durations omp offers for that request; none when the provider asks for safety
+  checks) allows the request and keeps a rule for **This session** (until the app quits), **This
   project** (the project folder) or **Always** (every project): for a command it covers commands starting with the
   same words (`npm test` covers `npm test --watch`, not `npm testing`; `git status`, `npm run build` keep their
-  subcommand); for a command chained with `;` `&&` `|`, redirected or substituted, run through a wrapper (`sudo`,
-  `env`, `bash -c`) or destructive (`rm`, `mv`, `chmod`, `kill`…) only that exact command; for other tools every
-  request of that tool. A prefix rule never covers a chained, redirected or multi-line command, whatever it starts
-  with, and no rule covers a command omp shortened in its request. When a rule answers, the conversation says
-  *Allowed automatically — …*. **Deny and say why…** (key 3) opens a box: what you type (Enter sends, Esc closes the
-  box) denies the request and reaches omp as a steering message, read right after the denied tool. Rules are the
+  subcommand). Commands chained with `;` `&&` `|`, redirected or substituted, run through a known wrapper (`sudo`,
+  `env`, `bash -c`) or using a known destructive root (`rm`, `mv`, `chmod`, `kill`…) require a fresh approval each
+  time, even if an older client saved an exact or tool-wide grant. Other tools can retain tool-wide rules.
+  Automatic bash rules accept only conservative plain ASCII tokens: quotes, expansions (`$HOME`, `~`), escapes,
+  globs, shell operators and non-ASCII text require a person. Git rules require a known direct subcommand;
+  option-first commands, aliases and destructive subcommands never inherit automatic approval.
+  Hidden/control/bidi characters are displayed as `[U+XXXX]` and prevent automatic command approval.
+  The original command is not rewritten. This classifier is not a shell sandbox and does not inspect script bodies.
+  Command-specific rules do not match commands omp shortened in its request. When a rule answers, the conversation
+  says *Allowed automatically — …*. **Deny and say why…** (key 3) opens a box: what you type (Enter sends, Esc closes the
+  box) denies the request and goes with the denial; the agent reads it in the denied tool's result. Rules are the
   app's own (omp 18.8 can only allow a whole tool), listed with **Remove** in *Settings → Permissions*.
+- **Plan mode** — when the chat's omp offers it, the mode chip's menu has **Plan mode** (*omp explores read-only and
+  writes a plan; nothing changes until you approve it.*), Shift+Tab reaches it after *Accept edits* (Ask → Accept
+  edits → Plan mode → Bypass), and `/plan` turns it on or off (text after `/plan` stays in the box as the first
+  planning message). While it is on, a **Plan mode** chip sits next to the mode chip: a click leaves it, and so does
+  the next Shift+Tab. Your permission mode stays as it was underneath. Leaving plan mode stops a planning turn in
+  flight. The plan omp proposes shows as a card above the message box: its title, *Proposed plan: nothing changes
+  until you approve it*, the plan file's path and the plan itself as formatted text. **Approve** leaves plan mode and
+  omp carries out exactly that plan. **Reject…** opens *What should change in the plan?*: **Reject and send** keeps
+  omp in plan mode and sends your words as its next planning turn, and it proposes a revised plan; with nothing
+  written it just closes the plan. **Cancel** goes back to the card. A new revision replaces the card, and what you
+  typed for the old one is dropped. Approve and Reject wait while omp works — a planning turn still running may
+  propose another version — and omp refuses them then too; a refusal shows as a note saying why. Both buttons have
+  localized Alt/⌥ access keys. `/plan-review` says whether a plan waits above the message box. An omp without plan
+  mode opens its terminal for `/plan` instead.
+- **Folder trust** — a project folder can bring its own tools that omp runs on your computer: MCP servers
+  (`.mcp.json`, `.omp/mcp.json`, `.cursor/`, `.vscode/`…), hooks, extensions, commands, custom tools, project plugins,
+  language servers and project settings — and its own skills, slash commands, prompt templates and subagents
+  (`.omp/skills`, `.claude/skills`, `.agents/skills`, `.omp/commands`, `.omp/prompts`, `.omp/agents`…). Until you trust
+  a folder, omp works there *without* any of them, and without language servers: the folder's skills and commands are
+  not in the slash menu, and the agent can neither use its skills nor start its subagents. Your own extensions, MCP
+  servers, tools, skills, subagents and settings still load, and so do the folder's `AGENTS.md` and rules. When omp
+  reports that it left something of the folder's out, a card above the message box says *Do you trust this folder?*
+  and lists those items by kind and name (*Skills: …*, *Subagents: …*). **Trust and restart** reopens that chat — the
+  same conversation — with the folder's tools, skills and subagents; other chats keep running as they are. **Keep
+  restricted** (or ×, Esc) closes the card and the chat goes on without them; the card comes back at the chat's next
+  start. The chat works either way. Once trusted, the folder asks again only when its configuration changes (*This
+  folder's tools changed*), including a skill, slash command or subagent added or edited; a change to code that
+  configuration runs from elsewhere in the repository does not ask. Folders you used before this version are not
+  trusted yet. A folder omp finds nothing of its own in shows no card. A chat that omp moves to another folder
+  (`/move`, a worktree) restarts under that folder's trust. omp's terminal UI in the terminal panel follows the same
+  choice, and the app's own omp commands that load extensions (usage, sign-in) run outside an untrusted folder.
+  Trusted folders are listed in *Settings → Permissions*.
 - **Message box** — Enter sends; Shift+Enter adds a line (*Settings → General → Send messages with* switches to
   Ctrl/⌘+Enter to send, Enter then adds a line). While omp is working, **Queue** (or Enter) adds a
   follow-up and **Steer** (or Alt/⌥+Enter) hands a message to the current run at its next step. Queued messages are
   listed in grey above the box until omp takes them: **×** takes one back, and ↑ in the empty box brings the last
   one back to edit (with its images). A long paste (over 800 characters or 3 lines) becomes a *Pasted text +N lines*
   chip instead of filling the box (hover it to see the start, × removes it); it is sent in full after what you typed.
+  Pasted text is cleaned of unsafe invisible/control/bidi characters, with a notice of what was removed.
+  Joining characters used by languages and emoji are preserved. If cleanup happens when sending a restored or
+  typed draft, review the visible text and send again; cleanup never silently exposes a slash or shell command.
+  An all-hidden paste leaves the selected draft intact. Attached files and images are not rewritten.
+  If the composed message exceeds the RPC limit, the input stays intact and **Send text as file** offers an
+  explicit alternative. It saves the full text, pasted chips and comments in a private UTF-8 file, then sends
+  its `@file` reference with the images. The notice shows the destination beside the draft journal. Runtime
+  previews may truncate; the complete file remains available. These files are retained until you delete them
+  manually, including after closing chats, so saved conversations and recovered queues do not lose their source.
+  File, validation and journal errors preserve the original input; queued recovery keeps one reference and
+  one set of images, never resends automatically. Slash commands are not converted. Unsupported reference paths
+  fail before writing or clearing input; oversized images still require a smaller attachment.
+  CRLF line endings become LF on paste and send. While the focused text box has an active IME preedit,
+  Enter, Esc, ↑/↓ and Tab do not send, stop the agent or operate command suggestions. Normal shortcuts resume
+  after composition ends or focus moves to another control.
   **+** opens *Attach images* (up to 3 per message; paste or drag & drop works too, other files are inserted as
-  paths), *Commands and skills*, *Connectors*, *Plugins* and *Comment on the page*. Type `/` for commands: ↑/↓ or
+  paths), *Commands and skills*, *MCP servers*, *Plugins* and *Comment on the page*. Type `/` for commands: ↑/↓ or
   Tab/Shift+Tab choose, Tab or Enter completes, Esc closes; what only omp's terminal runs is listed last, under
   *Terminal only*. Type `@` anywhere in a message for a file or folder of the project: the menu lists the project's
   top level, then narrows as you type a name (letters in order work, as in **Go to file**; what `.gitignore` excludes
@@ -159,8 +244,36 @@ project yet), so the OS warns on first start:
   writes it, so omp reads the file with your message. A folder ends in `/` and lists what is in it next. Esc closes
   the menu only (it stays closed for that word; omp keeps working). Before the first message the chips under the box
   also pick the project (a new session in another project, or **Open folder…**).
-- **Images** — each attached image shows as a chip with its preview, name and size (× removes it, right-click
-  opens or removes it). The sent message shows the same previews above its text, a queued message small ones, and
+- **Commands while working** — RPC-capable builtins such as `/rename` wait locally until the run is idle, then run
+  as commands, not model messages. Later queued follow-ups and skills wait behind that command in submission order.
+  Explicit **Steer** still interrupts the current run; a builtin submitted with Steer waits for idle instead.
+  The same queue chips let you withdraw or edit waiting input. **Stop**, a crash or restart restores it for review
+  without automatic replay. An already dispatched command cannot be withdrawn; check its result before resending.
+- **Large conversations** — opening a session loads its latest page (up to 100 messages). Scroll upward near the
+  beginning or choose **Load older messages** to prepend one page without losing your reading position.
+  Older pages pause while the agent is working. If the conversation changed since the page was loaded, the current
+  view stays intact; **Reload latest messages (moves view to end)** explicitly reloads the recent page, after which
+  older pages are available again. Errors remain visible with retry/reload actions rather than an empty transcript.
+  The page byte target is 768 KiB, except that one indivisible large message can exceed it and still uses the
+  transport's frame limit. Paging does not make an individually oversized message unlimited.
+- **Draft recovery** — text, image bytes, long-paste chips and comments (local marks: code and page, with their
+  anchors, notes and status) are saved locally per project/session after 500 ms of typing, and flushed before sending,
+  changing/closing a chat and quitting. After restart, open the saved session to recover its draft; unsaved chats
+  recover in their project. Page comments saved by an older version come back as one comment chip and are sent as
+  they were saved.
+  **Stop** withdraws the runtime queue and returns its unsent text/images beside newer composer edits. A runtime
+  crash/restart or a revoked question likewise restores recoverable input for review, never automatic sending.
+  Cancelled question replies include quoted question context so a leading `/` or `!` is not treated as a command.
+  Sign-in reply fields are excluded. If delivery was not confirmed, check the conversation before resending:
+  lost runtime acknowledgments cannot provide an exactly-once guarantee.
+  A save failure or an oversized RPC message leaves the input available and displays an error instead of silently
+  clearing it. A crash can still lose the last 500 ms of typing before the debounce checkpoint.
+  Deleting a session also removes its old recovery entry; newer input still in the active composer moves to a new
+  unsaved chat rather than being discarded. A failed session deletion keeps its recovery entry.
+- **Images** — each attached image shows as a chip with its preview, name and size (× removes it). Right-click
+  an image to **Open**, **Copy image**, **Save image…**, **Open in default app**, or reveal a temporary copy in the file manager;
+  a composer attachment also offers **Remove**. Save preserves the original encoded bytes. The sent message shows
+  the same previews above its text, a queued message small ones, and
   a session reopened from history shows them again (an image omp no longer has shows an image mark instead).
   Click a preview to open it in the viewer: the image fits the window; a click on it, Space or **100 %** shows it
   pixel for pixel (scroll to move around), and back. ←/→ go through the message's images; **Copy** puts the image on
@@ -194,6 +307,17 @@ project yet), so the OS warns on first start:
   thinks, then reads *Thought for 4s*; click it for the thoughts. While an open block is longer than the view, its
   header (the bar, a file card's header, the *Explored* line, the *Thought for* line) stays at the top of the
   conversation until the block ends, so it can be folded from anywhere in it.
+  Live durations use a monotonic clock, so changing the system date does not make them jump; message dates
+  still use the wall clock. Status, extension widgets and command/task output show hidden control characters
+  as visible markers, not terminal styling, while preserving ordinary Unicode, line breaks, tabs and raw data.
+  In a short window, cards scroll and the message input reduces its visible height so the conversation and
+  **Jump to latest** button stay accessible; scrolling the input still reaches the whole draft.
+  Approval cards reveal their primary answer after layout and resize without snapping back on ordinary manual
+  scrolling. A permission-mode choice stays displayed while its session restarts; a newer choice is not lost.
+- Large Markdown tables show at most 100 rows (including the header), 16 columns and 1,024 UTF-16 units per
+  oversized cell. A notice and **Copy original table** retain access to the complete table. Oversized cells
+  use a plain Markdown prefix. Very large replies shown as plain text have a bounded preview; right-click
+  **Copy code** to copy the complete original. Display clipping does not change stored conversation text.
 - **File changes** — a change shows as it happens, one card per file (a patch that changes several files has a card
   for each). The card's header has the file's folder and name, a badge for a **New file**, a **Deleted** one (folded
   to *Show N deleted lines*), a **Renamed** or **Moved** one (`old → new`), and +N −M. Changed lines have a coloured
@@ -204,12 +328,23 @@ project yet), so the OS warns on first start:
   7 files changed ›*) lists the files the run changed, with their +N −M and New / Deleted / Renamed / Moved marks (open when
   the run changed two or more files); click one to open it. The Files pane's *Changes* review uses the same colours,
   bars, word marks and line numbers.
+  Long diff lines show a grapheme-safe prefix of at most 4,096 UTF-16 units with a truncation marker.
+  Right-click a shortened row → **Copy code** copies the original line, including tabs and omitted text.
 - **Keyboard shortcuts** — Ctrl/⌘+/ (or `/hotkeys`) shows them all; Esc closes the sheet.
+- **Command palette** — Ctrl/⌘+K (or *View → Command Palette…*) finds and runs anything by part of its name: the
+  window's actions (each greyed with the reason when it cannot run now, e.g. *Stop omp* while nothing runs), the panels
+  (*Panel: Files*…), every settings page (*Settings: Permissions*…), the themes, your chats (unread ones first, then the
+  newest) and the open project's files (listed under the rest). Typing "set perm" is enough: whole-name prefixes rank
+  first, then word starts, then text inside a name, then scattered letters; the matched letters are bold. ↑/↓ choose,
+  Enter runs, Esc closes and puts the keyboard back where it was. What you ran last is listed first next time.
+  Ctrl/⌘+P (*Go to File…*) opens it on the project's files only. ⌘K and ⌘P were chosen because they were free: ⇧⌘F/G/P/T/B/S/M
+  are the panels and the preview, ⌘F / ⌘G find in the chat; ⌘P is "Go to file" in Codex and VS Code.
 - **Stop** — the Stop button or Esc stops the current run; if omp does not stop, the button offers Force stop. Esc
   stops the run only from the message box, the conversation or a button: in the sidebar's search and the Files filter
   the first Esc clears what you typed (as a Mac search field) and the next one hands the keyboard back to the message
   box, as Esc in the preview's address does; in a terminal tab or the preview it stays there (vim keeps its Esc).
-- **Closing or quitting while omp works** — closing the window (⌘W, ⌘Q, **Quit** in the tray menu) stops every
+- **Closing or quitting while omp works** — ⌘W first closes the focused terminal/panel/browser tab; outside those
+  surfaces it closes the window. Closing the window (⌘Q, **Quit** in the tray menu) stops every
   chat's omp and ends every terminal tab, and with them everything they started: omp's background jobs (a dev server
   omp keeps running, its daemon broker) and what you started in a terminal tab, even when it was detached. Only an
   editor or file manager you opened from the app stays. macOS and Linux; on Windows omp's background jobs may stay
@@ -224,6 +359,14 @@ project yet), so the OS warns on first start:
   terminal UI, for features omp offers only there (plan, goal, vibe…). With no terminal open the panel offers
   **New shell** and **omp TUI**. In omp's terminal UI `/login` lists only the providers you have added (the others
   are off for omp: [Network privacy](#network-privacy)); add a new one under **Settings → Model providers**.
+  Right-click terminal output for **Copy selection**, **Copy all**, **Paste**, **Clear**, or **Open selected link**;
+  right-click never pastes automatically. Ctrl-click a web URL opens it. Right-click a tab for **Close other tabs**
+  or **Close tabs to the right**; a middle click closes the pointed tab.
+  Browser tabs have the same close actions plus **Copy page URL** and **Reload**. The Browser rail has its own tab
+  strip; Ctrl+Tab / Ctrl+Shift+Tab cycle its tabs, not chat history. Ctrl/⌘+L focuses the address, +T opens a tab,
+  +R reloads, +[ / +] move through page history, and +Shift+C copies the address.
+  Normal window bounds/maximized state and panel sizes/visibility survive a normal close and are clamped to the
+  available screen on reopening. A restored terminal panel does not start a shell by itself.
 - **Project menu** — click the project's name next to the session title: **Browse files** (the Files pane),
   **Show in Finder** / **Show in Explorer** / **Open in file manager**, **Open in VS Code** (or Cursor, Windsurf,
   Zed, Sublime Text — only the editors whose command is on your PATH), **Open terminal here**, **Copy path**, a new
@@ -231,13 +374,24 @@ project yet), so the OS warns on first start:
 - **Files pane** — the project as a tree beside the conversation. Folders open on click; dependencies and build
   output (`node_modules`, `bin`, `obj`, `.venv`, `dist`…) and what `.gitignore` excludes are dimmed, and `.git` is
   never shown. **Go to file** finds a file by name anywhere in the project (letters in order work too: `fvm` finds
-  `FilesViewModel.cs`); Enter opens the first match. In a git repository each changed file gets a mark — M
-  modified, U new, A added, R renamed, ! conflict, D deleted (still listed, struck through) — and a folder with
+  `FilesViewModel.cs`); Enter opens the first match.
+  Search and `@` mentions match canonically equivalent Unicode spellings (for example, a composed accent and the
+  same accent stored as a combining character). The index's original paths are retained for display, insertion
+  and opening files. This also applies to the **Changed** and **This session** filters.
+  In a git repository each changed file gets a mark — M modified, U new, A added, R renamed, ! conflict,
+  D deleted (still listed, struck through) — and a folder with
   changes inside gets a dot. The segments above the tree: **All**, **Changed** (only in a git repository) and
   **This session** — the files omp edited or wrote in this conversation (marked ✦ in the tree). The pane follows the
-  disk while it is open and after every tool omp runs. Click a file to read it below the list: line numbers and
-  colours, Markdown rendered (the `<>` button shows its source), images shown; a very large file offers **Show the
-  start**, a binary one to open it in an app. **@** puts `@path` in the message box — omp then reads the file with
+  disk while it is open and after every tool omp runs. Supported text files open in the built-in editor, with
+  syntax colours, undo/redo, search/replace and **Save**. Unsaved buffers survive navigation; **Editor actions**
+  offers copying unsaved text, saving a copy and explicit reload. An external change produces a conflict instead
+  of overwriting either version. Language services require explicit trust and run through the project's engine.
+  Right-click inside the editor (Control-click on macOS) for **Cut**, **Copy**, **Paste** and **Select all**.
+  Opening the menu preserves the selection. Cut/Paste change the unsaved buffer, not the disk file; read-only
+  documents allow copying but not editing.
+  Markdown can be previewed; images remain previews. Large, binary or unsupported files are not silently
+  shortened and then saved. **@** puts `@path` in the message box — omp reads the saved disk file, not an unsaved
+  buffer. Use **Editor actions → Add selection to message** to attach an explicit versioned editor snapshot with
   your message; the **⋯** menu opens it in an editor (those on your PATH) or the default app, reveals it in the file
   manager, or copies its path or relative path. Right-click a row to open it, add it to the message, open it in the
   default app, reveal it or copy its path. A file's path in the conversation (a tool's line, the header of a change)
@@ -251,7 +405,8 @@ project yet), so the OS warns on first start:
   gets its old name back (for a file git does not have, the button says **Delete file…**). Neither can be undone.
   The **+** at the start of a line (hover it, or Tab to it) opens a comment box: Enter adds the comment to the
   message box as a chip (*app.py:41 — your comment*; × removes it), Shift+Enter starts a new line, Esc closes the
-  box. The comments go with your next message, each with its file, line and the line's text — on their own, too.
+  box. In the editor, right-click → **Comment…** comments on the selected lines (or the caret's line); in the
+  conversation, right-click a line of a change → **Comment on this line…**. See **Comments (marks)** below.
 - **Preview** — the 🌐 button in the header (Ctrl/⌘+Shift+B) opens the web app you are building beside the
   conversation, with back, forward, reload, an address box and *open in your browser*. Until a page is open, the
   local addresses that appear in omp's tool output (dev servers it starts) are offered as chips. Once a page is open,
@@ -304,8 +459,11 @@ project yet), so the OS warns on first start:
   On macOS: a new window a page opens (a sign-in pop-up, a `target=_blank` link) opens as a tab marked *Pop-up* next to
   the page that opened it, still connected to it, so *Sign in with…* pop-ups hand their result back and close
   themselves; × closes one, and closing a page closes its pop-ups. A camera or microphone request asks with **Allow
-  once** / **Always allow on this site** / **Don't allow** (the always answers are kept between runs). A page that
-  can't be opened shows why with **Try again**; a page whose web process stopped shows *This page stopped working* with
+  once** / **Always allow on this site** / **Don't allow**. Each remembered-permission decision reads the current
+  saved permissions, so another process's completed revocation takes effect at the next request. Missing,
+  unreadable or malformed storage cannot authorize; unsaved grants do not auto-allow. A failed revocation
+  still denies locally and is retried with the next successful settings mutation.
+  A page that can't be opened shows why with **Try again**; a page whose web process stopped shows *This page stopped working* with
   **Reload**. Downloads ask first: **Save** puts the file in the folder you chose last time (the save panel asks the
   first time, so nothing lands in a folder you didn't pick), **Save as…** always asks; they are listed under the page
   with their progress, **Stop** and **Show in Finder**. Logins (cookies) are kept between runs. Sites see Safari's own
@@ -318,21 +476,57 @@ project yet), so the OS warns on first start:
   own pins — also in a single-page app that changes its page without loading one (a route like `/cart` or `#/cart`;
   an anchor such as `#top` is the same page). The comment becomes a
   chip in the message box with its page's address (× removes it). To change a comment, click its pin on the page
-  (**Save** or **Delete**, in or out of the mode) or the chip's text (an editor with **Save** and **Show on the page**,
+  (**Save** or **Delete**, in or out of the mode) or the chip's text (an editor with **Save** and **Show**,
   which opens that page — its tab if one shows it). The page's own links and buttons do nothing until you leave the
   mode (Esc, or Annotate again). The comments go with your next message — with no text, Send asks omp to make the
   changes they ask for — grouped by page (each group starts with the page's address and title, so omp knows which
   page a comment is on), each with where the mark is (in the viewport and on the page) and what finds the element
   holding it in the code: its selector, opening tag, text, position and size and — for React ≤ 18, Vue and Svelte dev
-  builds — the source file; an area also lists the elements it shows. Comments on several pages can go together, up
-  to 20 at a time.
+  builds — the source file; an area also lists the elements it shows. Comments on several pages can go together.
+- **Comments (marks)** — comments on code (Changes, the editor, a change in the conversation) and on pages are one
+  numbered list of chips in the message box, up to 40 at a time; a page comment's number is its pin's. Each has its
+  place (file and line or lines with the lines around them, or the page), a short note and a status. Click a chip to
+  change its note, **Show** its place (the file at its line, or the page), or **Resolve** it: a resolved comment stays
+  as a dimmed chip but is not sent (**Reopen** brings it back). The next message carries the open comments — code
+  first, then pages — and they leave the box once sent.
+  With a team (see [Team](#team)), **Send N comments to the team…** under the chips sends the open code and page
+  comments to team members instead.
 - **Device size** — the device button in the preview's toolbar (Ctrl/⌘+Shift+M) lays the page out at a device's size,
   centred in the pane, with a bar under the toolbar: a preset (iPhone SE, iPhone 15 Pro, Pixel 8, iPad mini, iPad Pro,
   Laptop, Desktop) or a size typed in (Enter applies, 200–4000 each side), turn it (portrait / landscape), and the
   platform the page sees: Desktop, iPhone, iPad or Android — its user agent, set on macOS (elsewhere only the size
   changes, and the platform list is off); a page already open loads again with it. × or the button again fits the
   pane; the button brings back the device used last. It applies to every tab except pop-ups; a size omp set for its
-  own tab wins there. A pane smaller than the device limits it.
+  own tab wins there. With the Nightly agent browser the page always gets the device's size: where the pane is smaller,
+  the page is shown scaled down to fit (as a browser's device toolbar does), and clicks and taps land where they are
+  shown. In the built-in preview a pane smaller than the device limits it.
+- **Nightly agent browser** (macOS, experimental) — *Settings → General → Agent browser* chooses where the preview
+  and the Browser page render pages: **Built-in preview** (the system's web engine, above) or **Nightly
+  (experimental)**, a full browser engine that Ombra installs and runs with its own profile; open pages load again
+  in the chosen engine. Until you choose, the pane asks once: *Show pages with Nightly?* — *Ombra can show pages in
+  Nightly, a full browser engine it installs and runs with its own profile. Pages, sign-ins and downloads stay on
+  this Mac.* — with **Use Nightly** and **Keep the built-in preview**; the answer is saved. Ombra installs only the
+  Nightly version this release pins, checked against its SHA-256, and removes older versions it no longer runs;
+  Nightly in turn talks only to a signed Ombra. With Nightly, omp's browser tool works in its tabs as described above
+  (reading, clicks, typing, screenshots of what the pane shows). The page's questions — alerts, *OK / Cancel*, text
+  answers, *Leave this page?*, HTTP sign-in, permissions (screen sharing is refused), file pickers, downloads — come
+  up as the same cards, over the live page instead of a still picture, with the same remembered site permissions and
+  download folder; downloads are listed under the page. A page's new windows open as tabs next to it. While Nightly is
+  chosen but can't show pages — not installed, outdated, it could not start or stopped responding (*Nightly is not
+  responding.*) — the built-in preview shows them, with a bar that says why and *The built-in preview shows pages
+  meanwhile.*: **Install Nightly** when installing helps (with its progress, e.g. *Downloading Nightly …*), otherwise
+  **Try again**; **Show details** has what the process reported. Windows and Linux have the built-in preview only.
+- **Browser page** — **Browser** in the rail at the window's left edge opens a full-size browser of your own in the
+  conversation's place. With the built-in preview: its own tabs (keys: see *Terminal* above), the same cards,
+  downloads and site permissions as the preview. With Nightly (macOS): a whole Nightly browser window fills the page
+  from the window's top to its bottom, with the window's rounded corners — its own sidebar, spaces, address bar,
+  library, menus and settings, all Nightly's (the same Nightly process as the preview). Nightly follows Ombra's
+  *Appearance* (Light, Dark, or the Mac's under System), its windows and the pages' light or dark styles alike, and
+  switches with it. While it has the keyboard,
+  ⌘/Ctrl shortcuts are Nightly's (⌘T, ⌘L, ⌘W, ⇧⌘T, Ctrl+Tab, switching spaces…); Ombra keeps only ⌘Q, ⌘H, ⌘M, ⌘`
+  and ⌘Esc (back to the chats). Its menus, the library and share dialogs open as windows over Ombra's. omp never
+  drives it. **Chats** in the rail goes back to the conversation; the tabs stay. Links and pages from your team open
+  here once you accept them.
 - **Panes** — the buttons at the right of the header open **Files** (Ctrl/⌘+Shift+F), **Plan** (Ctrl/⌘+Shift+P),
   **Background tasks** (Ctrl/⌘+Shift+T), the **Terminal** (Ctrl+`) and the **Browser** preview (Ctrl/⌘+Shift+B); a
   lit button means its pane is open, and its tooltip names its shortcut. When the header has too little room for
@@ -346,11 +540,23 @@ project yet), so the OS warns on first start:
     plan*, and *History* lists every change with its time — also for a session you open later. While the pane is
     open, the one-line task card above the message box is hidden: the pane shows the same list.
   - *Background tasks* — the subagents the agent starts (its task tool): what each works on, its status, how long it
-    has run, its current tool, tool calls and tokens; open one to read its task, latest output and its own
-    conversation. Finished ones stay listed for the session. Below them, omp's background jobs (commands left
-    running, as omp's `/jobs` lists them), read again every few seconds while the pane is open.
+    has run, its current tool, tool calls and tokens; open one to read its task and latest output. **Show its
+    conversation** enables a live preview of the latest 40 entries, with long text shortened. It reads new complete
+    transcript lines once a second while the expanded card is visible; collapsing it, scrolling it out of view,
+    closing the pane or switching chats stops those reads. Reopening continues from the saved byte cursor;
+    a replaced or truncated transcript resets the preview. Finished ones stay listed for the session.
+    Below them, *Background jobs*: omp's background jobs (commands left running, as omp's `/jobs` lists them), read
+    again every few seconds while the pane is open. Each shows its status (*Running*, *Waiting for input*, *Done*,
+    *Failed (exit N)*, *Cancelled*) and how long it has run (*bash · running for 12s*). **Show output** shows what it
+    printed, updated while it runs (the row keeps only the latest part); **Stop** stops a running job, and the row then
+    shows how it ended (*Could not stop it: …* with omp's reason when it can't). A job whose last line looks like a
+    question is marked *Waiting for input*: a background command can't be answered from here — stop it, or ask the
+    agent to run it without prompts.
 - **Dictation** — the 🎤 button (or Ctrl/⌘+Shift+Space) records and transcribes on this computer. The first use asks before
   downloading the speech model (about 670 MB, verified against pinned hashes).
+  After all captures and audio checks have closed, the next recording refreshes the native audio device list.
+  An active recording is never restarted to refresh devices; after changing inputs or waking the computer, finish
+  or cancel that take and start another.
 - **Notifications** — when a run ends, omp stops or asks something in a chat you are not looking at (the window is
   in the background, or another chat is shown), the OS is told, with the chat's name when it is not the one shown,
   and the window's title gets a ● mark while the window is in the background: Windows flashes the taskbar button
@@ -380,23 +586,41 @@ project yet), so the OS warns on first start:
   that names nothing on disk stays plain.
 - **Right-click menus** — right-click (two-finger click, or Control+click on macOS) acts on what is under the
   pointer, not on what is selected: one of your messages offers **Copy** and **Rewind to here**; a reply **Copy**
-  (the text as it reads), **Copy as Markdown** and, when it failed, **Retry**; a code block **Copy code**; a link
-  **Open link** and **Copy link**; with words selected, the text's own **Copy**. Text fields have **Cut**, **Copy**,
-  **Paste** and **Select all**; the code viewer **Copy** and **Select all**; sessions, projects, files (in the tree
-  and in *Go to file*'s results) and images have the menus described with them. Esc or a click elsewhere closes a
-  menu.
+  (the text as it reads), **Copy as Markdown** and, when it failed, **Retry**; a code block **Copy code** and
+  **Insert into message**; a link **Open link** and **Copy link**. Selected conversation words keep the native
+  **Copy** menu and add **Quote in message**, inserting a Markdown quote at the composer caret without replacing
+  the draft. Free-text transcript comments are not supported: anchored comments remain on code/diffs and pages.
+  Errors and notices offer **Copy details** and **Show in Events** (failed replies also offer **Retry** when available).
+  Right-click an event to **Copy** that line, **Copy all**, or **Clear** the visible log. A queued message offers
+  **Copy**, **Edit**, **Send now** when eligible, and **Remove**; editing uses the same withdrawal/recovery path as ↑.
+  Pasted-text chips offer **Preview** (a scrollable, selectable code viewer), **Copy**, **Expand into message** at the caret, and **Remove**.
+  Message, path, code, link and image copies confirm only after the clipboard accepts them; clipboard failures
+  show the actual error instead of claiming success. The image viewer keeps its copy error visible in the viewer.
+  Text fields have **Cut**, **Copy**, **Paste** and **Select all**; the code viewer **Copy** and **Select all**;
+  sessions, projects and files have the menus described with them. Esc or a click elsewhere closes a menu.
 
 | Shortcut | Action |
 |---|---|
 | Enter / Shift+Enter | send / new line (Ctrl/⌘+Enter sends instead when chosen in Settings → General) |
 | Alt+Enter (⌥Enter) | steer the running turn |
-| Shift+Tab | next permission mode (Ask → Accept edits → Bypass, which asks to confirm) |
+| Shift+Tab | next permission mode (Ask → Accept edits → Plan mode, when omp offers it → Bypass, which asks to confirm) |
 | ↑ (in the empty message box) | edit the last queued message |
+| Ctrl+K (⌘K) | command palette: actions, panels, settings pages, themes, chats and files |
+| Ctrl+P (⌘P) | go to a file of the project (the palette on files only) |
 | Ctrl+/ (⌘/) | keyboard shortcuts |
+| Ctrl+L / Ctrl+Esc (⌘L / ⌘Esc) | focus the message box; ⌘L/Ctrl+L remains the address shortcut in either browser surface, while ⌘Esc/Ctrl+Esc returns from the Browser page to chat |
+| Ctrl+Shift+I / Ctrl+Shift+E (⇧⌘I / ⇧⌘E) | choose a model / thinking effort |
+| Ctrl+\\ (⌘\\) | hide the focused sidebar, right pane, terminal panel or event log; terminal processes keep running |
+| ↑ / ↓, Enter, F2, Delete (session list) | move focus without opening, open, rename, or ask to delete the focused chat; double-click a chat to rename |
+| ← / →, Home, End (sidebar resize handle) | change width by 20 pixels, restore its default, or use the maximum; Tab reaches the handle |
+| Ctrl+Shift+U (⇧⌘U), Shift+Esc | mark the focused/current chat read or unread; mark all chats read |
+| Ctrl+W (⌘W) | close the focused terminal/panel/browser tab before closing the window |
 | Ctrl+Enter (⌘+Enter) | send |
 | Ctrl+N (⌘+N) | new chat (outside any project) |
 | Ctrl+B (⌘+B) | show / hide the sidebar |
 | Ctrl+Tab / Ctrl+Shift+Tab | next / previous session in the sidebar |
+| Ctrl+F (⌘F) | find in chat: every loaded message, reply and tool call (its arguments and output), case-insensitive; the counter says which match of how many; words selected in a message are looked for. What hides a match (a turn's *Worked for…* line, a step group, a tool's output, the thinking) opens while it is shown |
+| Enter / Shift+Enter, Ctrl+G / Ctrl+Shift+G (⌘G / ⇧⌘G) | in the find bar: next / previous match (⇧⌘G opens the Changes pane while the bar is closed); Esc closes it and returns to the message box |
 | Ctrl+, (⌘+,) | settings |
 | Ctrl+` (Ctrl on macOS too) | terminal panel |
 | Ctrl+Shift+P (⇧⌘P) | Plan pane |
@@ -407,10 +631,20 @@ project yet), so the OS warns on first start:
 | Ctrl+Shift+M (⇧⌘M) | device size in the preview (on: the device used last; off: fit the pane) |
 | Ctrl+Shift+Space (⇧⌘Space) | dictation (Enter finishes, Esc cancels) |
 | Ctrl+V (⌘V) | paste text, images or files (a long text becomes a chip) |
-| 1 / 2 / 3, Alt+A / Alt+D (⌥A / ⌥D) | allow / deny / deny and say why on an approval card; 1–9 pick an answer |
+| 1 / 2 / 3 (approval card focused), localized Alt access keys (English: Alt+A / Alt+D) | allow / deny / deny and say why; approval requires a fresh released-key gesture after the appearance/activation guard; 1–9 pick an answer |
 | Esc | close the image viewer, leave Settings, close the shortcut sheet, the *say why* box, a question card or the session card (when it has the focus), clear a search box (then leave it), or stop the run (from the message box or the conversation) |
 | ← / →, Space | in the image viewer: previous / next image, actual size / fit |
 | F12 | event log beside the conversation, or over it when the window is too narrow for both (also *Settings → Diagnostics → RPC events*) |
+
+Closing an image viewer, request/session card or menu returns focus to its opener when that control still exists.
+A deliberate click or an action that opens another editor keeps its new focus. Selecting a model deliberately returns
+to the message box (so typing Space does not reopen its chip); cancelling the picker returns to its opener.
+Repeated Esc is not a rewind gesture: each Esc follows the existing close/dismiss/stop ladder. Use **Rewind** in the
+session menu or **Rewind to here** on a message instead.
+
+The native **Help** menu opens **Keyboard shortcuts**, **Report a problem** (the existing Settings → Diagnostics
+page, with its redacted diagnostic export), and **What's new** (Settings → Updates, with available release notes).
+It does not send a report or open an invented external issue tracker.
 
 ### Session menu
 
@@ -434,6 +668,9 @@ report on a card above the message box:
 - **Share a link…** — says first what happens: omp uploads an encrypted copy of the whole conversation (tool output
   included) to its share server (or a secret gist, per omp's settings), and anyone with the link can read it. After
   **Upload and copy link** the link is on the clipboard.
+  The consent card checks both `share.redactSecrets` and `secrets.enabled`. Until those settings are known,
+  it says redaction is unverified rather than promising that secrets will be removed. If either setting is off,
+  it warns that share redaction is off. Review the conversation before uploading even when redaction is enabled.
 - **Workspace folders…** — the folders omp may read and edit in this session; **Add folder…**, or remove an added one.
 - **Move to another folder…** — omp moves the conversation to that folder and works there from then on (your files
   do not move). **Pin session** keeps it at the top of the list (**Unpin session** undoes it). **Memory** shows what
@@ -448,16 +685,18 @@ is, from the first message on (a new chat shows none: before it, omp's few perce
 tools); it turns orange from 70 % and red from 85 % (omp compacts the conversation on its own near the end, when
 Auto-compact is on). Click it for the breakdown as bars (the parts omp's `/context` reports, the auto-compact buffer,
 free room), this session's tokens (input, output, cache) and cost (when omp prices the model), **Compact now**,
-**Measure again** and a link to omp's **Usage dashboard** across all sessions. When the model's provider reports plan
-limits (for example a Claude or ChatGPT subscription: the 5-hour and weekly windows), *Plan usage* shows each as a
-meter with the share used and when it resets ("resets in 2h 10m"); the bar turns orange from 80 % and red when the
-limit is used up. **All providers** opens Settings → Model providers. Providers that report no usage show nothing.
-While it is open it refreshes after each reply. The limits come from omp's own usage reports (`omp usage`, run in the
-background: nothing is sent to the conversation); omp caches them, and the app asks again at most every 30 seconds,
-after a reply ends, or when you click refresh.
+**Measure again** and a link to omp's **Usage dashboard** across all sessions. The open popover refreshes session
+details after each reply. When `get_state` reports an exceptional usage stage for the active account, a badge
+shows **Low priority** or **Limit reached · wrapping up**, even in an empty chat. Details include the reported reset
+time, extra-usage status and optional low-priority allowance. This is not a full subscription quota report;
+missing state shows no badge, and changing model or session clears stale state.
+
+The composer and its popover never launch `omp usage`. **All providers** opens Settings → Model providers,
+where full plan reports show subscription windows as meters with the share used and time to reset.
+These reports come from `omp usage --json`, separately from the live session's usage stage.
 
 Some providers give an account **saved resets** (ChatGPT and Claude subscriptions, now and then): each refreshes a
-used-up limit when you spend it. Under the account's meters the popover and Settings → Model providers show how many
+used-up limit when you spend it. Under the account's meters in Settings → Model providers you can see how many
 it has, how many can be spent now, when the soonest expires, or why none can be spent now (omp's reason, such as a
 cooldown). **Use a saved reset** asks once more in place; **Use reset** has omp spend one of that account's resets
 (`/usage reset`, without a message in the conversation), shows omp's answer under the account and reads the limits
@@ -474,37 +713,164 @@ omp's settings and apply to every session.
 
 ### Commands that run only in omp's terminal
 
-Some omp commands exist only in its terminal UI (for example `/plan`, `/goal`, `/loop`, `/fork`, `/tree`, `/collab`).
+Some omp commands exist only in its terminal UI (for example `/loop`, `/tree`, `/collab`, `/vibe`).
 Typed in the message box they are never sent to omp as a message: where the window has its own way it uses it —
 `/settings` → Settings, `/login` (`/setup`, `/providers`) and `/logout` → Model providers, `/new` → a new session in the current project, `/resume` → the
 sessions list (text after it filters the list), `/model` without arguments → the model picker, `/hub` → Background
-tasks, `/branch` or `/rewind` → Rewind, `/drop` → Delete session, `/restart` → restarts omp, `/extensions` and
-`/status` → a card that opens Plugins and skills, `/hotkeys` → the keyboard shortcuts. `/quit`, `/exit`, `/copy`,
+tasks, `/branch` or `/rewind` → Rewind, `/drop` → Delete session, `/plan` and `/plan-review` → plan mode (when omp
+offers it), `/restart` → restarts omp, `/extensions` and
+`/status` → a card that opens the Plugins page, `/hotkeys` → the keyboard shortcuts. `/quit`, `/exit`, `/copy`,
 `/open` and `/queue` get a card that says what to use in the window instead (the `/` menu leaves them out).
 Otherwise a card offers **Open omp terminal**, omp's own interface in the terminal panel (a separate omp with its own
 session); the `/` menu lists these last, under *Terminal only*. A skill, prompt or
 extension omp itself offers under such a name is sent to omp as usual. `!command` runs a shell command in the project
 through omp (the output joins the conversation and the context); `!!command` offers to open a shell instead.
 
+## Team
+
+**Team** in the rail at the window's left edge (the people icon) opens the Team page in the conversation's place;
+**Chats** in the rail goes back. A team is your own: it lives on a team server you or your organisation runs, and its
+members are the people its admins invite — it is not taken from GitHub, GitLab or another Git provider's
+organisations or repositories. What members send each other — names, shared items, comments, progress — is
+end-to-end encrypted between their devices; the server passes it on without seeing names or contents. The page
+refreshes every 15 seconds.
+
+- **Create a team** — *Your team server: its address and, for an IP address, the certificate pin install.sh printed.
+  The first team needs the one-time bootstrap code.* Fill in **Server** (`203.0.113.7` or `team.example.com`),
+  **Certificate pin** (for a server reached by IP address; one with a domain certificate needs none) and **Bootstrap
+  code**, then press **Create team**. You are its owner. The **Owner recovery key** is shown once: *Write it down or
+  print it and keep it offline. It is shown only now: Ombra does not keep it. Without it a lost owner device cannot be
+  replaced.* **Copy** copies it; **I saved it** removes it from the screen.
+- **Join a team** — an admin sends you an invite link (`ombra://join?…`; it names the server and its pin). Paste it
+  and press **Ask to join**: *Your request to join was sent. An admin of the team has to approve it; this page
+  updates by itself.* Admins see it under **Join requests** (the role and how many devices) and press **Approve**.
+- **Invite** (admins) — choose **Member** or **Admin** and press **Create link**: *One-time link ready · Member ·
+  valid until it is used*, with **Copy link** and **Show link**. Send it over a channel you trust.
+- **Members** — each with their name, role (*Owner*, *Admin*, *Member*) and *You* on your own row; the member ID is
+  the name's tooltip. **Safety number** shows a number to compare with that member in person or over another
+  channel. When a member's key changes, a banner and their row say so (*Key changed: compare the safety number with
+  them first.*), and **Numbers match** confirms it. Admins **Remove** a member (never the owner). The owner hands the
+  team over with **Make owner**: that member sees *The owner offers you the ownership of the team.* with **Accept**.
+- **My devices** — the computers on your account (*This device*, *Revoked*); **Revoke** cuts one off. To add one:
+  **Pair a device** shows a one-time link and a QR code; on the new computer, under **Add this computer to your
+  account**, paste the link and press **Pair**. Both screens then show six words; if they are the same, press **The
+  words match** on both.
+- **Technical details** (folded) — **Team ID** and **My ID**, each with **Copy**.
+- **Banners** — *You were removed from the team. Its data on this device was erased (keys, messages and shared
+  items).* (**Dismiss**). When neither the owner nor enough admins confirmed the team's state in the last 72 hours,
+  sending is paused and a banner says so. When the server showed two different versions of the team, the team is
+  frozen until the owner chooses one: **Review** lists what each choice undoes; after *I reviewed the list and want
+  these changes undone*, **Sign the decision**.
+
+**Settings → Account** has your **Name** in the team (*How the team sees you*; **Save** — *The name travels only
+inside the team, encrypted; the server never sees it.*), **Sign out** (stops the team's background work and forgets
+the account on this computer; its keys stay in the system key store for signing in again), **Technical details**
+(**My ID**, **Server**, **Certificate pin**) and *Share progress with the team* (below). Signed out, it says *Not
+signed in to a team. Create or join one on the Team page.*
+
+### Sharing and the Inbox
+
+You can share with the team:
+
+- a link in the conversation — right-click it → **Share with team…**;
+- a file of the project — its menu in the Files pane → **Share with team…**;
+- a skill — **Share with team…** on its page (**Plugins → Skills**, then the skill's row);
+- the project's changes since the last commit, as a patch — the share button of the Files pane's **Changed** view
+  (*Share the changes with the team as a patch*);
+- the Browser page's open pages, as one collection — *Share open browser pages with team…* in the command palette.
+
+The **Share with team** dialog names what goes (*Share a file “notes.md”*). **Send to**: **Everyone in the team** or
+**Specific members** (find them by name, tick them); an optional **Comment** (up to 280 characters); then **Share**.
+A file, skill or screenshot can be up to 50 MB. *Sent to everyone in the team.* or *Sent to 2 members.* confirms it;
+offline, it goes out at the next refresh. Without a team the app says *Join a team to share*.
+
+For the recipients a toast says *Anna shared a file “notes.md”* with **Open**, which opens the Team page at the
+**Inbox**; with the window in the background the system notification says only *Something new from your team* (no
+sender, no title: it can show on the lock screen). The Team button in the rail counts what waits (9+ above nine),
+and the bell lists it too. Each Inbox item has who shared it, its title and comment, a preview of what is inside —
+the address, the file's name and size, a skill's description, a patch's base commit and files, a collection's
+pages — its kind (*Link*, *File*, *Skill*, *Patch*, *Screenshot*, *Collection*), *Waiting for you*, *Accepted* or
+*Declined*, and when. **Nothing is saved, installed or opened before you press Accept**; **Decline** tells the
+sender no. Accepting:
+
+- a link or collection opens in the Browser page, each page in a tab;
+- a file or screenshot is saved in the open project (in Downloads without one) and opened in Files;
+- a skill is installed in omp's user skills folder (`~/.omp/agent/skills` unless omp says otherwise); omp offers it
+  from its next start;
+- a patch gets **Apply to project**: it applies only to a clone of the repository it was made in that has its base
+  commit — the open project, or a folder you pick — and the changes show in the Changes view.
+
+**Open** does it again later. Opening the Inbox marks what it lists as seen for the sender. What you shared is listed
+under **Shared by you** with *N of M answered* and each recipient's status: *Not opened yet*, *Seen*, *Accepted* or
+*Declined*.
+
+### Comments for the team
+
+Comments on code and pages in the message box (see *Comments (marks)*) can go to team members: while there are open
+ones and someone else in the team, **Send N comments to the team…** under them opens *Send comments to*: **Everyone**
+or the members you tick, then **Send**. Code comments carry the repository and commit they were left on. The sent
+comments leave your message box.
+
+A recipient gets a toast, *Comments from Anna in app.py*, and the Team page's **Comments** card lists them under
+**For you**: the note, who left it, where (*app.py:41*, *localhost:5173/about*) and a status. **Open** goes to the
+place — the file at its line in Files, or the page at its pin in the preview — and marks that author's comments
+there *Seen* for them. A code comment left on another commit than yours warns *Left on commit abc1234: the line may
+have moved.* Page comments for you show as pins on their pages until you finish them. Write an optional **Short
+note** (up to 280 characters) and press **Mark as done** or **Dismiss comment**; **To my agent** adds the comment to
+your message box for your agent, without changing its status. There are no replies: a new thought is a new comment.
+Under **Sent by you** each comment shows *2 of 3 done*, *1 of 2 seen* or *Not seen yet*, and every recipient's
+status (*Not opened*, *Seen*, *Done*, *Dismissed*) with their note.
+
+### Project progress
+
+**Settings → Account → Share progress with the team** lists your projects (the folders of your sessions), each with a
+**Team project** box: *Not shared with the team* or one of the team's projects (admins can make one with **New team
+project**; every member gets access). Once a project is linked, **Share progress** publishes your state there and
+**Include the current task title** adds the task — a second, separate choice; both are off by default. *Shared: you,
+the project, working / waiting for input / idle, and when it changed; the current task title only if you turn it
+on. Never shared: prompts, replies, file contents, diffs.* Turning sharing off ends what was published at once.
+
+The Team page's **Project progress** card shows, as it happens, who works on what: the member (*You* for yourself),
+the project, *Working*, *Waiting for input* or *Idle* with a coloured dot, the task when its author shares it, and
+when it changed; the box at the top filters by project (*All projects*). Progress goes only to members online now:
+*End-to-end encrypted; the server relays it to online members and keeps nothing.* What arrives is kept in memory
+only. With nobody sharing: *Nobody online shares progress right now. Turn it on for your projects in Settings ›
+Account.*
+
+### Nightly shares through Ombra (macOS)
+
+A Nightly on the same Mac — the one Ombra installs, or one in `/Applications` — has no team account of its own. While
+Ombra runs and is signed in to a team, Nightly shares a page, a tab group or a screenshot through Ombra's account, to
+everyone or to the members chosen, and shows what was shared with you (opening an item there accepts it; it can also
+decline it). Ombra answers only a Nightly it knows, run by the same user, with an intact code signature. What Nightly
+sends arrives in the Inbox like anything else (*Link*, *Collection*, *Screenshot*).
+
 ## Settings
 
 **Settings** at the bottom of the sidebar (in the header while the sidebar is hidden), Ctrl+, (⌘,) or
 `/settings`. The settings fill the window: their page list takes the sidebar's place, and **Back to app** at its top
-(or Esc) returns to the conversation. Pages: **General**; for omp, **Model providers**, **Connectors**, **Plugins and
-skills**, **Computer use**, **Git and worktrees**, **SSH hosts**; for this app, **Pets** and **Updates**; for
-troubleshooting, **Advanced** and **Diagnostics**. In a narrow window the pages are a strip across the top that
+(or Esc) returns to the conversation. Pages: **General**, **Account**, **Permissions**; for omp, **Model providers**,
+**Plugins** (also in the left rail), **Computer use**, **Git and worktrees**, **SSH hosts**; for this app, **Pets**
+and **Updates**; for troubleshooting, **Advanced** and **Diagnostics**. In a narrow window the pages are a strip across the top that
 scrolls sideways (its faded edge shows there are more). The ones without a section of
 their own below:
 
 - **General** — *Appearance* (System, Light or Dark), *Notifications* (see Daily use), *Send messages with*
-  (Enter, or Ctrl/⌘+Enter) and *Chats kept running* (2, 4 or 8 omp processes; see Sessions). Settings that make omp
-  restart (the runtime under Advanced, connectors, plugins, workspace settings) restart every open chat's omp: the
-  idle ones at once, a working one when its run ends. The event panel (F12) shows how many omp processes run and the
-  memory they hold.
+  (Enter, or Ctrl/⌘+Enter), *Agent uses the Ombra browser* (see *omp browses in the preview*) and, on macOS, *Agent
+  browser* (see *Nightly agent browser*).
+  Settings that change the shared engine's executable or environment require a
+  coordinated restart after all chats and sign-ins are idle; they must not silently restart just the shown chat
+  with a different process configuration. The event panel (F12) reports engine processes and memory,
+  not one independent omp process per chat.
 - **Permissions** — the *Don't ask again* rules given on approval cards: what each covers, as the rule
   (`bash(npm test:*)`), and where (*This session*, *This project* with its folder, *All projects*), each with
   **Remove** — omp asks again from the next request. Project and always rules are kept in the GUI's settings file
-  (`approvalRules`), session rules only until the app quits.
+  (`approvalRules`), session rules only until the app quits. *Trusted folders* lists the project folders whose own
+  tools omp may run (see *Folder trust*), with the date each was trusted and **Revoke**: the folder's idle chats
+  restart without its tools at once, a working one when its run ends, and a card offers to close omp terminals that
+  started there while it was trusted. The list is kept in `workspace-trust.json` next to the client's settings file
+  (readable and writable only by you).
+- **Account** — your team account: see [Team](#team).
 - **Model providers** — first, *Local and custom*: the model servers omp can use on this computer — **Ollama**,
   **LM Studio**, **llama.cpp** and **vLLM**, at the address omp would use (its default, or `OLLAMA_BASE_URL` /
   `OLLAMA_HOST`, `LM_STUDIO_BASE_URL`, `LLAMA_CPP_BASE_URL`) — each with *Running · N models* or *Not running*
@@ -520,8 +886,8 @@ their own below:
   pointed out); with *List them* and no ids yet, the ids it found fill the list. Your providers are listed under the
   local servers with **Edit** and **Remove** (it asks first); one with settings the form doesn't cover (headers,
   per-model limits…) is listed with a note to edit `models.yml` itself, and can still be removed. After each change
-  every chat's omp restarts (a replying one when its reply ends) and the new models are in the model chip. A
-  `models.yml` that doesn't parse is shown with the error and left unchanged.
+  the shared engine restarts once all chats and sign-ins are idle; the new models then appear in the model chip.
+  A `models.yml` that doesn't parse is shown with the error and left unchanged.
   Then the providers you sign in to, each with **Sign in** or *Signed in*; the browser link and any code appear above
   the message box. The sign-out button beside *Signed in* (its tooltip: *Sign out of …*) lists the accounts omp stored
   for that provider (the one in use marked *In use*); **Sign out** on one makes omp forget it. A provider signed in
@@ -531,11 +897,12 @@ their own below:
   Below it, *Plan usage* shows every signed-in account whose provider reports limits (subscription windows, spend),
   as meters with the share used and the time to reset, and the account's saved resets with **Use a saved reset**
   (see *Context and usage*), with a refresh button. Hidden when no provider reports usage.
-- **Advanced** — *omp runtime*: which omp the app starts. **Command** empty means the omp the app
-  installed, otherwise omp from PATH; *Arguments before omp's own* (one per line; for your own Bun setup the command
-  is `bun` with `--no-install` and the path to omp's `cli.ts`); *Profile* (`OMP_PROFILE`); **Save and restart omp**,
-  and **Install omp 18.8.0** or **Reinstall**. Unlike the rest of Settings, these three fields apply only with Save
-  and restart omp: until then the page says *Unsaved changes* (with **Discard**), and the edits stay when you leave
+- **Advanced** — *Agent engine*: the shared engine managed by Ombra. Leave **Command** empty for the managed
+  engine. A developer override must launch a compatible shared-engine host (for Bun, pass the owned `engine/host.ts`
+  in *Host arguments*), not an ordinary omp CLI. *Profile* (`OMP_PROFILE`), **Save and restart engine**,
+  and **Set up engine**, **Update engine** or **Repair engine**. These fields apply only after Save and restart
+  engine, once all chats and sign-ins are idle. Until then the page says *Unsaved changes* (with **Discard**),
+  and the edits stay when you leave
   Settings and come back. *Network*: corporate network certificates and a connection check (next section); *Network
   privacy*: which providers omp may contact, and strict network privacy (see [Network privacy](#network-privacy)).
 
@@ -600,7 +967,7 @@ run: omp starts unchanged, and **Settings → Advanced → Network privacy** say
 the background. The request carries no keys and no chat content, and omp has no setting that turns it off (reported
 upstream: `docs/upstream/omp-discovery-opt-in.md`). Strict network privacy blocks it.
 
-**Strict network privacy** (off by default; **Settings → Advanced → Network privacy → Turn on**) sends omp and the
+**Strict network privacy** (off by default; the **Settings → Advanced → Network privacy → Strict network privacy** switch) sends omp and the
 tools it runs through a filter in the app: every omp gets `PI_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY`
 pointing at it (per-provider `PI_PROXY_<PROVIDER>` variables are removed), and it lets through only:
 
@@ -616,49 +983,80 @@ connection, for example), and addresses on this computer or in private network r
 192.168.x), which omp always reaches directly. Turning it on or off restarts omp in open chats; omp terminal tabs
 already open keep the setting they started with.
 
-## Connectors (MCP servers)
+## Plugins, MCP servers and skills
 
-**Settings → Connectors** (or **+ → Connectors** in the message box) lists the MCP servers omp loads from its
-own files — yours (every project) and the project's `.omp/mcp.json` — and from the project folder's `mcp.json` /
-`.mcp.json` (shared with Claude Code and other tools: only their switch works here; change them in the file).
-Each row shows how omp starts or reaches the server,
-the names of its environment variables or headers (never their values), and whether this session has its tools
-(*Connected · N tools*) — omp connects to servers only when it starts.
+**Plugins** in the left rail (or **+ → Plugins** / **+ → MCP servers** in the message box, or **Settings → Plugins**)
+opens one page for everything that adds abilities to omp. At its top, **Browse catalog** and **Add ▾**
+(*Plugin…*, *MCP server…*, *Skill folder…*); under them three tabs with counts — **Plugins**, **MCP**, **Skills** —
+and a search for the current tab with a refresh button. Each tab is one list: a row shows the item's icon, name, one
+line of what it does, where it comes from (*Personal* — yours, for every project; *Project* — the project's own
+files; or the file name for a server from a shared `mcp.json`), its switch and a chevron to its own page. Project
+items in a folder you haven't trusted say *Requires folder trust*, and what omp left out of such a folder gets rows
+of its own. After a change that omp applies only when it starts, the page offers **Restart omp** (after the reply,
+if one is running).
 
-- The **switch** turns a server on or off (omp's `/mcp enable|disable`); **⋯ → Test connection** connects once
-  and lists its tools, or shows omp's reason it failed; **Edit…** changes the command, arguments, environment, URL
-  or headers in the file (other fields are kept); **Remove…** asks first.
-- **Add connector**: a local command (stdio: command, one argument per line, `NAME=value` variables) or a remote
-  server (HTTP or SSE: URL, an optional bearer token, other headers), for all projects or only this one. omp
+**Plugins** work through omp's `omp plugin` command line.
+
+- **Add → Plugin…** takes an npm package, a git URL, a local folder or `name@marketplace`; omp's own error is
+  shown if it fails.
+- A plugin's page lists what it adds (skills, commands, agents, MCP servers, tools, hooks), its source, version,
+  scope and folder, and says what it can run on this computer. It has **Update** (when the marketplace has a newer
+  version), **Uninstall…** (asks first) and, for an npm plugin with settings, its settings with **Save**.
+- After a plugin change omp reloads skills and commands at once; its tools, hooks and MCP servers load when omp
+  restarts.
+
+**The catalog** (**Browse catalog**) lists the plugins of every plugin source in sections: *Popular* when a
+source's catalog marks some as featured, then the catalog's categories, then *Other* for plugins without one. **+**
+installs a plugin; **⋯** on an installed one opens its page. Below are MCP servers from Smithery, a public registry:
+search it, and **+** on a result shows the command that adds it in omp's own terminal (`/mcp smithery-login` signs in
+to Smithery there). **Plugin sources** at the bottom lists the marketplaces the catalog reads — add one by GitHub
+`owner/repo` (Anthropic's is `anthropics/claude-plugins-official`), git URL, catalog URL or folder; **⋯** on a
+source updates its catalog or removes it — and **Plugin updates** sets whether omp checks for (or installs) plugin
+updates when it starts. Skills have no catalog: they come with plugins or from your own folders.
+
+**MCP servers** are the ones omp loads from its own files — yours (every project) and the project's
+`.omp/mcp.json` — and from the project folder's `mcp.json` / `.mcp.json` (shared with Claude Code and other tools:
+only their switch works here; change them in the file). A row says whether this session has the server's tools
+(*Connected · N tools*) — omp connects to servers only when it starts. Recognized credential formats are masked in
+commands, addresses and marketplace sources (URL passwords, `--api-key` arguments); this changes display text only,
+and it is not a guarantee that arbitrary secret formats are recognized. The edit form still shows the
+configuration you are editing.
+
+- The **switch** turns a server on or off (omp's `/mcp enable|disable`). A server's page shows how omp starts or
+  reaches it, the names of its environment variables or headers (never their values), and has **Test connection**
+  (connects once and lists its tools, or shows omp's reason it failed), **Edit…** (command, arguments,
+  environment, URL or headers; other fields are kept) and **Remove…** (asks first). A server that connected but
+  offers no tools shows *Connected · 0 tools* there with a warning: omp can't use it.
+- **Add → MCP server…**: a local command (stdio: command, one argument per line, `NAME=value` variables) or a
+  remote server (HTTP or SSE: URL, an optional bearer token, other headers), for all projects or only this one. omp
   checks and saves it (`/mcp add`).
-- After a change the page offers **Restart omp**: the change applies when omp starts again (after the reply, if
-  one is running).
-- **Find connectors** searches Smithery, a public registry of MCP servers, and lists what it finds. **Sign in…**
-  (servers that use OAuth), **Add…** on a Smithery result and the Smithery sign-in happen in omp's own terminal:
-  the page shows the command to type (`/mcp reauth <name>`, `/mcp smithery-login`) and opens the terminal.
-- **Edit…**, and the variables and headers of a new connector, are written into omp's MCP config file
-  (`mcp.json`) by the app itself — the only omp file it changes directly; everything else goes through omp's
-  commands. While omp is not running the page offers **Start omp**.
-- **Resources and prompts** asks the servers what they offer; a prompt can be used as a `/server:prompt`
-  command. **Servers from project files** turns off the servers a project brings, for projects you don't trust.
+- A server that uses OAuth shows its sign-in on its row: *Signed in*, *Signed out* or *Sign-in expired*. **Sign in**
+  (also offered when a remote server refused the test with 401) asks omp to sign in: the server's sign-in page opens
+  in your browser — only for a sign-in you started here, and only an `https` page or one on this computer — and the
+  row says *Connected · N tools* when you're done, without a restart. **Sign in again** on the server's page signs
+  in anew; **Cancel** stops a sign-in waiting on the browser. A link omp opens on its own stays on the link card for
+  you to open. When omp finds that a server needs you to sign in (again) — at start, or when a tool is refused — the
+  MCP tab shows a card with **Sign in** for it until you sign in or dismiss it; the conversation gets a notice too.
+- **Reconnect all**, under the list, has omp read its servers again and reconnect each one without restarting omp.
+  **Resources, prompts and options** asks the servers what they offer (a prompt can be used as a
+  `/server:prompt` command); **Servers from project files** turns off the servers a project brings, for projects you
+  don't trust.
+- A server can ask you to fill in a form while omp works (MCP elicitation): a card in the conversation names the
+  server and shows its fields (text, numbers, on/off, a choice, several choices). The app checks each field first
+  (required, length, range, email/address/date format) and says what to fix; **Send** gives the answers to the
+  server, **Decline** tells it no, × (Esc) closes the card without an answer. The answers go only to omp: they are
+  not kept in the conversation or the app's logs.
+- **Edit…**, and the variables and headers of a new server, are written into omp's MCP config file (`mcp.json`) by
+  the app itself — the only omp file it changes directly; everything else goes through omp's commands. While omp is
+  not running the tab offers **Start omp**.
 - Servers set up in other tools' settings (Claude Code, Cursor, VS Code…) are loaded by omp too; they are not
   listed, but their tools are named at the end of the list.
 
-## Plugins and skills
-
-**Settings → Plugins and skills** (or **+ → Plugins**) works through omp's `omp plugin` command line.
-
-- **Install** takes an npm package, a git URL, a local folder or `name@marketplace`; omp's own error is shown if
-  it fails. Each installed plugin has a switch, **Upgrade** (marketplace plugins) and **Uninstall…**.
-- **Marketplaces**: add one by GitHub `owner/repo` (Anthropic's is `anthropics/claude-plugins-official`), git
-  URL, catalog URL or folder; **Browse** lists its plugins with **Install**; **⋯** updates its catalog or removes
-  it. **Plugin updates** sets whether omp checks for (or installs) updates when it starts.
-- After a plugin change omp reloads skills and commands at once; its tools, hooks and MCP servers load when omp
-  restarts (the page offers the restart).
-- **Skills** lists omp's skills: **Use** starts a message with `/skill:<name>`, the switch turns a skill off
-  (omp's `disabledExtensions`); *Use skills* and *Skill commands* turn them off altogether. **Skill sources** chooses
-  where omp looks for skills (omp's, Claude Code's, `.agents`, Codex) and extra folders. Skill settings apply when
-  omp restarts.
+**Skills** are omp's skills. The switch turns one off (omp's `disabledExtensions`); a skill's page shows its
+command and folder, **Use in a message** starts a message with `/skill:<name>`, and **Share with team…** shares
+it. **Where omp finds skills**, under the list, turns skills or skill commands off altogether and chooses where omp
+looks (omp's, Claude Code's, `.agents`, Codex) and extra folders (**Add → Skill folder…**). Skill settings apply
+when omp restarts.
 
 ## Computer use, Git and worktrees, SSH hosts
 
@@ -678,7 +1076,11 @@ omp reads only when it starts say so and offer **Restart omp**.
 - **Git and worktrees** — the project's branch, uncommitted changes, upstream and remote. *GitHub*: omp works with
   GitHub only through the GitHub CLI (`gh`); **Sign in…** runs `gh auth login` in the terminal panel, and *Let omp
   use GitHub* adds omp's github tool. *Worktrees* lists the repository's worktrees: **Open** starts a new session
-  in one, **Remove** deletes a clean one (its branch stays; one with uncommitted changes is refused).
+  in one, **Remove** deletes a clean one (its branch stays; uncommitted changes or any open conversation using that
+  folder or a subfolder prevent removal). Removal waits until all open conversations are idle and their input
+  queues are empty. While Git is removing a worktree, new input and commands are refused without clearing the
+  draft, and opening or moving a conversation into that worktree is blocked. Cleaning up a missing worktree
+  removes only its own Git registration, not other missing worktrees.
   **New worktree…** runs omp's `/wt <branch>`: omp makes the branch from the current commit in a new folder,
   copies your uncommitted changes there and moves this conversation into it (the window follows). *Worktree
   options* and *Subagents* (each subagent in its own copy of the project) are omp's `worktree.*` and
@@ -686,6 +1088,28 @@ omp reads only when it starts say so and offer **Restart omp**.
   worktree), and SSH hosts are the other machines it reaches.
 - **Branch in the header** — next to the project name: the branch (and "· worktree" in a worktree), hidden outside
   git. Its menu copies the name, starts a new worktree from here, or opens these settings.
+- **The bell (teammates' pushes)** — the bell in the window's header lists what is new for you: per repository of
+  an open chat, the commits a teammate pushed to your branch's upstream that you don't have (*main: 3 new commits
+  from Bob, Alice — files: …*), and, while you are on a feature branch, new commits on the remote's default branch;
+  under them the team Inbox's waiting items (Accept / Decline / Open Inbox). The badge counts them. Ombra runs
+  `git fetch --quiet` (never a merge, with your own git credentials, never asking for a password) every 5 minutes,
+  when the window comes to the front and after the agent finishes a turn — for folders you trusted (Workspace
+  trust); an untrusted folder is fetched only when you press **Check now** in the bell. The folder's own git
+  configuration can't run anything: an ssh command, credential helper, upload-pack, filter or merge driver it sets
+  is replaced by your own (global) one or turned off. *Settings › General › Watch git remotes* turns it off; with
+  strict network privacy on nothing is fetched. Each repository says how safe an update is:
+  - nothing local → **Update** (`git pull --ff-only`);
+  - uncommitted changes in other files than the incoming ones → **Update (keep my changes)**: the same
+    fast-forward; git leaves your changes where they are and checks every file before writing any, so if one of
+    your changes (or an untracked file) would be touched, nothing changes at all;
+  - the incoming commits touch files you changed (uncommitted or unpushed), or you have unpushed commits → nothing
+    is updated automatically: the files changed on both sides are listed, **Ask the agent to update** puts a careful
+    request in the message box (fetch, rebase or merge keeping both sides, resolve conflicts, run the tests).
+  **Show incoming changes** opens the incoming commits and their diff in the Files viewer. While the agent is working
+  in that repository an update waits and runs when the turn ends; while an update runs, nothing new starts there
+  (Send waits, the hint over the message box says why). Typing a message in a chat whose branch is behind
+  shows a hint over the message box — *Branch main is 3 commits behind origin/main — update first?* — with
+  **Review update** (opens the bell); it never blocks sending.
 - **SSH hosts** — the machines omp's ssh tool can run commands on (keys only, no passwords), saved in omp's
   `ssh.json` for all projects or for this project. **Add host…** and **Remove** use omp's `/ssh add` and
   `/ssh remove`; **Test** connects the way omp does — the system `ssh` with your SSH config (its `HostName`, `Port`,
@@ -767,7 +1191,10 @@ way). Until the first release of this client is published, the check says *No re
 - **Restart now** (or simply quitting Ombra) installs it: once the app has closed, the new version takes the old
   one's place — same folder, so shortcuts keep working — and, with Restart now, starts. The version before is kept
   next to the app as `.<folder name>.previous` until the next update (to go back, swap the folders by hand). If the
-  swap fails, the old version is put back and Settings → Updates says why at the next start.
+  swap fails, restoration of the old version is attempted. On Windows, a failed rollback reports the backup
+  location instead of claiming restoration. Settings → Updates reports a failed update at the next start.
+  Windows uses a separate copy of the app to apply updates, not PowerShell; transient access/sharing locks
+  are retried for up to 60 seconds per filesystem operation.
 - **omp moves with the app.** Each version of the app runs one pinned omp. When an update brings a newer omp, the
   Updates page says so; after the restart the app installs it by itself (about 1.3 GB, verified like the first
   install) while omp from the previous version keeps working, then switches over once no run is active and removes
@@ -810,17 +1237,50 @@ report. Without the variable none of this runs.
 | Dictation model | `%LOCALAPPDATA%\Ombra\speech-models` | `~/Library/Application Support/Ombra/speech-models` | `~/.local/share/Ombra/speech-models` |
 | Chats without a project (one empty folder each, deleted when the chat is closed with nothing in it) | `%LOCALAPPDATA%\Ombra\chats` | `~/Library/Application Support/Ombra/chats` | `~/.local/share/Ombra/chats` |
 | The app's own errors (`client.log`) | `%LOCALAPPDATA%\Ombra\logs` | `~/Library/Logs/Ombra` | `~/.local/share/Ombra/logs` |
+| Team account and team data (`account.json`, `progress.json`, a folder per team server with its encrypted `state.db`) | `%LOCALAPPDATA%\Ombra\teams` | `~/Library/Application Support/Ombra/teams` | `~/.local/share/Ombra/teams` |
+| Team keys (this device only) | DPAPI-protected files in `%LOCALAPPDATA%\Ombra\teams\keys` | the Keychain (service `app.ombra.teams`) | the Secret Service keyring (libsecret) |
+| Nightly runtime and its profile (macOS) | — | `~/Library/Application Support/Ombra/runtimes/nightly`; profile `nightly-profile` next to the GUI settings | — |
 | omp's own data (sessions, sign-in, settings) | omp's folder (`~/.omp`), managed by omp | same | same |
 
 On Linux `XDG_CONFIG_HOME` and `XDG_DATA_HOME` move the GUI's folders. `--config <file>` or `OMBRA_CONFIG` use
-another settings file; `OMBRA_RUNTIME_DIR`, `OMBRA_STT_DIR`, `OMBRA_LOG_DIR` and `OMBRA_CHATS_DIR` move the
-runtime, the speech model, the error log and the chats' folders.
+another settings file; `OMBRA_RUNTIME_DIR`, `OMBRA_STT_DIR`, `OMBRA_LOG_DIR`, `OMBRA_CHATS_DIR` and `OMBRA_TEAMS_DIR`
+move the runtime, the speech model, the error log, the chats' folders and the team data; `OMBRA_NIGHTLY_PROFILE`
+moves Nightly's profile.
+
+Draft recovery uses the same settings path with its extension replaced by `.drafts.json`
+(for example, `ombra.local.drafts.json`). It contains local plaintext drafts and image bytes; Unix files are created
+owner-readable/writable only. This is not encrypted storage: sensitive text you type into an ordinary composer is
+part of its draft. Corrupt or unsupported journals are left intact and reported, not silently overwritten.
+Deleting a session file and replacing its recovery journal are separate operations, not an atomic or forensic
+erase. A crash or journal-write failure between them can leave older recovery data on disk; write failures are
+reported. Ordinary filesystem backups may also retain previously saved input.
+Editor recovery is stored beside the settings file in `<settings-path>.editor-recovery`. It is local plaintext,
+not team E2EE or encrypted gallery storage. Closing a file keeps its unsaved buffer; after an external change,
+save a copy or explicitly discard and reload rather than overwriting the disk version.
+Session search keeps the searchable text of saved sessions (up to 64K characters each) beside the settings file in
+`<settings-path>.session-search.json`, owner-readable/writable only, scoped to that profile and session folder. A
+session is read again only when its size or write time changes; a damaged file is rebuilt from the sessions.
+Only one Ombra window can use a configuration at a time. A second launch with the same settings file (including a
+symlinked path) shows "Ombra is already running" and changes nothing; a different `--config` opens independently.
+The lock is held by the operating system, so it is released even after a crash; the `.drafts.json.lock` file next
+to the journal is expected and should not be deleted. This coordinates new Ombra versions only: close older
+versions before switching. A chat another Ombra window or omp in a terminal has open is shown read-only with
+*Open in … (pid N)* above the message box; **Open here** asks the other one to let go and opens the chat here. A
+reply running in that other Ombra window is stopped (it says so); omp in a terminal saves what it wrote and goes on
+in a new chat file. One that does not answer within 30 seconds keeps the chat. If another window takes a chat over,
+this one turns read-only (*This chat was opened elsewhere*); what you typed stays in the message box.
 
 **Formerly OMP GUI.** Ombra was called OMP GUI. Its first start moves the old `OmpGui` folders above to `Ombra`
 (the settings file becomes `ombra.local.json`) and leaves a link named `OmpGui` in their place, because omp's
 sessions remember the chats' folders by their old path; nothing moves when an `Ombra` folder exists already or
 `OMBRA_CONFIG` is set. On macOS an *OMP GUI.app* that updated itself to Ombra renames itself to *Ombra.app* at its
 first start, and the new bundle id makes macOS ask once more for the microphone and other permissions.
+
+Known settings fields with invalid JSON types use their defaults; other valid fields still load. The warning names
+the rejected fields, not their values. Invalid and unknown fields remain in the file until explicitly changed.
+Malformed JSON is never overwritten. If the settings directory cannot be written, Settings warns that changes
+are kept for this run only. Restore write permissions and change a setting to retry saving. Pending local changes
+win for fields you changed; valid external changes to other fields are retained.
 
 The GUI writes its own settings file (atomically, keeping a `.bak` of a version you edited by hand), the folders
 above, and what you save (update packages, diagnostics). It reads omp's session folder to list sessions. Of omp's
@@ -838,6 +1298,8 @@ then — if you want — the GUI's folders from the table above, the Linux menu 
 (`~/.local/share/applications/ombra.desktop`) and update packages you downloaded by hand. On macOS remove
 Ombra from *System Settings → Privacy & Security* (Microphone, Screen Recording, Accessibility) if you granted
 them. omp's own data is left alone; remove `~/.omp` only if you want to remove omp's sessions and sign-ins too.
+Team keys stay in the system key store (on macOS the Keychain items of the service `app.ombra.teams`): sign out under
+**Settings → Account**, then delete them in Keychain Access (or your keyring) if you want them gone too.
 
 ## Troubleshooting
 
@@ -849,6 +1311,11 @@ them. omp's own data is left alone; remove `~/.omp` only if you want to remove o
 - **Dictation: the audio library needs libjack.so.0** (Linux) — no system recorder was found either. Install
   PulseAudio's or PipeWire's recorder (`pulseaudio-utils` / `pipewire-bin`) or `alsa-utils`, or the JACK client
   library (`libjack-jackd2-0` or `libjack0` on Debian/Ubuntu, `jack-audio-connection-kit` on Fedora).
+- **Dictation: the microphone delivered no audio / recorded only silence** — no samples arrived, or every recorded
+  sample was zero. The dictation bar keeps the error visible and leaves your draft untouched. Check the system's
+  default input, microphone permission and mute settings, then use **Try again**. Quiet nonzero audio is still
+  transcribed; the waveform's display floor is not used to reject speech. This check cannot diagnose a disconnected
+  device that produces nonzero noise, and does not claim to detect whether speech is present.
 - **The preview is empty** — the panel says which web engine is missing (WebKitGTK on Linux, WebView2 on
   Windows); **Open in browser** shows the page meanwhile.
 - **The window looks wrong at a large text size** — the layout follows the OS scaling; report it with a

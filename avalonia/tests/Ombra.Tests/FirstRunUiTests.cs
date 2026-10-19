@@ -5,6 +5,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.Services.Runtime;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
@@ -62,24 +63,39 @@ public sealed class FirstRunUiTests
         var tgz = RuntimeInstallerTests.Tarball();
         var installer = RuntimeInstallerTests.Installer(root, tgz, new RuntimeInstallerTests.FakeBun());
         var store = new ClientSettingsStore(Path.Combine(TestProcesses.TempDir("fr-settings"), "ombra.local.json"));
-        var s = new SessionController(LaunchVia(installer, Path.Combine(root, "omp-not-installed")), new LaunchRequest());
+        var launch = LaunchVia(installer, Path.Combine(root, "omp-not-installed"));
+        var launches = 0;
+        var s = new SessionController(request =>
+        {
+            Interlocked.Increment(ref launches);
+            return launch(request);
+        }, new LaunchRequest());
         var (w, vm) = Open(new MainViewModel(s, new AppArgs(), settings: store) { RuntimeInstaller = installer }, width, height);
         await Until(() => vm.CanRecover, "start failed");
-        Assert.Equal("Install omp to get started", vm.RecoverTitle);
-        Assert.Contains("1.3 GB", vm.RecoverHint);
+        Assert.Equal(StartProblem.NotFound, s.Snapshot().StartProblem);
+        Assert.True(vm.IsOnboarding);
+        Assert.True(vm.ShowSetupScreen);
+        Assert.Equal(1, Volatile.Read(ref launches));
         var install = w.FindControl<Button>("InstallRuntimeButton")!;
         await Until(() => Shown(install), "install offered");
-        Assert.Equal($"Install omp {RuntimePack.OmpVersion}", install.Content);
+        Assert.Same(vm.InstallRuntimeCommand, install.Command);
+        Assert.True(install.Command!.CanExecute(null));
         Assert.False(Shown(w.FindControl<Button>("SetUpProviderButton")!));
         var right = install.TranslatePoint(new Avalonia.Point(install.Bounds.Width, 0), w)!.Value.X;
         Assert.True(right <= w.Bounds.Width + 0.5, $"install button clipped at {right} > {w.Bounds.Width}");
         Shot(w, $"ui-first-run-install-{width}x{height}");
+        vm.ComposerText = "keep this unsent draft after installation";
 
         install.Command!.Execute(null);
         await Until(() => vm.Phase == SessionPhase.Ready, "omp started from the installed runtime");
         Assert.False(vm.CanRecover);
         Assert.NotNull(installer.FindInstalled());
         Assert.Equal("", vm.RuntimeInstallText);
+        Assert.NotNull(s.ProcessId);
+        Assert.Equal(2, Volatile.Read(ref launches));
+        Assert.Equal("keep this unsent draft after installation", vm.ComposerText);
+        Assert.Empty(s.Snapshot().Items.OfType<UserItem>());
+        Assert.Empty(s.Snapshot().Queued);
         await vm.DisposeAsync();
         w.Close();
     }
@@ -95,9 +111,10 @@ public sealed class FirstRunUiTests
         await Until(() => vm.ShowInstallRuntime, "install offered");
         vm.InstallRuntimeCommand.Execute(null);
         await Until(() => !vm.IsInstallingRuntime && vm.RuntimeInstallText.Length > 0, "install failed");
-        Assert.StartsWith("Installation failed:", vm.RuntimeInstallText);
-        Assert.Contains("integrity", vm.RuntimeInstallText);
-        Assert.Contains("Nothing was changed", vm.RuntimeInstallText);
+        var failed = Loc.F("Engine setup failed: {0} Nothing was changed. Try repairing the engine here.", "\0").Split('\0');
+        Assert.StartsWith(failed[0], vm.RuntimeInstallText);
+        Assert.Contains(Loc.F("{0}@{1} does not match its pinned integrity.", "@oven/bun-" + RuntimeInstallerTests.Key, RuntimePack.BunVersion), vm.RuntimeInstallText);
+        Assert.Contains(failed[1], vm.RuntimeInstallText);
         Assert.True(vm.ShowInstallRuntime); // offered again
         Assert.True(vm.CanRecover);
         Shot(w, "ui-first-run-install-failed");
@@ -116,9 +133,8 @@ public sealed class FirstRunUiTests
         var s = new SessionController(new OmpLaunchSpec { FileName = missing });
         var (w, vm) = Open(new MainViewModel(s, new AppArgs(), settings: store) { RuntimeInstaller = installer }, 1100, 720);
         await Until(() => vm.CanRecover, "start failed");
-        Assert.Equal("Install omp to get started", vm.RecoverTitle);
         Assert.False(vm.ShowInstallRuntime);
-        Assert.Contains("Settings", vm.RecoverHint);
+        Assert.Contains(Loc.T("Settings") + " → " + Loc.T("Advanced"), vm.RecoverHint); // the page's names as the user sees them
         await vm.DisposeAsync();
         w.Close();
     }
@@ -142,7 +158,7 @@ public sealed class FirstRunUiTests
         };
         (var w, vm) = Open(vm, width, height);
         await Until(() => vm.CanRecover, "start failed");
-        Assert.Equal("Connect a model provider", vm.RecoverTitle);
+        Assert.Equal(Loc.T("Connect a model provider"), vm.RecoverTitle);
         Assert.Contains("Sign in", vm.RecoverHint);
         var setUp = w.FindControl<Button>("SetUpProviderButton")!;
         await Until(() => Shown(setUp), "setup offered");
@@ -155,7 +171,7 @@ public sealed class FirstRunUiTests
         Assert.Equal(["login"], launched); // lists every provider, even those turned off for omp (NetworkPrivacy)
         Assert.Equal(TerminalKind.OmpTui, tab.Kind);
         Assert.True(vm.IsTerminalOpen);
-        Assert.Contains("Sign in", vm.ComposerMessage);
+        Assert.Contains(Loc.T("Sign in to a model provider in the terminal beside the conversation: choose one with the arrow keys and Enter, finish in the browser (or paste an API key), then press Try again."), vm.ComposerMessage);
         Assert.DoesNotContain("/login", vm.ComposerMessage);
         vm.CloseTerminalCommand.Execute(tab);
         await vm.DisposeAsync();

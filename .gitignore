@@ -35,3 +35,11 @@ Thumbs.db
 .workbuddy/
 .qoder/
 .temp/
+
+# ===== Build output outside avalonia/ =====
+server/native/ombra-core/target/
+server/**/bin/
+server/**/obj/
+!server/native/ombra-core/src/bin/
+avalonia/vendor/**/bin/
+avalonia/vendor/**/obj/

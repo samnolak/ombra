@@ -30,7 +30,8 @@ public sealed partial class AttachmentViewModel : ObservableObject, IDisposable
     public void Dispose() => Preview.Dispose();
 }
 
-/// <summary>A message sent while omp works, until omp delivers it: × withdraws it, ↑ in an empty box edits it.</summary>
+/// <summary>A message sent while omp works, until omp delivers it: × withdraws it, ↑ in an empty box edits it, Send now
+/// makes omp read a follow-up at its next step.</summary>
 public sealed partial class QueuedItemViewModel : ObservableObject, IDisposable
 {
     private readonly MainViewModel _owner;
@@ -42,16 +43,40 @@ public sealed partial class QueuedItemViewModel : ObservableObject, IDisposable
         Previews = [.. model.Images.Select(i => new ImagePreview(i, () => model.Images))];
     }
 
-    public QueuedMessage Model { get; }
+    public QueuedMessage Model
+    {
+        get => _model;
+        internal set
+        {
+            if (!SetProperty(ref _model, value)) return;
+            // Promotion turns a follow-up into a steer: label, tooltip and Send now follow.
+            OnPropertyChanged(nameof(Kind));
+            OnPropertyChanged(nameof(Tooltip));
+            OnPropertyChanged(nameof(CanSendNow));
+            SendNowCommand.NotifyCanExecuteChanged();
+        }
+    }
+    private QueuedMessage _model = null!;
     public IReadOnlyList<ImagePreview> Previews { get; }
     public bool HasImages => Previews.Count > 0;
     public string Text => Model.Text;
-    public string Kind => Model.Kind == QueueKind.Steer ? Loc.T("Steer") : Loc.T("Queued");
+    public string Kind => Model.Kind switch
+    {
+        QueueKind.Steer => Loc.T("Steer"),
+        QueueKind.BuiltinCommand => Loc.T("Command"),
+        _ => Loc.T("Queued"),
+    };
     public string Tooltip => Model.Kind == QueueKind.Steer
         ? Loc.T("omp reads this at its next step. ↑ in the empty message box edits it.")
         : Loc.T("Sent when omp finishes its current work. ↑ in the empty message box edits it.");
 
+    /// <summary>Only omp's follow-up queue can be promoted; a steer is already read at the next step.</summary>
+    public bool CanSendNow => Model is { Kind: QueueKind.FollowUp, Recovered: false };
+    public string SendNowTooltip => Loc.T("Send now: omp reads this at its next step instead of after its current work.");
+
+    [RelayCommand(CanExecute = nameof(CanSendNow))] private Task SendNow() => _owner.SendQueuedNowAsync(this);
     [RelayCommand] private Task Remove() => _owner.WithdrawQueuedAsync(this, edit: false);
+    [RelayCommand] private Task Edit() => _owner.WithdrawQueuedAsync(this, edit: true);
 
     public void Dispose()
     {
@@ -74,12 +99,19 @@ public sealed partial class PastedTextViewModel(string text, MainViewModel owner
         get
         {
             var lines = Text.Split('\n', 9);
-            var head = string.Join("\n", lines.Take(8).Select(l => l.Length > 120 ? l[..120] + "…" : l.TrimEnd('\r')));
+            var head = string.Join("\n", lines.Take(8).Select(l => l.Length > 120 ? l[..GraphemeText.PrefixLength(l, 120)] + "…" : l.TrimEnd('\r')));
             return lines.Length > 8 ? head + "\n…" : head;
         }
     }
 
     [RelayCommand] private void Remove() => owner.RemovePastedText(this);
+    [RelayCommand]
+    private void Expand()
+    {
+        if (owner.IsReadOnly) return;
+        owner.InsertMessageText(Text);
+        owner.RemovePastedText(this);
+    }
 }
 
 /// <summary>omp's thinking levels in words, for the thinking pill and its menu.</summary>
@@ -144,8 +176,8 @@ public sealed partial class MainViewModel
     public bool HasAttachments => Attachments.Count > 0;
     public bool HasPastedTexts => PastedTexts.Count > 0;
     public bool HasQueued => QueuedMessages.Count > 0;
-    public bool CanQueue => IsRunning && Phase == SessionPhase.Running && HasContent;
-    private bool HasContent => !string.IsNullOrWhiteSpace(ComposerText) || Attachments.Count > 0 || PastedTexts.Count > 0 || Preview.HasAnnotations || CodeComments.Count > 0;
+    public bool CanQueue => !IsReadOnly && IsRunning && Phase == SessionPhase.Running && HasContent;
+    private bool HasContent => !string.IsNullOrWhiteSpace(ComposerText) || Attachments.Count > 0 || PastedTexts.Count > 0 || Marks.HasOpen;
 
     /// <summary>A paste longer than this (characters) or than <see cref="LongPasteLines"/> lines becomes a chip.</summary>
     public const int LongPasteChars = 800;
@@ -155,6 +187,35 @@ public sealed partial class MainViewModel
     {
         var t = text.TrimEnd('\r', '\n');
         return t.Length == 0 ? 0 : t.Count(c => c == '\n') + 1;
+    }
+
+    public string CleanPastedText(string text)
+    {
+        var cleaned = PromptText.Clean(text);
+        if (cleaned.Removed > 0)
+            ComposerMessage = Loc.F("Removed invisible characters: {0}. Review the pasted text.", cleaned.Removed);
+        return cleaned.Text;
+    }
+
+    private bool PrepareComposerForSend()
+    {
+        var cleaned = PromptText.Clean(ComposerText);
+        if (!ReferenceEquals(cleaned.Text, ComposerText)) ComposerText = cleaned.Text;
+        var removed = cleaned.Removed;
+        var changedPastes = false;
+        for (var i = 0; i < PastedTexts.Count; i++)
+        {
+            var paste = PromptText.Clean(PastedTexts[i].Text);
+            removed += paste.Removed;
+            if (ReferenceEquals(paste.Text, PastedTexts[i].Text)) continue;
+            PastedTexts[i] = new PastedTextViewModel(paste.Text, this);
+            changedPastes = true;
+        }
+        if (changedPastes) AttachmentsChanged();
+        if (removed == 0) return true;
+        // Cleanup can expose a leading slash command. Show the result before any classification or dispatch.
+        ComposerMessage = Loc.F("Removed invisible characters: {0}. Review the text and send again.", removed);
+        return false;
     }
 
     /// <summary>
@@ -193,19 +254,33 @@ public sealed partial class MainViewModel
     private void CloseShortcuts()
     {
         IsShortcutsOpen = false;
-        FocusComposerRequested?.Invoke();
     }
 
     /// <summary>
-    /// Shift+Tab in the message box (Claude Code): Ask → Accept edits → Bypass → Ask. Bypass still asks first: the
-    /// view opens the permission menu on its confirmation, and nothing changes until the user confirms there. Another
-    /// Shift+Tab while that confirmation waits moves on past Bypass: a key press is never taken as the confirmation.
+    /// Shift+Tab in the message box (Claude Code): Ask → Accept edits → Plan mode → Bypass → Ask. Plan mode is a mode of
+    /// the session over the permission mode, offered when omp has it (MainViewModel.PlanMode.cs); leaving it moves on to
+    /// the step after it. Bypass still asks first: the view opens the permission menu on its confirmation, and nothing
+    /// changes until the user confirms there. Another Shift+Tab while that confirmation waits moves on past Bypass: a key
+    /// press is never taken as the confirmation.
     /// </summary>
     public void CycleApprovalMode()
     {
+        if (IsReadOnly) return;
+        if (IsPlanMode && !ConfirmYolo)
+        {
+            _ = SetPlanModeAsync(false);
+            // Plan entered from Bypass (the menu) has nothing of Bypass to step to: on to Ask
+            _ = SetApprovalModeCommand.ExecuteAsync(ShownApprovalMode == "yolo" ? "always-ask" : "yolo");
+            return;
+        }
         var modes = ApprovalModes.Select(m => m.Mode).ToList();
         var from = ConfirmYolo ? "yolo" : ShownApprovalMode ?? "";
         ConfirmYolo = false;
+        if (from == "write" && IsPlanModeAvailable && !IsPlanActionRunning)
+        {
+            _ = SetPlanModeAsync(true);
+            return;
+        }
         var next = modes[(modes.IndexOf(from) + 1) % modes.Count];
         _ = SetApprovalModeCommand.ExecuteAsync(next);
     }
@@ -215,9 +290,12 @@ public sealed partial class MainViewModel
 
     partial void OnComposerTextChanged(string value)
     {
+        ComposerInputChanged();
         UpdateCommandSuggestions();
         OnPropertyChanged(nameof(CanQueue));
         SteerCommand.NotifyCanExecuteChanged();
+        InterruptAndSendCommand.NotifyCanExecuteChanged();
+        SaveDraft();
     }
 
     public bool TryAddImage(ImageAttachment? image, string source)
@@ -279,11 +357,14 @@ public sealed partial class MainViewModel
 
     private void AttachmentsChanged()
     {
+        ComposerInputChanged();
         OnPropertyChanged(nameof(HasAttachments));
         OnPropertyChanged(nameof(HasPastedTexts));
         OnPropertyChanged(nameof(CanQueue));
         SendCommand.NotifyCanExecuteChanged();
         SteerCommand.NotifyCanExecuteChanged();
+        InterruptAndSendCommand.NotifyCanExecuteChanged();
+        SaveDraft();
     }
 
     [RelayCommand]
@@ -293,52 +374,83 @@ public sealed partial class MainViewModel
         await AddFilesAsync(await pick());
     }
 
-    /// <summary>Takes the composer content (text, long pastes, code and page comments, images) and clears it: the message is
-    /// being sent, so the conversation goes to its latest message (chat apps do, even when the reader had scrolled up).</summary>
-    private (string Text, ImageAttachment[] Images) TakeComposer()
+    /// <summary>Builds a message without mutating any input; validation and durable staging precede clearing.</summary>
+    private (string Text, ImageAttachment[] Images) TakeComposer() => BuildComposer(preserveWhitespace: false);
+
+    private (string Text, ImageAttachment[] Images) BuildComposer(bool preserveWhitespace)
     {
-        var text = ComposerText.Trim();
-        // Long pastes go in full after what was typed (the chips stood for them)
-        foreach (var p in PastedTexts) text = text.Length > 0 ? text + "\n\n" + p.Text.TrimEnd() : p.Text.TrimEnd();
-        // Comments on the code and on the page follow (MainViewModel.CodeComments.cs)
+        var text = preserveWhitespace ? ComposerText : ComposerText.Trim();
+        // Long pastes go in full after what was typed (the chips stood for them).
+        foreach (var p in PastedTexts)
+        {
+            var paste = preserveWhitespace ? p.Text : p.Text.TrimEnd();
+            text = text.Length > 0 ? text + "\n\n" + paste : paste;
+        }
+        // Open local marks follow (MainViewModel.Marks.cs; resolved ones stay out)
         text = WithComments(text);
         var images = Attachments.Select(a => a.Model).ToArray();
+        return (text, images);
+    }
+
+    private void ClearComposer()
+    {
+        _changingDraft = true;
         ComposerText = "";
         foreach (var a in Attachments) a.Dispose();
         Attachments.Clear();
         PastedTexts.Clear();
+        Marks.RemoveSent();
+        Preview.IsAnnotating = false;
+        _changingDraft = false;
         ComposerMessage = "";
         AttachmentsChanged();
         ScrollToLatestRequested?.Invoke();
-        return (text, images);
     }
 
-    private bool CanSteer() => Phase == SessionPhase.Running && HasContent;
+    private bool CanSteer() => !IsReadOnly && Phase == SessionPhase.Running && HasContent;
 
     [RelayCommand(CanExecute = nameof(CanSteer))]
     private async Task SteerAsync()
     {
+        if (IsReadOnly) return;
+        using var admission = AdmitWorktreeChat(null);
+        if (admission is null) return;
         var open = _open;
-        (string Text, ImageAttachment[] Images) content = ("", []);
+        string? submission = null;
         try
         {
+            if (!PrepareComposerForSend()) return;
             if (HandleTerminalOnlyCommand(ComposerText)) return;
-            content = TakeComposer();
-            await open.Controller.QueueAsync(QueueKind.Steer, content.Text, content.Images, _cts.Token);
+            var content = TakeComposer();
+            submission = StageSubmission(open, content, fromComposer: true);
+            var accepted = await open.Controller.QueueAsync(QueueKind.Steer, content.Text, content.Images, _cts.Token, submission);
+            FinishSubmission(open, submission, accepted);
             ApplyIfShown(open);
         }
-        catch (OmpNotRunningException) { if (open == _open) PutBackUnsent(content); }
-        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch (Exception e) when (e is OmpNotRunningException or ArgumentException or IOException or UnauthorizedAccessException or OperationCanceledException)
+        {
+            if (submission is not null) FinishSubmission(open, submission, accepted: false);
+            if (open == _open) ComposerMessage = e.Message;
+        }
     }
 
     private void ApplyQueue(SessionSnapshot s)
     {
-        if (QueuedMessages.Select(q => q.Model).SequenceEqual(s.Queued)) return;
+        var pending = s.Queued.Where(q => !q.Recovered).ToArray();
+        if (QueuedMessages.Select(q => q.Model).SequenceEqual(pending)) return;
         // Messages still queued keep their rows (and decoded previews); the delivered and withdrawn ones go
         var kept = QueuedMessages.ToDictionary(q => q.Model.Seq);
         QueuedMessages.Clear();
-        foreach (var q in s.Queued)
-            QueuedMessages.Add(kept.Remove(q.Seq, out var row) ? row : new QueuedItemViewModel(q, this));
+        foreach (var q in pending)
+        {
+            if (kept.Remove(q.Seq, out var row))
+            {
+                // Local follow-up admission changes its route, not its text, images or visible label.
+                row.Model = q;
+                QueuedMessages.Add(row);
+            }
+            else QueuedMessages.Add(new QueuedItemViewModel(q, this));
+        }
         foreach (var gone in kept.Values) gone.Dispose();
         OnPropertyChanged(nameof(HasQueued));
     }
@@ -351,7 +463,7 @@ public sealed partial class MainViewModel
         return true;
     }
 
-    private readonly HashSet<long> _withdrawing = [];
+    private readonly HashSet<(SessionController Controller, long Sequence)> _withdrawing = [];
 
     /// <summary>
     /// Takes a queued message back from omp before it is delivered; with <paramref name="edit"/> its text and images
@@ -359,33 +471,50 @@ public sealed partial class MainViewModel
     /// </summary>
     internal async Task WithdrawQueuedAsync(QueuedItemViewModel item, bool edit)
     {
-        if (!_withdrawing.Add(item.Model.Seq)) return;
+        var open = _open;
+        if (!_withdrawing.Add((open.Controller, item.Model.Seq))) return;
         try
         {
             IReadOnlyList<ImageAttachment>? images;
-            try { images = await Session.RemoveQueuedAsync(item.Model, _cts.Token); }
+            try { images = await open.Controller.RemoveQueuedAsync(item.Model, _cts.Token, recover: edit); }
             catch (Ombra.Rpc.RpcCommandException)
             {
                 ComposerMessage = Loc.T("This omp can’t take back queued messages (omp 18.4.4 or later can).");
                 return;
             }
-            Apply(Session.Snapshot());
+            ApplyIfShown(open);
             if (images is null)
             {
                 ComposerMessage = Loc.T("omp already has that message.");
                 return;
             }
             ComposerMessage = "";
-            if (!edit) return;
-            ComposerText = ComposerText.Length == 0 ? item.Text : item.Text + "\n" + ComposerText;
-            foreach (var image in images) TryAddImage(image, image.Name);
+            if (!edit && open == _open)
+            {
+                var restored = false;
+                var text = item.Model.Text;
+                var card = new SessionCardViewModel("brief", "IconTrash", Loc.T("Message removed from queue"),
+                    Loc.T("Undo restores it to the composer without sending."));
+                card.Primary = new SessionCardAction(Loc.T("Undo"), new RelayCommand(() =>
+                {
+                    if (restored || !_opens.ContainsKey(open.Controller)) return;
+                    restored = true;
+                    CloseSessionCard();
+                    AppendRecovered(open, text, images);
+                    SaveDraft(open);
+                    FlushDrafts();
+                    if (open == _open) FocusComposerRequested?.Invoke();
+                }));
+                ShowTimedCard(card, UndoCardDuration);
+            }
+            if (!edit || open != _open) return;
             CaretToEndRequested?.Invoke();
             FocusComposerRequested?.Invoke();
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
         finally
         {
-            _withdrawing.Remove(item.Model.Seq);
+            _withdrawing.Remove((open.Controller, item.Model.Seq));
         }
     }
 }

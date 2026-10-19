@@ -5,6 +5,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Threading;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.ClientCore;
@@ -59,12 +60,12 @@ public sealed class SidebarShellTests
     public void Ages_read_like_claude_code()
     {
         var now = new DateTimeOffset(2026, 10, 7, 12, 0, 0, TimeSpan.Zero);
-        Assert.Equal("now", SessionItemViewModel.Relative(now.AddSeconds(-59), now));
-        Assert.Equal("now", SessionItemViewModel.Relative(now.AddMinutes(3), now)); // a clock running behind
-        Assert.Equal("1m", SessionItemViewModel.Relative(now.AddSeconds(-61), now));
-        Assert.Equal("5m", SessionItemViewModel.Relative(now.AddMinutes(-5), now));
-        Assert.Equal("3h", SessionItemViewModel.Relative(now.AddHours(-3.5), now));
-        Assert.Equal("2d", SessionItemViewModel.Relative(now.AddDays(-2), now));
+        Assert.Equal(Loc.T("now"), SessionItemViewModel.Relative(now.AddSeconds(-59), now));
+        Assert.Equal(Loc.T("now"), SessionItemViewModel.Relative(now.AddMinutes(3), now)); // a clock running behind
+        Assert.Equal(Loc.F("{0}m", 1), SessionItemViewModel.Relative(now.AddSeconds(-61), now));
+        Assert.Equal(Loc.F("{0}m", 5), SessionItemViewModel.Relative(now.AddMinutes(-5), now));
+        Assert.Equal(Loc.F("{0}h", 3), SessionItemViewModel.Relative(now.AddHours(-3.5), now));
+        Assert.Equal(Loc.F("{0}d", 2), SessionItemViewModel.Relative(now.AddDays(-2), now));
         // From a week on: the date, without the year in this year
         var old = SessionItemViewModel.Relative(now.AddDays(-30), now);
         Assert.DoesNotContain("2026", old);
@@ -99,7 +100,7 @@ public sealed class SidebarShellTests
         await Until(() => vm.SessionGroups.Single().Items[0].Title == "first topic", "pinned first in its project");
         Assert.Equal(["first topic", "second topic"], vm.SessionGroups.Single().Items.Select(i => i.Title));
         Assert.Contains(first.Model.Id, SessionPins.Read(SessionPins.PathFor(first.Model.Path)));
-        Assert.Equal("Unpin", vm.Sessions.Single(x => x.Title == "first topic").PinLabel);
+        Assert.Equal(Loc.T("Unpin"), vm.Sessions.Single(x => x.Title == "first topic").PinLabel);
 
         await vm.TogglePinItemCommand.ExecuteAsync(vm.Sessions.Single(x => x.Title == "first topic"));
         await Until(() => vm.SessionGroups.Single().Items[0].Title == "second topic", "unpinned");
@@ -181,7 +182,7 @@ public sealed class SidebarShellTests
         await Until(() => vm.HasDialog, "approval asked");
         vm.RequestCatalogRefresh();
         await Until(() => vm.Sessions.FirstOrDefault(x => x.IsCurrent) is { Status: SessionStatus.Waiting }, "waiting dot");
-        Assert.Equal("Needs your input", vm.Sessions.Single(x => x.IsCurrent).StatusText);
+        Assert.Equal(Loc.T("Needs your input"), vm.Sessions.Single(x => x.IsCurrent).StatusText);
         await vm.DisposeAsync();
         w.Close();
     }

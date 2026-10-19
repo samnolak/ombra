@@ -7,12 +7,19 @@ using Ombra.ClientCore;
 
 namespace Ombra.App.ViewModels;
 
-/// <summary>One task of the plan: omp's todo item (pending, in_progress, completed, abandoned, blocked).</summary>
-public sealed partial class PlanTaskViewModel(string content, string status, string? blocker, bool isCurrent) : ObservableObject
+/// <summary>
+/// One task of the plan: omp's todo item (pending, in_progress, completed, abandoned, blocked). A task of the current
+/// plan can be edited (<paramref name="editor"/>: its place is <paramref name="phase"/>, <paramref name="index"/>);
+/// an earlier plan's tasks are only a record.
+/// </summary>
+public sealed partial class PlanTaskViewModel(string content, string status, string? blocker, bool isCurrent,
+    PlanViewModel? editor = null, int phase = -1, int index = -1) : ObservableObject
 {
     public string Content { get; } = content;
     public string Status { get; } = status;
     public string? Blocker { get; } = blocker;
+    internal int Phase { get; } = phase;
+    internal int Index { get; } = index;
     public bool IsDone => Status is "completed" or "done";
     public bool IsActive => Status is "in_progress" or "active";
     public bool IsDropped => Status is "abandoned" or "cancelled" or "canceled";
@@ -41,6 +48,49 @@ public sealed partial class PlanTaskViewModel(string content, string status, str
     private string _activity = "";
 
     public bool HasActivity => Activity.Length > 0;
+
+    // ── Editing (the current plan only): each change goes to omp as the whole list (set_todos) ──
+
+    /// <summary>The task can be changed here (a task of the current plan, with an omp session to send it to).</summary>
+    public bool CanEdit => editor is { IsEditable: true };
+
+    /// <summary>The text is being edited in place.</summary>
+    [ObservableProperty] private bool _isEditing;
+    [ObservableProperty] private string _editText = "";
+
+    /// <summary>The box: done ↔ to do (a dropped task comes back as to do).</summary>
+    [RelayCommand] private Task ToggleDone() => SetStatus(IsDone ? "pending" : "completed");
+
+    /// <summary><paramref name="value"/>: pending, in_progress, completed or abandoned.</summary>
+    [RelayCommand]
+    private Task SetStatus(string? value) =>
+        editor is not null && value is "pending" or "in_progress" or "completed" or "abandoned" && value != Status
+            ? editor.ChangeAsync(this, t => t with { Status = value!, Blocker = null })
+            : Task.CompletedTask;
+
+    [RelayCommand] private Task MoveUp() => editor?.MoveAsync(this, -1) ?? Task.CompletedTask;
+    [RelayCommand] private Task MoveDown() => editor?.MoveAsync(this, +1) ?? Task.CompletedTask;
+    [RelayCommand] private Task Delete() => editor?.RemoveAsync(this) ?? Task.CompletedTask;
+
+    [RelayCommand]
+    private void StartEdit()
+    {
+        if (!CanEdit) return;
+        EditText = Content;
+        IsEditing = true;
+    }
+
+    [RelayCommand] private void CancelEdit() => IsEditing = false;
+
+    /// <summary>The new text replaces the task's; empty or unchanged changes nothing.</summary>
+    [RelayCommand]
+    private Task CommitEdit()
+    {
+        if (!IsEditing) return Task.CompletedTask;
+        IsEditing = false;
+        var text = EditText.Trim();
+        return editor is null || text.Length == 0 || text == Content ? Task.CompletedTask : editor.ChangeAsync(this, t => t with { Content = text });
+    }
 }
 
 public sealed record PlanPhaseViewModel(string Name, IReadOnlyList<PlanTaskViewModel> Tasks)
@@ -90,9 +140,11 @@ public sealed partial class PlanViewModel : ObservableObject
     /// <summary>The plan's states in order: what the todo tool committed, and what get_state reported besides.</summary>
     private readonly List<Entry> _timeline = [];
 
-    public PlanViewModel(MainViewModel? owner = null)
+    /// <param name="save">Sends an edited list to omp (set_todos); by default the window's session. None: read-only.</param>
+    public PlanViewModel(MainViewModel? owner = null, Func<IReadOnlyList<TodoPhase>, Task<bool>>? save = null)
     {
         Owner = owner;
+        _save = save ?? (owner is null ? null : owner.SaveTodosAsync);
         if (owner is not null)
             owner.PropertyChanged += (_, e) =>
             {
@@ -101,6 +153,84 @@ public sealed partial class PlanViewModel : ObservableObject
     }
 
     public MainViewModel? Owner { get; }
+
+    // ── Editing: the user's changes to omp's list (set_todos). Nothing changes here until omp has taken the change:
+    // the list shown is always omp's, and the change is in History like the agent's own. ──
+
+    private readonly Func<IReadOnlyList<TodoPhase>, Task<bool>>? _save;
+
+    /// <summary>A change is on its way to omp: until omp answers, no other change is taken (each builds on omp's list).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanEdit))]
+    private bool _isSaving;
+
+    /// <summary>The plan can be edited here (an omp session to send it to).</summary>
+    public bool IsEditable => _save is not null;
+
+    public bool CanEdit => IsEditable && !IsSaving;
+
+    /// <summary>Why the last change did not reach omp.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasEditError))]
+    private string _editError = "";
+
+    public bool HasEditError => EditError.Length > 0;
+
+    /// <summary>The "Add a task" box.</summary>
+    [ObservableProperty] private string _newTaskText = "";
+
+    /// <summary>Adds the box's text as a task to do at the end of the plan (a new plan when there is none).</summary>
+    [RelayCommand]
+    private Task AddTask()
+    {
+        var text = NewTaskText.Trim();
+        if (text.Length == 0 || !CanEdit) return Task.CompletedTask;
+        var plan = Editable();
+        if (plan.Count == 0) plan.Add(("Todos", []));
+        plan[^1].Tasks.Add(new TodoTask(text, "pending"));
+        return SaveAsync(plan, () => NewTaskText = "");
+    }
+
+    internal Task ChangeAsync(PlanTaskViewModel task, Func<TodoTask, TodoTask> change) =>
+        Edit(task, (tasks, i) => tasks[i] = change(tasks[i]));
+
+    /// <summary>Moves a task up or down within its phase.</summary>
+    internal Task MoveAsync(PlanTaskViewModel task, int by) =>
+        Edit(task, (tasks, i) =>
+        {
+            var to = Math.Clamp(i + by, 0, tasks.Count - 1);
+            if (to == i) return false;
+            (tasks[i], tasks[to]) = (tasks[to], tasks[i]);
+            return true;
+        });
+
+    internal Task RemoveAsync(PlanTaskViewModel task) => Edit(task, (tasks, i) => tasks.RemoveAt(i));
+
+    private Task Edit(PlanTaskViewModel task, Action<List<TodoTask>, int> change) =>
+        Edit(task, (tasks, i) => { change(tasks, i); return true; });
+
+    private Task Edit(PlanTaskViewModel task, Func<List<TodoTask>, int, bool> change)
+    {
+        if (!CanEdit) return Task.CompletedTask;
+        var plan = Editable();
+        if (task.Phase < 0 || task.Phase >= plan.Count || task.Index < 0 || task.Index >= plan[task.Phase].Tasks.Count) return Task.CompletedTask;
+        return change(plan[task.Phase].Tasks, task.Index) ? SaveAsync(plan, null) : Task.CompletedTask;
+    }
+
+    /// <summary>The current plan as lists to change (a phase left empty is dropped when sent).</summary>
+    private List<(string Name, List<TodoTask> Tasks)> Editable() => [.. _current.Select(p => (p.Name, p.Tasks.ToList()))];
+
+    private async Task SaveAsync(List<(string Name, List<TodoTask> Tasks)> plan, Action? saved)
+    {
+        IsSaving = true;
+        try
+        {
+            var ok = await _save!([.. plan.Where(p => p.Tasks.Count > 0).Select(p => new TodoPhase(p.Name, p.Tasks))]);
+            EditError = ok ? "" : Loc.T("The change did not reach omp. Try again.");
+            if (ok) saved?.Invoke();
+        }
+        finally { IsSaving = false; }
+    }
 
     public ObservableCollection<PlanPhaseViewModel> Phases { get; } = [];
     public ObservableCollection<EarlierPlanViewModel> EarlierPlans { get; } = [];
@@ -249,14 +379,16 @@ public sealed partial class PlanViewModel : ObservableObject
         for (var i = 0; i < EarlierPlans.Count; i++) EarlierPlans[i].IsExpanded = expanded.Contains(EarlierPlans.Count - 1 - i);
     }
 
-    /// <summary>"14:32" today, "Sep 24 14:32" before; empty when unknown.</summary>
+    /// <summary>"14:32" today, "Sep 24 14:32" before (the month and day as the sidebar's dates, in the user's culture);
+    /// empty when unknown.</summary>
     private static string Time(DateTimeOffset? at)
     {
         if (at is not { } t) return "";
         var local = t.ToLocalTime();
+        var culture = CultureInfo.CurrentCulture;
         return local.Date == DateTimeOffset.Now.Date
-            ? local.ToString("HH:mm", CultureInfo.InvariantCulture)
-            : local.ToString("MMM d HH:mm", CultureInfo.InvariantCulture);
+            ? local.ToString("HH:mm", culture)
+            : local.ToString(culture.DateTimeFormat.MonthDayPattern.Replace("MMMM", "MMM") + " HH:mm", culture);
     }
 
     private static string When(DateTimeOffset? at) => at is null ? "" : Loc.T(" at ") + Time(at);
@@ -281,7 +413,7 @@ public sealed partial class PlanViewModel : ObservableObject
     private void Retire(List<TodoPhase> plan, string when)
     {
         var (done, total) = Count(plan);
-        EarlierPlans.Insert(0, new EarlierPlanViewModel(when, Loc.F("{0} of {1} done", done, total), Build(plan, current: false)));
+        EarlierPlans.Insert(0, new EarlierPlanViewModel(when, Loc.F("{0} of {1} done", done, total), Build(plan, null)));
         while (EarlierPlans.Count > MaxEarlierPlans) EarlierPlans.RemoveAt(EarlierPlans.Count - 1);
     }
 
@@ -289,7 +421,7 @@ public sealed partial class PlanViewModel : ObservableObject
     {
         Replay();
         Phases.Clear();
-        foreach (var p in Build(_current, current: true)) Phases.Add(p);
+        foreach (var p in Build(_current, this)) Phases.Add(p);
         var (done, total) = Count(_current);
         DoneCount = done;
         TotalCount = total;
@@ -301,7 +433,7 @@ public sealed partial class PlanViewModel : ObservableObject
         // Nothing current: the last plan is open (a finished plan omp cleared is still there to read)
         if (!HasPlan && EarlierPlans.Count > 0 && EarlierPlans.All(e => !e.IsExpanded)) EarlierPlans[0].IsExpanded = true;
         HasHistory = Changes.Count > 0;
-        HistoryTitle = Changes.Count == 0 ? Loc.T("History") : Loc.F("History · {0}", Changes.Count == 1 ? Loc.T("1 change") : Loc.F("{0} changes", Changes.Count));
+        HistoryTitle = Changes.Count == 0 ? Loc.T("History") : Loc.Plural(Changes.Count, "History · {0} change", "History · {0} changes");
         UpdateActivity();
     }
 
@@ -321,12 +453,13 @@ public sealed partial class PlanViewModel : ObservableObject
 
     internal static bool IsDropped(string? status) => status is "abandoned" or "cancelled" or "canceled";
 
-    private static List<PlanPhaseViewModel> Build(List<TodoPhase> plan, bool current)
+    /// <summary>The view of a plan; <paramref name="editor"/> for the current one (its tasks can be edited and one is current).</summary>
+    private static List<PlanPhaseViewModel> Build(List<TodoPhase> plan, PlanViewModel? editor)
     {
-        var active = current ? plan.SelectMany(p => p.Tasks).FirstOrDefault(t => t.Status is "in_progress" or "active") : null;
+        var active = editor is not null ? plan.SelectMany(p => p.Tasks).FirstOrDefault(t => t.Status is "in_progress" or "active") : null;
         // Phase names only when there is more than one (a single "Todos" phase is just the list)
-        return [.. plan.Select(p => new PlanPhaseViewModel(plan.Count > 1 ? p.Name : "",
-            [.. p.Tasks.Select(t => new PlanTaskViewModel(t.Content, t.Status, t.Blocker, ReferenceEquals(t, active)))]))];
+        return [.. plan.Select((p, pi) => new PlanPhaseViewModel(plan.Count > 1 ? p.Name : "",
+            [.. p.Tasks.Select((t, ti) => new PlanTaskViewModel(t.Content, t.Status, t.Blocker, ReferenceEquals(t, active), editor, pi, ti))]))];
     }
 
     private static List<TodoTask> Flatten(List<TodoPhase> plan) => [.. plan.SelectMany(p => p.Tasks)];

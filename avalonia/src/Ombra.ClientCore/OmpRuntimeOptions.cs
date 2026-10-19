@@ -5,7 +5,11 @@ using Ombra.Rpc;
 namespace Ombra.ClientCore;
 
 /// <summary>What changes between omp launches of one window: project folder, session to resume, approval mode.</summary>
-public sealed record LaunchRequest(string? WorkingDirectory = null, string? ResumeSessionFile = null, string? ApprovalMode = null);
+public sealed record LaunchRequest(string? WorkingDirectory = null, string? ResumeSessionFile = null, string? ApprovalMode = null,
+    bool ResumeOnCurrentModel = false)
+{
+    public bool ReadOnly { get; init; }
+}
 
 /// <summary>
 /// Where omp lives and how to start it. Machine-specific, so it is read from a local JSON file
@@ -13,16 +17,16 @@ public sealed record LaunchRequest(string? WorkingDirectory = null, string? Resu
 /// </summary>
 public sealed record OmpRuntimeOptions
 {
-    /// <summary><c>omp.exe</c>, or a runtime such as <c>bun.exe</c> when <see cref="PrefixArgs"/> names the omp CLI entry. Default: <c>omp</c> on PATH.</summary>
+    /// <summary>The app-owned engine executable, or a runtime when <see cref="PrefixArgs"/> names its host entry.</summary>
     public string? Command { get; init; }
-    /// <summary>Arguments before omp's own (e.g. the path to <c>cli.ts</c> for a Bun runtime pack).</summary>
+    /// <summary>Executable-prefix arguments identifying the shared engine host.</summary>
     public string[] PrefixArgs { get; init; } = [];
+    /// <summary>Executable-prefix arguments for explicit CLI management and terminal launches, not GUI sessions.</summary>
+    public string[] ManagementPrefixArgs { get; init; } = [];
     /// <summary>omp profile (sets <c>OMP_PROFILE</c>). The existing <c>harness</c> profile is used in place, never copied.</summary>
     public string? Profile { get; init; }
     /// <summary><c>provider/model</c> for this session (<c>--model</c>). Null keeps the profile's default model role.</summary>
     public string? Model { get; init; }
-    /// <summary><c>rpc-ui</c> (session has a UI: tool approvals are asked through extension UI requests) or <c>rpc</c>.</summary>
-    public string Mode { get; init; } = "rpc-ui";
     /// <summary><c>--approval-mode</c>: always-ask | write | yolo. Default write (edits run, commands ask).</summary>
     public string? ApprovalMode { get; init; } = "write";
     /// <summary><c>--thinking</c> for a new session: off | minimal | low | medium | high | xhigh | max | auto. Null (or a
@@ -42,6 +46,8 @@ public sealed record OmpRuntimeOptions
     public string? Language { get; init; }
     /// <summary>OS notification when a run ends or omp asks while the window is in the background (default on).</summary>
     public bool? Notifications { get; init; }
+    /// <summary>Watch the open projects' git remotes in the background (git fetch, never a merge; default on; off under strict network privacy).</summary>
+    public bool? WatchGitRemotes { get; init; }
     /// <summary>How the message box sends: <c>enter</c> (default; Shift+Enter adds a line) or <c>mod-enter</c> (⌘/Ctrl+Enter sends, Enter adds a line).</summary>
     public string? SendKey { get; init; }
     /// <summary>Update manifest address (https, signed with the release key); unset = this client's release feed.</summary>
@@ -58,16 +64,24 @@ public sealed record OmpRuntimeOptions
     public string[]? PinnedProjects { get; init; }
     /// <summary>Names the user gave project folders in the sidebar (folder → name); a folder not here shows its own name.</summary>
     public Dictionary<string, string>? ProjectNames { get; init; }
+    /// <summary>Session files archived from the sidebar: listed only under Archived (nothing is deleted on disk).</summary>
+    public string[]? ArchivedSessions { get; init; }
+    /// <summary>Chats explicitly marked unread by the user, until opened or marked read.</summary>
+    public string[]? MarkedUnreadSessions { get; init; }
     /// <summary>The sidebar's width as last dragged (220–480 px); null means the default.</summary>
     public double? SidebarWidth { get; init; }
+    /// <summary>Window placement and panel layout from the last normal close (client only).</summary>
+    public WindowLayoutOptions? WindowLayout { get; init; }
+    /// <summary>The command palette's entries last run, newest first (ids such as <c>settings:permissions</c>); listed first.</summary>
+    public string[]? PaletteRecent { get; init; }
     /// <summary>"Don't ask again" rules for omp's approval requests (<see cref="ApprovalRuleSet"/>); session rules are never saved.</summary>
     public SavedApprovalRule[]? ApprovalRules { get; init; }
-    /// <summary>How many chats keep their own omp running at once (default 4): opening one more closes the idle chat used
-    /// longest ago; a working one is never closed.</summary>
-    public int? MaxOpenSessions { get; init; }
     /// <summary>omp's browser tool drives the app's built-in browser (default on): see
     /// <see cref="Browser.AgentBrowserDefaults"/>. Off: omp's own browser settings decide, the app adds nothing.</summary>
     public bool? AgentUsesGuiBrowser { get; init; }
+    /// <summary>Settings › General › Agent browser: null (the built-in preview) or <c>nightly</c> (experimental, macOS:
+    /// pages render in the embedded Nightly runtime).</summary>
+    public string? AgentBrowserEngine { get; init; }
     /// <summary>Settings › Advanced › Corporate network certificates (<see cref="Network.CorporateTrust"/>): null (off),
     /// <c>system</c> (macOS: Bun trusts what macOS trusts) or <c>pem</c> (Bun also trusts <see cref="CorporateTrustBundle"/>).</summary>
     public string? CorporateTrust { get; init; }
@@ -91,6 +105,7 @@ public sealed record OmpRuntimeOptions
         ReadCommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        IgnoreReadOnlyProperties = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true,
     };
@@ -103,13 +118,9 @@ public sealed record OmpRuntimeOptions
     public static OmpRuntimeOptions Load(string? explicitPath = null)
     {
         var path = explicitPath ?? System.Environment.GetEnvironmentVariable(ConfigEnvVar);
-        if (path is null)
-        {
-            if (!File.Exists(DefaultConfigPath)) return new OmpRuntimeOptions();
-            path = DefaultConfigPath;
-        }
-        using var stream = File.OpenRead(path);
-        return JsonSerializer.Deserialize<OmpRuntimeOptions>(stream, Json) ?? new OmpRuntimeOptions();
+        // An explicitly selected missing file is an error, not a request for default runtime settings.
+        if (path is not null) _ = File.GetAttributes(path);
+        return new ClientSettingsStore(path ?? DefaultConfigPath).Load();
     }
 
     public static readonly IReadOnlyList<string> ApprovalModes = ["always-ask", "write", "yolo"];
@@ -121,6 +132,7 @@ public sealed record OmpRuntimeOptions
     public static readonly IReadOnlyList<string> ThinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"];
 
     /// <summary>The level a new session starts at: <see cref="DefaultThinkingLevel"/> when omp knows it, else medium.</summary>
+    [JsonIgnore]
     public string EffectiveThinkingLevel => DefaultThinkingLevel is { } l && ThinkingLevels.Contains(l) ? l : DefaultThinkingLevelValue;
 
     /// <summary>
@@ -130,9 +142,10 @@ public sealed record OmpRuntimeOptions
     public static string EffectiveApprovalMode(string? mode) => mode is not null && ApprovalModes.Contains(mode) ? mode : DefaultApprovalMode;
 
     /// <summary>A warning when the configured approval mode is not one omp knows (then "write" is used).</summary>
+    [JsonIgnore]
     public string? ApprovalModeWarning =>
         ApprovalMode is not null && !ApprovalModes.Contains(ApprovalMode)
-            ? $"Unknown approval mode \"{ApprovalMode}\" in the settings; using \"{DefaultApprovalMode}\" (ask before commands)."
+            ? "Unknown approval mode in the settings; using write (ask before commands)."
             : null;
 
     /// <summary>
@@ -144,7 +157,7 @@ public sealed record OmpRuntimeOptions
         var rpc = ToLaunchSpec(new LaunchRequest(workingDirectory));
         // The same approval mode as the window's session (omp's own default is yolo), and the same thinking level as
         // a new chat's.
-        var args = new List<string>(PrefixArgs) { "--approval-mode", EffectiveApprovalMode(ApprovalMode) };
+        var args = new List<string>(ManagementPrefixArgs) { "--approval-mode", EffectiveApprovalMode(ApprovalMode) };
         if (!ExtraArgs.Contains("--thinking")) args.AddRange(["--thinking", EffectiveThinkingLevel]);
         if (Model is not null) args.AddRange(["--model", Model]);
         args.AddRange(ExtraArgs);
@@ -163,15 +176,14 @@ public sealed record OmpRuntimeOptions
     public OmpLaunchSpec ToCliLaunchSpec(IEnumerable<string> arguments, string? workingDirectory = null)
     {
         var rpc = ToLaunchSpec(new LaunchRequest(workingDirectory));
-        var args = new List<string>(PrefixArgs);
+        var args = new List<string>(ManagementPrefixArgs);
         args.AddRange(arguments);
-        return rpc with { Arguments = args };
+        return rpc with { Arguments = args, SessionArguments = [] };
     }
 
     public OmpLaunchSpec ToLaunchSpec(LaunchRequest? request = null)
     {
-        var args = new List<string>(PrefixArgs) { "--mode", Mode };
-        args.AddRange(["--approval-mode", EffectiveApprovalMode(request?.ApprovalMode ?? ApprovalMode)]);
+        var args = new List<string> { "--approval-mode", EffectiveApprovalMode(request?.ApprovalMode ?? ApprovalMode) };
         if (request?.ResumeSessionFile is { } resume) args.AddRange(["--resume", resume]);
         // A new session starts at the app's level; a resumed one at its own (omp restores it from the file). A
         // --thinking among the user's extra arguments wins.
@@ -196,9 +208,28 @@ public sealed record OmpRuntimeOptions
         return new OmpLaunchSpec
         {
             FileName = Command ?? "omp",
-            Arguments = args,
+            Arguments = PrefixArgs,
+            SessionArguments = args,
+            ResumeOnCurrentModel = request?.ResumeOnCurrentModel == true,
             WorkingDirectory = request?.WorkingDirectory ?? WorkingDirectory,
             Environment = env,
         };
     }
+}
+
+/// <summary>Position uses desktop pixels; sizes use device-independent pixels, as Avalonia windows do.</summary>
+public sealed record WindowLayoutOptions
+{
+    public int X { get; init; }
+    public int Y { get; init; }
+    public double Width { get; init; } = 1200;
+    public double Height { get; init; } = 800;
+    public bool Maximized { get; init; }
+    public bool SidebarVisible { get; init; } = true;
+    public double RightPanelWidth { get; init; } = 480;
+    public double EventsWidth { get; init; } = 420;
+    public double TerminalHeight { get; init; } = 260;
+    public string? ActivePane { get; init; }
+    public bool EventsVisible { get; init; }
+    public bool TerminalVisible { get; init; }
 }

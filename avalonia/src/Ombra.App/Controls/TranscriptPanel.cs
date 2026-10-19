@@ -419,6 +419,15 @@ public sealed class TranscriptPanel : VirtualizingPanel
         return Tops[Math.Clamp(row, 0, count - 1)];
     }
 
+    internal object? ItemAtRow(int row) => row >= 0 && row < Items.Count ? Items[row] : null;
+
+    internal int IndexOfRow(object item)
+    {
+        for (var i = 0; i < Items.Count; i++)
+            if (ReferenceEquals(Items[i], item)) return i;
+        return -1;
+    }
+
     /// <summary>The width rows are laid out at (the panel's, before its first measure).</summary>
     private double LayoutWidth => double.IsFinite(_width) && _width > 0 ? _width : Bounds.Width > 0 ? Bounds.Width : 800;
 

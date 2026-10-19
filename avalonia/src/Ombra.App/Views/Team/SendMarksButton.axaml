@@ -1,0 +1,33 @@
+<!-- "Send N comments to the team…" under the message box's marks (MainViewModel.SendMarksToTeamCommand): the open code and page marks go to
+     everyone in the team or the members checked; shown while there are open marks and a team to send to. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Ombra.App.Localization"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             x:Class="Ombra.App.Views.Team.SendMarksButton"
+             x:DataType="vm:MainViewModel">
+  <UserControl.IsVisible>
+    <MultiBinding Converter="{x:Static BoolConverters.And}">
+      <Binding Path="Marks.HasOpen" />
+      <Binding Path="TeamMarks.CanShare" />
+    </MultiBinding>
+  </UserControl.IsVisible>
+  <Button x:Name="SendMarksToButton" Classes="flat sm" HorizontalAlignment="Left" Content="{Binding Marks.SendToTeamLabel}"
+          ToolTip.Tip="{loc:T 'Send these comments to team members'}">
+    <Button.Flyout>
+      <Flyout Placement="TopEdgeAlignedLeft">
+        <StackPanel x:Name="SendMarksPanel" Width="260" Spacing="8">
+          <TextBlock Text="{loc:T 'Send comments to'}" FontWeight="Medium" />
+          <ItemsControl x:Name="MarkRecipientList" ItemsSource="{Binding TeamMarks.Recipients}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:MarkRecipientOption">
+                <CheckBox Content="{Binding Name}" IsChecked="{Binding IsChecked}" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Button x:Name="SendMarksConfirm" Classes="accent" HorizontalAlignment="Right" Content="{loc:T 'Send'}" Click="OnSend" />
+        </StackPanel>
+      </Flyout>
+    </Button.Flyout>
+  </Button>
+</UserControl>

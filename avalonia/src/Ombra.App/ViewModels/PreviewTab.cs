@@ -36,13 +36,15 @@ public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableO
     /// The pane's cards show the active tab's.</summary>
     public DialogBroker Dialogs { get; } = new();
 
-    /// <summary>The window a page opened (<c>window.open</c>, <c>target=_blank</c>), hosted in this tab; null for ordinary tabs.</summary>
+    /// <summary>The window a page opened (<c>window.open</c>, <c>target=_blank</c>), hosted in this tab as the engine made
+    /// it; null for ordinary tabs and for Nightly's pop-ups (Nightly's pane shows those, PreviewPanel).</summary>
     public BrowserPopup? Popup { get; init; }
 
     /// <summary>The tab whose page opened this pop-up.</summary>
     public PreviewTab? Opener { get; init; }
 
-    public bool IsPopup => Popup is not null;
+    /// <summary>A window a page opened (its <see cref="Opener"/>), whichever engine shows it.</summary>
+    public bool IsPopup => Opener is not null;
 
     /// <summary>The user can close it: omp's tabs, pop-ups and the ones they opened (their first tab stays).</summary>
     public bool CanClose => IsAgentTab || IsPopup || IsOpenedByUser;

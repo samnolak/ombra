@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -5,10 +6,14 @@ using System.Text.RegularExpressions;
 
 namespace Ombra.ClientCore.Network;
 
-/// <summary>Why a certificate file was accepted or refused: a fixed code (for logs) and the sentence the page shows.</summary>
-public sealed record CaFileCheck(string Code, string Message, int Count = 0, DateTimeOffset? ValidUntil = null, string? Pem = null)
+/// <summary>
+/// Why a certificate file was accepted or refused: a fixed code (for logs) and the sentence the page shows, as an English
+/// format and its arguments so the app can show it in its language (<see cref="Message"/> is the English sentence).
+/// </summary>
+public sealed record CaFileCheck(string Code, string Format, object?[] Args, int Count = 0, DateTimeOffset? ValidUntil = null, string? Pem = null)
 {
     public bool Ok => Code == "ok";
+    public string Message => string.Format(CultureInfo.InvariantCulture, Format, Args);
 }
 
 /// <summary>
@@ -31,24 +36,24 @@ public static class CorporateCaFile
         try
         {
             var info = new FileInfo(path);
-            if (!info.Exists) return new("unreadable", "The file was not found.");
-            if (info.Length > MaxBytes) return new("too-large", "The file is larger than a certificate file can be (1 MB).");
+            if (!info.Exists) return Refuse("unreadable", "The file was not found.");
+            if (info.Length > MaxBytes) return Refuse("too-large", "The file is larger than a certificate file can be (1 MB).");
             bytes = File.ReadAllBytes(path);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            return new("unreadable", "The file could not be read.");
+            return Refuse("unreadable", "The file could not be read.");
         }
         return Validate(bytes, now);
     }
 
     public static CaFileCheck Validate(byte[] bytes, DateTimeOffset now)
     {
-        if (bytes.Length == 0) return new("no-certificate", "The file is empty.");
+        if (bytes.Length == 0) return Refuse("no-certificate", "The file is empty.");
         var text = Encoding.ASCII.GetString(bytes);
         // Before anything else: a private key never goes into the app's copy, whatever else the file holds
         if (text.Contains("PRIVATE KEY", StringComparison.Ordinal))
-            return new("private-key", "The file contains a private key. Choose a file with only the certificate authority's certificate (ask IT for the CA certificate, not a key).");
+            return Refuse("private-key", "The file contains a private key. Choose a file with only the certificate authority's certificate (ask IT for the CA certificate, not a key).");
 
         var certificates = new List<X509Certificate2>();
         try
@@ -58,12 +63,12 @@ public static class CorporateCaFile
                 foreach (Match m in Block.Matches(text))
                 {
                     if (m.Groups[1].Value != "CERTIFICATE")
-                        return new("unsupported", $"The file contains a \"{m.Groups[1].Value}\" block. Only PEM certificates (BEGIN CERTIFICATE) are supported.");
+                        return Refuse("unsupported", "The file contains a \"{0}\" block. Only PEM certificates (BEGIN CERTIFICATE) are supported.", m.Groups[1].Value);
                     byte[] der;
                     try { der = Convert.FromBase64String(m.Groups[2].Value); }
-                    catch (FormatException) { return new("garbage", "A certificate in the file is damaged (not valid base64)."); }
+                    catch (FormatException) { return Refuse("garbage", "A certificate in the file is damaged (not valid base64)."); }
                     certificates.Add(X509CertificateLoader.LoadCertificate(der));
-                    if (certificates.Count > MaxCertificates) return new("too-large", $"The file has more than {MaxCertificates} certificates.");
+                    if (certificates.Count > MaxCertificates) return Refuse("too-large", "The file has more than {0} certificates.", MaxCertificates);
                 }
             }
             else certificates.Add(X509CertificateLoader.LoadCertificate(bytes)); // one DER certificate (.cer, .crt)
@@ -71,33 +76,43 @@ public static class CorporateCaFile
         catch (CryptographicException)
         {
             Dispose(certificates);
-            return new("garbage", "The file is not a certificate file (PEM or DER).");
+            return Refuse("garbage", "The file is not a certificate file (PEM or DER).");
         }
 
         try
         {
-            if (certificates.Count == 0) return new("no-certificate", "The file contains no certificate.");
+            if (certificates.Count == 0) return Refuse("no-certificate", "The file contains no certificate.");
             var distinct = certificates.DistinctBy(c => c.Thumbprint).ToList();
             for (var i = 0; i < distinct.Count; i++)
             {
                 var c = distinct[i];
-                var which = distinct.Count == 1 ? "The certificate" : $"Certificate {i + 1} of {distinct.Count}";
+                var single = distinct.Count == 1;
                 var basic = c.Extensions.OfType<X509BasicConstraintsExtension>().FirstOrDefault();
                 if (basic is not { CertificateAuthority: true })
-                    return new("not-ca", which + " is not a certificate authority (it looks like a server's or a person's certificate). Choose your organisation's root or intermediate CA certificate.");
+                    return single
+                        ? Refuse("not-ca", "The certificate is not a certificate authority (it looks like a server's or a person's certificate). Choose your organisation's root or intermediate CA certificate.")
+                        : Refuse("not-ca", "Certificate {0} of {1} is not a certificate authority (it looks like a server's or a person's certificate). Choose your organisation's root or intermediate CA certificate.", i + 1, distinct.Count);
                 var usage = c.Extensions.OfType<X509KeyUsageExtension>().FirstOrDefault();
                 if (usage is null || !usage.KeyUsages.HasFlag(X509KeyUsageFlags.KeyCertSign))
-                    return new("not-ca", which + " is not allowed to sign certificates (no keyCertSign key usage), so it cannot be a certificate authority.");
+                    return single
+                        ? Refuse("not-ca", "The certificate is not allowed to sign certificates (no keyCertSign key usage), so it cannot be a certificate authority.")
+                        : Refuse("not-ca", "Certificate {0} of {1} is not allowed to sign certificates (no keyCertSign key usage), so it cannot be a certificate authority.", i + 1, distinct.Count);
                 var notAfter = new DateTimeOffset(c.NotAfter.ToUniversalTime(), TimeSpan.Zero);
                 var notBefore = new DateTimeOffset(c.NotBefore.ToUniversalTime(), TimeSpan.Zero);
-                if (notAfter <= now) return new("expired", which + " expired on " + Day(notAfter) + ".");
-                if (notBefore > now) return new("not-yet-valid", which + " is valid only from " + Day(notBefore) + ".");
+                if (notAfter <= now)
+                    return single
+                        ? Refuse("expired", "The certificate expired on {0:d MMMM yyyy}.", notAfter)
+                        : Refuse("expired", "Certificate {0} of {1} expired on {2:d MMMM yyyy}.", i + 1, distinct.Count, notAfter);
+                if (notBefore > now)
+                    return single
+                        ? Refuse("not-yet-valid", "The certificate is valid only from {0:d MMMM yyyy}.", notBefore)
+                        : Refuse("not-yet-valid", "Certificate {0} of {1} is valid only from {2:d MMMM yyyy}.", i + 1, distinct.Count, notBefore);
             }
             var pem = new StringBuilder();
             foreach (var c in distinct) pem.Append(c.ExportCertificatePem()).Append('\n');
             var until = distinct.Min(c => new DateTimeOffset(c.NotAfter.ToUniversalTime(), TimeSpan.Zero));
-            var count = distinct.Count == 1 ? "1 certificate authority" : $"{distinct.Count} certificate authorities";
-            return new("ok", $"{count}, valid until {Day(until)}.", distinct.Count, until, pem.ToString());
+            var format = distinct.Count == 1 ? "{0} certificate authority, valid until {1:d MMMM yyyy}." : "{0} certificate authorities, valid until {1:d MMMM yyyy}.";
+            return new("ok", format, [distinct.Count, until], distinct.Count, until, pem.ToString());
         }
         finally
         {
@@ -136,7 +151,7 @@ public static class CorporateCaFile
         if (Directory.Exists(folder) && !Directory.EnumerateFileSystemEntries(folder).Any()) Directory.Delete(folder);
     }
 
-    private static string Day(DateTimeOffset d) => d.ToString("d MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+    private static CaFileCheck Refuse(string code, string format, params object?[] args) => new(code, format, args);
 
     private static void Dispose(List<X509Certificate2> certificates)
     {

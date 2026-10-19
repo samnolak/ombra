@@ -23,7 +23,7 @@ internal static class LayoutAudit
     /// <summary>Buttons whose content is a left-aligned row on purpose (lists, menus, links).</summary>
     private static readonly string[] LeftAligned =
         ["menu-item", "session", "sidebar-action", "option", "tool-row", "link", "title", "todo-head", "thinking-toggle", "chip", "flat", "segment", "settings-nav",
-         "turn-files-toggle", "turn-file", "card-header", "turn-fold-head"];
+         "turn-files-toggle", "turn-file", "card-header", "turn-fold-head", "plug-open"];
 
     public static List<Finding> Run(Window w, Control? scope = null)
     {
@@ -37,8 +37,8 @@ internal static class LayoutAudit
                 case TextBlock t: CheckClipped(w, t, found); break;
             }
             if (c is Panel p) CheckRow(w, p, found);
-            if (c is StackPanel or WrapPanel or DockPanel) CheckOverlap(w, (Panel)c, found);
-            if (c is Border frame) { CheckFrame(w, frame, found); CheckMirror(w, frame, found); }
+            if (c is StackPanel or WrapPanel or DockPanel) { CheckOverlap(w, (Panel)c, found); CheckButtonPair(w, (Panel)c, found); }
+            if (c is Border frame) { CheckFrame(w, frame, found); CheckMirror(w, frame, found); if (frame.Classes.Contains("plug-list")) CheckListEdge(w, frame, found); }
         }
         CheckComposerGap(w, found);
         return found;
@@ -196,6 +196,23 @@ internal static class LayoutAudit
                 found.Add(new("baseline", Name(a) + " ⟷ " + Name(b),
                     string.Create(CultureInfo.InvariantCulture, $"{a.FontSize:0}px baseline {ba:0.0}, {b.FontSize:0}px baseline {bb:0.0}"), Box(w, a).Union(Box(w, b))));
         }
+        // A badge's text and a text of its size beside it share one baseline: the subagent card's "Running" badge, its
+        // text stretched to the badge's top, sat 1–1.5 px above "task · in the background" beside it
+        foreach (var badge in kids.OfType<Border>().Where(b => b.Bounds.Height <= 24))
+        {
+            if (badge.GetVisualDescendants().OfType<TextBlock>().Where(t => Shown(t) && Baseline(w, t) is not null).ToList() is not [var inner]) continue;
+            var bb = Box(w, badge);
+            var bi = Baseline(w, inner)!.Value;
+            foreach (var t in texts.Where(t => Math.Abs(t.FontSize - inner.FontSize) < 0.5))
+            {
+                var tb = Box(w, t);
+                if (tb.Y > bb.Bottom || tb.Bottom < bb.Y) continue; // another line of a wrapping row
+                var bt = Baseline(w, t)!.Value;
+                if (Math.Abs(bi - bt) > 0.5)
+                    found.Add(new("badge-baseline", Name(inner) + " ⟷ " + Name(t),
+                        string.Create(CultureInfo.InvariantCulture, $"badge text baseline {bi:0.0}, beside it {bt:0.0} ({bi - bt:+0.0;-0.0} px)"), bb.Union(tb)));
+            }
+        }
     }
 
     /// <summary>
@@ -268,6 +285,53 @@ internal static class LayoutAudit
 
     private static bool Stuck(Control k) =>
         k.Classes.Contains("stuck") || k.GetVisualAncestors().OfType<Control>().Any(a => a.Classes.Contains("stuck"));
+
+    /// <summary>Classes that give a button its own shape: anything else is the default secondary rectangle.</summary>
+    private static readonly string[] Shaped =
+        ["accent", "inverse", "outline", "flat", "chip", "danger", "menu-item", "icon", "link", "option", "round", "send", "segment", "image-thumb"];
+
+    /// <summary>
+    /// Next to a primary pill (accent, inverse) the secondary is an outline pill and the tertiary a flat text button, of the
+    /// same height: a default rounded rectangle beside the pill (the Nightly consent strip) read as two different kinds.
+    /// </summary>
+    private static void CheckButtonPair(Window w, Panel p, List<Finding> found)
+    {
+        var buttons = p.Children.OfType<Button>().Where(Shown).ToList();
+        // Text pills only: the composer's round Send/Stop beside its chips are a different kind of control
+        var primary = buttons.FirstOrDefault(b => (b.Classes.Contains("accent") || b.Classes.Contains("inverse"))
+            && !b.Classes.Any(c => c is "send" or "round" or "icon"));
+        if (primary is null) return;
+        var height = Box(w, primary).Height;
+        foreach (var b in buttons.Where(b => b != primary))
+        {
+            if (!b.Classes.Any(Shaped.Contains))
+                found.Add(new("button-pair", Name(b), $"plain button next to primary {Name(primary)}: use outline (secondary) or flat (tertiary)", Box(w, b)));
+            else if (b.Classes.Any(c => c is "outline" or "accent" or "inverse" or "danger") && Math.Abs(Box(w, b).Height - height) > 0.5)
+                found.Add(new("button-pair", Name(b), $"{Box(w, b).Height:0} px high next to {height:0} px primary {Name(primary)}", Box(w, b)));
+        }
+        // A picker in the same row as the primary (the Team invite's role and "Create link") is as high as it
+        foreach (var combo in p.Children.OfType<ComboBox>().Where(Shown))
+            if (Math.Abs(Box(w, combo).Height - height) > 0.5)
+                found.Add(new("button-pair", Name(combo), $"picker {Box(w, combo).Height:0} px high next to {height:0} px primary {Name(primary)}", Box(w, combo)));
+    }
+
+    /// <summary>
+    /// The rows of one list card end their trailing controls on one right edge: a member row whose last button was
+    /// "Remove" ended 8 px further right than one ending with "Safety number" (the Team page's members).
+    /// </summary>
+    private static void CheckListEdge(Window w, Border list, List<Finding> found)
+    {
+        var edges = list.GetVisualDescendants().OfType<Grid>().Where(g => g.Classes.Contains("plug-row") && Shown(g))
+            .Select(g => (g, k: g.GetVisualDescendants().OfType<Control>()
+                .Where(k => k is Button or ComboBox && !k.Classes.Contains("plug-open") && Shown(k)).MaxBy(k => Box(w, k).Right)))
+            .Where(e => e.k is not null).ToList();
+        if (edges.Count < 2) return;
+        var right = edges[0].k!;
+        foreach (var (g, k) in edges.Skip(1))
+            if (Math.Abs(Box(w, k!).Right - Box(w, right).Right) > 1)
+                found.Add(new("row-edge", Name(k!) + " ⟷ " + Name(right), string.Create(CultureInfo.InvariantCulture,
+                    $"trailing control ends at {Box(w, k!).Right:0.0}, the list's first row at {Box(w, right).Right:0.0}"), Box(w, g)));
+    }
 
     /// <summary>A card above the message box keeps a clear gap from it (the approval card was glued to it).</summary>
     private static void CheckComposerGap(Window w, List<Finding> found)

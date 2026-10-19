@@ -1,0 +1,393 @@
+<!-- The rail's Team (MainViewModel.Team, ViewModels/Team/TeamViewModel): sign in to a team server, create or join a
+     team, banners of its state, members and roles, join requests, invites, my devices and pairing, the owner's
+     equivocation decision. Other team features add one line each in the marked region.
+     Layout as the Plugins page: each section's title above its card (Grid.list-head, one height with or without an
+     action on its right); a list is one Border.plug-list of 64 px rows (Grid.plug-row) split by hairlines, each row's
+     actions in one "⋯" menu; a form is the same card with one StackPanel.plug-body (the rows' 16 px inset). -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Ombra.App.Localization"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
+             xmlns:team="using:Ombra.App.Views.Team"
+             x:Class="Ombra.App.Views.Team.TeamPage"
+             x:DataType="vm:MainViewModel">
+  <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+    <StackPanel MaxWidth="760" Margin="32,24,32,32" Spacing="24">
+      <StackPanel x:Name="TeamBody" DataContext="{Binding Team}" x:DataType="vm:TeamViewModel" Spacing="24">
+        <TextBlock Classes="page-title" Text="{loc:T 'Team'}" />
+
+        <!-- errors -->
+        <Border x:Name="TeamError" Classes="ws-note error" IsVisible="{Binding HasError}">
+          <SelectableTextBlock Text="{Binding Error}" TextWrapping="Wrap" />
+        </Border>
+
+        <!-- ── banners ── -->
+        <Border x:Name="RemovedBanner" Classes="ws-note error" IsVisible="{Binding WasRemoved}">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="{Binding RemovedText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Classes="flat" Content="{loc:T 'Dismiss'}" Command="{Binding DismissRemovedCommand}" Margin="12,0,0,0" VerticalAlignment="Center" />
+          </Grid>
+        </Border>
+        <Border x:Name="NotConfirmedBanner" Classes="ws-note" IsVisible="{Binding NotConfirmed}">
+          <TextBlock Text="{Binding NotConfirmedText}" TextWrapping="Wrap" />
+        </Border>
+        <Border x:Name="KeyChangedBanner" Classes="ws-note error" IsVisible="{Binding KeyChanged}">
+          <TextBlock Text="{Binding KeyChangedText}" TextWrapping="Wrap" />
+        </Border>
+        <Border x:Name="EquivocationBanner" Classes="ws-note error" IsVisible="{Binding HasEquivocation}">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock TextWrapping="Wrap" VerticalAlignment="Center"
+                       Text="{loc:T 'The server showed two different versions of the team. The team is frozen until the owner chooses one.'}" />
+            <Button Grid.Column="1" Classes="accent" Content="{loc:T 'Review'}" Command="{Binding OpenEquivocationCommand}" IsVisible="{Binding CanResolve}" Margin="12,0,0,0" VerticalAlignment="Center" />
+          </Grid>
+        </Border>
+        <Border x:Name="OwnershipBanner" Classes="ws-note" IsVisible="{Binding HasOwnershipOffer}">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="{loc:T 'The owner offers you the ownership of the team.'}" TextWrapping="Wrap" VerticalAlignment="Center" />
+            <Button Grid.Column="1" Classes="accent" Content="{loc:T 'Accept'}" Command="{Binding AcceptOwnershipCommand}" Margin="12,0,0,0" VerticalAlignment="Center" />
+          </Grid>
+        </Border>
+
+        <!-- ── recovery key, once ── -->
+        <StackPanel x:Name="RecoveryKeyCard" Spacing="8" IsVisible="{Binding HasRecoveryKey}">
+          <Grid Classes="list-head"><TextBlock Classes="section" Text="{loc:T 'Owner recovery key'}" /></Grid>
+          <Border Classes="plug-list">
+            <StackPanel Classes="plug-body" Spacing="12">
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'Write it down or print it and keep it offline. It is shown only now: Ombra does not keep it. Without it a lost owner device cannot be replaced.'}" />
+              <SelectableTextBlock x:Name="RecoveryKeyText" Classes="mono" Text="{Binding RecoveryKey}" FontSize="{DynamicResource GuiFontM}" TextWrapping="Wrap" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes="outline md" Content="{loc:T 'Copy'}" Command="{Binding CopyRecoveryKeyCommand}" />
+                <Button Classes="accent md" Content="{loc:T 'I saved it'}" Command="{Binding DismissRecoveryKeyCommand}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+
+        <!-- ── signed out: server, create, join, pair ── -->
+        <StackPanel x:Name="SignedOutForms" Spacing="24" IsVisible="{Binding !HasTeam}">
+          <Border Classes="plug-list" IsVisible="{Binding IsWaitingForApproval}">
+            <TextBlock x:Name="WaitingText" Margin="16,12" TextWrapping="Wrap" Text="{loc:T 'Your request to join was sent. An admin of the team has to approve it; this page updates by itself.'}" />
+          </Border>
+          <StackPanel Spacing="8" IsVisible="{Binding !IsWaitingForApproval}">
+            <Grid Classes="list-head"><TextBlock Classes="section" Text="{loc:T 'Join a team'}" /></Grid>
+            <Border Classes="plug-list">
+              <StackPanel Classes="plug-body" Spacing="12">
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'Paste the invite link an admin sent you.'}" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                  <TextBox x:Name="InviteLinkBox" Classes="sm" Text="{Binding InviteLinkText}" Watermark="ombra://join?…" VerticalAlignment="Center" />
+                  <Button x:Name="JoinButton" Grid.Column="1" Classes="accent" Content="{loc:T 'Ask to join'}" Command="{Binding JoinCommand}" IsEnabled="{Binding !IsBusy}" VerticalAlignment="Center" />
+                </Grid>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+          <StackPanel Spacing="8" IsVisible="{Binding !IsWaitingForApproval}">
+            <Grid Classes="list-head"><TextBlock Classes="section" Text="{loc:T 'Create a team'}" /></Grid>
+            <Border Classes="plug-list">
+              <StackPanel Classes="plug-body" Spacing="12">
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'Your team server: its address and, for an IP address, the certificate pin install.sh printed. The first team needs the one-time bootstrap code.'}" />
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="16" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+                  <TextBlock Classes="muted" Text="{loc:T 'Server'}" VerticalAlignment="Center" />
+                  <TextBox x:Name="ServerAddressBox" Grid.Column="1" Text="{Binding ServerAddress}" Watermark="203.0.113.7 · team.example.com" IsEnabled="{Binding IsSignedOut}" />
+                  <TextBlock Grid.Row="1" Classes="muted" Text="{loc:T 'Certificate pin'}" VerticalAlignment="Center" />
+                  <TextBox x:Name="ServerPinBox" Grid.Row="1" Grid.Column="1" Text="{Binding ServerPin}" Watermark="sha256 SPKI (64 hex)" IsEnabled="{Binding IsSignedOut}" />
+                  <TextBlock Grid.Row="2" Classes="muted" Text="{loc:T 'Bootstrap code'}" VerticalAlignment="Center" />
+                  <TextBox x:Name="BootstrapBox" Grid.Row="2" Grid.Column="1" Text="{Binding BootstrapCode}" Watermark="XXXXX-XXXXX-…" />
+                </Grid>
+                <Button x:Name="CreateTeamButton" Classes="accent" HorizontalAlignment="Left" Content="{loc:T 'Create team'}" Command="{Binding CreateTeamCommand}" IsEnabled="{Binding !IsBusy}" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+          <StackPanel Spacing="8" IsVisible="{Binding !IsWaitingForApproval}">
+            <Grid Classes="list-head"><TextBlock Classes="section" Text="{loc:T 'Add this computer to your account'}" /></Grid>
+            <Border Classes="plug-list">
+              <StackPanel Classes="plug-body" Spacing="12">
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'On a device already in the team: Team › My devices › Pair a device, then paste its link here.'}" />
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                  <TextBox x:Name="PairLinkBox" Classes="sm" Text="{Binding PairLinkText}" Watermark="ombra://pair?…" VerticalAlignment="Center" />
+                  <Button x:Name="PairThisButton" Grid.Column="1" Classes="outline" Content="{loc:T 'Pair'}" Command="{Binding PairThisDeviceCommand}" IsEnabled="{Binding !IsBusy}" VerticalAlignment="Center" />
+                </Grid>
+                <StackPanel Spacing="8" IsVisible="{Binding HasNewDeviceWords}">
+                  <TextBlock Text="{loc:T 'Check that the other device shows the same six words:'}" />
+                  <TextBlock x:Name="NewDeviceWords" Text="{Binding NewDeviceWords}" FontSize="{DynamicResource GuiFontL}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                  <Button Classes="accent" HorizontalAlignment="Left" Content="{loc:T 'The words match'}" Command="{Binding FinishPairingCommand}" />
+                </StackPanel>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </StackPanel>
+
+        <!-- equivocation: the owner chooses a branch after seeing what it undoes (§7) -->
+        <StackPanel x:Name="EquivocationCard" Spacing="8" IsVisible="{Binding IsEquivocationOpen}">
+          <Grid Classes="list-head"><TextBlock Classes="section" Text="{loc:T 'Two versions of the team'}" /></Grid>
+          <Border Classes="plug-list">
+            <StackPanel Classes="plug-body" Spacing="12">
+              <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'Choose the version the team keeps. The other one is discarded; review what that undoes before you sign.'}" />
+              <RadioButton x:Name="KeepKnownRadio" GroupName="equivocation" IsChecked="{Binding KeepKnown}">
+                <TextBlock TextWrapping="Wrap" Text="{Binding KeepKnownText}" />
+              </RadioButton>
+              <RadioButton x:Name="SwitchRadio" GroupName="equivocation" IsChecked="{Binding !KeepKnown}">
+                <TextBlock TextWrapping="Wrap" Text="{Binding SwitchText}" />
+              </RadioButton>
+              <TextBlock Classes="muted" Text="{loc:T 'This choice undoes:'}" />
+              <ItemsControl x:Name="UndoneList" ItemsSource="{Binding Undone}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="x:String">
+                    <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,2" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+              <CheckBox x:Name="UndoneConfirmedBox" IsChecked="{Binding UndoneConfirmed}" Content="{loc:T 'I reviewed the list and want these changes undone'}" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button x:Name="ResolveButton" Classes="accent md" Content="{loc:T 'Sign the decision'}" Command="{Binding ResolveEquivocationCommand}" IsEnabled="{Binding !IsBusy}" />
+                <Button Classes="flat md" Content="{loc:T 'Cancel'}" Command="{Binding CloseEquivocationCommand}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </StackPanel>
+
+      <!-- The Inbox first (the rail badge counts what waits in it); the admin sections follow -->
+      <team:TeamShareSection x:Name="TeamShareSection" IsVisible="{Binding Share.CanShare}" />
+
+      <StackPanel DataContext="{Binding Team}" x:DataType="vm:TeamViewModel" Spacing="24" IsVisible="{Binding HasTeam}">
+        <!-- ── the team ── -->
+        <StackPanel x:Name="TeamSections" Spacing="24" IsVisible="{Binding HasTeam}">
+          <!-- join requests -->
+          <StackPanel x:Name="JoinRequests" Spacing="8" IsVisible="{Binding HasJoins}">
+            <Grid Classes="list-head"><TextBlock Classes="section" Text="{loc:T 'Join requests'}" /></Grid>
+            <Border Classes="plug-list">
+              <ItemsControl x:Name="JoinList" ItemsSource="{Binding JoinRows}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:TeamJoinRow">
+                    <StackPanel>
+                      <Border Classes="plug-sep" />
+                      <Grid Classes="plug-row" ColumnDefinitions="Auto,*,Auto">
+                        <Border Classes="conn-tile" Margin="8,0,0,0" VerticalAlignment="Center"><ctl:Icon Data="{StaticResource IconUser}" Size="16" /></Border>
+                        <StackPanel Grid.Column="1" Classes="plug-lead" Margin="12,10,12,10" ToolTip.Tip="{Binding Id}">
+                          <TextBlock Classes="conn-name" Text="{loc:T 'Request to join'}" />
+                          <TextBlock Classes="plug-line" Text="{Binding Detail}" ToolTip.Tip="{Binding Detail}" />
+                        </StackPanel>
+                        <Button Grid.Column="2" Classes="accent" Content="{loc:T 'Approve'}" Command="{Binding ApproveCommand}" IsEnabled="{Binding CanApprove}" VerticalAlignment="Center" />
+                      </Grid>
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </Border>
+          </StackPanel>
+
+          <!-- members: name, role, one menu (safety number, make owner, remove — asked first) -->
+          <StackPanel x:Name="MembersCard" Spacing="8">
+            <Grid Classes="list-head"><TextBlock Classes="section" Text="{loc:T 'Members'}" /></Grid>
+            <Border Classes="plug-list">
+              <ItemsControl x:Name="MemberList" ItemsSource="{Binding MemberRows}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:TeamMemberRow">
+                    <StackPanel>
+                      <Border Classes="plug-sep" />
+                      <Grid Classes="plug-row" ColumnDefinitions="Auto,*,Auto,Auto">
+                        <Border Classes="conn-tile" Margin="8,0,0,0" VerticalAlignment="Center"><ctl:Icon Data="{StaticResource IconUser}" Size="16" /></Border>
+                        <StackPanel Grid.Column="1" Classes="plug-lead" Margin="12,10,12,10" Orientation="Horizontal" Spacing="8">
+                          <TextBlock Classes="conn-name" Text="{Binding Name}" ToolTip.Tip="{Binding Id}" />
+                          <Border Classes="conn-tag" IsVisible="{Binding IsMe}"><TextBlock Text="{loc:T 'You'}" /></Border>
+                        </StackPanel>
+                        <Border Grid.Column="2" Classes="conn-tag" Margin="0,0,8,0"><TextBlock Text="{Binding RoleText}" /></Border>
+                        <Button Grid.Column="3" Classes="icon conn-more" VerticalAlignment="Center" ToolTip.Tip="{loc:T 'More'}"
+                                AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'More for {0}'}}">
+                          <ctl:Icon Data="{StaticResource IconMoreHorizontal}" Size="16" />
+                          <Button.Flyout>
+                            <Flyout Placement="BottomEdgeAlignedRight">
+                              <StackPanel Width="220" Spacing="2">
+                                <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding ShowSafetyNumberCommand}"
+                                        AutomationProperties.Name="{loc:T 'Safety number'}">
+                                  <Grid ColumnDefinitions="Auto,*">
+                                    <ctl:Icon Data="{StaticResource IconShield}" Size="16" Margin="0,0,10,0" />
+                                    <TextBlock Grid.Column="1" Text="{loc:T 'Safety number'}" VerticalAlignment="Center" />
+                                  </Grid>
+                                </Button>
+                                <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding MakeOwnerCommand}"
+                                        IsVisible="{Binding CanMakeOwner}" AutomationProperties.Name="{loc:T 'Make owner'}">
+                                  <Grid ColumnDefinitions="Auto,*">
+                                    <ctl:Icon Data="{StaticResource IconKey}" Size="16" Margin="0,0,10,0" />
+                                    <TextBlock Grid.Column="1" Text="{loc:T 'Make owner'}" VerticalAlignment="Center" />
+                                  </Grid>
+                                </Button>
+                                <Border Classes="menu-separator" IsVisible="{Binding CanRemove}" />
+                                <Button Classes="menu-item danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding AskRemoveCommand}"
+                                        IsVisible="{Binding CanRemove}" AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Remove {0}…'}}">
+                                  <Grid ColumnDefinitions="Auto,*">
+                                    <ctl:Icon Data="{StaticResource IconTrash}" Size="16" Margin="0,0,10,0" />
+                                    <TextBlock Grid.Column="1" Text="{loc:T 'Remove…'}" VerticalAlignment="Center" />
+                                  </Grid>
+                                </Button>
+                              </StackPanel>
+                            </Flyout>
+                          </Button.Flyout>
+                        </Button>
+                      </Grid>
+                      <Border Classes="plug-under conn-inset" IsVisible="{Binding SafetyNumber, Converter={x:Static ObjectConverters.IsNotNull}}">
+                        <SelectableTextBlock Classes="mono" Text="{Binding SafetyNumber}" TextWrapping="Wrap" />
+                      </Border>
+                      <Border Classes="plug-under conn-inset" IsVisible="{Binding KeyChanged}">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                          <TextBlock Text="{loc:T 'Key changed: compare the safety number with them first.'}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" VerticalAlignment="Center" />
+                          <Button Grid.Column="1" Classes="outline" Content="{loc:T 'Numbers match'}" Command="{Binding ConfirmKeyCommand}" VerticalAlignment="Center" />
+                        </Grid>
+                      </Border>
+                      <Border Classes="plug-under conn-inset" IsVisible="{Binding IsConfirmingRemove}">
+                        <StackPanel Spacing="10">
+                          <TextBlock Text="{Binding RemoveQuestion}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+                          <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Classes="danger" Content="{loc:T 'Remove'}" Command="{Binding RemoveCommand}" AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Remove {0}'}}" />
+                            <Button Classes="flat" Content="{loc:T 'Cancel'}" Command="{Binding CancelRemoveCommand}" />
+                          </StackPanel>
+                        </StackPanel>
+                      </Border>
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </Border>
+          </StackPanel>
+
+          <!-- invite: the role and "Create link" in one row; the ready link as a row of its own -->
+          <StackPanel x:Name="InviteCard" Spacing="8" IsVisible="{Binding IsAdmin}">
+            <Grid Classes="list-head"><TextBlock Classes="section" Text="{loc:T 'Invite'}" /></Grid>
+            <Border Classes="plug-list">
+              <StackPanel>
+                <Grid Classes="plug-row" ColumnDefinitions="*,Auto">
+                  <StackPanel Classes="plug-lead">
+                    <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'A one-time link with a secret: send it over a channel you trust. You approve the request when it comes.'}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <ComboBox x:Name="InviteRoleBox" Classes="chip" SelectedValue="{Binding InviteRole}" SelectedValueBinding="{Binding Tag, DataType=ComboBoxItem}" VerticalAlignment="Center">
+                      <ComboBoxItem Tag="member" Content="{loc:T 'Member'}" />
+                      <ComboBoxItem Tag="admin" Content="{loc:T 'Admin'}" />
+                    </ComboBox>
+                    <Button x:Name="CreateInviteButton" Classes="accent" Content="{loc:T 'Create link'}" Command="{Binding CreateInviteCommand}" IsEnabled="{Binding !IsBusy}" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Grid>
+                <StackPanel x:Name="InviteReady" IsVisible="{Binding HasInvite}">
+                  <Border Classes="plug-sep" />
+                  <Grid Classes="plug-row" ColumnDefinitions="Auto,*,Auto">
+                    <Border Classes="conn-tile" Margin="8,0,0,0" VerticalAlignment="Center"><ctl:Icon Data="{StaticResource IconLink}" Size="16" /></Border>
+                    <StackPanel Grid.Column="1" Classes="plug-lead" Margin="12,10,12,10">
+                      <TextBlock x:Name="InviteStatus" Classes="plug-line" Text="{Binding InviteRoleText, StringFormat={loc:T 'One-time link ready · {0} · valid until it is used'}}"
+                                 ToolTip.Tip="{Binding InviteRoleText, StringFormat={loc:T 'One-time link ready · {0} · valid until it is used'}}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                      <Button Classes="outline" Content="{loc:T 'Copy link'}" Command="{Binding CopyInviteCommand}" VerticalAlignment="Center" />
+                      <ToggleButton x:Name="ShowInviteToggle" Classes="flat" Content="{loc:T 'Show link'}" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Grid>
+                  <Border Classes="plug-under conn-inset" IsVisible="{Binding #ShowInviteToggle.IsChecked}">
+                    <SelectableTextBlock x:Name="InviteText" Classes="mono" Text="{Binding Invite}" FontSize="{DynamicResource GuiFontCaption}" TextWrapping="Wrap" />
+                  </Border>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <!-- my devices: name, its state; revoking in the row's menu; pairing a new one under the list -->
+          <StackPanel x:Name="DevicesCard" Spacing="8">
+            <Grid Classes="list-head" ColumnDefinitions="*,Auto">
+              <TextBlock Classes="section" Text="{loc:T 'My devices'}" />
+              <Button x:Name="StartPairingButton" Grid.Column="1" Classes="outline" Content="{loc:T 'Pair a device'}" Command="{Binding StartPairingCommand}" IsVisible="{Binding !IsPairing}" VerticalAlignment="Center" />
+            </Grid>
+            <Border Classes="plug-list">
+              <StackPanel>
+                <ItemsControl x:Name="DeviceList" ItemsSource="{Binding DeviceRows}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:TeamDeviceRow">
+                      <StackPanel>
+                        <Border Classes="plug-sep" />
+                        <Grid Classes="plug-row" ColumnDefinitions="Auto,*,Auto,Auto">
+                          <Border Classes="conn-tile" Margin="8,0,0,0" VerticalAlignment="Center"><ctl:Icon Data="{StaticResource IconDevices}" Size="16" /></Border>
+                          <StackPanel Grid.Column="1" Classes="plug-lead" Margin="12,10,12,10">
+                            <TextBlock Classes="conn-name" Text="{Binding Name}" ToolTip.Tip="{Binding Id}" />
+                          </StackPanel>
+                          <TextBlock Grid.Column="2" Classes="plug-scope" Text="{Binding State}" />
+                          <!-- The menu's slot stays when there is nothing to revoke: every row ends on one edge -->
+                          <Panel Grid.Column="3" Width="32" VerticalAlignment="Center">
+                            <Button Classes="icon conn-more" IsVisible="{Binding CanRevoke}" ToolTip.Tip="{loc:T 'More'}"
+                                    AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'More for {0}'}}">
+                              <ctl:Icon Data="{StaticResource IconMoreHorizontal}" Size="16" />
+                              <Button.Flyout>
+                                <Flyout Placement="BottomEdgeAlignedRight">
+                                  <StackPanel Width="220" Spacing="2">
+                                    <Button Classes="menu-item danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding RevokeCommand}"
+                                            AutomationProperties.Name="{loc:T 'Revoke'}">
+                                      <Grid ColumnDefinitions="Auto,*">
+                                        <ctl:Icon Data="{StaticResource IconTrash}" Size="16" Margin="0,0,10,0" />
+                                        <TextBlock Grid.Column="1" Text="{loc:T 'Revoke'}" VerticalAlignment="Center" />
+                                      </Grid>
+                                    </Button>
+                                  </StackPanel>
+                                </Flyout>
+                              </Button.Flyout>
+                            </Button>
+                          </Panel>
+                        </Grid>
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <StackPanel IsVisible="{Binding IsPairing}">
+                  <Border Classes="plug-sep flush" />
+                  <Grid x:Name="PairingPanel" Classes="plug-body" ColumnDefinitions="Auto,*" ColumnSpacing="16">
+                    <Border Background="White" Padding="8" CornerRadius="{DynamicResource GuiRadius8}" VerticalAlignment="Top">
+                      <Image x:Name="PairingQr" Source="{Binding PairingQr}" Width="168" Height="168" RenderOptions.BitmapInterpolationMode="None" />
+                    </Border>
+                    <StackPanel Grid.Column="1" Spacing="10">
+                      <TextBlock TextWrapping="Wrap" Text="{loc:T 'On the new device: Team › Add this computer, paste this link (or scan the code).'}" />
+                      <TextBlock x:Name="PairingLinkStatus" Classes="muted" Text="{loc:T 'One-time pairing link ready.'}" />
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Classes="outline" Content="{loc:T 'Copy link'}" Command="{Binding CopyPairingLinkCommand}" />
+                        <ToggleButton x:Name="ShowPairingLinkToggle" Classes="flat" Content="{loc:T 'Show link'}" />
+                        <Button Classes="flat" Content="{loc:T 'Cancel'}" Command="{Binding CancelPairingCommand}" />
+                      </StackPanel>
+                      <Border Classes="conn-inset" IsVisible="{Binding #ShowPairingLinkToggle.IsChecked}">
+                        <SelectableTextBlock x:Name="PairingLinkText" Classes="mono" Text="{Binding PairingLink}" FontSize="{DynamicResource GuiFontCaption}" TextWrapping="Wrap" />
+                      </Border>
+                      <TextBlock Classes="muted" Text="{loc:T 'Waiting for the new device…'}" IsVisible="{Binding !HasPairingWords}" />
+                      <StackPanel Spacing="8" IsVisible="{Binding HasPairingWords}">
+                        <TextBlock Text="{loc:T 'Both screens must show the same six words:'}" />
+                        <TextBlock x:Name="PairingWords" Text="{Binding PairingWords}" FontSize="{DynamicResource GuiFontL}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <Button Classes="accent" HorizontalAlignment="Left" Content="{loc:T 'The words match'}" Command="{Binding ConfirmPairingCommand}" />
+                      </StackPanel>
+                    </StackPanel>
+                  </Grid>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <!-- technical details: IDs for support and scripts, folded away -->
+          <StackPanel x:Name="TeamTechDetails" Spacing="8">
+            <ToggleButton x:Name="TeamTechToggle" Classes="thinking-toggle" AutomationProperties.Name="{loc:T 'Technical details'}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="{loc:T 'Technical details'}" VerticalAlignment="Center" />
+                <ctl:Icon Classes="chevron" Data="{StaticResource IconChevronRight}" Size="16" />
+              </StackPanel>
+            </ToggleButton>
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16" RowDefinitions="Auto,Auto" RowSpacing="8" IsVisible="{Binding #TeamTechToggle.IsChecked}">
+              <TextBlock Classes="muted" Text="{loc:T 'Team ID'}" VerticalAlignment="Center" />
+              <SelectableTextBlock Grid.Column="1" Classes="ws-value mono" Text="{Binding TeamId}" TextWrapping="Wrap" VerticalAlignment="Center" />
+              <Button Grid.Column="2" Classes="flat sm" Content="{loc:T 'Copy'}" Command="{Binding CopyTeamIdCommand}" />
+              <TextBlock Grid.Row="1" Classes="muted" Text="{loc:T 'My ID'}" VerticalAlignment="Center" />
+              <SelectableTextBlock Grid.Row="1" Grid.Column="1" Classes="ws-value mono" Text="{Binding MyId}" TextWrapping="Wrap" VerticalAlignment="Center" />
+              <Button Grid.Row="1" Grid.Column="2" Classes="flat sm" Content="{loc:T 'Copy'}" Command="{Binding CopyMyIdCommand}" />
+            </Grid>
+          </StackPanel>
+        </StackPanel>
+      </StackPanel>
+
+      <!-- ── sections of other features: one line each ── -->
+      <StackPanel x:Name="TeamFeatureSections" Spacing="24">
+        <Panel IsVisible="{Binding TeamMarks.IsAvailable}"><team:SharedMarksView DataContext="{Binding TeamMarks}" /></Panel>
+        <Panel IsVisible="{Binding TeamProgress.IsAvailable}"><team:TeamProgressSection DataContext="{Binding TeamProgress}" /></Panel>
+      </StackPanel>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

@@ -1,0 +1,95 @@
+<!-- P5 on the Team page (MainViewModel.Share, ViewModels/Team/TeamShareViewModel): the Inbox of files, skills, links,
+     patches and collections members sent me (a preview; Accept or Decline: nothing lands or opens before Accept), and
+     what I shared with each recipient's status. Each a title above one list card of rows (as TeamPage). -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Ombra.App.Localization"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             x:Class="Ombra.App.Views.Team.TeamShareSection"
+             x:DataType="vm:MainViewModel">
+  <StackPanel Spacing="24" DataContext="{Binding Share}" x:DataType="vm:TeamShareViewModel">
+    <Border x:Name="TeamInboxCard">
+      <StackPanel Spacing="8">
+        <Grid Classes="list-head" ColumnDefinitions="*,Auto">
+          <TextBlock Classes="section" Text="{loc:T 'Inbox'}" />
+          <Border Grid.Column="1" Classes="conn-tag" IsVisible="{Binding HasInbox}">
+            <TextBlock Text="{Binding InboxWaitingText}" />
+          </Border>
+        </Grid>
+        <Border Classes="plug-list">
+          <StackPanel>
+            <StackPanel Classes="plug-body" IsVisible="{Binding !HasInboxRows}">
+              <TextBlock x:Name="TeamInboxEmpty" Classes="muted" TextWrapping="Wrap"
+                         Text="{loc:T 'Files, skills, links, patches and collections members share with you appear here. Nothing is saved or opened until you accept it.'}" />
+            </StackPanel>
+            <ItemsControl x:Name="TeamInboxList" ItemsSource="{Binding Inbox}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:TeamInboxRow">
+                  <StackPanel>
+                    <Border Classes="plug-sep flush" />
+                    <Grid Classes="plug-row" ColumnDefinitions="*,Auto">
+                      <StackPanel Classes="plug-lead" Spacing="4">
+                        <TextBlock Classes="plug-line" Text="{Binding Headline}" />
+                        <TextBlock Classes="conn-name" Text="{Binding Title}" ToolTip.Tip="{Binding Title}" />
+                        <TextBlock Text="{Binding Comment}" TextWrapping="Wrap" IsVisible="{Binding HasComment}" />
+                        <TextBlock Classes="muted mono" Text="{Binding Preview}" FontSize="{DynamicResource GuiFontCaption}" TextWrapping="Wrap" MaxLines="4" TextTrimming="CharacterEllipsis" />
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <Border Classes="conn-tag"><TextBlock Text="{Binding KindText}" /></Border>
+                          <Border Classes="conn-tag"><TextBlock Text="{Binding StatusText}" /></Border>
+                          <TextBlock Classes="tertiary" Text="{Binding When}" VerticalAlignment="Center" />
+                        </StackPanel>
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Button Classes="accent" Content="{loc:T 'Accept'}" Command="{Binding AcceptCommand}" IsVisible="{Binding IsPending}" IsEnabled="{Binding !IsBusy}"
+                                AutomationProperties.Name="{Binding Title, StringFormat={loc:T 'Accept {0}'}}" />
+                        <Button Classes="flat" Content="{loc:T 'Decline'}" Command="{Binding DeclineCommand}" IsVisible="{Binding IsPending}" IsEnabled="{Binding !IsBusy}"
+                                AutomationProperties.Name="{Binding Title, StringFormat={loc:T 'Decline {0}'}}" />
+                        <Button Classes="outline" Content="{loc:T 'Open'}" Command="{Binding OpenCommand}" IsVisible="{Binding CanOpen}"
+                                AutomationProperties.Name="{Binding Title, StringFormat={loc:T 'Open {0}'}}" />
+                        <Button Classes="accent" Content="{loc:T 'Apply to project'}" Command="{Binding ApplyCommand}" IsVisible="{Binding CanApply}"
+                                AutomationProperties.Name="{Binding Title, StringFormat={loc:T 'Apply {0}'}}" />
+                      </StackPanel>
+                    </Grid>
+                  </StackPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </Border>
+
+    <!-- Sent: the kind, the title, a line per recipient under the title; how many answered on the right -->
+    <Border x:Name="TeamSentCard" IsVisible="{Binding HasSent}">
+      <StackPanel Spacing="8">
+        <Grid Classes="list-head"><TextBlock Classes="section" Text="{loc:T 'Shared by you'}" /></Grid>
+        <Border Classes="plug-list">
+          <ItemsControl x:Name="TeamSentList" ItemsSource="{Binding Sent}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:TeamSentRow">
+                <StackPanel>
+                  <Border Classes="plug-sep flush" />
+                  <Grid Classes="plug-row" ColumnDefinitions="*,Auto">
+                    <Grid Margin="8,10" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="2" VerticalAlignment="Center">
+                      <!-- 1 px down: its 11 px text on the 14 px title's baseline (centred, it sat 1 px above it) -->
+                      <Border Classes="conn-tag" Margin="0,1,0,0"><TextBlock Text="{Binding KindText}" /></Border>
+                      <TextBlock Grid.Column="1" Classes="conn-name" Text="{Binding Title}" ToolTip.Tip="{Binding Title}" />
+                      <ItemsControl Grid.Row="1" Grid.Column="1" ItemsSource="{Binding Recipients}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:TeamSentRecipient">
+                            <TextBlock Classes="plug-line" Text="{Binding Line}" ToolTip.Tip="{Binding Line}" />
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </Grid>
+                    <TextBlock Grid.Column="1" Classes="plug-scope end" Text="{Binding Summary}" />
+                  </Grid>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </Border>
+      </StackPanel>
+    </Border>
+  </StackPanel>
+</UserControl>

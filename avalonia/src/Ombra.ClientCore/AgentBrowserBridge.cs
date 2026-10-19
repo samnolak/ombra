@@ -24,6 +24,27 @@ public sealed class AgentBrowserException(string code, string message) : Excepti
     public string Code { get; } = code;
 }
 
+/// <summary>
+/// A device preset the preview offers (the device bar's): CSS size, upright, the device pixel ratio and the platform
+/// (<c>desktop</c>, <c>iphone</c>, <c>ipad</c>, <c>android</c>).
+/// </summary>
+public sealed record AgentDevicePreset(string Name, int Width, int Height, double PixelRatio, string Platform);
+
+/// <summary>
+/// What <c>browser.set_device</c> asks of the preview's device mode: a <paramref name="Preset"/> by name, or a size;
+/// then any of the pixel ratio (0 the display's), touch, platform and orientation over it. Unset fields stay as they are
+/// (a preset sets them all first).
+/// </summary>
+public sealed record AgentDeviceRequest(
+    string? Preset = null, int? Width = null, int? Height = null, double? PixelRatio = null, bool? Touch = null,
+    string? Platform = null, bool? Landscape = null);
+
+/// <summary>The preview's device mode after <c>browser.set_device</c>. <paramref name="Width"/>/<paramref name="Height"/>:
+/// the page's size (turned when landscape), null when it fills the pane. <paramref name="Emulated"/>: the engine also
+/// emulates the pixel ratio and touch (the Nightly runtime); elsewhere only the size and the user agent change.</summary>
+public sealed record AgentDeviceState(
+    string? Preset, int? Width, int? Height, double PixelRatio, bool Touch, string Platform, bool Landscape, bool Emulated);
+
 /// <summary>A PNG capture of what the preview shows (the page's visible area).</summary>
 /// <param name="Png">The encoded image.</param>
 /// <param name="Width">Width in pixels (device pixels: twice the page's width on a Retina screen).</param>
@@ -92,6 +113,15 @@ public interface IAgentBrowserPage
 
     /// <summary>omp acts on the page until the result is disposed: what the page asks meanwhile goes to omp first. Any thread.</summary>
     IDisposable? BeginAction() => null;
+
+    /// <summary>The preview's presets (<c>browser.devices</c>).</summary>
+    IReadOnlyList<AgentDevicePreset> DevicePresets => [];
+
+    /// <summary>Sets the preview's device mode for every tab (<c>browser.set_device</c>; null: back to the pane's size and
+    /// the engine's own user agent, pixel ratio and input). Throws <see cref="AgentBrowserException"/> "invalid_params" for
+    /// an unknown preset or platform or a size out of range, "not_supported" where the preview has no device mode.</summary>
+    Task<AgentDeviceState> SetDeviceAsync(AgentDeviceRequest? device, CancellationToken ct) =>
+        throw new AgentBrowserException("not_supported", "This preview has no device mode.");
 }
 
 /// <summary>
@@ -438,6 +468,35 @@ public sealed partial class AgentBrowserBridge : IDisposable
                 };
                 break;
             }
+            case "browser.devices":
+                result = new JsonObject
+                {
+                    ["devices"] = new JsonArray([.. page.DevicePresets.Select(d => (JsonNode)new JsonObject
+                    {
+                        ["name"] = d.Name,
+                        ["width"] = d.Width,
+                        ["height"] = d.Height,
+                        ["dpr"] = d.PixelRatio,
+                        ["platform"] = d.Platform,
+                    })]),
+                };
+                break;
+            case "browser.set_device":
+            {
+                var state = await page.SetDeviceAsync(DeviceRequest(p), ct).ConfigureAwait(false);
+                result = new JsonObject
+                {
+                    ["preset"] = state.Preset,
+                    ["width"] = state.Width,
+                    ["height"] = state.Height,
+                    ["dpr"] = state.PixelRatio,
+                    ["touch"] = state.Touch,
+                    ["platform"] = state.Platform,
+                    ["landscape"] = state.Landscape,
+                    ["emulated"] = state.Emulated,
+                };
+                break;
+            }
             default:
                 throw new AgentBrowserException("method_not_found", $"Unknown method {method}");
         }
@@ -471,22 +530,13 @@ public sealed partial class AgentBrowserBridge : IDisposable
         return new JsonObject { ["surface_id"] = id, ["url"] = url, ["workspace_id"] = "ombra", ["created_split"] = false };
     }
 
-    /// <summary>The tab a request names (the newest open one when it names none).</summary>
+    /// <summary>The explicit tab identity supplied by the originating browser handle; never the active or newest tab.</summary>
     private (string Id, IAgentBrowserPage Page) Surface(JsonObject p)
     {
-        var asked = Str(p, "surface_id");
+        var asked = Str(p, "surface_id") ??
+            throw new AgentBrowserException("invalid_params", "A browser request needs the surface_id returned by browser.open_split.");
         lock (_gate)
         {
-            if (asked is null)
-            {
-                // Tabs the user closed are gone for good
-                for (var i = _surfaces.Count - 1; i >= 0; i--)
-                    if (_surfaces.GetAt(i).Value.IsClosed) _surfaces.RemoveAt(i);
-                if (_surfaces.Count == 0)
-                    throw new AgentBrowserException("not_found", "No browser tab is open in the Ombra preview: open one first.");
-                var (id, newest) = _surfaces.GetAt(_surfaces.Count - 1);
-                return (id, newest);
-            }
             if (!_surfaces.TryGetValue(asked, out var page))
                 throw new AgentBrowserException("not_found", "This browser tab is closed in the Ombra preview: open a new one.");
             if (page.IsClosed)
@@ -808,6 +858,28 @@ public sealed partial class AgentBrowserBridge : IDisposable
     private static double? Num(JsonObject p, string name) =>
         p[name] is { } n && n.GetValueKind() == JsonValueKind.Number ? n.GetValue<double>() : null;
 
+    /// <summary>browser.set_device's parameters: <c>clear: true</c> ends the device mode (null), else a preset and/or
+    /// <c>width</c>+<c>height</c> (whole CSS pixels), <c>dpr</c>, <c>touch</c>, <c>platform</c>, <c>landscape</c>.</summary>
+    internal static AgentDeviceRequest? DeviceRequest(JsonObject p)
+    {
+        if (Bool(p, "clear") == true) return null;
+        int? Side(string name) => Num(p, name) switch
+        {
+            null => null,
+            { } v when v == Math.Floor(v) && v >= 1 && v <= 100_000 => (int)v,
+            _ => throw new AgentBrowserException("invalid_params", $"browser.set_device: {name} is a whole number of CSS pixels"),
+        };
+        var request = new AgentDeviceRequest(Str(p, "preset"), Side("width"), Side("height"), Num(p, "dpr"), Bool(p, "touch"),
+            Str(p, "platform"), Bool(p, "landscape"));
+        if (request.Width.HasValue != request.Height.HasValue)
+            throw new AgentBrowserException("invalid_params", "browser.set_device needs both width and height");
+        if (request.PixelRatio is < 0 or > 10)
+            throw new AgentBrowserException("invalid_params", "browser.set_device: dpr is 0 (the display's) to 10");
+        if (request == new AgentDeviceRequest())
+            throw new AgentBrowserException("invalid_params", "browser.set_device needs a preset, a width and height, dpr, touch, platform, landscape or clear: true");
+        return request;
+    }
+
     /// <summary>Engines return a string result as JSON ("\"complete\"") or bare: the bare text.</summary>
     internal static string Unquote(string? raw)
     {
@@ -820,7 +892,7 @@ public sealed partial class AgentBrowserBridge : IDisposable
         return raw;
     }
 
-    private static string Clip(string s) => s.Length > 200 ? s[..200] + "…" : s;
+    private static string Clip(string s) => s.Length > 200 ? s[..GraphemeText.PrefixLength(s, 200)] + "…" : s;
 
     [GeneratedRegex(@"^(?<code>not_found|invalid_params|invalid_target|blocked): (?<message>.*)$", RegexOptions.Singleline)]
     private static partial Regex CodedError();

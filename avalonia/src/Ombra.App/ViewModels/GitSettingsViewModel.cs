@@ -86,7 +86,7 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
     [NotifyPropertyChangedFor(nameof(NewBranchProblem), nameof(HasNewBranchProblem), nameof(CreateHint), nameof(CanSubmitWorktree))]
     private string _newBranch = "";
 
-    public string NewBranchProblem => WorkspaceParsers.BranchNameProblem(NewBranch.Trim()) ?? "";
+    public string NewBranchProblem => WorkspaceParsers.BranchNameProblem(NewBranch.Trim()) is { } problem ? Loc.T(problem) : "";
     public bool HasNewBranchProblem => NewBranchProblem.Length > 0;
 
     public bool CanCreateWorktree => IsRepo && IsOmpRunning && !Main.IsRunning;
@@ -486,15 +486,30 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
 
     internal bool CanOpenWorktree(WorktreeRowViewModel row) => !row.IsCurrent && !row.Info.Prunable && !Main.IsRunning;
 
-    /// <summary>Before asking: a worktree with changes, a locked one or this session's folder is never removed.</summary>
+    /// <summary>Protect every open chat, including background, starting and stopped chats and nested working directories.</summary>
+    internal bool IsWorktreeInUse(string path)
+    {
+        foreach (var chat in Main.OpenChats)
+            if (MainViewModel.WorktreeContainsPath(path, chat.Snapshot().Cwd)
+                || MainViewModel.WorktreeContainsPath(path, chat.CurrentLaunch.WorkingDirectory)) return true;
+        return false;
+    }
+
+    private string? OpenChatProblem(WorktreeRowViewModel row) => IsWorktreeInUse(row.Path)
+        ? Loc.T("An open conversation works in it. Close that conversation or open another folder in it first.")
+        : null;
+
+    /// <summary>Before asking: a worktree with changes, a locked one or any open chat's folder is never removed.</summary>
     internal async Task<string?> RemoveProblemAsync(WorktreeRowViewModel row)
     {
         if (row.IsMain) return Loc.T("This is the repository's main folder.");
-        if (row.IsCurrent) return Loc.T("This conversation works in it. Open another folder first.");
+        if (OpenChatProblem(row) is { } problem) return problem;
         if (row.Info.Locked) return (row.Info.LockReason is { Length: > 0 } why ? Loc.F("It is locked ({0}). Unlock it first: git worktree unlock.", why) : Loc.T("It is locked. Unlock it first: git worktree unlock."));
-        if (row.Info.Prunable) return null;
+        if (row.Info.Prunable)
+            return Directory.Exists(row.Path) ? Loc.T("This worktree's folder has reappeared. Refresh the list before removing it.") : null;
         var r = await Main.RunTool(new ToolCommand("git", ["status", "--porcelain"], row.Path, TimeSpan.FromSeconds(20)), Main.Lifetime);
         if (!r.Ok) return Loc.T("git can't read it: ") + r.Message;
+        if (OpenChatProblem(row) is { } changed) return changed;
         var changes = r.Stdout.Split('\n').Count(l => l.Trim().Length > 0);
         return changes == 0 ? null : Loc.Plural(changes, "It has {0} uncommitted change. Commit or discard it first.",
             "It has {0} uncommitted changes. Commit or discard them first.");
@@ -502,9 +517,16 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
 
     internal async Task<string?> RemoveWorktreeAsync(WorktreeRowViewModel row)
     {
+        // Confirmation can outlive a chat switch, a new background chat or a status change.
+        if (await RemoveProblemAsync(row) is { } problem) return problem;
+        using var reservation = Main.ReserveWorktreeRemoval(row.Path);
+        if (reservation is null) return Loc.T("Wait for open conversations, queued input and other worktree operations to finish before removing this worktree.");
         if (Main.ProjectFolder is not { } folder) return Loc.T("No project folder.");
-        var args = row.Info.Prunable ? new[] { "worktree", "prune" } : ["worktree", "remove", row.Path];
-        var r = await Main.RunTool(new ToolCommand("git", args, folder, TimeSpan.FromSeconds(60)), Main.Lifetime);
+        if (OpenChatProblem(row) is { } changed) return changed;
+        // `prune` affects every missing worktree. `remove` also handles a missing directory,
+        // but removes only this row's registration, leaving unrelated open chats intact.
+        var r = await Main.RunTool(new ToolCommand("git", ["worktree", "remove", row.Path], folder, TimeSpan.FromSeconds(60),
+            GitTargetDirectory: row.Info.Prunable ? null : row.Path), Main.Lifetime);
         if (!r.Ok) return r.Message;
         Say(row.Info.Prunable ? Loc.T("Cleaned up the missing worktree.") : Loc.F("Removed the worktree {0}.", GitProbe.Tilde(row.Path)) + (row.Info.Branch is { } b ? Loc.F(" Branch {0} is still there.", b) : ""));
         await LoadAsync();

@@ -19,11 +19,11 @@ public sealed partial class MainViewModel
 
     internal ClientSettingsStore? SettingsStore => _settings;
 
-    /// <summary>Every chat's omp starts again with the changed settings: idle ones now, working ones after their run.</summary>
+    /// <summary>Restarts the shared engine once every logical session is idle.</summary>
     internal Task<bool> RestartEnginesAsync() => RestartAllSessionsAsync();
 
-    /// <summary>Chats whose omp restarts once its run ends (<see cref="OpenSession.RestartWhenIdle"/>).</summary>
-    internal int PendingEngineRestarts => _opens.Values.Count(o => o.RestartWhenIdle);
+    /// <summary>All open chats wait together for a pending process-wide settings change.</summary>
+    internal int PendingEngineRestarts => _engineRestartPending ? _opens.Count : 0;
 
     /// <summary>omp terminal tabs already open: they keep the environment they started with.</summary>
     internal int OpenOmpTerminals => Terminals.Count(t => t.Kind == TerminalKind.OmpTui);

@@ -7,8 +7,8 @@ namespace Ombra.Tests;
 /// left behind, and never another running Ombra's.</summary>
 public sealed class OwnedProcessesTests
 {
-    private const string Rt = "/Users/me/Library/Application Support/Ombra/runtimes";
-    private const string Bun = Rt + "/omp-18.8.0-bun-1.4.2/bun/bun";
+    private static readonly string Rt = Path.Combine(Path.GetTempPath(), "ombra-owned-process-tests", "runtimes");
+    private static readonly string Bun = Path.Combine(Rt, "ombra-engine-18.8.0-bun-1.4.2-v1", "bun", "bun");
     private const int Self = 100;
 
     private static OwnedProcesses With(params Info[] all) => new(Rt, () => all);
@@ -20,7 +20,7 @@ public sealed class OwnedProcessesTests
     {
         var o = With(
             App(Self),
-            new(200, Self, Bun + " cli.ts --mode rpc-ui", Self),
+            new(200, Self, Bun + " host.ts", Self),
             new(300, 1, Bun + " cli.ts __omp_worker_daemon_broker", Self),   // the broker, detached
             new(301, 300, "ng serve app --port 4207", Self),
             new(302, 301, "node_modules/@esbuild/bin/esbuild --service", Self),
@@ -35,7 +35,7 @@ public sealed class OwnedProcessesTests
     {
         var o = With(
             App(Self),
-            new(200, Self, Bun + " cli.ts --mode rpc-ui", Self),               // started a moment ago
+            new(200, Self, Bun + " host.ts", Self),                          // one app-owned engine
             App(700),                                                          // another Ombra, running
             new(701, 1, Bun + " cli.ts __omp_worker_daemon_broker", 700),
             new(800, 1, Bun + " cli.ts __omp_worker_daemon_broker", 42),       // its app (42) is gone
@@ -43,6 +43,23 @@ public sealed class OwnedProcessesTests
         Assert.Equal([800, 801], o.Select(Moment.Start, Self));
         // At quit, this app's own as well (a gone app's leftovers go whenever they are found)
         Assert.Equal([200, 800, 801], o.Select(Moment.Quit, Self));
+    }
+
+    [Theory]
+    [InlineData("/usr/local/share/dotnet/dotnet /projects/my app/Ombra.dll --config /tmp/isolated.json")]
+    [InlineData("dotnet Ombra.dll --config isolated.json")]
+    [InlineData("/usr/bin/dotnet exec /projects/Ombra.dll")]
+    [InlineData("C:\\Program Files\\dotnet\\dotnet.exe C:\\Projects\\Ombra.dll --config isolated.json")]
+    [InlineData("/Applications/OMP GUI.app/Contents/MacOS/OmpGui")]
+    public void Independent_development_and_legacy_instances_keep_their_children(string command)
+    {
+        var owner = new Info(700, 1, command, null);
+        var o = With(App(Self), owner,
+            new(701, 700, Bun + " host.ts", 700),
+            new(702, 1, Bun + " cli.ts __omp_worker_daemon_broker", 700),
+            new(800, 1, Bun + " cli.ts __omp_worker_daemon_broker", 42));
+        Assert.Equal([800], o.Select(Moment.Start, Self));
+        Assert.Equal([800], o.Select(Moment.Quit, Self));
     }
 
     [Fact]
@@ -67,7 +84,7 @@ public sealed class OwnedProcessesTests
         var o = With(
             new(50, 1, "/bin/zsh -l", 42),                                     // the shell the app was started from
             new(Self, 50, "/Applications/Ombra.app/Contents/MacOS/Ombra OMBRA_OWNER=42", 42),
-            new(200, Self, Bun + " cli.ts", Self));
+            new(200, Self, Bun + " host.ts", Self));
         Assert.Equal([200], o.Select(Moment.Quit, Self));
         Assert.Empty(o.Select(Moment.Start, Self));
     }

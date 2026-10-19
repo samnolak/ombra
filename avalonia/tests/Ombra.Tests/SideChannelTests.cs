@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Avalonia.Headless.XUnit;
 using Ombra.App;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore;
@@ -22,6 +23,7 @@ public sealed class SideChannelTests
         public IReadOnlyList<string> Sent => File.Exists(Log) ? File.ReadAllLines(Log) : [];
     }
 
+    /// <summary>Makes a <see cref="MainViewModel"/>: only from an <see cref="AvaloniaFactAttribute"/> test (see ConnectorsFlowTests).</summary>
     private static async Task<Setup> StartAsync()
     {
         var dir = TestProcesses.TempDir("side");
@@ -46,7 +48,7 @@ public sealed class SideChannelTests
         return new(vm, s, log);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task Settings_pages_read_omp_without_a_turn_a_message_or_a_new_title()
     {
         var t = await StartAsync();
@@ -55,7 +57,7 @@ public sealed class SideChannelTests
         await t.Vm.SshSettings.LoadAsync();
         await t.Vm.ComputerSettings.LoadAsync();
 
-        Assert.Equal(["/mcp list", "/tools", "/ssh list", "/computer status", "/tools"], t.Sent);
+        Assert.Equal(["/mcp list", "/tools", "get_mcp_servers", "/ssh list", "/computer status", "/tools"], t.Sent);
         var snap = t.Session.Snapshot();
         Assert.Empty(snap.Items.OfType<UserItem>());
         Assert.Empty(snap.Items.OfType<AssistantItem>());
@@ -68,7 +70,7 @@ public sealed class SideChannelTests
         Assert.False(t.Vm.SshSettings.ReadOnly);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task A_builtin_this_omp_does_not_list_is_never_sent()
     {
         var t = await StartAsync();
@@ -109,7 +111,7 @@ public sealed class SideChannelTests
         Assert.Single(s.Snapshot().Items.OfType<NoticeItem>());
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task Thinking_levels_from_an_omp_without_them_fall_back_quietly()
     {
         var t = await StartAsync();

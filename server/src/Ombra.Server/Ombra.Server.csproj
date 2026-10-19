@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <RootNamespace>Ombra.Server</RootNamespace>
+    <AssemblyName>Ombra.Server</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Ombra.Server.Contracts/Ombra.Server.Contracts.csproj" />
+    <ProjectReference Include="../Ombra.Core.Interop/Ombra.Core.Interop.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Single source of migrations: server/migrations, embedded and applied in file-name order. -->
+    <EmbeddedResource Include="../../migrations/*.sql" LogicalName="migrations/%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Ombra.Server.Tests" />
+    <InternalsVisibleTo Include="Ombra.Server.Cli" />
+  </ItemGroup>
+</Project>

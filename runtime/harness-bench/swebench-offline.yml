@@ -1,0 +1,9 @@
+# Settings overlay for swebench.mjs (passed as `--config`): SWE-bench instances are public GitHub issues whose fixes are
+# online, so the agent gets no web search, URL reads or browser. A pilot run without it spent 105 of 237 tool calls on
+# web_search, mostly looking for the upstream commit.
+web_search:
+  enabled: false
+fetch:
+  enabled: false
+browser:
+  enabled: false

@@ -17,6 +17,8 @@ public sealed record UsageMeterViewModel(string Label, double? Fraction, string 
     public bool IsHigh => Fraction >= 0.8 && !IsFull;
     /// <summary>Used up: the bar in the negative colour.</summary>
     public bool IsFull => Exhausted || Fraction >= 1;
+    public bool ShowAdvice => IsHigh || IsFull;
+    public string Advice => Loc.T("Near the plan limit. Wait for the reset or choose another provider.");
     public string AccessibleName => Resets.Length > 0 ? $"{Label}: {Amount}, {Resets}" : $"{Label}: {Amount}";
 }
 
@@ -72,13 +74,13 @@ public sealed partial class ProviderUsageGroupViewModel(ProviderUsageViewModel o
         return owner.SpendResetAsync(this);
     }
 
-    private static string ResetsDetail(ProviderUsageResets r, DateTimeOffset now)
+    internal static string ResetsDetail(ProviderUsageResets r, DateTimeOffset now)
     {
         var parts = new List<string>();
         if (r.Usable != r.Saved) parts.Add(Loc.F("{0} usable now", r.Usable));
         if (r.SoonestExpiry is { } at)
-            parts.Add(at > now ? Loc.F("the soonest expires in {0}", ProviderUsage.Span(at - now)) : Loc.F("expired {0}", at.ToLocalTime().ToString("d", CultureInfo.CurrentCulture)));
-        if (r.Usable == 0 && r.Unavailable is { Length: > 0 } why) parts.Add(Loc.F("unavailable: {0}", why));
+            parts.Add(at > now ? Loc.F("the soonest expires in {0}", ProviderUsageViewModel.Span(at - now)) : Loc.F("expired {0}", at.ToLocalTime().ToString("d", CultureInfo.CurrentCulture)));
+        if (r.Usable == 0 && r.UnavailableFormat is { } why) parts.Add(Loc.F("unavailable: {0}", Loc.F(why, r.UnavailableArgs ?? [])));
         return string.Join(" · ", parts);
     }
 }
@@ -86,8 +88,8 @@ public sealed partial class ProviderUsageGroupViewModel(ProviderUsageViewModel o
 /// <summary>
 /// The subscription limits of every signed-in provider that reports them (Claude's and ChatGPT's 5-hour and weekly
 /// windows, API spend…), read from <c>omp usage --json</c>: a side process, never a message in the conversation.
-/// omp caches the reports itself; this asks it at most every <see cref="MinInterval"/> unless refreshed by hand or
-/// marked stale (a run ended). Providers without a usage source are simply absent.
+/// Explicitly read in Settings → Model providers, at most every <see cref="MinInterval"/> unless refreshed by hand
+/// or marked stale (a run ended). Providers without a usage source are simply absent.
 /// </summary>
 public sealed partial class ProviderUsageViewModel : ObservableObject
 {
@@ -116,11 +118,9 @@ public sealed partial class ProviderUsageViewModel : ObservableObject
 
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private bool _hasGroups;
-    /// <summary>"Updated 3m ago"; empty while fresh or when nothing was reported.</summary>
+    /// <summary>Timestamp of the oldest report shown; retained across failed refreshes.</summary>
     [ObservableProperty] private string _note = "";
-
-    /// <summary>Raised after new reports were applied.</summary>
-    public event Action? Updated;
+    [ObservableProperty] private bool _refreshFailed;
 
     /// <summary>A run ended: the next load asks omp again even within <see cref="MinInterval"/>.</summary>
     internal void MarkStale() => _stale = true;
@@ -128,16 +128,15 @@ public sealed partial class ProviderUsageViewModel : ObservableObject
     [RelayCommand]
     private Task Refresh() => LoadAsync(force: true);
 
-    /// <summary>The groups for one provider (the session's model), in report order.</summary>
-    internal IEnumerable<ProviderUsageGroupViewModel> For(string provider) => Groups.Where(g => g.Provider == provider);
-
     /// <summary>Reads the reports again unless they are recent; concurrent calls share one read.</summary>
     internal Task LoadAsync(bool force = false)
     {
+        if (force) _stale = true;
+        if (!_main.IsSettingsOpen || _main.SettingsCategory != "providers") return Task.CompletedTask;
         if (_loading is { IsCompleted: false } running) return running;
         if (!force && !_stale && DateTimeOffset.UtcNow - _fetchedAt < MinInterval)
         {
-            Apply(); // only the "updated … ago" note moves on
+            Apply(); // refresh the reset countdown without querying the provider
             return Task.CompletedTask;
         }
         return _loading = FetchAsync();
@@ -146,16 +145,25 @@ public sealed partial class ProviderUsageViewModel : ObservableObject
     private async Task FetchAsync()
     {
         IsLoading = true;
+        _stale = false; // invalidations arriving during this read must survive its completion
         try
         {
             var r = await _main.RunOmpCliAsync(ProviderUsage.CliArgs, TimeSpan.FromSeconds(30), _main.Closing);
-            _stale = false;
-            _fetchedAt = DateTimeOffset.UtcNow;
-            // Only what omp reported: a failed read or an unknown payload shows no meters (never made-up numbers)
-            _reports = r.Ok && ProviderUsage.Parse(r.Stdout) is { } reports ? reports : [];
+            if (r.Ok && ProviderUsage.Parse(r.Stdout) is { } reports)
+            {
+                _fetchedAt = DateTimeOffset.UtcNow;
+                _reports = reports;
+                RefreshFailed = false;
+            }
+            else
+            {
+                // Keep the last real report, but never present it as a successful refresh.
+                RefreshFailed = true;
+                _stale = true;
+            }
             Apply();
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) { _stale = true; }
         finally { IsLoading = false; }
     }
 
@@ -166,8 +174,8 @@ public sealed partial class ProviderUsageViewModel : ObservableObject
         foreach (var report in _reports)
         {
             var name = ProviderUsage.ProviderName(report.Provider);
-            var meters = report.Limits.Select(l => new UsageMeterViewModel(ProviderUsage.DisplayLabel(l, name), l.UsedFraction, ProviderUsage.Amount(l),
-                l.ResetsAt is { } at ? ProviderUsage.ResetsIn(at, now, l.ResetVerb) : "", l.Status == "exhausted")).ToList();
+            var meters = report.Limits.Select(l => new UsageMeterViewModel(ProviderUsage.DisplayLabel(l, name, Loc.T), l.UsedFraction, Amount(l),
+                l.ResetsAt is { } at ? ResetsIn(at, now, l.ResetVerb) : "", l.Status == "exhausted")).ToList();
             var plan = report.Plan is { Length: > 0 } p ? Loc.F("{0} plan", CultureInfo.InvariantCulture.TextInfo.ToTitleCase(p)) : "";
             var account = string.Join(" · ", new[] { report.Account ?? "", plan }.Where(s => s.Length > 0));
             var group = new ProviderUsageGroupViewModel(this, report, name, account, meters);
@@ -175,9 +183,8 @@ public sealed partial class ProviderUsageViewModel : ObservableObject
             Groups.Add(group);
         }
         HasGroups = Groups.Count > 0;
-        var oldest = _reports.Select(r => r.FetchedAt).OfType<DateTimeOffset>().DefaultIfEmpty(now).Min();
-        Note = HasGroups && now - oldest >= TimeSpan.FromMinutes(1) ? Loc.F("Updated {0} ago", Age(now - oldest)) : "";
-        Updated?.Invoke();
+        var oldest = _reports.Select(r => r.FetchedAt).OfType<DateTimeOffset>().DefaultIfEmpty(_fetchedAt).Min();
+        Note = HasGroups ? Loc.F("As of {0}", oldest.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)) : "";
     }
 
     internal void ForgetSpendMessage(ProviderUsageGroupViewModel group) => _spendMessages.Remove((group.Provider, group.Report.Account));
@@ -214,13 +221,35 @@ public sealed partial class ProviderUsageViewModel : ObservableObject
         await LoadAsync(force: true);
     }
 
-    private static string Age(TimeSpan t) => t.TotalHours >= 1 ? Loc.F("{0}h", (int)t.TotalHours) : Loc.F("{0}m", (int)t.TotalMinutes);
+    /// <summary>A time left in its two largest units: "3d 4h", "2h 10m", "45m" (in the app's language).</summary>
+    internal static string Span(TimeSpan left) =>
+        left.TotalDays >= 1 ? Loc.F("{0}d", (int)left.TotalDays) + (left.Hours > 0 ? " " + Loc.F("{0}h", left.Hours) : "")
+        : left.TotalHours >= 1 ? left.Minutes > 0 ? Loc.F("{0}h {1}m", (int)left.TotalHours, left.Minutes) : Loc.F("{0}h", (int)left.TotalHours)
+        : Loc.F("{0}m", (int)left.TotalMinutes);
+
+    /// <summary>"resets in 2h 10m", "resets soon" under a minute; a verb of omp's other than "resets" stays omp's words.</summary>
+    internal static string ResetsIn(DateTimeOffset at, DateTimeOffset now, string verb)
+    {
+        if (verb != "resets") return ProviderUsage.ResetsIn(at, now, verb);
+        var left = at - now;
+        return left < TimeSpan.FromMinutes(1) ? Loc.T("resets soon") : Loc.F("resets in {0}", Span(left));
+    }
+
+    /// <summary>The share used ("42% used"), else the amount: "$12.40 used", "1,200 of 5,000 requests" (unit as omp names it).</summary>
+    internal static string Amount(ProviderUsageLimit l)
+    {
+        if (l.UsedFraction is { } f) return Loc.F("{0:0}% used", Math.Round(f * 100));
+        if (l.Used is not { } used) return "";
+        string N(double v) => v.ToString(l.Unit == "usd" ? "$#,0.00" : "#,0.##", CultureInfo.CurrentCulture);
+        var unit = l.Unit is "usd" or "unknown" or "percent" ? "" : " " + l.Unit;
+        return l.Limit is { } max ? Loc.F("{0} of {1}", N(used), N(max) + unit) : Loc.F("{0} used", N(used) + unit);
+    }
 }
 
 public partial class MainViewModel
 {
     private ProviderUsageViewModel? _providerUsage;
 
-    /// <summary>Signed-in providers' plan limits (the context popover and Settings → Model providers).</summary>
+    /// <summary>Signed-in providers' plan limits, read only in Settings → Model providers.</summary>
     public ProviderUsageViewModel ProviderUsage => _providerUsage ??= new ProviderUsageViewModel(this);
 }

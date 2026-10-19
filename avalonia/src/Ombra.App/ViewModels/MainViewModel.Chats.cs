@@ -1,4 +1,3 @@
-using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Ombra.App.Localization;
@@ -8,9 +7,8 @@ namespace Ombra.App.ViewModels;
 
 /// <summary>
 /// Chats outside any project (ChatGPT, Claude and Codex open a new chat this way): New chat (⌘N, the sidebar's top
-/// button) gives each one an empty folder of its own (<see cref="ChatFolders"/>), and takes over an omp started ahead for
-/// it (the host's spare), so the new chat can be used at once instead of after omp's start (about two seconds: omp's own
-/// start, and before it the provider check of network privacy, each a Bun process).
+/// button) gives each one an empty folder of its own (<see cref="ChatFolders"/>) and opens a logical session in the
+/// app-owned engine.
 /// </summary>
 public sealed partial class MainViewModel
 {
@@ -77,9 +75,7 @@ public sealed partial class MainViewModel
         Chats.Contains(open.Controller.CurrentLaunch.WorkingDirectory) && IsUntouched(open);
 
     /// <summary>
-    /// A new chat outside any project, shown at once. The spare omp takes it when it is ready and was started the way a
-    /// new chat would be now (else a new omp starts, as for any new chat); either way the next spare is prepared. The
-    /// shown chat is that already while it is a chat nothing was said or typed in.
+    /// A new chat outside any project, shown at once. The shown chat is reused while nothing was said or typed in it.
     /// </summary>
     [RelayCommand]
     private async Task NewChatAsync()
@@ -90,22 +86,14 @@ public sealed partial class MainViewModel
             FocusComposerRequested?.Invoke();
             return;
         }
-        if (_host.TakeSpare(NewLaunch(null)) is { } spare)
-        {
-            ShowStartedChat(spare); // MainViewModel.OpenSessions.cs
-            ScheduleSpare();
-            return;
-        }
         string folder;
         try { folder = Chats.Create(); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            ShowBrief("IconAlert", Loc.T("Couldn’t start a new chat"), Loc.T("Its folder could not be made: ") + e.Message, Chats.Root);
+            ShowUrgentBrief("IconAlert", Loc.T("Couldn’t start a new chat"), Loc.T("Its folder could not be made: ") + e.Message, Chats.Root);
             return;
         }
-        var start = StartNewSessionAsync(NewLaunch(folder)); // MainViewModel.OpenSessions.cs
-        ScheduleSpare();
-        await start;
+        await StartNewSessionAsync(NewLaunch(folder)); // MainViewModel.OpenSessions.cs
     }
 
     /// <summary>A new session where the shown chat works (omp's /new): in its project, or a new chat for a chat.</summary>
@@ -121,57 +109,28 @@ public sealed partial class MainViewModel
         return StartNewSessionAsync(NewLaunch(ProjectFolder ?? Session.CurrentLaunch.WorkingDirectory));
     }
 
-    // ───────────── The spare omp ─────────────
-
-    /// <summary>How long the window waits before it starts the spare: after the first chat's omp is ready, and after a new
-    /// chat took the spare (omp's start is seconds of CPU; it is not wanted while the window itself starts).</summary>
-    internal TimeSpan SpareDelay { get; set; } = TimeSpan.FromSeconds(3);
-
-    private DispatcherTimer? _spareTimer;
-    private bool _spareScheduled;
-
-    /// <summary>The omp started ahead for the next new chat, if any (the host's).</summary>
-    internal SessionController? Spare => _host.Spare;
-
-    /// <summary>The spare is prepared once the window has been idle for <see cref="SpareDelay"/>, unless there is one.</summary>
-    private void ScheduleSpare()
+    private void PrepareDraftWorkingDirectory(LaunchRequest request)
     {
-        _spareScheduled = true;
-        if (IsClosing || _host.Spare is not null || _spareTimer is not null) return;
-        _spareTimer = new DispatcherTimer(SpareDelay, DispatcherPriority.ApplicationIdle, (_, _) =>
-        {
-            _spareTimer?.Stop();
-            _spareTimer = null;
-            if (IsClosing || _host.Spare is not null) return;
-            string folder;
-            try { folder = Chats.Create(); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                return; // New chat says why when it cannot make a folder either
-            }
-            _ = _host.PrepareSpareAsync(NewLaunch(folder), _cts.Token);
-        });
-        _spareTimer.Start();
+        var folder = request.WorkingDirectory;
+        // Older cleanup could remove an empty chat folder while its composer still lived in the journal.
+        // Recreate only app-owned chat folders, never a missing external project. Core reports preparation failures.
+        if (Chats.Contains(folder) && !Directory.Exists(folder) && _draftStore.HasDraftInProject(folder))
+            Directory.CreateDirectory(folder!);
     }
 
-    /// <summary>Something that changes how omp starts changed: the spare goes, and (when <paramref name="again"/>) a new
-    /// one is prepared the new way.</summary>
-    private void ReplaceSpare(bool again)
-    {
-        _spareTimer?.Stop();
-        _spareTimer = null;
-        _host.InvalidateSpare();
-        if (again && _spareScheduled) ScheduleSpare();
-    }
+    /// <summary>A chat's empty folder goes with its process only when no saved input needs that working directory.</summary>
+    private void OnChatStopped(SessionController c) => DeleteUnusedChatFolder(c.CurrentLaunch.WorkingDirectory, c.SessionFile);
 
-    /// <summary>A chat's omp stopped (closed, or the spare dropped): a chat's folder nothing was made in goes with it.</summary>
-    private void OnChatStopped(SessionController c) => Chats.DeleteIfUnused(c.CurrentLaunch.WorkingDirectory, c.SessionFile);
+    private void DeleteUnusedChatFolder(string? folder, string? sessionFile)
+    {
+        if (!_draftStore.HasDraftInProject(folder)) Chats.DeleteIfUnused(folder, sessionFile);
+    }
 
     /// <summary>An untouched chat's omp went to another folder (a project, a saved session): the chat's own folder goes
     /// when nothing was made in it.</summary>
     private void LeftChatFolder(SessionController c, string? folder, string? sessionFile)
     {
         if (Chats.Contains(folder) && !SessionCatalog.SamePath(folder, c.CurrentLaunch.WorkingDirectory))
-            _ = Task.Run(() => Chats.DeleteIfUnused(folder, sessionFile));
+            _ = Task.Run(() => DeleteUnusedChatFolder(folder, sessionFile));
     }
 }

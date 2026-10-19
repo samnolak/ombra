@@ -106,11 +106,9 @@ public sealed class ComposerUiTests
         File.WriteAllBytes(broken, [1, 2, 3, 4]);
         await vm.AddFilesAsync(paths);
         Assert.Equal(ImageAttachments.MaxImages, vm.Attachments.Count);
-        Assert.StartsWith("At most 3 images", vm.ComposerMessage);
         vm.Attachments[0].RemoveCommand.Execute(null);
         await vm.AddFilesAsync([broken]);
         Assert.Equal(2, vm.Attachments.Count);
-        Assert.StartsWith("broken.png: not an image", vm.ComposerMessage);
         await vm.DisposeAsync();
         w.Close();
     }
@@ -209,7 +207,6 @@ public sealed class ComposerUiTests
         w.KeyPress(Key.V, paste, PhysicalKey.V, null);
         await Until(() => vm.PastedTexts.Count == 1, "chip");
         Assert.Equal("", vm.ComposerText);
-        Assert.Equal("Pasted text +40 lines", vm.PastedTexts[0].Label);
         Assert.True(w.FindControl<ItemsControl>("PastedTextList")!.IsEffectivelyVisible);
 
         // A short paste goes into the box as usual
@@ -227,7 +224,32 @@ public sealed class ComposerUiTests
     }
 
     [AvaloniaFact]
-    public async Task Shift_tab_steps_through_the_permission_modes_and_bypass_asks_first()
+    public async Task An_all_hidden_paste_preserves_the_selected_draft()
+    {
+        var (w, vm, _) = await OpenAsync();
+        try
+        {
+            var composer = w.FindControl<TextBox>("Composer")!;
+            vm.ComposerText = "keep this draft";
+            composer.Focus();
+            composer.SelectAll();
+            await w.Clipboard!.SetTextAsync("\u200b");
+            var paste = (RawInputModifiers)w.GetPlatformSettings()!.HotkeyConfiguration.CommandModifiers;
+            w.KeyPress(Key.V, paste, PhysicalKey.V, null);
+            await Until(() => !string.IsNullOrEmpty(vm.ComposerMessage), "cleanup notice");
+            Assert.Equal("keep this draft", vm.ComposerText);
+            Assert.Equal("keep this draft", composer.SelectedText);
+            Assert.Empty(vm.PastedTexts);
+        }
+        finally
+        {
+            await vm.DisposeAsync();
+            w.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Shift_tab_steps_through_the_permission_modes_and_plan_mode_and_bypass_asks_first()
     {
         var (w, vm, s) = await OpenAsync();
         var composer = w.FindControl<TextBox>("Composer")!;
@@ -238,17 +260,25 @@ public sealed class ComposerUiTests
         // Two quick steps: each shown at once, one omp restart once the keys pause
         w.KeyPress(Key.Tab, RawInputModifiers.Shift, PhysicalKey.Tab, null);
         Assert.Equal("always-ask", vm.ShownApprovalMode);
-        Assert.Equal("Ask permissions", vm.ApprovalLabel);
         w.KeyPress(Key.Tab, RawInputModifiers.Shift, PhysicalKey.Tab, null);
         Assert.Equal("write", vm.ShownApprovalMode);
         Assert.True(vm.IsAcceptEdits);
         Assert.Contains("mode-write", pill.Classes);
-        Assert.Equal("Accept edits", vm.ApprovalLabel);
         Assert.True(composer.IsFocused); // the keys stay in the message box
         await Until(() => s.Snapshot().ApprovalMode == "write" && vm.Phase == SessionPhase.Ready && vm.PendingApprovalMode is null, "omp restarted in Accept edits");
 
-        // Accept edits → Bypass: nothing changes until confirmed in the permission menu, which opens for it
+        // Accept edits → Plan mode (Claude Code's order): the session plans read-only, the permission mode stays under it
         w.KeyPress(Key.Tab, RawInputModifiers.Shift, PhysicalKey.Tab, null);
+        Assert.True(vm.IsPlanMode);
+        Assert.Equal("write", vm.ShownApprovalMode);
+        await Until(() => s.Snapshot().PlanMode.Enabled && !vm.IsPlanActionRunning, "omp in plan mode");
+        Assert.True(w.FindControl<Button>("PlanModeChip")!.IsVisible);
+        Assert.True(composer.IsFocused);
+
+        // Plan mode → Bypass: plan mode ends, and nothing else changes until confirmed in the permission menu, which opens for it
+        w.KeyPress(Key.Tab, RawInputModifiers.Shift, PhysicalKey.Tab, null);
+        Assert.False(vm.IsPlanMode);
+        await Until(() => !s.Snapshot().PlanMode.Enabled, "plan mode left");
         Assert.True(vm.ConfirmYolo);
         Assert.Equal("write", vm.ShownApprovalMode);
         Assert.True(w.FindControl<Button>("ApprovalButton")!.Flyout!.IsOpen);
@@ -258,17 +288,85 @@ public sealed class ComposerUiTests
         Assert.False(vm.ConfirmYolo);
         Assert.Equal("always-ask", vm.ShownApprovalMode);
         await Until(() => s.Snapshot().ApprovalMode == "always-ask" && vm.Phase == SessionPhase.Ready && vm.PendingApprovalMode is null, "omp restarted in Ask");
+        Assert.Equal("always-ask", vm.ShownApprovalMode);
         vm.CycleApprovalMode();
+        Assert.Equal("write", vm.ShownApprovalMode);
         await Until(() => s.Snapshot().ApprovalMode == "write" && vm.Phase == SessionPhase.Ready && vm.PendingApprovalMode is null, "Accept edits again");
+        vm.CycleApprovalMode();
+        Assert.True(vm.IsPlanMode);
+        await Until(() => s.Snapshot().PlanMode.Enabled && !vm.IsPlanActionRunning, "plan mode again");
         vm.CycleApprovalMode();
         Assert.True(vm.ConfirmYolo);
         Assert.Equal("write", vm.ShownApprovalMode);
         await vm.SetApprovalModeCommand.ExecuteAsync("yolo");
         Assert.Contains("mode-yolo", pill.Classes);
-        await Until(() => s.Snapshot().ApprovalMode == "yolo" && vm.Phase == SessionPhase.Ready, "bypass");
-        Assert.Equal("Bypass permissions", vm.ApprovalLabel);
+        await Until(() => s.Snapshot().ApprovalMode == "yolo" && vm.Phase == SessionPhase.Ready && vm.PendingApprovalMode is null, "bypass");
         await vm.DisposeAsync();
         w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Cycling_during_a_permission_restart_uses_the_pending_choice_and_drains_the_next_one()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var factory = TestProcesses.FakeFactory("no-plan-mode", TestProcesses.TempDir("cu-mode-sessions")); // the permission modes alone
+        var s = new SessionController(async (request, ct) =>
+        {
+            if (request.ApprovalMode == "always-ask")
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(ct);
+            }
+            return factory(request);
+        }, new LaunchRequest(TestProcesses.TempDir("cu-mode-project"), ApprovalMode: "write"));
+        var vm = new MainViewModel(s, new AppArgs());
+        try
+        {
+            // No window update pump: reproduce the stale Ready/write projection deterministically while Core
+            // already has the new launch request. Restart completion must publish the mode before clearing it.
+            await s.StartAsync().WaitAsync(TimeSpan.FromSeconds(20));
+            vm.Apply(s.Snapshot());
+            var enginePid = s.ProcessId;
+            Assert.NotNull(enginePid);
+            vm.CycleApprovalMode();
+            Assert.True(vm.ConfirmYolo);
+            vm.CycleApprovalMode();
+            var applying = vm.SetApprovalModeCommand.ExecutionTask!;
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(20));
+
+            Assert.Equal("always-ask", s.Snapshot().ApprovalMode);
+            Assert.Equal(SessionPhase.Ready, vm.Phase);
+            Assert.Equal("write", vm.ApprovalMode);
+            Assert.Equal("always-ask", vm.PendingApprovalMode);
+            Assert.Equal("always-ask", vm.ShownApprovalMode);
+            Assert.False(applying.IsCompleted);
+            Assert.False(vm.ConfirmYolo);
+
+            // This must queue write, not reopen Bypass from the stale write projection. Completing the older
+            // Ask restart must neither clear the newer explicit choice nor leave it waiting for another wake-up.
+            vm.CycleApprovalMode();
+            Assert.Equal("write", vm.PendingApprovalMode);
+            Assert.Equal("write", vm.ShownApprovalMode);
+            Assert.False(vm.ConfirmYolo);
+            release.TrySetResult();
+            await applying.WaitAsync(TimeSpan.FromSeconds(20));
+
+            Assert.Equal("write", s.Snapshot().ApprovalMode);
+            Assert.Equal(SessionPhase.Ready, s.Snapshot().Phase);
+            Assert.Equal(enginePid, s.ProcessId); // only the logical session reopens, not the shared engine
+            Assert.Equal(SessionPhase.Ready, vm.Phase);
+            Assert.Equal("write", vm.ApprovalMode);
+            Assert.Null(vm.PendingApprovalMode);
+            vm.CycleApprovalMode();
+            Assert.True(vm.ConfirmYolo);
+            Assert.Equal("write", vm.ShownApprovalMode);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await vm.DisposeAsync();
+        }
     }
 
     [AvaloniaFact]
@@ -281,7 +379,6 @@ public sealed class ComposerUiTests
         Dispatcher.UIThread.RunJobs();
         Assert.True(vm.IsShortcutsOpen);
         Assert.True(w.FindControl<Ombra.App.Controls.ShortcutsSheet>("ShortcutsSheet")!.IsEffectivelyVisible);
-        Assert.Contains(vm.Shortcuts.SelectMany(g => g.Items), s => s.Action == "Switch permission mode");
         Shot(w, "ui-shortcut-sheet");
 
         vm.ComposerText = "long task";

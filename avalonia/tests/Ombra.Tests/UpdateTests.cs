@@ -5,6 +5,7 @@ using System.Text.Json;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.Services;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
@@ -104,7 +105,7 @@ public sealed class UpdateTests
         Assert.False((await Checker(Manifest("0.1.0")).Checker.CheckAsync(CancellationToken.None)).Available);
         var older = await Checker(Manifest("0.0.9")).Checker.CheckAsync(CancellationToken.None);
         Assert.False(older.Available);
-        Assert.Contains("up to date", older.Message);
+        Assert.Equal(Loc.F("Ombra {0} is up to date.", "0.1.0"), older.Message);
     }
 
     [Fact]
@@ -112,7 +113,7 @@ public sealed class UpdateTests
     {
         var check = await Checker(Manifest("0.2.0", rid: "osx-arm64")).Checker.CheckAsync(CancellationToken.None);
         Assert.False(check.Available);
-        Assert.Contains("not for this platform (linux-x64)", check.Message);
+        Assert.Contains(Loc.F("Version {0} exists, but not for this platform ({1}).", "0.2.0", "linux-x64"), check.Message);
     }
 
     [Fact]
@@ -186,7 +187,7 @@ public sealed class UpdateTests
         await Assert.ThrowsAsync<InvalidDataException>(() => http.CheckAsync(CancellationToken.None));
         var missing = await new UpdateChecker(new HttpClient(new Server([])), Feed, "0.1.0", "linux-x64", TestSigning.PublicKey).CheckAsync(CancellationToken.None);
         Assert.False(missing.Available);
-        Assert.Equal("No release is published yet.", missing.Message);
+        Assert.Equal(Loc.T("No release is published yet."), missing.Message);
     }
 
     [AvaloniaFact]
@@ -203,13 +204,13 @@ public sealed class UpdateTests
         Assert.Equal("Ombra 0.1.0 (linux-x64)", vm.AppVersionText);
         vm.CheckForUpdatesCommand.Execute(null);
         await Until(() => vm.UpdateAvailable, "update offered");
-        Assert.StartsWith("Version 0.2.0 is available", vm.UpdateText);
+        Assert.StartsWith(Loc.F("Version {0} is available (you have {1}).", "0.2.0", "0.1.0"), vm.UpdateText);
         Assert.Equal("Faster start.", vm.UpdateNotes);
-        Assert.Equal("Update available: 0.2.0", vm.UpdatePill);
-        Assert.Equal("Download and verify", vm.UpdateActionLabel); // a test run is no package: download only
+        Assert.Equal(Loc.F("Update available: {0}", "0.2.0"), vm.UpdatePill);
+        Assert.Equal(Loc.T("Download and verify"), vm.UpdateActionLabel); // a test run is no package: download only
         vm.DownloadUpdateCommand.Execute(null);
         await Until(() => vm.DownloadedUpdate is not null, "downloaded");
-        Assert.StartsWith("Downloaded and verified", vm.UpdateText);
+        Assert.StartsWith(Loc.F("Downloaded and verified (SHA-256 matches the release): {0}", ""), vm.UpdateText);
         Assert.True(File.Exists(vm.DownloadedUpdate));
         await vm.DisposeAsync();
         w.Close();

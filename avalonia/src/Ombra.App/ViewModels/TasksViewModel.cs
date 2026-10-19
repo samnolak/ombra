@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
-using System.Text.RegularExpressions;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -29,12 +28,18 @@ public sealed partial class SubagentRowViewModel : ObservableObject
 {
     private readonly TasksViewModel _owner;
     private SubagentInfo _info;
+    private CancellationTokenSource? _messagesRead;
+    private bool _messagesRequested;
+    private bool _inViewport;
+    private bool _retired;
+    private long _nextByte;
+    private string? _transcriptFile;
 
-    public SubagentRowViewModel(TasksViewModel owner, SubagentInfo info, DateTimeOffset now)
+    public SubagentRowViewModel(TasksViewModel owner, SubagentInfo info)
     {
         _owner = owner;
         _info = info;
-        Update(info, now);
+        Update(info);
     }
 
     public string Id => _info.Id;
@@ -74,6 +79,8 @@ public sealed partial class SubagentRowViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(ShowTaskFull));
         OnPropertyChanged(nameof(ShowTaskShort));
+        if (!value) CancelMessages();
+        else _ = PollMessagesAsync();
     }
 
     public bool ShowTaskFull => HasTask && IsExpanded;
@@ -82,42 +89,119 @@ public sealed partial class SubagentRowViewModel : ObservableObject
     [RelayCommand]
     private void ToggleExpanded() => IsExpanded = !IsExpanded;
 
-    /// <summary>Reads the subagent's own conversation from omp (<c>get_subagent_messages</c>).</summary>
+    /// <summary>Opts into a live, bounded conversation preview while this expanded card is on screen.</summary>
     [RelayCommand]
-    private async Task LoadMessagesAsync()
+    private Task LoadMessagesAsync()
     {
-        if (IsLoadingMessages) return;
-        IsLoadingMessages = true;
+        _messagesRequested = true;
+        return PollMessagesAsync();
+    }
+
+    internal void SetInViewport(bool visible)
+    {
+        if (_inViewport == visible) return;
+        _inViewport = visible;
+        if (!visible) CancelMessages();
+        else _ = PollMessagesAsync();
+    }
+
+    internal void CancelMessages(bool retire = false)
+    {
+        _retired |= retire;
+        var pending = _messagesRead;
+        _messagesRead = null;
+        pending?.Cancel();
+        IsLoadingMessages = false;
+    }
+
+    private void ResetMessages()
+    {
+        CancelMessages();
+        _nextByte = 0;
+        _transcriptFile = null;
+        Messages.Clear();
+        MessagesLoaded = false;
         MessagesNote = "";
         HasMessagesNote = false;
+    }
+
+    internal async Task PollMessagesAsync()
+    {
+        if (_retired || !_messagesRequested || !IsExpanded || !_inViewport || !_owner.CanReadMessages || _messagesRead is not null) return;
+        using var pending = new CancellationTokenSource();
+        _messagesRead = pending;
+        var session = _owner.MessageSession;
+        var sessionFile = session?.Snapshot().SessionFile;
+        var id = Id;
+        var path = _info.SessionFile;
+        IsLoadingMessages = !MessagesLoaded;
         try
         {
-            var (messages, error) = await _owner.ReadMessagesAsync(Id);
-            Messages.Clear();
-            foreach (var m in messages) Messages.Add(new SubagentMessageViewModel(m.Role, m.Text));
-            MessagesLoaded = error is null;
-            MessagesNote = error is not null ? Loc.T("Could not read its messages: ") + error : messages.Count == 0 ? Loc.T("No messages yet.") : "";
-            HasMessagesNote = MessagesNote.Length > 0;
+            var (page, error) = await _owner.ReadMessagesAsync(id, _nextByte, pending.Token);
+            if (pending.IsCancellationRequested || !ReferenceEquals(_messagesRead, pending) || id != Id || path != _info.SessionFile
+                || session != _owner.MessageSession || sessionFile != session?.Snapshot().SessionFile || !_owner.CanReadMessages) return;
+            if (error is not null || page is null)
+            {
+                SetMessagesNote(Loc.T("Could not read its messages: ") + (error ?? Loc.T("omp did not answer")));
+                return; // retain both the preview and the last successfully consumed byte
+            }
+            if (_transcriptFile is { } previous && previous != page.SessionFile)
+            {
+                Messages.Clear();
+                MessagesLoaded = false;
+                _nextByte = 0;
+                _transcriptFile = page.SessionFile;
+                SetMessagesNote("");
+                // A cursor into the old file cannot be used to read the new file, even when it happens to fit.
+                if (page.FromByte != 0) return;
+            }
+            if (page.Reset) Messages.Clear();
+            _transcriptFile = page.SessionFile;
+            foreach (var message in page.Messages)
+            {
+                if (Messages.Count == SubagentMessagesPage.PreviewLimit) Messages.RemoveAt(0);
+                Messages.Add(new SubagentMessageViewModel(message.Role, Ombra.App.Controls.VisibleText.FromUntrustedOutput(message.Text)));
+            }
+            _nextByte = page.NextByte; // runtime counts UTF-8 bytes of complete lines, never .NET characters
+            MessagesLoaded = true;
+            SetMessagesNote(Messages.Count == 0 ? Loc.T("No messages yet.") : "");
         }
+        catch (OperationCanceledException) { } // collapse, hide, switch and shutdown are not read failures
         finally
         {
-            IsLoadingMessages = false;
+            if (ReferenceEquals(_messagesRead, pending))
+            {
+                _messagesRead = null;
+                IsLoadingMessages = false;
+            }
         }
     }
 
-    public void Update(SubagentInfo info, DateTimeOffset now)
+    private void SetMessagesNote(string note)
     {
+        MessagesNote = Ombra.App.Controls.VisibleText.FromUntrustedOutput(note);
+        HasMessagesNote = MessagesNote.Length > 0;
+    }
+
+    public void Update(SubagentInfo info)
+    {
+        var identityChanged = _info.Id != info.Id || _info.SessionFile != info.SessionFile;
+        if (identityChanged) ResetMessages();
         _info = info;
-        var firstLine = info.Task?.Split('\n', 2)[0].Trim();
-        Title = info.Description is { Length: > 0 } d ? d : firstLine is { Length: > 0 } f ? Shorten(f, 120) : info.Agent;
-        Agent = info.Agent;
-        TaskText = info.Task is { Length: > 0 } t ? Shorten(t.Trim(), 2000) : "";
+        // Its description, else the name it was given (omp's id, the last part of a nested one): omp's task text is the
+        // rendered subagent prompt ("Complete assignment thoroughly: …"); what the parent asked is the assignment.
+        var name = info.Id[(info.Id.LastIndexOf('.') + 1)..];
+        var title = info.Description is { Length: > 0 } d ? d : name.Length > 0 ? name : info.Agent;
+        Title = Ombra.App.Controls.VisibleText.FromUntrustedOutput(Shorten(title.Split('\n', 2)[0].Trim(), 120));
+        Agent = Ombra.App.Controls.VisibleText.FromUntrustedOutput(info.Agent);
+        var task = info.Assignment is { Length: > 0 } assignment ? assignment : info.Task;
+        TaskText = task is { Length: > 0 } t ? Ombra.App.Controls.VisibleText.FromUntrustedOutput(Shorten(t.Trim(), 2000)) : "";
         HasTask = TaskText.Length > 0 && TaskText != Title;
         IsBackground = info.Detached;
         IsRunning = info.IsRunning;
         IsDone = info.Status == "completed";
         IsFailed = info.Status == "failed";
-        StatusText = info.Status switch
+        StatusText = Ombra.App.Controls.VisibleText.FromUntrustedOutput(info.Status switch
         {
             "running" => Loc.T("Running"),
             "pending" => Loc.T("Waiting"),
@@ -126,75 +210,52 @@ public sealed partial class SubagentRowViewModel : ObservableObject
             "aborted" => Loc.T("Stopped"),
             "ended" => Loc.T("Ended"),
             var s => char.ToUpperInvariant(s[0]) + s[1..],
-        };
+        });
         // Running: what it does now. Ended: what it last said it did — for a failure, its last words (the reason)
-        ActivityText = info.IsRunning
+        ActivityText = Ombra.App.Controls.VisibleText.FromUntrustedOutput(info.IsRunning
             ? info.CurrentTool is { Length: > 0 } tool ? tool + (info.CurrentToolArgs is { Length: > 0 } a ? ": " + OneLine(a) : "") : info.LastIntent ?? Loc.T("Working…")
             : info.Status is "failed" or "aborted" && info.RecentOutput is [var last, ..] ? OneLine(last)
-            : info.LastIntent ?? "";
+            : info.LastIntent ?? "");
         HasActivity = ActivityText.Length > 0;
         var meta = new List<string>();
         if (info.ToolCount > 0) meta.Add(info.ToolCount == 1 ? Loc.T("1 tool call") : Loc.F("{0} tool calls", info.ToolCount));
         if (info.Tokens > 0) meta.Add(TokensText(info.Tokens));
         if (info.Model is { Length: > 0 } model) meta.Add(model);
-        MetaText = string.Join(" · ", meta);
+        MetaText = Ombra.App.Controls.VisibleText.FromUntrustedOutput(string.Join(" · ", meta));
         HasMeta = MetaText.Length > 0;
         // omp lists the newest line first; read top to bottom here
-        OutputText = string.Join("\n", info.RecentOutput.Reverse());
+        OutputText = Ombra.App.Controls.VisibleText.FromUntrustedOutput(string.Join("\n", info.RecentOutput.Reverse()));
         HasOutput = OutputText.Length > 0;
-        ToolsText = string.Join("\n", info.RecentTools.Select(t => t.Args.Length > 0 ? $"{t.Tool}: {t.Args}" : t.Tool));
+        ToolsText = Ombra.App.Controls.VisibleText.FromUntrustedOutput(string.Join("\n", info.RecentTools.Select(t => t.Args.Length > 0 ? $"{t.Tool}: {t.Args}" : t.Tool)));
         HasTools = ToolsText.Length > 0;
-        RetryNote = info.RetryNote ?? "";
+        RetryNote = Ombra.App.Controls.VisibleText.FromUntrustedOutput(info.RetryNote ?? "");
         HasRetryNote = RetryNote.Length > 0;
         OnPropertyChanged(nameof(ShowTaskFull));
         OnPropertyChanged(nameof(ShowTaskShort));
         OnPropertyChanged(nameof(AccessibleName));
-        Tick(now);
+        Tick();
+        if (identityChanged) _ = PollMessagesAsync();
     }
 
     /// <summary>The running time: omp's own at the last progress, plus the time since (live while it runs).</summary>
-    public void Tick(DateTimeOffset now)
+    public void Tick()
     {
-        var took = _info.IsRunning
-            ? (_info.Duration ?? TimeSpan.Zero) + (now - (_info.Duration is null ? _info.FirstSeenAt : _info.UpdatedAt))
-            : _info.Duration ?? (_info.EndedAt ?? now) - _info.FirstSeenAt;
-        ElapsedText = TasksViewModel.Duration(took);
+        ElapsedText = TasksViewModel.Duration(_info.RunningTime.Elapsed);
     }
 
     internal static string TokensText(long tokens) => tokens >= 1000
-        ? Loc.F("{0}k tokens", (tokens / 1000.0).ToString("0.#", CultureInfo.InvariantCulture))
+        ? Loc.F("{0}k tokens", (tokens / 1000.0).ToString("0.#", CultureInfo.CurrentCulture))
         : Loc.F("{0} tokens", tokens);
 
     private static string OneLine(string s) => Shorten(string.Join(' ', s.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)).Trim(), 200);
 
-    private static string Shorten(string s, int max) => s.Length <= max ? s : s[..max].TrimEnd() + "…";
-}
-
-/// <summary>A background job (omp's <c>/jobs</c>: long bash commands, async tasks) as the pane shows it.</summary>
-public sealed record JobRowViewModel(string Id, string Type, string Status, string Label, string Ago, bool IsRunningSection)
-{
-    public bool IsRunning => IsRunningSection && Status is "running";
-    public bool IsDone => Status is "completed";
-    public bool IsFailed => Status is "failed";
-    public string Title => Label.Length > 0 ? Label : $"{Type} {Id}";
-    public string StatusText => Status switch
-    {
-        "running" => Loc.T("Running"),
-        "completed" => Loc.T("Done"),
-        "failed" => Loc.T("Failed"),
-        "cancelled" => Loc.T("Cancelled"),
-        { Length: > 0 } s => char.ToUpperInvariant(s[0]) + s[1..],
-        _ => Loc.T("Unknown"),
-    };
-    /// <summary>"bash · running for 12s" / "task · started 5m ago".</summary>
-    public string Detail => IsRunningSection ? Loc.F("{0} · running for {1}", Type, Ago) : Loc.F("{0} · started {1} ago", Type, Ago);
-    public string AccessibleName => $"{Title} — {StatusText}";
+    private static string Shorten(string s, int max) => s.Length <= max ? s : s[..GraphemeText.PrefixLength(s, max, trimEnd: true)] + "…";
 }
 
 /// <summary>
-/// The Background tasks pane: omp's subagents (live over RPC, kept after they end) and background jobs (omp's
-/// <c>/jobs</c>, read while the pane is open, every few seconds and after each run). The count of what runs goes to
-/// the header's ⋯ menu and summary.
+/// The Background tasks pane: omp's subagents (live over RPC, kept after they end) and background jobs
+/// (<c>get_jobs</c>, read while the pane is open, every few seconds and after each run). The count of what runs goes
+/// to the header's ⋯ menu and summary.
 /// </summary>
 public sealed partial class TasksViewModel : ObservableObject
 {
@@ -203,7 +264,12 @@ public sealed partial class TasksViewModel : ObservableObject
     private IReadOnlyList<SubagentInfo>? _lastSubagents;
     private DispatcherTimer? _timer;
     private DateTimeOffset _jobsReadAt;
-    private bool _readingJobs;
+    private bool _shutdown;
+    private SessionController? _subagentsController;
+    private string? _subagentsSessionFile;
+
+    internal SessionController? MessageSession => _owner?.Session;
+    internal bool CanReadMessages => IsShown && !_shutdown && _owner is not { IsClosing: true };
 
     public TasksViewModel(MainViewModel? owner = null) => _owner = owner;
 
@@ -222,9 +288,6 @@ public sealed partial class TasksViewModel : ObservableObject
     [ObservableProperty] private bool _hasJobs;
     /// <summary>This omp does not report subagents (its RPC lacks the commands).</summary>
     [ObservableProperty] private bool _isUnsupported;
-    /// <summary><c>/jobs</c> printed something the client does not recognize: shown as omp printed it.</summary>
-    [ObservableProperty] private string _jobsText = "";
-    [ObservableProperty] private bool _hasJobsText;
     [ObservableProperty] private string _jobsError = "";
     [ObservableProperty] private bool _hasJobsError;
     [ObservableProperty] private bool _isEmpty = true;
@@ -244,25 +307,46 @@ public sealed partial class TasksViewModel : ObservableObject
 
     private void Start()
     {
+        if (_shutdown) return;
+        foreach (var row in Subagents) _ = row.PollMessagesAsync();
         _ = RefreshAsync();
         _timer ??= new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => OnTick());
         _timer.Start();
     }
 
-    private void Stop() => _timer?.Stop();
+    private void Stop()
+    {
+        _timer?.Stop();
+        foreach (var row in Subagents) row.CancelMessages();
+        foreach (var row in Jobs) row.CancelOutput();
+        CancelJobsRead();
+    }
 
-    /// <summary>The window is closing.</summary>
-    internal void Shutdown() => Stop();
+    /// <summary>The window is closing: stop the timer and cancel any in-flight preview read.</summary>
+    internal void Shutdown()
+    {
+        _shutdown = true;
+        Stop();
+    }
 
     private void OnTick()
     {
-        if (_owner is { IsClosing: true })
+        if (!CanReadMessages)
         {
             Stop(); // the window is closing: nothing left to read
             return;
         }
         var now = DateTimeOffset.UtcNow;
-        foreach (var r in Subagents.Where(r => r.IsRunning)) r.Tick(now);
+        foreach (var row in Subagents)
+        {
+            if (row.IsRunning) row.Tick();
+            _ = row.PollMessagesAsync();
+        }
+        foreach (var row in Jobs)
+        {
+            if (row.IsRunning) row.Tick(now);
+            _ = row.PollOutputAsync();
+        }
         if (now - _jobsReadAt >= JobsInterval) _ = RefreshJobsAsync();
     }
 
@@ -280,80 +364,40 @@ public sealed partial class TasksViewModel : ObservableObject
     /// <summary>A run ended: its background jobs may have started or finished (the count in the header too).</summary>
     public void OnRunEnded() => _ = RefreshJobsAsync();
 
-    /// <summary>
-    /// Reads omp's <c>/jobs</c> — only from an omp that lists it among its commands (omp lists the builtins it runs
-    /// over RPC): anything else would take the text for a message to the model.
-    /// </summary>
-    public async Task RefreshJobsAsync()
-    {
-        if (_owner is not { CanRunOmpCommands: true, OmpListsJobs: true } owner || _readingJobs) return;
-        _readingJobs = true;
-        _jobsReadAt = DateTimeOffset.UtcNow;
-        // The chat asked: another one may be shown by the time omp answers, and its jobs are not these
-        var session = owner.Session;
-        try
-        {
-            var r = await owner.RunOmpCommandAsync("/jobs", TimeSpan.FromSeconds(20));
-            if (owner.Session != session) return;
-            _jobsReadAt = DateTimeOffset.UtcNow;
-            if (!r.Ok)
-            {
-                JobsError = Loc.T("Could not read the background jobs: ") + (r.Error ?? Loc.T("omp did not answer"));
-                HasJobsError = true;
-                return;
-            }
-            JobsError = "";
-            HasJobsError = false;
-            ApplyJobs(r.Output);
-        }
-        finally
-        {
-            _readingJobs = false;
-        }
-    }
-
     /// <summary>Another chat is shown: the jobs listed were the other chat's omp's; this one's are read again.</summary>
     internal void OnSessionShown()
     {
-        _parsedJobs = null;
-        JobsText = "";
-        HasJobsText = false;
+        // Apply normally detects the switch first. The controller identity also covers chats with no file yet.
+        if (_subagentsController != MessageSession) ResetSubagents();
+        ResetJobs();
         JobsError = "";
         HasJobsError = false;
-        ShowJobs();
-        _readingJobs = false; // a read still under way was for the other chat; its answer is dropped
+        Recount();
+        CancelJobsRead(); // a read still under way was for the other chat: cancelled, its answer dropped
         _ = RefreshJobsAsync();
     }
 
-    /// <summary>What <c>/jobs</c> printed: rows when it is omp's usual listing, else the text as it is.</summary>
-    public void ApplyJobs(string output)
-    {
-        _parsedJobs = ParseJobs(output);
-        JobsText = _parsedJobs is null ? output.Trim() : "";
-        HasJobsText = JobsText.Length > 0;
-        ShowJobs();
-    }
-
-    private List<JobRowViewModel>? _parsedJobs;
     private bool _subagentsReported;
-
-    /// <summary>
-    /// An async task job is the subagents it runs, which omp reports and the pane lists above: it is not listed (or
-    /// counted) twice. An omp that does not report subagents keeps it among the jobs.
-    /// </summary>
-    private void ShowJobs()
-    {
-        Jobs.Clear();
-        foreach (var j in _parsedJobs ?? []) if (!_subagentsReported || j.Type != "task") Jobs.Add(j);
-        Recount();
-    }
 
     public void Apply(SessionSnapshot s)
     {
+        if (_subagentsController != MessageSession || _subagentsSessionFile != s.SessionFile)
+        {
+            ResetSubagents();
+            _subagentsController = MessageSession;
+            _subagentsSessionFile = s.SessionFile;
+        }
         SetSupport(s.SubagentsSupported);
         if (ReferenceEquals(s.Subagents, _lastSubagents)) return;
         _lastSubagents = s.Subagents;
-        ApplySubagents(s.Subagents, DateTimeOffset.UtcNow);
+        ApplySubagents(s.Subagents);
+    }
+
+    private void ResetSubagents()
+    {
+        foreach (var row in Subagents) row.CancelMessages(retire: true);
+        Subagents.Clear();
+        _lastSubagents = null;
     }
 
     /// <summary>Whether omp reports its subagents (null: not known yet).</summary>
@@ -362,10 +406,10 @@ public sealed partial class TasksViewModel : ObservableObject
         IsUnsupported = supported == false;
         if (_subagentsReported == (supported == true)) return;
         _subagentsReported = supported == true;
-        ShowJobs();
+        ShowJobs(DateTimeOffset.UtcNow);
     }
 
-    public void ApplySubagents(IReadOnlyList<SubagentInfo> list, DateTimeOffset now)
+    public void ApplySubagents(IReadOnlyList<SubagentInfo> list)
     {
         var order = list.Where(a => a.IsRunning).OrderBy(a => a.FirstSeenAt).ThenBy(a => a.Index)
             .Concat(list.Where(a => !a.IsRunning).OrderByDescending(a => a.EndedAt ?? a.UpdatedAt).ThenByDescending(a => a.Index)).ToList();
@@ -375,13 +419,17 @@ public sealed partial class TasksViewModel : ObservableObject
             var info = order[i];
             if (rows.TryGetValue(info.Id, out var row))
             {
-                if (!ReferenceEquals(row.Info, info)) row.Update(info, now);
+                if (!ReferenceEquals(row.Info, info)) row.Update(info);
                 var at = Subagents.IndexOf(row);
                 if (at != i) Subagents.Move(at, i);
             }
-            else Subagents.Insert(i, new SubagentRowViewModel(this, info, now));
+            else Subagents.Insert(i, new SubagentRowViewModel(this, info));
         }
-        while (Subagents.Count > order.Count) Subagents.RemoveAt(Subagents.Count - 1);
+        while (Subagents.Count > order.Count)
+        {
+            Subagents[^1].CancelMessages(retire: true);
+            Subagents.RemoveAt(Subagents.Count - 1);
+        }
         Recount();
     }
 
@@ -390,47 +438,17 @@ public sealed partial class TasksViewModel : ObservableObject
         HasSubagents = Subagents.Count > 0;
         HasJobs = Jobs.Count > 0;
         var agents = Subagents.Count(r => r.IsRunning);
+        CanStopAll = agents >= 2;
         RunningCount = agents + Jobs.Count(j => j.IsRunning);
         var finished = Subagents.Count - agents + Jobs.Count(j => !j.IsRunning);
         Summary = RunningCount == 0 && finished == 0 ? "" : RunningCount > 0
             ? finished > 0 ? Loc.F("{0} running · {1} finished", RunningCount, finished) : Loc.F("{0} running", RunningCount)
             : Loc.F("{0} finished", finished);
-        IsEmpty = !HasSubagents && !HasJobs && !HasJobsText;
+        IsEmpty = !HasSubagents && !HasJobs;
     }
 
-    internal Task<(IReadOnlyList<SubagentMessage> Messages, string? Error)> ReadMessagesAsync(string id) =>
-        _owner?.GetSubagentMessagesAsync(id) ?? Task.FromResult<(IReadOnlyList<SubagentMessage>, string?)>(([], Loc.T("omp is not running")));
-
-    // omp's /jobs (slash-commands/builtin-session.ts): "  [id] type (status) — 12s" then the label, indented.
-    [GeneratedRegex(@"^\s*\[(?<id>[^\]]+)\]\s+(?<type>\S+)\s+\((?<status>[^)]*)\)\s+[—–-]\s+(?<ago>.+?)\s*$")]
-    private static partial Regex JobLine();
-
-    /// <summary>omp's <c>/jobs</c> listing as rows; null when the text is not in that shape.</summary>
-    public static List<JobRowViewModel>? ParseJobs(string text)
-    {
-        var trimmed = text.Trim();
-        if (trimmed.StartsWith("No background jobs", StringComparison.Ordinal)) return [];
-        if (!trimmed.StartsWith("Background Jobs", StringComparison.Ordinal)) return null;
-        var list = new List<JobRowViewModel>();
-        var running = true;
-        JobRowViewModel? job = null;
-        foreach (var raw in trimmed.Split('\n'))
-        {
-            var line = raw.TrimEnd();
-            if (line.Trim() is "Running Jobs") { running = true; continue; }
-            if (line.Trim() is "Recent Jobs") { running = false; continue; }
-            if (JobLine().Match(line) is { Success: true } m)
-            {
-                if (job is not null) list.Add(job);
-                job = new JobRowViewModel(m.Groups["id"].Value, m.Groups["type"].Value, m.Groups["status"].Value.Trim(), "", m.Groups["ago"].Value, running);
-                continue;
-            }
-            if (job is { Label.Length: 0 } && line.Trim().Length > 0 && raw.StartsWith("   ", StringComparison.Ordinal))
-                job = job with { Label = line.Trim() };
-        }
-        if (job is not null) list.Add(job);
-        return list;
-    }
+    internal Task<(SubagentMessagesPage? Page, string? Error)> ReadMessagesAsync(string id, long fromByte, CancellationToken ct) =>
+        _owner?.GetSubagentMessagesAsync(id, fromByte, ct) ?? Task.FromResult<(SubagentMessagesPage?, string?)>((null, Loc.T("omp is not running")));
 
     /// <summary>"8s", "1m 05s", "1h 02m".</summary>
     public static string Duration(TimeSpan t)

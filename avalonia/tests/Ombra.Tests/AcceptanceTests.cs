@@ -14,12 +14,12 @@ namespace Ombra.Tests;
 
 /// <summary>
 /// E2E acceptance: one daily-work session in the real window, typed on the keyboard, against the Original OMP Core
-/// (omp 18.2.0 over its RPC). Runs when OMBRA_TEST_CONFIG names a runtime (CI smoke: the stand-in model, whose
+/// (the pinned omp over its RPC). Runs when OMBRA_TEST_CONFIG names a runtime (CI smoke: the stand-in model, whose
 /// scripted keywords TOOLCALL / BASHCALL / SLOWSHORT drive tool calls; a real model would need other assertions).
 /// </summary>
 public sealed class AcceptanceTests
 {
-    private static readonly string ShotDir = Environment.GetEnvironmentVariable("OMBRA_SHOT_DIR") ?? Path.Combine(AppContext.BaseDirectory, "screenshots");
+    private static readonly string ShotDir = Environment.GetEnvironmentVariable("OMBRA_SHOT_DIR") ?? TestProcesses.TempDir("acceptance-screenshots");
 
     private static async Task Until(Func<bool> condition, string what, int seconds = 120)
     {
@@ -106,14 +106,14 @@ public sealed class AcceptanceTests
         vm.RenameText = "Acceptance session";
         await vm.CommitRenameCommand.ExecuteAsync(null);
         await Until(() => vm.SessionTitle == "Acceptance session", "renamed");
-        var first = session.Snapshot().SessionFile;
-        vm.NewChatCommand.Execute(null);
-        await Until(() => vm.Phase == SessionPhase.Ready && session.Snapshot().SessionFile != first && !vm.Rows.OfType<UserRowViewModel>().Any(), "new session");
+        var first = vm.Session.Snapshot().SessionFile;
+        await vm.NewChatCommand.ExecuteAsync(null);
+        await Until(() => vm.Phase == SessionPhase.Ready && vm.Session.Snapshot().SessionFile != first && !vm.Rows.OfType<UserRowViewModel>().Any(), "new session");
         Type(w, "hello from the second session");
         await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.OfType<AssistantRowViewModel>().Any(), "second session reply");
         await Until(() => vm.Sessions.Any(s => s.Title == "Acceptance session"), "sidebar lists the renamed session", 30);
         vm.OpenSessionCommand.Execute(vm.Sessions.First(s => s.Title == "Acceptance session"));
-        await Until(() => session.Snapshot().SessionFile == first && vm.Rows.OfType<UserRowViewModel>().Any(u => u.Text == "TOOLCALL please"), "first session reopened");
+        await Until(() => vm.Session.Snapshot().SessionFile == first && vm.Rows.OfType<UserRowViewModel>().Any(u => u.Text == "TOOLCALL please"), "first session reopened");
         Shot(w, "acceptance-reopened");
 
         // 7. A shell in the terminal panel, in the project folder.

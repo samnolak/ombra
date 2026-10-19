@@ -9,99 +9,166 @@ namespace Ombra.ClientCore;
 /// none is found): the list's sort key, so opening a session (which can append non-message entries) does not reorder it.</param>
 public sealed record SessionSummary(string Path, string Id, string Cwd, string Title, DateTimeOffset LastMessageAt, bool IsEmpty = false);
 
+public sealed record SessionCatalogError(string Path, string Message);
+
+public sealed record SessionSummaryReadResult(SessionSummary? Summary, SessionCatalogError? Error);
+
+/// <summary>Only a complete, uncapped, error-free scan can prove that a previously listed session was deleted.</summary>
+public sealed record SessionCatalogScanResult(
+    string Root,
+    IReadOnlyList<SessionSummary> Sessions,
+    bool EnumerationComplete,
+    bool IsCapped,
+    IReadOnlyList<SessionCatalogError> Errors)
+{
+    public bool IsAuthoritative => EnumerationComplete && !IsCapped && Errors.Count == 0;
+
+    /// <summary>Incomplete reads retain known rows, but never from a different session root / account.</summary>
+    public IReadOnlyList<SessionSummary> Merge(string? previousRoot, IReadOnlyList<SessionSummary> previous)
+    {
+        if (IsAuthoritative || previousRoot is null || !SessionCatalog.SamePath(previousRoot, Root)) return Sessions;
+        var merged = new Dictionary<string, SessionSummary>(StringComparer.Ordinal);
+        foreach (var session in previous) merged[session.Path] = session;
+        foreach (var session in Sessions) merged[session.Path] = session;
+        return [.. merged.Values.OrderByDescending(s => s.LastMessageAt)];
+    }
+}
+
 /// <summary>
 /// Lists omp's saved sessions. omp 18.2.0 has no RPC or CLI for this, so the catalog reads the session folder
 /// omp itself reports (the parent of <c>get_state.sessionFile</c>'s project folder), and only the head of each file:
 /// an optional <c>{"type":"title"}</c> line, the <c>{"type":"session"}</c> header (id, cwd) and the first user message
 /// as a fallback title; and its tail, for the time of the last message (the sort key).
-/// <c>UNDOCUMENTED / VERSION-PINNED</c> (session file layout v3, omp 18.2.0). Only <see cref="DeleteSession"/> writes
-/// (the sidebar's delete of a session omp does not have open).
+/// <c>UNDOCUMENTED / VERSION-PINNED</c> (session file layout v3, omp 18.2.0). Read-only:
+/// deletion goes through the runtime's session ownership lease, not this catalog.
 /// </summary>
 public static class SessionCatalog
 {
     private const int HeadBytes = 64 * 1024;
     private const int MaxTitleChars = 80;
 
+    internal readonly record struct FileStamp(long Size, DateTime LastWriteUtc);
+
     /// <summary>The folder that holds one sub-folder per project: <c>…/agent/sessions</c>.</summary>
     public static string? SessionsRootOf(string? sessionFile) =>
         sessionFile is null ? null : Path.GetDirectoryName(Path.GetDirectoryName(sessionFile));
 
-    public static async Task<IReadOnlyList<SessionSummary>> ScanAsync(string sessionsRoot, int limit = 500, CancellationToken ct = default)
+    public static Task<SessionCatalogScanResult> ScanAsync(string sessionsRoot, int limit = 500, CancellationToken ct = default) =>
+        ScanAsync(sessionsRoot, limit, ct, static root => root.EnumerateDirectories(),
+            static project => project.EnumerateFiles("*.jsonl"), static file => file.LastWriteTimeUtc);
+
+    // Explicit IO boundaries let regressions exercise failures during lazy enumeration and metadata access
+    // without depending on platform permissions (which do not fail when the test runner owns the files).
+    internal static async Task<SessionCatalogScanResult> ScanAsync(string sessionsRoot, int limit, CancellationToken ct,
+        Func<DirectoryInfo, IEnumerable<DirectoryInfo>> enumerateProjects,
+        Func<DirectoryInfo, IEnumerable<FileInfo>> enumerateFiles,
+        Func<FileInfo, DateTime> lastWriteTime,
+        Func<FileInfo, FileStamp, CancellationToken, Task<SessionSummaryReadResult>>? readSummary = null)
     {
-        if (!Directory.Exists(sessionsRoot)) return [];
-        var files = new List<FileInfo>();
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        ct.ThrowIfCancellationRequested();
+        var root = Path.GetFullPath(sessionsRoot);
+        var files = new List<(FileInfo File, FileStamp Stamp)>();
+        var errors = new List<SessionCatalogError>();
+        var enumerationComplete = true;
         try
         {
-            foreach (var dir in new DirectoryInfo(sessionsRoot).EnumerateDirectories())
+            // Exists suppresses access / IO errors, including a temporarily unavailable root.
+            foreach (var dir in enumerateProjects(new DirectoryInfo(root)))
             {
-                try { files.AddRange(dir.EnumerateFiles("*.jsonl")); }
-                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    foreach (var file in enumerateFiles(dir))
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        try { files.Add((file, new(file.Length, lastWriteTime(file)))); }
+                        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                        {
+                            errors.Add(new(file.FullName, e.Message));
+                        }
+                    }
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    enumerationComplete = false;
+                    errors.Add(new(dir.FullName, e.Message));
+                }
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            return [];
+            enumerationComplete = false;
+            errors.Add(new(root, e.Message));
         }
-        var newest = files.OrderByDescending(f => f.LastWriteTimeUtc).Take(limit).ToList();
-        var result = new SessionSummary?[newest.Count];
+        var newest = files.OrderByDescending(f => f.Stamp.LastWriteUtc).Take(limit).ToList();
+        var reads = new SessionSummaryReadResult[newest.Count];
         await Parallel.ForEachAsync(Enumerable.Range(0, newest.Count), new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = ct },
-            async (i, token) => result[i] = await ReadSummaryAsync(newest[i], token).ConfigureAwait(false)).ConfigureAwait(false);
-        return [.. result.OfType<SessionSummary>().OrderByDescending(s => s.LastMessageAt)];
+            async (i, token) => reads[i] = await (readSummary is null
+                ? ReadSummaryAsync(newest[i].File, token, newest[i].Stamp)
+                : readSummary(newest[i].File, newest[i].Stamp, token)).ConfigureAwait(false)).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+        foreach (var read in reads)
+            if (read.Error is { } error) errors.Add(error);
+        return new(root, [.. reads.Select(r => r.Summary).OfType<SessionSummary>().OrderByDescending(s => s.LastMessageAt)],
+            enumerationComplete, files.Count > limit, errors);
     }
 
-    /// <summary>
-    /// Deletes a saved session that omp does not have open, as omp's own session picker does
-    /// (<c>FileSessionStorage.deleteSessionWithArtifacts</c>, omp 18.x): the file, its artifacts folder (the path
-    /// without <c>.jsonl</c>) and stale rewrite backups (<c>&lt;name&gt;.jsonl.*.bak</c>). The only write in this class.
-    /// The open session goes through omp instead (<c>/session delete</c>).
-    /// </summary>
-    public static void DeleteSession(string path)
-    {
-        if (!path.EndsWith(".jsonl", StringComparison.Ordinal)) throw new IOException($"Not a session file: {path}");
-        File.Delete(path);
-        var artifacts = path[..^".jsonl".Length];
-        if (Directory.Exists(artifacts)) Directory.Delete(artifacts, recursive: true);
-        if (Path.GetDirectoryName(path) is not { } dir) return;
-        foreach (var bak in Directory.EnumerateFiles(dir, Path.GetFileName(path) + ".*.bak"))
-        {
-            try { File.Delete(bak); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // best effort, as omp
-        }
-    }
-
-    public static Task<SessionSummary?> ReadSummaryAsync(string path, CancellationToken ct = default) =>
+    public static Task<SessionSummaryReadResult> ReadSummaryAsync(string path, CancellationToken ct = default) =>
         ReadSummaryAsync(new FileInfo(path), ct);
 
-    private static async Task<SessionSummary?> ReadSummaryAsync(FileInfo file, CancellationToken ct)
+    internal static Stream OpenSummary(string path) =>
+        new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, useAsync: true);
+
+    internal static async Task<SessionSummaryReadResult> ReadSummaryAsync(FileInfo file, CancellationToken ct,
+        FileStamp? expected = null, Func<string, Stream>? openRead = null)
     {
-        string head;
-        DateTimeOffset? lastMessage;
+        ct.ThrowIfCancellationRequested();
         try
         {
-            await using var stream = new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, useAsync: true);
-            var buffer = new byte[HeadBytes];
+            file.Refresh();
+            if (!file.Exists) throw new FileNotFoundException("Session disappeared while being read.", file.FullName);
+            var before = new FileStamp(file.Length, file.LastWriteTimeUtc);
+            if (expected is { } stamp && stamp != before) throw new IOException("Session changed while being read.");
+            await using var stream = (openRead ?? OpenSummary)(file.FullName);
+            if (stream.Length != before.Size) throw new IOException("Session changed while being read.");
+            var buffer = new byte[(int)Math.Min(HeadBytes, before.Size)];
             var read = await ReadFullyAsync(stream, buffer, ct).ConfigureAwait(false);
+            if (read != Math.Min(HeadBytes, before.Size)) throw new IOException("Session read was incomplete.");
+            var completeLine = read > 0 && buffer[read - 1] == (byte)'\n';
             // A multi-byte character cut at the end of the buffer decodes as U+FFFD; only whole lines are used.
-            head = Encoding.UTF8.GetString(buffer, 0, read);
-            lastMessage = stream.Length <= read ? LastMessageTime(head, headIsWhole: true) : null;
+            var head = Encoding.UTF8.GetString(buffer, 0, read);
+            DateTimeOffset? lastMessage = before.Size <= read ? LastMessageTime(head, headIsWhole: true) : null;
             // The tail holds the newest message; a long tool result can push it further back, so look twice.
-            foreach (var size in (long[])[HeadBytes, 16 * HeadBytes])
+            for (var attempt = 0; attempt < 2; attempt++)
             {
-                if (lastMessage is not null || stream.Length <= read) break;
-                var start = Math.Max(read, stream.Length - size);
+                if (lastMessage is not null || before.Size <= read) break;
+                var size = attempt == 0 ? HeadBytes : 16 * HeadBytes;
+                var start = Math.Max(read, before.Size - size);
                 stream.Seek(start, SeekOrigin.Begin);
-                var tail = new byte[stream.Length - start];
+                var tail = new byte[before.Size - start];
                 var n = await ReadFullyAsync(stream, tail, ct).ConfigureAwait(false);
+                if (n != tail.Length) throw new IOException("Session read was incomplete.");
+                completeLine = n > 0 && tail[n - 1] == (byte)'\n';
                 lastMessage = LastMessageTime(Encoding.UTF8.GetString(tail, 0, n), headIsWhole: false);
                 if (start == read) break;
             }
+            // FileInfo metadata can fail too; it belongs to the same failure boundary as the stream.
+            file.Refresh();
+            if (!file.Exists) throw new FileNotFoundException("Session disappeared while being read.", file.FullName);
+            if (new FileStamp(file.Length, file.LastWriteTimeUtc) != before || stream.Length != before.Size)
+                throw new IOException("Session changed while being read.");
+            var summary = Parse(head, file.FullName, before.LastWriteUtc);
+            ct.ThrowIfCancellationRequested();
+            if (summary is null) return new(null, new(file.FullName, "No complete session header could be read."));
+            return new(lastMessage is { } at ? summary with { LastMessageAt = at } : summary,
+                completeLine ? null : new(file.FullName, "Session ends with an incomplete entry."));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            return null;
+            ct.ThrowIfCancellationRequested();
+            return new(null, new(file.FullName, e.Message));
         }
-        var summary = Parse(head, file.FullName, file.LastWriteTimeUtc);
-        return summary is not null && lastMessage is { } at ? summary with { LastMessageAt = at } : summary;
     }
 
     private static async Task<int> ReadFullyAsync(Stream stream, byte[] buffer, CancellationToken ct)

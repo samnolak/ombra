@@ -4,6 +4,10 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Ombra.Rpc\Ombra.Rpc.csproj" />
+    <!-- Teams (SERVER_DESIGN §7): ombra-core via P/Invoke (the validator is never re-implemented here) and the wire contracts. -->
+    <ProjectReference Include="..\..\..\server\src\Ombra.Core.Interop\Ombra.Core.Interop.csproj" />
+    <ProjectReference Include="..\..\..\server\src\Ombra.Server.Contracts\Ombra.Server.Contracts.csproj" />
+    <InternalsVisibleTo Include="Ombra.Teams.Tests" />
     <InternalsVisibleTo Include="Ombra.Tests" />
     <!-- tools/verify/webview-harness drives the agent browser bridge against a real WKWebView (scenario agent-native) -->
     <InternalsVisibleTo Include="WebViewHarness" />

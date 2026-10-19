@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Integration tests of the Teams module (SERVER_DESIGN §9, slices S2/S3): Ombra.ClientCore/Teams against the real team
+    server — the production image (server/deploy/Dockerfile) in IP mode with a TLS 1.3 SPKI pin — over a real Postgres 17
+    (Testcontainers; colima's socket is found automatically on macOS). Not in Ombra.sln on purpose: it needs Docker.
+    Run: dotnet test avalonia/tests/Ombra.Teams.Tests (plus the artifacts-path option of your build folder).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- every wait in these tests has its own deadline -->
+    <NoWarn>$(NoWarn);xUnit1051</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.16.0" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ombra.ClientCore\Ombra.ClientCore.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <!-- TLS 1.3 on macOS needs Network.framework (SecureTransport has no TLS 1.3); see avalonia/docs/PLATFORM_NOTES.md. -->
+    <RuntimeHostConfigurationOption Include="System.Net.Security.UseNetworkFramework" Value="true" />
+  </ItemGroup>
+</Project>

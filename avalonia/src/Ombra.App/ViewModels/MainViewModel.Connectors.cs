@@ -3,23 +3,34 @@ using Ombra.ClientCore;
 
 namespace Ombra.App.ViewModels;
 
-/// <summary>The Connectors and Plugins and skills settings pages, and the composer's "+" menu entries that open them.</summary>
+/// <summary>Settings → Plugins (plugins, MCP servers and skills on tabs), and the menu entries that open it on a tab.</summary>
 public partial class MainViewModel
 {
     private ConnectorsViewModel? _connectors;
     private PluginsViewModel? _plugins;
+    private PluginsHubViewModel? _pluginsHub;
 
-    /// <summary>Settings → Connectors (omp's MCP servers). Created with the settings page.</summary>
+    /// <summary>The Plugins page's MCP tab (omp's MCP servers). Created with the settings page.</summary>
     public ConnectorsViewModel Connectors => _connectors ??= new ConnectorsViewModel(this);
 
-    /// <summary>Settings → Plugins and skills.</summary>
+    /// <summary>The Plugins page's Plugins and Skills tabs.</summary>
     public PluginsViewModel Plugins => _plugins ??= new PluginsViewModel(this);
 
-    [RelayCommand] private Task OpenConnectorsPage() => OpenSettingsAtAsync("connectors");
-    [RelayCommand]
-    private Task OpenPluginsPage()
+    /// <summary>The Plugins page: its tabs, search, catalog and details pages.</summary>
+    public PluginsHubViewModel PluginsHub => _pluginsHub ??= new PluginsHubViewModel(this);
+
+    /// <summary>The Plugins page on its MCP tab (the "+" menu's MCP servers, a sign-in prompt).</summary>
+    [RelayCommand] private Task OpenConnectorsPage() => OpenPluginsTabAsync("mcp");
+
+    /// <summary>The Plugins page on its Plugins tab (the rail, the "+" menu).</summary>
+    [RelayCommand] private Task OpenPluginsPage() => OpenPluginsTabAsync("plugins");
+
+    /// <summary>The Plugins page on its Skills tab.</summary>
+    [RelayCommand] private Task OpenSkillsPage() => OpenPluginsTabAsync("skills");
+
+    private Task OpenPluginsTabAsync(string tab)
     {
-        SettingsAnchor = null; // the page itself, not its Skills section (MainViewModel.Rail.cs)
+        PluginsHub.Show(tab);
         return OpenSettingsAtAsync("plugins");
     }
 

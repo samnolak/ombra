@@ -15,6 +15,69 @@ public sealed class ConversationStateTests
         return new RpcFrame(e.GetProperty("type").GetString()!, null, e, Stopwatch.GetTimestamp(), json.Length + 1);
     }
 
+    [Theory]
+    [InlineData("😀")]
+    [InlineData("e\u0301")]
+    [InlineData("👩‍💻")]
+    [InlineData("🇫🇷")]
+    public void Shell_arguments_and_output_clip_only_between_visible_graphemes(string glyph)
+    {
+        // Try every UTF-16 position inside the cluster, not just the first surrogate.
+        for (var cut = 1; cut < glyph.Length; cut++)
+        {
+            var state = new ConversationState();
+            var commandHead = new string('a', 400 - cut);
+            var command = commandHead + glyph + " remaining";
+            var id = state.AddShellCommand(command, T);
+            Assert.Equal(commandHead + $"… [{glyph.Length + 10} more chars]",
+                Assert.Single(state.Snapshot().Items.OfType<ToolItem>()).Args);
+
+            var head = new string('h', 1000 - cut);
+            var tail = new string('t', 3000 - (glyph.Length - cut));
+            var output = head + glyph + new string('m', 25) + glyph + tail;
+            state.FinishShellCommand(id, output, 0, false, T);
+            Assert.Equal(head + $"\n… [{25 + 2 * glyph.Length} chars omitted] …\n" + tail,
+                Assert.Single(state.Snapshot().Items.OfType<ToolItem>()).Output);
+
+            // A boundary exactly after/before the glyph keeps it rather than dropping it gratuitously.
+            var aligned = new string('h', 1000 - glyph.Length) + glyph + new string('m', 25)
+                + glyph + new string('t', 3000 - glyph.Length);
+            state.FinishShellCommand(id, aligned, 0, false, T);
+            Assert.Equal(new string('h', 1000 - glyph.Length) + glyph + "\n… [25 chars omitted] …\n"
+                + glyph + new string('t', 3000 - glyph.Length),
+                Assert.Single(state.Snapshot().Items.OfType<ToolItem>()).Output);
+        }
+    }
+
+    [Fact]
+    public void Shell_clipping_preserves_ascii_budgets_and_short_text()
+    {
+        var state = new ConversationState();
+        var id = state.AddShellCommand(new string('a', 401), T);
+        Assert.Equal(new string('a', 400) + "… [1 more chars]",
+            Assert.Single(state.Snapshot().Items.OfType<ToolItem>()).Args);
+        state.FinishShellCommand(id, new string('x', 4001), 0, false, T);
+        Assert.Equal(new string('x', 1000) + "\n… [1 chars omitted] …\n" + new string('x', 3000),
+            Assert.Single(state.Snapshot().Items.OfType<ToolItem>()).Output);
+        state.FinishShellCommand(id, "e\u0301 👩‍💻", 0, false, T);
+        Assert.Equal("e\u0301 👩‍💻", Assert.Single(state.Snapshot().Items.OfType<ToolItem>()).Output);
+    }
+
+    [Fact]
+    public void Ownership_fork_notice_moves_visible_identity_without_discarding_the_conversation()
+    {
+        var state = new ConversationState { SessionFile = "/sessions/original.jsonl", SessionId = "original" };
+        state.SetPhase(SessionPhase.Ready, T);
+        state.AddUserPrompt("retained conversation");
+        state.Apply(F("""{"type":"notice","level":"warning","source":"session-persistence","reason":"open-elsewhere","message":"Another writer owns the original; saving a fork.","previousSessionFile":"/sessions/original.jsonl","sessionFile":"/sessions/fork.jsonl","sessionId":"fork"}"""), T);
+        var snapshot = state.Snapshot();
+        Assert.Equal("/sessions/fork.jsonl", snapshot.SessionFile);
+        Assert.Equal("fork", snapshot.SessionId);
+        Assert.Single(snapshot.Items.OfType<UserItem>());
+        Assert.Contains(snapshot.Items, item => item is NoticeItem { Level: NoticeLevel.Warning });
+        Assert.True(state.StateRefreshWanted);
+    }
+
     [Fact]
     public void A_reply_the_client_ended_before_its_message_end_is_settled_not_duplicated()
     {
@@ -51,33 +114,66 @@ public sealed class ConversationStateTests
         Assert.Equal(["Once upon a time", "Hello"], s.Snapshot().Items.OfType<AssistantItem>().Select(a => a.Text));
     }
 
-    [Fact]
-    public void Text_omp_drops_from_a_failed_message_is_not_counted_as_lost_stream_data()
+    [Theory]
+    [InlineData("")]
+    [InlineData("Useful partial answer")]
+    public void Retry_removes_only_empty_failed_assistant_rows(string partial)
     {
-        // Real model (SmolLM2): omp 18.2.0 detected a "thinking loop", ended that message with stopReason error and
-        // empty content, and retried. The deltas it had streamed are omp's choice to drop, not the client losing data.
-        var s = new ConversationState();
-        s.SetPhase(SessionPhase.Ready, T);
-        s.AddUserPrompt("hi");
-        s.SetPhase(SessionPhase.Running, T);
-        s.Apply(F("""{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}"""), T);
-        s.Apply(F("""{"type":"message_start","message":{"role":"assistant","content":[]}}"""), T);
-        s.Apply(F("""{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"la la la la la la"}}"""), T);
-        s.Apply(F("""{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"Thinking loop detected: retrying."}}"""), T);
-        s.Apply(F("""{"type":"message_start","message":{"role":"assistant","content":[]}}"""), T);
-        s.Apply(F("""{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Hello"}}"""), T);
-        s.Apply(F("""{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Hello"}],"stopReason":"stop"}}"""), T);
-        var snap = s.Snapshot();
-        Assert.Equal(0, snap.StreamMismatches);
-        Assert.Collection(snap.Items.OfType<AssistantItem>(),
-            failed => { Assert.Equal("", failed.Text); Assert.Equal("error", failed.StopReason); Assert.StartsWith("Thinking loop", failed.Error); },
-            ok => Assert.Equal("Hello", ok.Text));
+        var state = new ConversationState();
+        state.SetPhase(SessionPhase.Running, T);
+        state.Apply(F("""{"type":"message_start","message":{"role":"assistant","content":[]}}"""), T);
+        state.Apply(F(JsonSerializer.Serialize(new
+        {
+            type = "message_update",
+            assistantMessageEvent = new { type = "text_delta", delta = partial }
+        })), T);
+        state.Apply(F("""{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"offline"}}"""), T);
+        state.Apply(F("""{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"errorMessage":"offline"}"""), T);
+        var replies = state.Snapshot().Items.OfType<AssistantItem>();
+        if (partial.Length == 0) Assert.Empty(replies);
+        else Assert.Equal(partial, Assert.Single(replies).Text);
+        Assert.Single(state.Snapshot().Items.OfType<NoticeItem>());
+    }
 
-        // A normally finished message whose deltas do not add up is still counted: that is the data-loss detector.
-        s.Apply(F("""{"type":"message_start","message":{"role":"assistant","content":[]}}"""), T);
-        s.Apply(F("""{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Hel"}}"""), T);
-        s.Apply(F("""{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Hello"}],"stopReason":"stop"}}"""), T);
-        Assert.Equal(1, s.Snapshot().StreamMismatches);
+    [Fact]
+    public void Retry_progress_replaces_itself_and_disappears_on_success()
+    {
+        var state = new ConversationState();
+        state.SetPhase(SessionPhase.Running, T);
+        state.Apply(F("""{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"errorMessage":"offline"}"""), T);
+        var key = Assert.Single(state.Snapshot().Items.OfType<NoticeItem>()).Key;
+        state.Apply(F("""{"type":"auto_retry_start","attempt":2,"maxAttempts":3,"errorMessage":"offline"}"""), T);
+        Assert.Equal(key, Assert.Single(state.Snapshot().Items.OfType<NoticeItem>()).Key);
+        state.Apply(F("""{"type":"auto_retry_end","success":true}"""), T);
+        Assert.Empty(state.Snapshot().Items.OfType<NoticeItem>());
+    }
+
+    [Theory]
+    [InlineData("error", false)]
+    [InlineData("aborted", false)]
+    [InlineData("aborted", true)]
+    public void Interrupted_final_preserves_received_text_and_thinking(string reason, bool endedEarly)
+    {
+        var state = new ConversationState();
+        state.SetPhase(SessionPhase.Running, T);
+        state.Apply(F("""{"type":"message_start","message":{"role":"assistant","content":[]}}"""), T);
+        state.Apply(F("""{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"Partial answer already visible"}}"""), T);
+        state.Apply(F("""{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"Partial reasoning already visible"}}"""), T);
+        if (endedEarly) state.EndRun(interrupted: true, T);
+        state.Apply(F(JsonSerializer.Serialize(new
+        {
+            type = "message_end",
+            message = new { role = "assistant", content = Array.Empty<object>(), stopReason = reason, errorMessage = "Interrupted" }
+        })), T);
+        var reply = Assert.Single(state.Snapshot().Items.OfType<AssistantItem>());
+        Assert.Equal("Partial answer already visible", reply.Text);
+        Assert.Equal("Partial reasoning already visible", reply.Thinking);
+        Assert.Equal(reason, reply.StopReason);
+        Assert.False(reply.Streaming);
+        state.Apply(F("""{"type":"message_start","message":{"role":"assistant","content":[]}}"""), T);
+        state.Apply(F("""{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Successful retry"}],"stopReason":"stop"}}"""), T);
+        Assert.Equal(["Partial answer already visible", "Successful retry"],
+            state.Snapshot().Items.OfType<AssistantItem>().Select(item => item.Text));
     }
 
     [Fact]
@@ -99,6 +195,70 @@ public sealed class ConversationStateTests
         s.SetPhase(SessionPhase.Stopping, T);
         s.SetPhase(SessionPhase.Stopped, T);                // closing the app is not a run ending
         Assert.Equal(3, s.Snapshot().RunsEnded);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Pending_local_or_cancelled_input_does_not_count_as_an_ended_agent_turn(bool interrupted)
+    {
+        var s = new ConversationState();
+        s.SetPhase(SessionPhase.Ready, T);
+        s.BeginRun(T);
+        if (interrupted) s.SetPhase(SessionPhase.Aborting, T.AddSeconds(1));
+        s.EndPendingRun(interrupted, T.AddSeconds(5));
+
+        var done = s.Snapshot();
+        Assert.Equal(SessionPhase.Ready, done.Phase);
+        Assert.Equal(0, done.RunsEnded);
+        Assert.Null(done.RunStartedAt);
+        Assert.Empty(done.Items.OfType<TurnEndItem>());
+    }
+
+    [Fact]
+    public void A_local_prompt_result_does_not_count_a_pending_start_as_an_agent_turn()
+    {
+        var s = new ConversationState();
+        s.SetPhase(SessionPhase.Ready, T);
+        s.BeginRun(T);
+        s.Apply(F("""{"type":"prompt_result","agentInvoked":false,"status":"completed"}"""), T.AddSeconds(5));
+
+        var done = s.Snapshot();
+        Assert.Equal(SessionPhase.Ready, done.Phase);
+        Assert.Equal(0, done.RunsEnded);
+        Assert.Null(done.RunStartedAt);
+        Assert.Empty(done.Items.OfType<TurnEndItem>());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void An_agent_started_during_input_admission_survives_pending_settlement_and_counts_once(bool interrupted)
+    {
+        var clock = new PowerLifecycleTests.ManualClock();
+        var s = new ConversationState(clock);
+        s.SetPhase(SessionPhase.Ready, T);
+        s.BeginRun(T);
+        s.Apply(F("""{"type":"agent_start"}"""), T);
+        s.EndPendingRun(interrupted, T.AddSeconds(1));
+
+        var running = s.Snapshot();
+        Assert.Equal(SessionPhase.Running, running.Phase);
+        Assert.Equal(0, running.RunsEnded);
+        Assert.Equal(T, running.RunStartedAt);
+        Assert.Empty(running.Items.OfType<TurnEndItem>());
+
+        clock.Advance(TimeSpan.FromSeconds(5));
+        s.Apply(F("""{"type":"agent_end","messages":[],"isTerminal":true}"""), T.AddSeconds(5));
+        s.Apply(F("""{"type":"prompt_result","agentInvoked":true,"status":"completed","sessionSettled":true}"""), T.AddSeconds(5));
+        s.Apply(F("""{"type":"session_settled"}"""), T.AddSeconds(5));
+        var done = s.Snapshot();
+        Assert.Equal(SessionPhase.Ready, done.Phase);
+        Assert.Equal(1, done.RunsEnded);
+        Assert.Null(done.RunStartedAt);
+        var ended = Assert.Single(done.Items.OfType<TurnEndItem>());
+        Assert.Equal(TimeSpan.FromSeconds(5), ended.Took);
+        Assert.False(ended.Interrupted);
     }
 
     /// <summary>A stdout recording of real omp 18.2.0 (prompt → streamed text → read tool → final answer).</summary>
@@ -267,7 +427,7 @@ public sealed class ConversationStateTests
     public void Dialogs_end_by_answer_withdrawal_deadline_or_shutdown_and_each_end_is_recorded()
     {
         var s = new ConversationState();
-        s.Apply(F("""{"type":"extension_ui_request","id":"a","method":"select","title":"Allow tool: bash","options":["Approve","Deny"]}"""), T);
+        s.Apply(F("""{"type":"extension_ui_request","id":"a","method":"select","title":"Allow tool: bash","options":["Approve","Deny"],"approval":{"tool":"bash","toolCallId":"t1","risk":"exec","details":[],"command":"ls","scopes":["once","session","always"]}}"""), T);
         s.Apply(F("""{"type":"extension_ui_request","id":"b","method":"confirm","title":"Go?","message":"m","timeout":5000}"""), T);
         s.Apply(F("""{"type":"extension_ui_request","id":"c","method":"input","title":"Name"}"""), T);
         s.Apply(F("""{"type":"extension_ui_request","id":"d","method":"input","title":"Other"}"""), T);
@@ -321,6 +481,123 @@ public sealed class ConversationStateTests
         Assert.Equal(4, items.Count);
         Assert.Equal(ToolStatus.Succeeded, ((ToolItem)items[2]).Status);
         Assert.Equal("plain string content", ((AssistantItem)items[3]).Text);
+    }
+
+    [Fact]
+    public void Visible_runtime_context_keeps_live_and_reopened_order_images_and_timestamps()
+    {
+        using var document = JsonDocument.Parse("""
+            [
+              {"role":"custom","customType":"extension-note","display":true,"timestamp":1000,"content":[{"type":"text","text":"**Visible**"},{"type":"image","mimeType":"image/png","data":"AQID"},{"type":"image","data":"blob:sha256:missing"}]},
+              {"role":"hookMessage","customType":"legacy-note","display":true,"timestamp":2000,"content":"Legacy"},
+              {"role":"branchSummary","summary":"Branch body","fromId":"prior","timestamp":3000},
+              {"role":"compactionSummary","summary":"Compacted body","tokensBefore":9000,"timestamp":4000,"blocks":[{"type":"text","text":"Archive text"},{"type":"image","mimeType":"image/png","data":"BAU="}],"warning":"Compaction warning"},
+              {"role":"fileMention","timestamp":5000,"files":[{"path":"photo.png","content":"private auto-read payload","image":{"type":"image","mimeType":"image/png","data":"Bgc="}},{"path":"large.bin","content":"","skippedReason":"tooLarge"}]},
+              {"role":"pythonExecution","code":"print(7)","output":"7","exitCode":1,"cancelled":false,"timestamp":6000},
+              {"role":"bashExecution","command":"echo done","output":"done","exitCode":0,"cancelled":false,"timestamp":7000,"images":[{"type":"image","mimeType":"image/png","data":"CAk="}]}
+            ]
+            """);
+        var live = new ConversationState();
+        foreach (var message in document.RootElement.EnumerateArray())
+        {
+            live.Apply(F($$"""{"type":"message_start","message":{{message.GetRawText()}}}"""), T);
+            live.Apply(F($$"""{"type":"message_end","message":{{message.GetRawText()}}}"""), T);
+        }
+        var reopened = new ConversationState();
+        reopened.Hydrate(document.RootElement);
+        // Serialized row values include attachment bytes, order, stable keys, and timestamps.
+        Assert.Equal(JsonSerializer.Serialize(reopened.Snapshot().Items.Select(item => (object)item)),
+            JsonSerializer.Serialize(live.Snapshot().Items.Select(item => (object)item)));
+        var rows = reopened.Snapshot().Items;
+        Assert.Equal(9, rows.Count);
+        var custom = Assert.IsType<CommandOutputItem>(rows[0]);
+        Assert.Equal("extension-note", custom.Label);
+        Assert.Equal("**Visible**", custom.Text);
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1000), custom.At);
+        Assert.Equal(new byte[] { 1, 2, 3 }, custom.Images[0].Data);
+        Assert.Empty(custom.Images[1].Data);
+        Assert.Equal("Legacy", Assert.IsType<CommandOutputItem>(rows[1]).Text);
+        Assert.Equal("Branch body", Assert.IsType<CommandOutputItem>(rows[2]).Text);
+        var compacted = Assert.IsType<CommandOutputItem>(rows[3]);
+        Assert.Equal("Compacted body\n\nArchive text\n\nCompaction warning", compacted.Text);
+        Assert.Single(compacted.Images);
+        Assert.Equal("photo.png", Assert.IsType<CommandOutputItem>(rows[4]).Text);
+        Assert.Equal("large.bin (tooLarge)", Assert.IsType<CommandOutputItem>(rows[5]).Text);
+        var python = Assert.IsType<ToolItem>(rows[6]);
+        Assert.Equal(("eval", "print(7)", ToolStatus.Failed, "7\nexit code 1"), (python.Name, python.Summary, python.Status, python.Output));
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(6000), python.StartedAt);
+        Assert.Single(Assert.IsType<CommandOutputItem>(rows[8]).Images);
+    }
+
+    [Fact]
+    public void Reload_replaces_persisted_context_without_duplicating_it_or_discarding_command_output()
+    {
+        using var document = JsonDocument.Parse("""[{"role":"custom","customType":"note","display":true,"content":"persisted"}]""");
+        var state = new ConversationState();
+        state.Hydrate(document.RootElement);
+        state.Apply(F("""{"type":"command_output","text":"local command output"}"""), T);
+        state.ReplaceHistory(document.RootElement);
+        state.ReplaceHistory(document.RootElement);
+        Assert.Equal(["persisted", "local command output"], state.Snapshot().Items.OfType<CommandOutputItem>().Select(item => item.Text));
+    }
+
+    [Fact]
+    public async Task Visible_context_cannot_complete_a_background_command()
+    {
+        await using var controller = new SessionController(TestProcesses.Fake("history"));
+        var before = controller.Snapshot();
+        controller.Mutate(state =>
+        {
+            state.Hydrate(JsonDocument.Parse("""[{"role":"custom","customType":"extension","display":true,"content":"not command output"}]""").RootElement);
+            state.Apply(F("""{"type":"command_output","text":"actual command output"}"""), T);
+        });
+        Assert.Equal("actual command output", await controller.WaitForCommandOutputAsync(before, _ => true, TimeSpan.FromSeconds(1)));
+    }
+
+    [Theory]
+    [InlineData("custom", "extension-note")]
+    [InlineData("hookMessage", "legacy-note")]
+    [InlineData("custom", "irc:incoming")]
+    [InlineData("custom", "irc:relay")]
+    public void Hidden_custom_content_and_details_never_become_transcript_rows(string role, string customType)
+    {
+        foreach (var display in new[] { ",\"display\":false", "" })
+        {
+            var message = $$$"""{"role":"{{{role}}}","customType":"{{{customType}}}"{{{display}}},"content":"secret content","details":{"from":"peer","message":"secret details"}}""";
+            var state = new ConversationState();
+            state.Hydrate(JsonDocument.Parse("[" + message + "]").RootElement);
+            foreach (var kind in new[] { "message_start", "message_end", "irc_message" })
+                state.Apply(F($$"""{"type":"{{kind}}","message":{{message}}}"""), T);
+            Assert.Empty(state.Snapshot().Items);
+        }
+    }
+
+    [Fact]
+    public void Irc_live_observation_and_persisted_lifecycle_render_once_and_reset_for_the_next_session()
+    {
+        const string message = """{"role":"custom","customType":"irc:incoming","display":true,"content":"model envelope","details":{"id":"irc-1","from":"peer","message":"visible body"}}""";
+        var state = new ConversationState();
+        foreach (var kind in new[] { "irc_message", "message_start", "message_end" })
+            state.Apply(F($$"""{"type":"{{kind}}","message":{{message}}}"""), T);
+        Assert.Equal("visible body", Assert.IsType<AgentMessageItem>(Assert.Single(state.Snapshot().Items)).Text);
+        state.ResetTranscript();
+        state.Apply(F($$"""{"type":"message_end","message":{{message}}}"""), T);
+        Assert.Single(state.Snapshot().Items);
+    }
+
+    [Fact]
+    public void Context_row_is_not_command_output_or_a_compaction_marker()
+    {
+        using var row = new Ombra.App.ViewModels.CommandOutputRowViewModel(new CommandOutputItem(1, "Compaction complete. Tokens: 9 -> 3")
+        {
+            Label = "extension-note", At = T, Images = [new ImageAttachment("missing.png", "image/png", [])],
+        });
+        Assert.True(row.IsContext);
+        Assert.False(row.IsOutput);
+        Assert.False(row.IsMarker);
+        Assert.True(row.HasTime);
+        Assert.True(row.HasImages);
+        Assert.Equal("missing.png", Assert.Single(row.Previews).Name);
     }
 
     [Fact]
@@ -447,7 +724,7 @@ public sealed class ConversationStateTests
               "details":{"__interrupted":true,"source":"interrupt_skipped","execution":"started"}}]
             """).RootElement);
         Assert.Equal(ToolStatus.Skipped, h.Snapshot().Items.OfType<ToolItem>().Single().Status);
-        Assert.Equal("Skipped: a background job finished first", Ombra.App.ViewModels.ToolRowViewModel.SkippedFor(skippedText));
+        Assert.Equal(Ombra.App.Localization.Loc.T("Skipped: a background job finished first"), Ombra.App.ViewModels.ToolRowViewModel.SkippedFor(skippedText));
     }
 
     [Fact]
@@ -469,6 +746,19 @@ public sealed class ConversationStateTests
         Assert.Equal(("GallerySolutions", "**Found** it"), h.Snapshot().Items.OfType<AgentMessageItem>().Select(m => (m.From, m.Text)).Single());
 
         var row = new Ombra.App.ViewModels.AgentMessageRowViewModel(new AgentMessageItem(1, "C", null, "## Result\n**Found** `it`\n- one", true));
-        Assert.Equal(("Result Found it - one", "→ omp · reply"), (row.Preview, row.Route));
+        Assert.Equal(("Result Found it - one", Ombra.App.Localization.Loc.T("→ omp") + " · " + Ombra.App.Localization.Loc.T("reply")), (row.Preview, row.Route));
+    }
+
+    [Fact]
+    public void The_clients_own_failure_notice_reads_in_the_ui_language_and_keeps_omps_words()
+    {
+        // Regression (ru): "Starting omp failed: …" and "omp exited unexpectedly …" notices stayed English.
+        var s = new ConversationState();
+        var text = new ClientText("Starting omp failed: {0}", "spawn EACCES");
+        s.AddNotice(NoticeLevel.Error, text + "\nbun: permission denied", text);
+        var item = s.Snapshot().Items.OfType<NoticeItem>().Single();
+        Assert.Equal("Starting omp failed: spawn EACCES\nbun: permission denied", item.Text); // the log keeps the English
+        Assert.Equal(Ombra.App.Localization.Loc.F("Starting omp failed: {0}", "spawn EACCES") + "\nbun: permission denied",
+            new Ombra.App.ViewModels.NoticeRowViewModel(item).Text);
     }
 }

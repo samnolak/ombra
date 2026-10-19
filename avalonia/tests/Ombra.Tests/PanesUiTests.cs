@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
@@ -9,6 +10,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
 using Ombra.App.Controls;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.App.Views.Panes;
@@ -106,7 +108,7 @@ public sealed class PanesUiTests
 
         var menu = OpenViewsMenu(w);
         await Settle();
-        Assert.Equal(["Files", "Changes", "Background tasks", "Plan", "Browser", "Terminal"],
+        Assert.Equal([Loc.T("Files"), Loc.T("Changes"), Loc.T("Background tasks"), Loc.T("Plan"), Loc.T("Browser"), Loc.T("Terminal")],
             menu.Children.OfType<Button>().Select(b => AutomationProperties.GetName(b)));
         Assert.All(menu.Children.OfType<Button>(), b => Assert.False(Ticked(b)));
         // The plan's progress and the shortcuts are in the menu
@@ -120,7 +122,7 @@ public sealed class PanesUiTests
         Assert.Equal(SidePane.Plan, vm.ActivePane);
         Assert.False(ViewsButton(w).Flyout!.IsOpen); // a choice closes the menu
         Assert.True(Named<RightPanel>(w, "RightPanel").IsEffectivelyVisible);
-        Assert.Equal("Plan", vm.PanelTabs.Single(t => t.IsActive).Header);
+        Assert.Equal(Loc.T("Plan"), vm.PanelTabs.Single(t => t.IsActive).Header);
 
         menu = OpenViewsMenu(w);
         await Settle();
@@ -238,9 +240,9 @@ public sealed class PanesUiTests
     }
 
     [AvaloniaFact]
-    public async Task Jobs_are_never_asked_of_an_omp_that_does_not_list_them()
+    public async Task Jobs_are_read_over_rpc_never_as_a_jobs_prompt()
     {
-        // An omp that does not run /jobs over RPC would take it for a message to the model
+        // The pane asks get_jobs; no /jobs text goes to omp, where an older omp would take it for a message to the model
         var dir = TestProcesses.TempDir("panes-nojobs");
         File.WriteAllText(Path.Combine(dir, "c.json"), "{}");
         var log = Path.Combine(dir, "sent.log");
@@ -256,8 +258,10 @@ public sealed class PanesUiTests
         await SendAsync(vm, "hello", () => vm.Rows.OfType<AssistantRowViewModel>().Any());
         await Settle(600);
         Assert.False(File.Exists(log) && File.ReadAllText(log).Contains("/jobs", StringComparison.Ordinal));
+        Assert.Contains(await JobRequests(vm), c => c.Type == "get_jobs");
         Assert.Single(vm.Rows.OfType<UserRowViewModel>());
         Assert.True(vm.Tasks.IsEmpty);
+        Assert.False(vm.Tasks.HasJobsError);
         Assert.True(vm.Tasks.IsUnsupported); // the fake has no subagent commands either
         await vm.DisposeAsync();
         w.Close();
@@ -287,16 +291,16 @@ public sealed class PanesUiTests
         vm.ShowPaneCommand.Execute(SidePane.Plan);
         await Settle();
         Assert.False(card.IsEffectivelyVisible); // the pane shows the same list: no second copy above the composer
-        Assert.Equal("2 of 5 done", vm.Plan.ProgressText); // the dropped task counts neither way
+        Assert.Equal(Loc.F("{0} of {1} done", 2, 5), vm.Plan.ProgressText); // the dropped task counts neither way
         var rows = Named<ItemsControl>(w, "PlanPhases").GetVisualDescendants().OfType<Border>().Where(b => b.Classes.Contains("plan-task")).ToList();
         Assert.Equal(6, rows.Count);
         Assert.Single(rows, r => r.Classes.Contains("current"));
 
         await SendAsync(vm, "go on", () => vm.Plan.Changes.Count > 1);
         await SendAsync(vm, "new plan", () => vm.Plan.HasEarlierPlans);
-        Assert.Equal("0 of 2 done", vm.Plan.ProgressText);
-        Assert.Equal("3 of 6 done", Assert.Single(vm.Plan.EarlierPlans).Summary);
-        Assert.Contains(vm.Plan.Changes, c => c.What == "Completed");
+        Assert.Equal(Loc.F("{0} of {1} done", 0, 2), vm.Plan.ProgressText);
+        Assert.Equal(Loc.F("{0} of {1} done", 3, 6), Assert.Single(vm.Plan.EarlierPlans).Summary);
+        Assert.Contains(vm.Plan.Changes, c => c.What == Loc.T("Completed"));
 
         vm.ClosePaneCommand.Execute(null);
         await Settle();
@@ -307,7 +311,7 @@ public sealed class PanesUiTests
         Assert.True(await vm.RestartOmpToApplyAsync());
         await Until(() => vm.Phase == SessionPhase.Ready && vm.Plan.HasEarlierPlans, "history after the restart");
         Assert.Equal(changes, vm.Plan.Changes.Select(c => (c.What, c.Content)));
-        Assert.Equal("3 of 6 done", vm.Plan.EarlierPlans.Single().Summary);
+        Assert.Equal(Loc.F("{0} of {1} done", 3, 6), vm.Plan.EarlierPlans.Single().Summary);
         await vm.DisposeAsync();
         w.Close();
     }
@@ -326,7 +330,7 @@ public sealed class PanesUiTests
         // sa-3 runs in the background, and the bash job; the async task job is sa-3 itself
         Assert.Equal(2, vm.Tasks.RunningCount);
         Assert.Equal(["Watch the dev server", "Review the plan pane", "Find where todos are read"], vm.Tasks.Subagents.Select(r => r.Title));
-        Assert.Equal(["Running", "Failed", "Done"], vm.Tasks.Subagents.Select(r => r.StatusText));
+        Assert.Equal([Loc.T("Running"), Loc.T("Failed"), Loc.T("Done")], vm.Tasks.Subagents.Select(r => r.StatusText));
         Assert.Equal(3, Named<ItemsControl>(w, "SubagentList").GetVisualDescendants().OfType<ToggleButton>().Count());
 
         // The ⋯ menu counts what runs
@@ -340,10 +344,475 @@ public sealed class PanesUiTests
         // A card opens to its conversation
         var first = vm.Tasks.Subagents.Single(r => r.Id == "sa-1");
         first.IsExpanded = true;
+        await Settle();
+        var show = Named<ItemsControl>(w, "SubagentList").GetVisualDescendants().OfType<Button>()
+            .Single(b => ReferenceEquals(b.DataContext, first) && b.Command == first.LoadMessagesCommand);
+        show.BringIntoView();
+        await Settle();
         await first.LoadMessagesCommand.ExecuteAsync(null);
         Assert.True(first.MessagesLoaded);
         Assert.Contains(first.Messages, m => m.Role == "tool");
         await vm.DisposeAsync();
         w.Close();
+    }
+
+    /// <summary>The subagents scenario after a turn, with <paramref name="more"/> extra subagents still running, pane open.</summary>
+    private static async Task<(MainWindow W, MainViewModel Vm)> OpenRunningSubagents(params string[] more)
+    {
+        var (w, vm) = await OpenAsync("subagents", 1180);
+        await SendAsync(vm, "look into it", () => vm.Tasks.Subagents.Count == 3);
+        if (more.Length > 0) await PanesTests.SubagentControl(vm.Session, "{\"start\":" + JsonSerializer.Serialize(more) + "}");
+        vm.ShowPaneCommand.Execute(SidePane.Tasks);
+        await Until(() => vm.Tasks.Subagents.Count(r => r.IsRunning) == 1 + more.Length, "running subagents listed");
+        await Settle();
+        return (w, vm);
+    }
+
+    private static Control RowControl(MainWindow w, SubagentRowViewModel row, string name) =>
+        Named<ItemsControl>(w, "SubagentList").GetVisualDescendants().OfType<Control>()
+            .Single(c => c.Name == name && ReferenceEquals(c.DataContext, row));
+
+    private static async Task<List<(string Type, string Id, string? Message)>> SubagentControls(MainViewModel vm) =>
+        (await PanesTests.SubagentControl(vm.Session, "{}")).GetProperty("controls").EnumerateArray()
+            .Select(c => (c.GetProperty("type").GetString()!, c.GetProperty("subagentId").GetString()!,
+                c.TryGetProperty("message", out var m) ? m.GetString() : null)).ToList();
+
+    [AvaloniaFact]
+    public async Task Stop_cancels_only_that_subagent_and_its_row_leaves_running()
+    {
+        var (w, vm) = await OpenRunningSubagents("sa-4");
+        var row = vm.Tasks.Subagents.Single(r => r.Id == "sa-3");
+        var other = vm.Tasks.Subagents.Single(r => r.Id == "sa-4");
+        // Finished rows offer neither control
+        Assert.False(RowControl(w, vm.Tasks.Subagents.Single(r => r.Id == "sa-1"), "SubagentStop").IsEffectivelyVisible);
+        Click(RowControl(w, row, "SubagentStop"));
+        await Until(() => !row.IsRunning, "sa-3 stopped");
+        Assert.Equal(Loc.T("Stopped"), row.StatusText);
+        Assert.False(row.HasActionError);
+        Assert.True(other.IsRunning);
+        Assert.Equal([("cancel_subagent", "sa-3", (string?)null)], await SubagentControls(vm));
+        await Settle();
+        Assert.False(RowControl(w, row, "SubagentStop").IsEffectivelyVisible);
+        Assert.False(vm.Tasks.CanStopAll); // one runs now
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Message_steers_the_subagent_with_the_text_and_clears_the_box()
+    {
+        var (w, vm) = await OpenRunningSubagents();
+        var row = vm.Tasks.Subagents.Single(r => r.Id == "sa-3");
+        var box = (TextBox)RowControl(w, row, "SubagentMessageBox");
+        Assert.False(RowControl(w, row, "SubagentSend").IsEnabled); // nothing written yet
+        box.Text = "also watch the tests";
+        await Settle();
+        Click(RowControl(w, row, "SubagentSend"));
+        await Until(() => row.MessageText.Length == 0, "message delivered");
+        Assert.Equal("", box.Text);
+        Assert.False(row.HasActionError);
+        Assert.True(row.IsRunning);
+        Assert.Equal([("steer_subagent", "sa-3", (string?)"also watch the tests")], await SubagentControls(vm));
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task A_refused_stop_or_message_is_shown_on_the_row()
+    {
+        var (w, vm) = await OpenRunningSubagents();
+        var row = vm.Tasks.Subagents.Single(r => r.Id == "sa-3");
+        await PanesTests.SubagentControl(vm.Session, """{"cancelError":"the subagent is busy","steerError":"the subagent is finishing"}""");
+        Click(RowControl(w, row, "SubagentStop"));
+        await Until(() => row.HasActionError, "stop error");
+        Assert.Contains("the subagent is busy", row.ActionError);
+        Assert.True(row.IsRunning);
+        await Settle();
+        Assert.True(RowControl(w, row, "SubagentStop").IsEnabled); // it can be tried again
+        Assert.Contains(Named<ItemsControl>(w, "SubagentList").GetVisualDescendants().OfType<TextBlock>(),
+            t => t.Text == row.ActionError && t.IsEffectivelyVisible);
+
+        row.MessageText = "keep going";
+        Click(RowControl(w, row, "SubagentSend"));
+        await Until(() => row.ActionError.Contains("the subagent is finishing", StringComparison.Ordinal), "message error");
+        Assert.Equal("keep going", row.MessageText); // not lost
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Stop_all_cancels_every_running_subagent()
+    {
+        var (w, vm) = await OpenRunningSubagents("sa-4", "sa-5");
+        var stopAll = Named<Button>(w, "StopAllSubagents");
+        Assert.True(stopAll.IsEffectivelyVisible);
+        Click(stopAll);
+        await Until(() => vm.Tasks.Subagents.All(r => !r.IsRunning), "all stopped");
+        var cancelled = (await SubagentControls(vm)).Where(c => c.Type == "cancel_subagent").Select(c => c.Id).Order().ToList();
+        Assert.Equal(["sa-3", "sa-4", "sa-5"], cancelled);
+        await Settle();
+        Assert.False(stopAll.IsEffectivelyVisible);
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    private static async Task<(MainWindow W, MainViewModel Vm, SubagentRowViewModel Row)> OpenLiveConversation(string? messages = null)
+    {
+        var (w, vm) = await OpenAsync("subagents", 1180);
+        await SendAsync(vm, "look into it", () => vm.Tasks.Subagents.Count == 3);
+        if (messages is not null) await PanesTests.SubagentControl(vm.Session, "{\"replace\":" + messages + "}");
+        vm.ShowPaneCommand.Execute(SidePane.Tasks);
+        var row = vm.Tasks.Subagents.Single(r => r.Id == "sa-3");
+        row.IsExpanded = true;
+        await Settle();
+        var show = Named<ItemsControl>(w, "SubagentList").GetVisualDescendants().OfType<Button>()
+            .Single(b => ReferenceEquals(b.DataContext, row) && b.Command == row.LoadMessagesCommand);
+        Click(show);
+        await Until(() => row.MessagesLoaded, "conversation loaded");
+        return (w, vm, row);
+    }
+
+    [AvaloniaFact]
+    public async Task An_open_conversation_appends_live_deltas_keeps_a_bounded_preview_and_retries_failed_bytes()
+    {
+        var messages = JsonSerializer.Serialize(Enumerable.Range(0, 45).Select(i => new { role = "user", content = $"entry-{i}" }));
+        var (w, vm, row) = await OpenLiveConversation(messages);
+        try
+        {
+            Assert.Equal(Enumerable.Range(5, 40).Select(i => $"entry-{i}"), row.Messages.Select(m => m.Text));
+            var retained = row.Messages[2];
+            await PanesTests.SubagentControl(vm.Session, """{"append":[{"role":"assistant","content":"é漢😀"},{"role":"assistant","content":"é漢😀"}]}""");
+            await Until(() => row.Messages.Count(m => m.Text == "é漢😀") == 2, "live delta without another click");
+            Assert.Equal(40, row.Messages.Count);
+            Assert.Same(retained, row.Messages[0]);
+
+            var changes = 0;
+            row.Messages.CollectionChanged += (_, _) => changes++;
+            var prior = await PanesTests.SubagentControl(vm.Session, "{}");
+            var requests = prior.GetProperty("requests").GetArrayLength();
+            await Settle(1300); // an empty live poll must not rebuild rows or disturb a text selection
+            var empty = await PanesTests.SubagentControl(vm.Session, "{}");
+            Assert.True(empty.GetProperty("requests").GetArrayLength() > requests);
+            Assert.Equal(0, changes);
+            var cursor = empty.GetProperty("requests").EnumerateArray().Last().GetProperty("fromByte").GetInt64();
+
+            await PanesTests.SubagentControl(vm.Session, """{"append":[{"role":"assistant","content":"after error"}],"error":"read unavailable"}""");
+            await Until(() => row.HasMessagesNote, "read error");
+            Assert.Equal(0, changes);
+            await PanesTests.SubagentControl(vm.Session, """{"error":null,"malformed":true}""");
+            await Settle(1300);
+            Assert.Equal(0, changes);
+            var malformed = await PanesTests.SubagentControl(vm.Session, "{}");
+            Assert.Equal(cursor, malformed.GetProperty("requests").EnumerateArray().Last().GetProperty("fromByte").GetInt64());
+            await PanesTests.SubagentControl(vm.Session, """{"malformed":false}""");
+            await Until(() => row.Messages.Any(m => m.Text == "after error"), "same bytes retried");
+            Assert.Single(row.Messages, m => m.Text == "after error");
+            Assert.False(row.HasMessagesNote);
+
+            await PanesTests.SubagentControl(vm.Session, """{"replace":[{"role":"user","content":"reset"}]}""");
+            await Until(() => row.Messages.Count == 1 && row.Messages[0].Text == "reset", "truncated transcript replaced");
+        }
+        finally
+        {
+            await vm.DisposeAsync();
+            w.Close();
+        }
+    }
+
+    [AvaloniaTheory]
+    [InlineData("collapse")]
+    [InlineData("pane")]
+    [InlineData("chat")]
+    public async Task Leaving_a_conversation_cancels_its_read_and_drops_a_late_answer(string leave)
+    {
+        var (w, vm, row) = await OpenLiveConversation("""[{"role":"user","content":"before"}]""");
+        var session = vm.Session;
+        try
+        {
+            await PanesTests.SubagentControl(session, """{"append":[{"role":"assistant","content":"while hidden"}],"hold":true}""");
+            await UntilSubagentReadHeld(session);
+            Assert.Equal(1, PendingSubagentReadCount(session));
+            if (leave == "collapse") row.IsExpanded = false;
+            else if (leave == "pane") vm.ClosePaneCommand.Execute(null);
+            else vm.NewChatCommand.Execute(null);
+            // Bound this below the 15-second transcript deadline: a timeout is not cancellation.
+            await Until(() => PendingSubagentReadCount(session) == 0, "preview request cancelled before its late reply", seconds: 5);
+            if (leave == "chat")
+                await Until(() => vm.Session != session && vm.Phase == SessionPhase.Ready, "another chat");
+            var hidden = await PanesTests.SubagentControl(session, """{"hold":false,"release":true}""");
+            await Settle(1300);
+            Assert.Equal("before", Assert.Single(row.Messages).Text);
+            Assert.Equal(hidden.GetProperty("requests").GetArrayLength(),
+                (await PanesTests.SubagentControl(session, "{}")).GetProperty("requests").GetArrayLength());
+            if (leave == "chat")
+            {
+                Assert.Empty(vm.Tasks.Subagents);
+                await SendAsync(vm, "new tasks", () => vm.Tasks.Subagents.Count == 3);
+                Assert.NotSame(row, vm.Tasks.Subagents.Single(r => r.Id == row.Id));
+                Assert.All(vm.Tasks.Subagents, next => Assert.Empty(next.Messages));
+            }
+            else
+            {
+                if (leave == "pane") vm.ShowPaneCommand.Execute(SidePane.Tasks);
+                else row.IsExpanded = true;
+                await Until(() => row.Messages.Any(m => m.Text == "while hidden"), "resumed cursor");
+                Assert.Equal(["before", "while hidden"], row.Messages.Select(m => m.Text));
+            }
+        }
+        finally
+        {
+            await vm.DisposeAsync();
+            w.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task A_changed_transcript_path_restarts_at_zero_and_a_replaced_card_rejects_its_old_read()
+    {
+        var (w, vm, row) = await OpenLiveConversation("""[{"role":"user","content":"before"}]""");
+        try
+        {
+            // The registry can know the new file before a progress frame tells the card about it.
+            await PanesTests.SubagentControl(vm.Session, """{"sessionFile":"/new/transcript.jsonl","replace":[{"role":"user","content":"the new file begins with a longer first entry"},{"role":"assistant","content":"new second"}]}""");
+            await Until(() => row.Messages.Count == 2 && row.Messages[0].Text.StartsWith("the new file", StringComparison.Ordinal), "new file read from zero");
+            Assert.Equal("new second", row.Messages[1].Text);
+
+            await PanesTests.SubagentControl(vm.Session, """{"hold":true,"append":[{"role":"assistant","content":"stale old-file answer"}]}""");
+            await UntilSubagentReadHeld(vm.Session);
+            await PanesTests.SubagentControl(vm.Session, """{"sessionFile":"/third/transcript.jsonl","replace":[{"role":"user","content":"third file"}]}""");
+            row.Update(row.Info with { SessionFile = "/third/transcript.jsonl" });
+            await PanesTests.SubagentControl(vm.Session, """{"hold":false,"release":true}""");
+            await Until(() => row.MessagesLoaded && row.Messages.Count == 1, "replacement path");
+            Assert.Equal("third file", row.Messages[0].Text);
+            Assert.DoesNotContain(row.Messages, m => m.Text == "stale old-file answer");
+        }
+        finally
+        {
+            await vm.DisposeAsync();
+            w.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task An_offscreen_conversation_stops_polling_and_disposal_cancels_the_resumed_read()
+    {
+        var (w, vm, row) = await OpenLiveConversation("""[{"role":"user","content":"before"}]""");
+        try
+        {
+            var laterCard = vm.Tasks.Subagents.Last();
+            laterCard.Update(laterCard.Info with { Task = string.Join("\n", Enumerable.Repeat("More work below this card", 60)) });
+            laterCard.IsExpanded = true;
+            w.Height = 480;
+            await Settle();
+            var scroll = Named<ScrollViewer>(w, "TasksScroll");
+            scroll.ScrollToEnd();
+            await Settle();
+            var card = Named<ItemsControl>(w, "SubagentList").GetVisualDescendants().OfType<Border>()
+                .Single(b => b.Classes.Contains("task-card") && ReferenceEquals(b.DataContext, row));
+            Assert.True(card.TranslatePoint(new Point(0, card.Bounds.Height), scroll)!.Value.Y <= 0);
+            var offscreen = await PanesTests.SubagentControl(vm.Session, """{"append":[{"role":"assistant","content":"later"}]}""");
+            await Settle(1300);
+            Assert.Equal("before", Assert.Single(row.Messages).Text);
+            Assert.Equal(offscreen.GetProperty("requests").GetArrayLength(),
+                (await PanesTests.SubagentControl(vm.Session, "{}")).GetProperty("requests").GetArrayLength());
+
+            await PanesTests.SubagentControl(vm.Session, """{"hold":true}""");
+            scroll.ScrollToHome();
+            await Settle();
+            await UntilSubagentReadHeld(vm.Session);
+            var connection = vm.Session.Connection!;
+            await vm.DisposeAsync();
+            Assert.Equal(0, connection.PendingRequestCount);
+            Assert.Equal("before", Assert.Single(row.Messages).Text);
+            Assert.False(row.IsLoadingMessages);
+        }
+        finally
+        {
+            await vm.DisposeAsync();
+            w.Close();
+        }
+    }
+
+    /// <summary>A chat whose omp runs <paramref name="jobsJson"/> (FakeJobs.cs), the Background tasks pane open on its rows.</summary>
+    private static async Task<(MainWindow W, MainViewModel Vm)> OpenJobs(string jobsJson, int rows)
+    {
+        var (w, vm) = await OpenAsync("normal", 1180);
+        await PanesTests.JobControl(vm.Session, jobsJson);
+        vm.ShowPaneCommand.Execute(SidePane.Tasks);
+        await vm.Tasks.RefreshAsync();
+        await Until(() => vm.Tasks.Jobs.Count == rows, "jobs listed");
+        await Settle();
+        return (w, vm);
+    }
+
+    private static Control JobControl(MainWindow w, JobRowViewModel row, string name) =>
+        Named<ItemsControl>(w, "JobList").GetVisualDescendants().OfType<Control>()
+            .Single(c => c.Name == name && ReferenceEquals(c.DataContext, row));
+
+    private static async Task<List<(string Type, string? Id, long? FromByte)>> JobRequests(MainViewModel vm) =>
+        (await PanesTests.JobControl(vm.Session, "{}")).GetProperty("controls").EnumerateArray()
+            .Select(c => (c.GetProperty("type").GetString()!, c.TryGetProperty("jobId", out var id) ? id.GetString() : null,
+                c.TryGetProperty("fromByte", out var from) && from.ValueKind == JsonValueKind.Number ? from.GetInt64() : (long?)null)).ToList();
+
+    [AvaloniaFact]
+    public async Task Stop_cancels_only_that_job_and_a_refusal_is_shown_on_its_row()
+    {
+        var (w, vm) = await OpenJobs("""{"jobs":[{"id":"bg_1","label":"npm run dev"},{"id":"bg_2","label":"cargo watch"},{"id":"bg_0","status":"completed","label":"npm test"}]}""", 3);
+        var dev = vm.Tasks.Jobs.Single(r => r.Id == "bg_1");
+        var watch = vm.Tasks.Jobs.Single(r => r.Id == "bg_2");
+        Assert.Equal(2, vm.Tasks.RunningCount);
+        Assert.False(JobControl(w, vm.Tasks.Jobs.Single(r => r.Id == "bg_0"), "JobStop").IsEffectivelyVisible); // an ended job has none
+
+        await PanesTests.JobControl(vm.Session, """{"cancelError":"the job is busy"}""");
+        Click(JobControl(w, watch, "JobStop"));
+        await Until(() => watch.HasActionError, "stop refused");
+        Assert.Contains("the job is busy", watch.ActionError);
+        Assert.True(watch.IsRunning);
+        await Settle();
+        Assert.True(JobControl(w, watch, "JobStop").IsEnabled); // it can be tried again
+
+        await PanesTests.JobControl(vm.Session, """{"cancelError":null}""");
+        Click(JobControl(w, dev, "JobStop"));
+        await Until(() => !dev.IsRunning, "bg_1 stopped");
+        Assert.Equal(Loc.T("Cancelled"), dev.StatusText);
+        Assert.False(dev.HasActionError);
+        Assert.True(watch.IsRunning);
+        Assert.Same(dev, vm.Tasks.Jobs.Single(r => r.Id == "bg_1")); // the same row, updated
+        Assert.Equal(1, vm.Tasks.RunningCount);
+        Assert.Equal([("cancel_job", "bg_2"), ("cancel_job", "bg_1")],
+            (await JobRequests(vm)).Where(c => c.Type == "cancel_job").Select(c => (c.Type, c.Id)));
+        await Settle();
+        Assert.False(JobControl(w, dev, "JobStop").IsEffectivelyVisible);
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Show_output_reads_the_tail_then_only_new_bytes_and_keeps_a_bounded_view()
+    {
+        var (w, vm) = await OpenJobs("""{"jobs":[{"id":"bg_1","label":"npm run dev","output":"> dev\né漢😀 ready\n"}]}""", 1);
+        var row = vm.Tasks.Jobs.Single();
+        var toggle = (Button)JobControl(w, row, "JobOutputToggle");
+        Assert.Equal(Loc.T("Show output"), toggle.Content);
+        Assert.False(JobControl(w, row, "JobOutputText").IsEffectivelyVisible);
+        Click(toggle);
+        await Until(() => row.HasOutput, "tail read");
+        Assert.Equal("> dev\né漢😀 ready\n", row.OutputText);
+        await Settle();
+        Assert.Equal(Loc.T("Hide output"), toggle.Content);
+        Assert.True(JobControl(w, row, "JobOutputText").IsEffectivelyVisible);
+        Assert.False(row.HasOutputNote);
+
+        // While it runs, only what it printed since is asked for, from the byte cursor
+        await PanesTests.JobControl(vm.Session, """{"jobId":"bg_1","append":"compiled\n"}""");
+        await Until(() => row.OutputText.EndsWith("compiled\n", StringComparison.Ordinal), "delta appended");
+        Assert.Equal("> dev\né漢😀 ready\ncompiled\n", row.OutputText);
+        var reads = (await JobRequests(vm)).Where(c => c.Type == "get_job_output").ToList();
+        Assert.Null(reads[0].FromByte); // the tail first
+        Assert.Contains(reads, c => c.FromByte == 22); // then from its UTF-8 end
+
+        // A flood keeps only the latest part, whole lines, and says so
+        var flood = string.Concat(Enumerable.Range(0, 3000).Select(i => $"line {i:D5} {new string('x', 40)}\n"));
+        await PanesTests.JobControl(vm.Session, "{\"jobId\":\"bg_1\",\"append\":" + JsonSerializer.Serialize(flood) + "}");
+        await Until(() => row.OutputText.EndsWith("line 02999 " + new string('x', 40) + "\n", StringComparison.Ordinal), "flood read");
+        Assert.True(row.OutputText.Length <= JobRowViewModel.OutputLimit);
+        Assert.StartsWith("line ", row.OutputText);
+        Assert.True(row.HasOutputNote);
+
+        // Hidden, it is no longer read
+        Click(toggle);
+        await Settle();
+        var before = (await JobRequests(vm)).Count(c => c.Type == "get_job_output");
+        await PanesTests.JobControl(vm.Session, """{"jobId":"bg_1","append":"unseen\n"}""");
+        await Settle(1500);
+        Assert.Equal(before, (await JobRequests(vm)).Count(c => c.Type == "get_job_output"));
+        Assert.DoesNotContain("unseen", row.OutputText);
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task A_job_quiet_on_a_prompt_shows_waiting_for_input_until_it_prints_again()
+    {
+        var (w, vm) = await OpenJobs("""{"jobs":[{"id":"bg_1","label":"npx create-app","output":"Project name: ","waitingForInput":true},{"id":"bg_2","label":"npm run dev"}]}""", 2);
+        var asking = vm.Tasks.Jobs.Single(r => r.Id == "bg_1");
+        var other = vm.Tasks.Jobs.Single(r => r.Id == "bg_2");
+        Assert.Equal(Loc.T("Waiting for input"), asking.StatusText);
+        Assert.True(JobControl(w, asking, "JobWaiting").IsEffectivelyVisible);
+        Assert.False(JobControl(w, other, "JobWaiting").IsEffectivelyVisible);
+        Assert.Equal(Loc.T("Running"), other.StatusText);
+        Assert.True(JobControl(w, asking, "JobStop").IsEffectivelyVisible); // the way out
+
+        await PanesTests.JobControl(vm.Session, """{"jobId":"bg_1","waitingForInput":false,"append":"my-app\n"}""");
+        await vm.Tasks.RefreshAsync();
+        await Until(() => !asking.IsWaitingForInput, "no longer waiting");
+        Assert.Equal(Loc.T("Running"), asking.StatusText);
+        await Settle();
+        Assert.False(JobControl(w, asking, "JobWaiting").IsEffectivelyVisible);
+
+        // An ended job waits for nothing, whatever its last line
+        await PanesTests.JobControl(vm.Session, """{"jobId":"bg_1","waitingForInput":true,"status":"failed","exitCode":130}""");
+        await vm.Tasks.RefreshAsync();
+        await Until(() => !asking.IsRunning, "ended");
+        Assert.False(asking.IsWaitingForInput);
+        Assert.Equal(Loc.F("Failed (exit {0})", 130), asking.StatusText);
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    private static int PendingRequests(SessionController session, string command)
+    {
+        const System.Reflection.BindingFlags fields = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var pending = Assert.IsAssignableFrom<System.Collections.IDictionary>(
+            typeof(Ombra.Rpc.RpcConnection).GetField("_pending", fields)!.GetValue(session.Connection));
+        return pending.Values.Cast<object>().Count(request => (string?)request.GetType().GetProperty("Command")!.GetValue(request) == command);
+    }
+
+    [AvaloniaFact]
+    public async Task Switching_chats_or_hiding_the_pane_cancels_the_job_list_read_under_way()
+    {
+        var (w, vm) = await OpenJobs("""{"jobs":[{"id":"bg_1","label":"npm run dev"}]}""", 1);
+        await PanesTests.JobControl(vm.Session, """{"holdList":true}""");
+        _ = vm.Tasks.RefreshAsync();
+        await Until(() => PendingRequests(vm.Session, "get_jobs") == 1, "a held read");
+        // Each switch cancels the read of the chat shown before and starts one: they never pile up
+        for (var i = 0; i < 3; i++)
+        {
+            vm.Tasks.OnSessionShown();
+            await Settle(100);
+            Assert.Equal(1, PendingRequests(vm.Session, "get_jobs"));
+        }
+        Assert.Equal(4, (await PanesTests.JobControl(vm.Session, "{}")).GetProperty("held").GetInt32());
+        vm.ClosePaneCommand.Execute(null);
+        await Until(() => PendingRequests(vm.Session, "get_jobs") == 0, "hiding cancels it");
+        // The cancelled reads' late answers change nothing; the next read is not blocked by them
+        await PanesTests.JobControl(vm.Session, """{"holdList":false,"release":true}""");
+        await Settle();
+        Assert.Empty(vm.Tasks.Jobs); // the switch cleared the rows; dropped answers did not bring them back
+        vm.ShowPaneCommand.Execute(SidePane.Tasks);
+        await Until(() => vm.Tasks.Jobs.Count == 1, "read again");
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    private static int PendingSubagentReadCount(SessionController session)
+    {
+        // Optional capability probes can remain pending after an older omp replies without an id.
+        // Inspect the real transcript requests, not UI loading state or unrelated session RPCs.
+        const System.Reflection.BindingFlags fields = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var pending = Assert.IsAssignableFrom<System.Collections.IDictionary>(
+            typeof(Ombra.Rpc.RpcConnection).GetField("_pending", fields)!.GetValue(session.Connection));
+        return pending.Values.Cast<object>().Count(request =>
+            (string?)request.GetType().GetProperty("Command")!.GetValue(request) == "get_subagent_messages");
+    }
+
+    private static async Task UntilSubagentReadHeld(SessionController session)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while ((await PanesTests.SubagentControl(session, "{}")).GetProperty("held").GetInt32() == 0)
+        {
+            if (DateTime.UtcNow >= deadline) throw new TimeoutException("No live conversation read reached omp");
+            await Settle(20);
+        }
     }
 }

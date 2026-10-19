@@ -1,3 +1,8 @@
+using Avalonia.Headless.XUnit;
+using Avalonia.Threading;
+using Ombra.App;
+using Ombra.App.Localization;
+using Ombra.App.ViewModels;
 using Ombra.ClientCore;
 using Ombra.Rpc;
 
@@ -55,7 +60,7 @@ public sealed class ModelSettingsTests
 
         await s.SetApprovalModeAsync("always-ask");
         var after = s.Snapshot();
-        Assert.NotEqual(pid, s.ProcessId);
+        Assert.Equal(pid, s.ProcessId);
         Assert.Equal("always-ask", after.ApprovalMode);
         Assert.Equal(file, after.SessionFile);
         Assert.Contains(after.Items, i => i is UserItem { Text: "before the change" });
@@ -128,23 +133,28 @@ public sealed class ModelSettingsTests
     [Fact]
     public void Launch_request_sets_folder_resume_approval_mode_and_thinking()
     {
-        var o = new OmpRuntimeOptions { Command = "omp", Profile = "harness", ApprovalMode = "write", WorkingDirectory = "/configured" };
+        var o = new OmpRuntimeOptions { Command = "bun", PrefixArgs = ["host.ts"], ManagementPrefixArgs = ["cli.ts"], Profile = "harness", ApprovalMode = "write", WorkingDirectory = "/configured" };
         var plain = o.ToLaunchSpec();
         // A new session starts at medium, not omp's own default (high)
-        Assert.Equal(["--mode", "rpc-ui", "--approval-mode", "write", "--thinking", "medium"], plain.Arguments);
+        Assert.Equal(["host.ts"], plain.Arguments);
+        Assert.Equal(["--approval-mode", "write", "--thinking", "medium"], plain.SessionArguments);
+        Assert.Equal(["cli.ts", "plugin", "list"], o.ToCliLaunchSpec(["plugin", "list"]).Arguments);
+        Assert.Empty(o.ToCliLaunchSpec(["plugin", "list"]).SessionArguments);
+        Assert.Equal("cli.ts", o.ToTuiLaunchSpec("/configured").Arguments[0]);
         Assert.Equal("/configured", plain.WorkingDirectory);
         Assert.Equal("harness", plain.Environment!["OMP_PROFILE"]);
 
         // A resumed session keeps the level saved with it
         var spec = o.ToLaunchSpec(new LaunchRequest("/other", "/s/x.jsonl", "always-ask"));
-        Assert.Equal(["--mode", "rpc-ui", "--approval-mode", "always-ask", "--resume", "/s/x.jsonl"], spec.Arguments);
+        Assert.Equal(["host.ts"], spec.Arguments);
+        Assert.Equal(["--approval-mode", "always-ask", "--resume", "/s/x.jsonl"], spec.SessionArguments);
         Assert.Equal("/other", spec.WorkingDirectory);
 
         // The settings file's level when omp knows it; the user's own --thinking wins
-        Assert.Equal("high", (o with { DefaultThinkingLevel = "high" }).ToLaunchSpec().Arguments[^1]);
-        Assert.Equal("medium", (o with { DefaultThinkingLevel = "turbo" }).ToLaunchSpec().Arguments[^1]);
-        Assert.Equal(["--mode", "rpc-ui", "--approval-mode", "write", "--thinking", "low"],
-            (o with { ExtraArgs = ["--thinking", "low"] }).ToLaunchSpec().Arguments);
+        Assert.Equal("high", (o with { DefaultThinkingLevel = "high" }).ToLaunchSpec().SessionArguments[^1]);
+        Assert.Equal("medium", (o with { DefaultThinkingLevel = "turbo" }).ToLaunchSpec().SessionArguments[^1]);
+        Assert.Equal(["--approval-mode", "write", "--thinking", "low"],
+            (o with { ExtraArgs = ["--thinking", "low"] }).ToLaunchSpec().SessionArguments);
     }
 
     [Fact]
@@ -183,5 +193,190 @@ public sealed class ModelSettingsTests
         File.WriteAllText(path, "{ not json");
         Assert.Throws<InvalidDataException>(() => store.Update(o => o with { Theme = "light" }));
         Assert.Equal("{ not json", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void Settings_store_uses_defaults_for_invalid_fields_and_preserves_them_until_edited()
+    {
+        var path = Path.Combine(TestProcesses.TempDir("settings-invalid-field"), "ombra.local.json");
+        const string json = """{"command":"omp","profile":"harness","theme":42,"futureOption":true}""";
+        File.WriteAllText(path, json);
+        var store = new ClientSettingsStore(path);
+
+        var options = store.Load();
+        Assert.Equal("omp", options.Command);
+        Assert.Equal("harness", options.Profile);
+        Assert.Null(options.Theme);
+        Assert.Equal(["theme"], store.InvalidFields);
+
+        store.Update(o => o with { LastWorkingDirectory = "/project" });
+        Assert.Contains("\"theme\": 42", File.ReadAllText(path));
+        Assert.Contains("\"futureOption\": true", File.ReadAllText(path));
+        Assert.Equal("/project", store.Load().LastWorkingDirectory);
+        Assert.Equal(json, File.ReadAllText(store.BackupPath));
+        store.Update(o => o with { Theme = "light" });
+        Assert.Empty(store.InvalidFields);
+        Assert.Equal("light", store.Load().Theme);
+    }
+
+    [Fact]
+    public void Thinking_level_round_trips_without_serializing_computed_settings()
+    {
+        var path = Path.Combine(TestProcesses.TempDir("settings-thinking"), "ombra.local.json");
+        var store = new ClientSettingsStore(path);
+        store.Update(o => o with { DefaultThinkingLevel = "high" });
+        Assert.Equal("high", store.Load().EffectiveThinkingLevel);
+        Assert.Equal("high", new ClientSettingsStore(path).Load().EffectiveThinkingLevel);
+        Assert.Equal("high", OmpRuntimeOptions.Load(path).ToLaunchSpec().SessionArguments[^1]);
+        Assert.DoesNotContain("effectiveThinkingLevel", File.ReadAllText(path));
+        Assert.DoesNotContain("approvalModeWarning", File.ReadAllText(path));
+
+        // Older versions emitted computed properties. They are harmless unknown raw data now.
+        File.WriteAllText(path, """{"defaultThinkingLevel":"low","effectiveThinkingLevel":"high","approvalModeWarning":{"private":"keep"}}""");
+        Assert.Equal("low", store.Load().EffectiveThinkingLevel);
+        Assert.Empty(store.InvalidFields);
+        store.Update(o => o with { Theme = "dark" });
+        Assert.Contains("\"effectiveThinkingLevel\": \"high\"", File.ReadAllText(path));
+        Assert.Equal("low", store.Load().EffectiveThinkingLevel);
+    }
+
+    [Fact]
+    public void Null_required_collections_use_defaults_and_launch_without_losing_raw_values()
+    {
+        var path = Path.Combine(TestProcesses.TempDir("settings-null"), "ombra.local.json");
+        const string json = """{"command":"omp","prefixArgs":null,"managementPrefixArgs":null,"extraArgs":null,"environment":null,"notifications":"private-invalid-value","theme":"dark"}""";
+        File.WriteAllText(path, json);
+        var store = new ClientSettingsStore(path);
+        var options = store.Load();
+        Assert.Equal(["environment", "extraArgs", "managementPrefixArgs", "notifications", "prefixArgs"], store.InvalidFields);
+        Assert.Empty(options.PrefixArgs);
+        Assert.Empty(options.ManagementPrefixArgs);
+        Assert.Empty(options.ExtraArgs);
+        Assert.Empty(options.Environment);
+        Assert.Null(options.Notifications);
+        Assert.Equal("dark", options.Theme);
+        Assert.Equal("omp", options.ToLaunchSpec().FileName);
+        Assert.Equal("omp", options.ToTuiLaunchSpec(null).FileName);
+        Assert.Equal("omp", options.ToCliLaunchSpec(["plugin", "list"]).FileName);
+        Assert.Empty(OmpRuntimeOptions.Load(path).Environment);
+
+        store.Update(o => o with { DefaultThinkingLevel = "high" });
+        Assert.Equal(json, File.ReadAllText(store.BackupPath));
+        Assert.Contains("\"environment\": null", File.ReadAllText(path));
+        Assert.Contains("private-invalid-value", File.ReadAllText(path));
+        Assert.DoesNotContain("private-invalid-value", string.Join(", ", store.InvalidFields));
+    }
+
+    [Fact]
+    public void Read_only_directory_keeps_changes_in_memory_then_merges_external_edits_on_recovery()
+    {
+        if (OperatingSystem.IsWindows()) { Assert.Skip("Unix directory permissions; Windows persistence failures are covered by the backup failure regression."); return; }
+        var dir = TestProcesses.TempDir("settings-read-only");
+        var path = Path.Combine(dir, "ombra.local.json");
+        const string original = """{"command":"omp","theme":"dark","futureOption":{"keep":true}}""";
+        File.WriteAllText(path, original);
+        var mode = File.GetUnixFileMode(dir);
+        var store = new ClientSettingsStore(path);
+        var notifications = 0;
+        store.WarningsChanged += () => notifications++;
+        try
+        {
+            File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            Assert.Equal("dark", store.Load().Theme);
+            if (!store.IsPersistenceUnavailable) { Assert.Skip("The test account bypasses directory write permissions."); return; }
+            Assert.Equal(1, notifications);
+            Assert.Equal("high", store.Update(o => o with { DefaultThinkingLevel = "high" }).EffectiveThinkingLevel);
+            store.Update(o => o with { Theme = "light" });
+            Assert.Equal(("high", "light"), (store.Load().EffectiveThinkingLevel, store.Load().Theme));
+            Assert.Equal(original, File.ReadAllText(path));
+            Assert.Equal("dark", new ClientSettingsStore(path).Load().Theme);
+            Assert.False(File.Exists(store.BackupPath));
+        }
+        finally { File.SetUnixFileMode(dir, mode); }
+
+        // An external valid edit after permissions recover must not be replaced by a stale snapshot.
+        const string external = """{"command":"custom-omp","theme":"dark","model":"external/model","futureOption":{"keep":false}}""";
+        File.WriteAllText(path, external);
+        var loaded = store.Load();
+        Assert.Equal(("custom-omp", "external/model", "light", "high"), (loaded.Command, loaded.Model, loaded.Theme, loaded.EffectiveThinkingLevel));
+        Assert.True(store.IsPersistenceUnavailable); // Nothing has saved the pending changes yet.
+        store.Update(o => o);
+        Assert.False(store.IsPersistenceUnavailable);
+        Assert.Equal(2, notifications);
+        Assert.Equal(external, File.ReadAllText(store.BackupPath));
+        var restarted = new ClientSettingsStore(path).Load();
+        Assert.Equal(("custom-omp", "external/model", "light", "high"), (restarted.Command, restarted.Model, restarted.Theme, restarted.EffectiveThinkingLevel));
+        Assert.Contains("\"keep\": false", File.ReadAllText(path));
+        Assert.Empty(Directory.GetFiles(dir, "*.tmp"));
+        Assert.Empty(Directory.GetFiles(dir, "*.probe-*"));
+    }
+
+    [Fact]
+    public void Explicit_missing_runtime_settings_remain_an_error()
+    {
+        var path = Path.Combine(TestProcesses.TempDir("settings-missing-explicit"), "missing.json");
+        Assert.Throws<FileNotFoundException>(() => OmpRuntimeOptions.Load(path));
+    }
+
+    [Fact]
+    public void Failed_backup_retains_pending_edits_and_still_refuses_malformed_external_json()
+    {
+        var path = Path.Combine(TestProcesses.TempDir("settings-backup-failure"), "ombra.local.json");
+        const string original = """{"command":"omp","theme":"dark"}""";
+        File.WriteAllText(path, original);
+        var store = new ClientSettingsStore(path);
+        Directory.CreateDirectory(store.BackupPath);
+        Assert.Null(store.Update(o => o with { Command = null, DefaultThinkingLevel = "high" }).Command);
+        Assert.True(store.IsPersistenceUnavailable);
+        Assert.Null(store.Load().Command);
+        Assert.Equal("high", store.Load().EffectiveThinkingLevel);
+        Assert.Equal(original, File.ReadAllText(path));
+
+        File.WriteAllText(path, "{ private-broken-value");
+        Assert.Throws<InvalidDataException>(() => store.Load());
+        var error = Assert.Throws<InvalidDataException>(() => store.Update(o => o with { Theme = "light" }));
+        Assert.DoesNotContain("private-broken-value", error.Message);
+        Assert.Equal("{ private-broken-value", File.ReadAllText(path));
+        Directory.Delete(store.BackupPath);
+        const string repaired = """{"command":"external","theme":"light","futureOption":42}""";
+        File.WriteAllText(path, repaired);
+        Assert.Null(store.Load().Command);
+        Assert.Equal("light", store.Load().Theme);
+        store.Update(o => o);
+        Assert.False(store.IsPersistenceUnavailable);
+        Assert.Equal(repaired, File.ReadAllText(store.BackupPath));
+        Assert.Null(new ClientSettingsStore(path).Load().Command);
+        Assert.Equal("high", new ClientSettingsStore(path).Load().EffectiveThinkingLevel);
+        Assert.Contains("\"futureOption\": 42", File.ReadAllText(path));
+    }
+
+    [AvaloniaFact]
+    public async Task Settings_warning_stays_visible_when_other_feedback_changes_and_clears_after_recovery()
+    {
+        var path = Path.Combine(TestProcesses.TempDir("settings-warning"), "ombra.local.json");
+        File.WriteAllText(path, """{"theme":{"secret":"private-invalid-value"},"command":"omp"}""");
+        var store = new ClientSettingsStore(path);
+        store.Load();
+        await using var vm = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs(), settings: store);
+        var fieldWarning = Loc.F("Some settings could not be read; defaults are in use: {0}", "theme");
+        Assert.Equal(fieldWarning, vm.SettingsWarning); // No duplicated wrapping or exception text.
+        Assert.DoesNotContain("private-invalid-value", vm.SettingsWarning);
+
+        Directory.CreateDirectory(store.BackupPath);
+        store.Update(o => o with { DefaultThinkingLevel = "high" });
+        Dispatcher.UIThread.RunJobs();
+        Assert.Contains(fieldWarning, vm.SettingsWarning);
+        Assert.Contains(Loc.T("Settings cannot be saved. Changes are kept for this run only and will be lost when the app closes. Check write permissions for the settings folder, then change a setting to retry."), vm.SettingsWarning);
+        var warning = vm.SettingsWarning;
+        vm.SettingsMessage = "Another operation completed.";
+        Assert.Equal(warning, vm.SettingsWarning);
+
+        Directory.Delete(store.BackupPath);
+        File.WriteAllText(path, """{"command":"external-omp","theme":"light"}""");
+        Assert.Equal("external-omp", store.Load().Command);
+        store.Update(o => o);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Empty(vm.SettingsWarning);
+        Assert.Equal("high", new ClientSettingsStore(path).Load().EffectiveThinkingLevel);
     }
 }

@@ -46,6 +46,7 @@ public sealed class AgentBrowserDefaults
 
     private readonly AgentBrowserBridge _bridge;
     private readonly TernHost? _tern;
+    private readonly string? _enginePaneId;
     private readonly Func<string, string?> _inherited;
     private readonly Lock _gate = new();
 
@@ -57,6 +58,7 @@ public sealed class AgentBrowserDefaults
     {
         _bridge = bridge;
         _tern = tern;
+        _enginePaneId = tern?.CreatePaneId();
         _inherited = inherited ?? System.Environment.GetEnvironmentVariable;
         Directory = directory;
         OverlayPath = Path.Combine(directory, OverlayFileName);
@@ -85,13 +87,13 @@ public sealed class AgentBrowserDefaults
     public string OverlayPath { get; }
     public string ExtensionPath { get; }
 
-    /// <summary>A chat's omp (RPC).</summary>
+    /// <summary>A logical chat in the app's shared engine.</summary>
     public OmpLaunchSpec ForSession(OmpRuntimeOptions options, LaunchRequest request) =>
-        Apply(options.ToLaunchSpec(request), options.AgentUsesGuiBrowser != false);
+        Apply(options.ToLaunchSpec(request), options.AgentUsesGuiBrowser != false, logicalSession: true);
 
     /// <summary>omp's own terminal UI in the terminal pane.</summary>
     public OmpLaunchSpec ForTui(OmpRuntimeOptions options, string? workingDirectory) =>
-        Apply(options.ToTuiLaunchSpec(workingDirectory), options.AgentUsesGuiBrowser != false);
+        Apply(options.ToTuiLaunchSpec(workingDirectory), options.AgentUsesGuiBrowser != false, logicalSession: false);
 
     /// <summary>
     /// <paramref name="spec"/> sent to the built-in browser; unchanged when <paramref name="enabled"/> is false or the
@@ -101,14 +103,14 @@ public sealed class AgentBrowserDefaults
     /// the app cannot write its files, omp still gets the sockets and the flags (without the overlay and the note), and
     /// a line goes to stderr.
     /// </summary>
-    public OmpLaunchSpec Apply(OmpLaunchSpec spec, bool enabled)
+    private OmpLaunchSpec Apply(OmpLaunchSpec spec, bool enabled, bool logicalSession)
     {
         if (!enabled) return spec;
         var withSocket = _bridge.AddTo(spec);
         if (ReferenceEquals(withSocket, spec)) return spec;
         if (_tern is not null)
         {
-            var withTern = _tern.AddTo(withSocket);
+            var withTern = _tern.AddTo(withSocket, logicalSession ? _enginePaneId : null);
             if (ReferenceEquals(withTern, withSocket)) return spec;
             withSocket = withTern;
         }
@@ -123,8 +125,9 @@ public sealed class AgentBrowserDefaults
         if (!files.Contains(OverlayPath)) files.Add(OverlayPath);
         env[ConfigFilesVariable] = string.Join(Path.PathSeparator, files);
 
-        var args = new List<string>(withSocket.Arguments) { ExtensionFlag, ExtensionPath };
-        return withSocket with { Arguments = args, Environment = env };
+        return logicalSession
+            ? withSocket with { SessionArguments = [.. withSocket.SessionArguments, ExtensionFlag, ExtensionPath], Environment = env }
+            : withSocket with { Arguments = [.. withSocket.Arguments, ExtensionFlag, ExtensionPath], Environment = env };
     }
 
     /// <summary>The overlay: only the browser keys, so every other omp setting stays the user's.</summary>
@@ -149,7 +152,9 @@ public sealed class AgentBrowserDefaults
         return Backend switch
         {
             AgentBrowserBackend.Cmux => note + "\nThis browser is a cmux surface: read pages with `tab.ariaSnapshot()` rather than `tab.observe()`; "
-                + "dialogs, frames, downloads and device emulation are not available.",
+                + "dialogs, frames and downloads are not available. `tab.emulate({ device })` (names from `tab.devices()`) or "
+                + "`tab.emulate({ viewport: { width, height, scale } })` sets the pane's device mode, which the user sees: the page's size, "
+                + "the platform's user agent and, in the Nightly runtime, the pixel ratio and touch.",
             _ => note + "\nEach tab you open is a tab of that pane, driven with trusted native input. The user can close a tab: "
                 + "when a request says so, open a new one if you still need the page. Sign-in forms and password prompts are the user's to fill in.",
         };
@@ -194,8 +199,6 @@ public sealed class AgentBrowserDefaults
     private static void WriteIfChanged(string path, string content)
     {
         if (File.Exists(path) && File.ReadAllText(path, Utf8) == content) return;
-        var temp = path + ".tmp";
-        File.WriteAllText(temp, content, Utf8);
-        File.Move(temp, path, overwrite: true);
+        AtomicFile.WriteAllText(path, content, Utf8);
     }
 }

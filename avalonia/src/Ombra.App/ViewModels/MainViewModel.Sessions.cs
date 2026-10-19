@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Ombra.App.Localization;
 using Ombra.ClientCore;
+using Ombra.Rpc;
 
 namespace Ombra.App.ViewModels;
 
@@ -13,6 +14,20 @@ public sealed partial class MainViewModel
     private IReadOnlyList<SessionSummary> _catalog = [];
     // Requests counted, scans run one at a time; a request that arrives during a scan causes one more scan.
     private int _catalogRequests;
+    private sealed record CatalogRequest(string Root, string File);
+    private CatalogRequest? _catalogRequest;
+    private string? _catalogRoot;
+    private bool _catalogLoaded;
+    internal Func<string, CancellationToken, Task<SessionCatalogScanResult>> ScanCatalogAsync { get; set; }
+    internal Task CatalogRefreshTask { get; private set; } = Task.CompletedTask;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasCatalogNotice))]
+    private string? _catalogNotice;
+    public bool HasCatalogNotice => CatalogNotice is not null;
+
+    [RelayCommand]
+    private void RetryCatalog() => RequestCatalogRefresh();
 
     /// <summary>Saved sessions, newest first, filtered by <see cref="SessionFilter"/>.</summary>
     public ObservableCollection<SessionItemViewModel> Sessions { get; } = [];
@@ -36,8 +51,8 @@ public sealed partial class MainViewModel
     private bool _sidebarShownWhileNarrow;
 
     /// <summary>Wide: the user's choice. Narrow: hidden unless the user opened it. Never beside the settings page,
-    /// which has its own navigation in its place.</summary>
-    public bool ShowSidebar => !IsSettingsOpen && (IsNarrow ? SidebarShownWhileNarrow : IsSidebarVisible);
+    /// which has its own navigation in its place, nor beside the Browser page: the browser's own sidebar is there.</summary>
+    public bool ShowSidebar => !IsSettingsOpen && !IsBrowserPageOpen && (IsNarrow ? SidebarShownWhileNarrow : IsSidebarVisible);
 
     // Shortcuts as the platform writes them (⌘ on macOS, Ctrl elsewhere), for tooltips and the sidebar's hints.
     public static string HideSidebarTip { get; } = Loc.F("Hide sidebar ({0})", CommandKey("B"));
@@ -48,8 +63,8 @@ public sealed partial class MainViewModel
 
     private static string CommandKey(string key) => OperatingSystem.IsMacOS() ? "⌘" + key : "Ctrl+" + key;
 
-    /// <summary>A search that matches no session: the list says so instead of standing empty.</summary>
-    public bool ShowNoSessionMatch => SessionFilter.Trim().Length > 0 && SessionGroups.Count == 0;
+    /// <summary>A search that matches no session: the list says so instead of standing empty (once the messages are searched too).</summary>
+    public bool ShowNoSessionMatch => (SessionFilter.Trim().Length > 0 || StatusFilter != SessionStatusFilter.All) && SessionGroups.Count == 0 && !IsSearchingContent && !IsLoadingSessions;
 
     public const double SidebarMinWidth = 220, SidebarMaxWidth = 480, SidebarDefaultWidth = 260;
     private double? _sidebarWidth;
@@ -86,9 +101,9 @@ public sealed partial class MainViewModel
     }
 
     partial void OnIsNarrowChanged(bool value) => SidebarShownWhileNarrow = false;
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ShowSessionSearch))] private string _sessionFilter = "";
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ShowSessionSearch), nameof(ShowStatusFilters))] private string _sessionFilter = "";
     /// <summary>The sidebar header's search icon opened the search field (it also shows while a search is typed).</summary>
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ShowSessionSearch))] private bool _isSessionSearchOpen;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ShowSessionSearch), nameof(ShowStatusFilters))] private bool _isSessionSearchOpen;
     public bool ShowSessionSearch => IsSessionSearchOpen || SessionFilter.Length > 0;
     [ObservableProperty] private string _sessionTitle = UntitledSession;
     [ObservableProperty] private string _projectName = "";
@@ -101,7 +116,14 @@ public sealed partial class MainViewModel
     /// <summary>Raised when the user asked to open a folder; the view shows the platform folder picker.</summary>
     public event Func<Task<string?>>? PickFolderRequested;
 
-    partial void OnSessionFilterChanged(string value) => ApplySessionFilter();
+    /// <summary>The folder the user picks in the platform folder picker; null when cancelled or there is no view.</summary>
+    internal Task<string?> PickFolderAsync() => PickFolderRequested is { } pick ? pick() : Task.FromResult<string?>(null);
+
+    partial void OnSessionFilterChanged(string value)
+    {
+        RequestContentSearch(debounce: true); // MainViewModel.SessionSearch.cs
+        ApplySessionFilter();
+    }
 
     /// <summary>The sidebar header's search icon: opens the search field, or closes it and clears the search.</summary>
     [RelayCommand]
@@ -127,7 +149,16 @@ public sealed partial class MainViewModel
     {
         SidebarShownWhileNarrow = false; // the drawer closes on a choice
         if (item is null) return;
+        // Found in its messages: opened at the match (MainViewModel.SessionSearch.cs)
+        var query = item.ContentMatch is null ? "" : SessionFilter.Trim();
         await OpenSavedSessionAsync(item.Model.Path, item.Model.Cwd); // MainViewModel.OpenSessions.cs
+        if (SessionCatalog.PathComparer.Equals(ShownFile, item.Model.Path))
+        {
+            _open.Unread = false;
+            ClearMarkedUnread(item.Model.Path);
+            UpdateSessionStatuses();
+        }
+        RevealContentMatch(item, query);
     }
 
     [RelayCommand]
@@ -152,7 +183,7 @@ public sealed partial class MainViewModel
     }
 
     /// <summary>omp renames the session it has open while it is idle.</summary>
-    private bool CanRename() => Phase == SessionPhase.Ready && !IsSigningIn;
+    private bool CanRename() => !IsReadOnly && Phase == SessionPhase.Ready && !IsSigningIn && !IsSavingRename;
 
     [RelayCommand(CanExecute = nameof(CanRename))]
     private void StartRename()
@@ -165,20 +196,25 @@ public sealed partial class MainViewModel
     [RelayCommand]
     private async Task CommitRenameAsync()
     {
+        if (IsReadOnly) return;
         var open = _open;
         try
         {
             IsRenaming = false;
             var name = RenameText.Trim();
             if (name.Length == 0 || name == open.Last?.SessionName) return;
+            IsSavingRename = true;
             await open.Controller.RenameSessionAsync(name, _cts.Token);
             ApplyIfShown(open);
             RequestCatalogRefresh();
+            if (open == _open && open.Controller.Snapshot().SessionName == name)
+                ShowBrief("IconPencil", Loc.T("Session renamed"), name);
         }
         catch (OperationCanceledException) when (_cts.IsCancellationRequested)
         {
             // The window is closing: the request was abandoned on purpose.
         }
+        finally { IsSavingRename = false; }
     }
 
     [RelayCommand]
@@ -190,20 +226,21 @@ public sealed partial class MainViewModel
         RequestCatalogRefresh();
     }
 
+    private static string? KnownSessionTitle(SessionSnapshot s) =>
+        s.SessionName is { Length: > 0 } name ? name
+        : s.SessionTitleHint is { Length: > 0 } hint ? hint
+        : !s.History.HasOlder && s.Items.OfType<UserItem>().FirstOrDefault()?.Text is { Length: > 0 } first
+            ? SessionCatalogTitle(first) : null;
+
     /// <summary>Header text and the current-session mark; called from Apply.</summary>
     private void ApplySessionInfo(SessionSnapshot s)
     {
-        var firstUser = s.Items.OfType<UserItem>().FirstOrDefault()?.Text;
         // A chat outside any project is one from its start (before omp reports its folder)
         IsProjectless = Chats.Contains(s.Cwd ?? Session.CurrentLaunch.WorkingDirectory);
-        SessionTitle = s.SessionName is { Length: > 0 } n ? n
-            : firstUser is { Length: > 0 } u ? SessionCatalogTitle(u)
-            : IsProjectless ? UntitledChat : UntitledSession;
+        SessionTitle = KnownSessionTitle(s) ?? (IsProjectless ? UntitledChat : UntitledSession);
         ProjectName = IsProjectless ? "" : ProjectDisplayName(s.Cwd) ?? SessionItemViewModel.ProjectName(s.Cwd);
         var projectChanged = ProjectPath != (s.Cwd ?? "");
         ProjectPath = s.Cwd ?? "";
-        // The window has started once its first omp is ready: the spare for the next new chat follows (MainViewModel.Chats.cs)
-        if (!_spareScheduled && s.Phase == SessionPhase.Ready) ScheduleSpare();
         if (projectChanged) RebuildSessionGroups(); // the open project's group goes first
         var current = ShownFile;
         foreach (var item in Sessions)
@@ -244,54 +281,119 @@ public sealed partial class MainViewModel
     /// </summary>
     private void UpdateSessionStatuses()
     {
-        Dictionary<string, OpenSession>? others = null;
-        foreach (var o in _opens.Values)
-            if (o != _open && (o.Controller.SessionFile ?? o.Controller.CurrentLaunch.ResumeSessionFile) is { } file)
-                (others ??= new(SessionCatalog.PathComparer))[file] = o;
+        // A chip narrows the list by status: a status that changed may add or take out a row
+        if (StatusFilter != SessionStatusFilter.All)
+        {
+            ApplySessionFilter();
+            return;
+        }
+        SetSessionStatuses();
+    }
+
+    private void SetSessionStatuses()
+    {
+        var opens = OpenChatsByFile();
         foreach (var item in Sessions)
         {
-            var open = item.IsCurrent ? _open : others?.GetValueOrDefault(item.Model.Path);
-            item.Status = open is null ? SessionStatus.None : StatusOf(open); // MainViewModel.OpenSessions.cs
+            item.Status = StatusOfFile(opens, item.Model.Path);
+            item.IsMarkedUnread = MarkedUnread().Contains(item.Model.Path) || opens?.GetValueOrDefault(item.Model.Path)?.Unread == true;
         }
+    }
+
+    /// <summary>Each open chat by its session file (a live chat over a read-only view of the same file).</summary>
+    private Dictionary<string, OpenSession>? OpenChatsByFile()
+    {
+        Dictionary<string, OpenSession>? opens = null;
+        foreach (var o in _opens.Values)
+            if ((o.Controller.SessionFile ?? o.Controller.CurrentLaunch.ResumeSessionFile) is { } file)
+            {
+                opens ??= new(SessionCatalog.PathComparer);
+                // A read-only view of the same source must not hide a live chat's running/waiting dot.
+                if (!o.Controller.CurrentLaunch.ReadOnly || !opens.ContainsKey(file)) opens[file] = o;
+            }
+        return opens;
+    }
+
+    private SessionStatus StatusOfFile(Dictionary<string, OpenSession>? opens, string file)
+    {
+        var status = opens?.GetValueOrDefault(file) is { } open ? StatusOf(open) : SessionStatus.None;
+        return status == SessionStatus.None && MarkedUnread().Contains(file) ? SessionStatus.Unread : status;
     }
 
     private static string SessionCatalogTitle(string text)
     {
         var line = string.Join(' ', text.Split(['\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries)).Trim();
-        return line.Length <= 80 ? line : line[..80] + "…";
+        return line.Length <= 80 ? line : line[..GraphemeText.PrefixLength(line, 80)] + "…";
     }
 
     /// <summary>Rescans omp's session folder off the UI thread; overlapping requests collapse into one more scan.</summary>
     internal void RequestCatalogRefresh()
     {
+        if (IsClosing) return;
+        var ct = _cts.Token;
         // omp keeps every project's sessions under one folder: any open chat's file says where (the shown one may not
         // have reported its own yet)
         var file = _open.Last?.SessionFile ?? _opens.Values.Select(o => o.Controller.SessionFile).FirstOrDefault(f => f is not null);
         if (file is null || SessionCatalog.SessionsRootOf(file) is not { } root) return;
+        if (_catalogRoot is null || !SessionCatalog.SamePath(_catalogRoot, root))
+        {
+            // A different profile/account must never inherit rows or pins from the old root, even on failure.
+            _catalog = [];
+            _catalogLoaded = false;
+            _catalogRoot = root;
+            _pinnedIds = [];
+            CatalogNotice = null;
+            ApplySessionFilter();
+        }
+        Volatile.Write(ref _catalogRequest, new CatalogRequest(root, file));
+        IsLoadingSessions = !_catalogLoaded;
         // Only the request that finds the counter at zero starts the worker; the worker scans until it has
         // covered every request made before its last scan began.
         if (Interlocked.Increment(ref _catalogRequests) != 1) return;
-        _ = Task.Run(async () =>
+        CatalogRefreshTask = Task.Run(async () =>
         {
             try
             {
+                CatalogRequest? previousRequest = null;
+                var retries = 0;
                 while (true)
                 {
                     var seen = Volatile.Read(ref _catalogRequests);
-                    var list = await SessionCatalog.ScanAsync(root, ct: _cts.Token).ConfigureAwait(false);
+                    var request = Volatile.Read(ref _catalogRequest)!;
+                    if (!ReferenceEquals(previousRequest, request)) retries = 0;
+                    previousRequest = request;
+                    var result = await ScanCatalogAsync(request.Root, ct).ConfigureAwait(false);
+                    ct.ThrowIfCancellationRequested();
                     var pinsVersion = Volatile.Read(ref _pinsVersion);
-                    var pins = ReadPinnedSessionIds(file); // omp's pinned sessions come first (MainViewModel.Session.cs)
-                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    var pins = ReadPinnedSessionIds(request.File); // omp's pinned sessions come first (MainViewModel.Session.cs)
+                    await UiDispatcher.InvokeAsync(() =>
                     {
-                        _catalog = list;
+                        if (IsClosing || ct.IsCancellationRequested || !ReferenceEquals(request, Volatile.Read(ref _catalogRequest))) return;
+                        _catalogLoaded = true;
+                        IsLoadingSessions = false;
+                        _catalog = result.Merge(_catalogRoot, _catalog);
+                        _catalogRoot = result.Root;
+                        CanShowOlder = result.IsCapped;
+                        CatalogNotice = result.IsAuthoritative || result.Errors.Count == 0 ? null
+                            : Loc.F("Sessions may be out of date. Keeping previously listed sessions. {0}", result.Errors[0].Message);
                         // Not over a pin made from the sidebar after this read (the next scan reads it)
                         if (pinsVersion == _pinsVersion) _pinnedIds = pins;
                         ApplySessionFilter();
-                    }, DispatcherPriority.Background);
+                        // The messages of sessions read again are searched again (unchanged journals are not re-read)
+                        if (SessionFilter.Trim().Length > 0) RequestContentSearch(debounce: false);
+                    }, DispatcherPriority.Background, ct);
+                    // Retry inside this same coalescing worker, with the window's lifetime token.
+                    // A cap is not transient; only failures receive the three bounded retries.
+                    if (result.Errors.Count > 0 && retries < 3 && ReferenceEquals(request, Volatile.Read(ref _catalogRequest)))
+                    {
+                        await Task.Delay(TimeSpan.FromMilliseconds(250 * (1 << (2 * retries++))), ct).ConfigureAwait(false);
+                        continue;
+                    }
                     if (Interlocked.CompareExchange(ref _catalogRequests, 0, seen) == seen) return;
                 }
             }
             catch (OperationCanceledException) { Interlocked.Exchange(ref _catalogRequests, 0); }
+            finally { await UiDispatcher.InvokeAsync(() => IsLoadingSessions = false); }
         });
     }
 
@@ -299,16 +401,14 @@ public sealed partial class MainViewModel
     {
         var f = SessionFilter.Trim();
         var current = ShownFile;
-        // Empty sessions (omp creates one per start) are noise, except an open chat's: a new chat with only a draft in it,
-        // left for another, has to stay in reach (it would have kept its omp with no way back to it)
-        var open = OpenFiles();
-        var listed = new HashSet<string>(_catalog.Count, SessionCatalog.PathComparer);
-        foreach (var c in _catalog) listed.Add(c.Path);
-        // The catalog is newest first (SessionCatalog.ScanAsync); unsaved chats are ordered in by the same key
-        var visible = _catalog.Concat(UnsavedChats(listed)).Where(c => !c.IsEmpty || open.Contains(c.Path)).Where(c => f.Length == 0
-            || c.Title.Contains(f, StringComparison.CurrentCultureIgnoreCase)
-            || c.Cwd.Contains(f, StringComparison.CurrentCultureIgnoreCase))
-            .OrderByDescending(c => _pinnedIds.Contains(c.Id)).ThenByDescending(c => c.LastMessageAt).ToList();
+        var candidates = ListableSessions();
+        var visible = FilterSessions(candidates, f); // MainViewModel.SessionSearch.cs
+        if (StatusFilter != SessionStatusFilter.All)
+        {
+            var opens = OpenChatsByFile();
+            visible = [.. visible.Where(v => Passes(StatusFilter, StatusOfFile(opens, v.Summary.Path)))];
+        }
+        var archived = Archived();
         EnsureAgeTimer();
         // Keyed by the session's file (unique, unlike an id a copied file shares): a listed session keeps its row and
         // only its fields change, so a rescan during a run (new LastMessageAt, size, title) does not recreate the rows
@@ -316,24 +416,42 @@ public sealed partial class MainViewModel
         var rows = new Dictionary<string, SessionItemViewModel>(Sessions.Count, StringComparer.Ordinal);
         foreach (var item in Sessions) rows[item.Model.Path] = item;
         var target = new List<SessionItemViewModel>(visible.Count);
-        foreach (var c in visible)
+        foreach (var (c, match) in visible)
         {
             if (rows.Remove(c.Path, out var item)) item.Model = c;
             else item = new SessionItemViewModel(c)
             {
                 OpenCommand = OpenSessionCommand, DeleteCommand = DeleteSessionItemCommand, RenameCommand = RenameSessionItemCommand,
                 TogglePinCommand = TogglePinItemCommand, CopyPathCommand = CopySessionPathCommand, CopyIdCommand = CopySessionItemIdCommand,
-                ExportCommand = ExportHtmlCommand, ShareCommand = ShareSessionCommand,
+                ExportCommand = ExportHtmlCommand, ShareCommand = ShareSessionCommand, ToggleArchiveCommand = ToggleArchiveCommand,
+                ToggleReadCommand = ToggleReadItemCommand, MarkAllReadCommand = MarkAllReadCommand,
+                RevealCommand = RevealSessionItemCommand, OpenTerminalCommand = TerminalSessionItemCommand,
             };
             item.IsCurrent = c.Path == current;
+            item.ContentMatch = match;
             item.IsPinned = _pinnedIds.Contains(c.Id);
+            item.IsArchived = archived.Contains(c.Path);
             item.LiveTitle = LiveTitleFor(item);
             item.RefreshWhen();
             target.Add(item);
         }
         Reconcile(Sessions, target);
-        UpdateSessionStatuses();
+        SetSessionStatuses();
         RebuildSessionGroups();
+    }
+
+    /// <summary>
+    /// What the sidebar lists before its search narrows it: the catalog, newest first (SessionCatalog.ScanAsync), and
+    /// the open chats omp has no file for yet, ordered in by the same key. Empty sessions (omp creates one per start) are
+    /// noise, except an open chat's: a new chat with only a draft in it, left for another, has to stay in reach (it would
+    /// have kept its omp with no way back to it).
+    /// </summary>
+    private IEnumerable<SessionSummary> ListableSessions()
+    {
+        var open = OpenFiles();
+        var listed = new HashSet<string>(_catalog.Count, SessionCatalog.PathComparer);
+        foreach (var c in _catalog) listed.Add(c.Path);
+        return _catalog.Concat(UnsavedChats(listed)).Where(c => !c.IsEmpty || open.Contains(c.Path));
     }
 
     /// <summary>
@@ -351,11 +469,11 @@ public sealed partial class MainViewModel
             if (o.OpeningFile is not null || c.SessionFile is not { } file || listed.Contains(file)) continue;
             var s = c.Snapshot();
             if ((s.Cwd ?? c.CurrentLaunch.WorkingDirectory) is not { Length: > 0 } cwd) continue;
-            var firstUser = s.Items.OfType<UserItem>().FirstOrDefault()?.Text;
-            var named = s.SessionName is { Length: > 0 };
-            var title = named ? s.SessionName! : firstUser is { Length: > 0 } u ? SessionCatalogTitle(u) : Chats.Contains(cwd) ? UntitledChat : UntitledSession;
-            yield return new SessionSummary(file, s.SessionId ?? Path.GetFileNameWithoutExtension(file), cwd, title, o.OpenedAt,
-                IsEmpty: !named && firstUser is null);
+            listed.Add(file);
+            var title = KnownSessionTitle(s);
+            yield return new SessionSummary(file, s.SessionId ?? Path.GetFileNameWithoutExtension(file), cwd,
+                title ?? (Chats.Contains(cwd) ? UntitledChat : UntitledSession), o.OpenedAt,
+                IsEmpty: title is null && s.History.TotalMessages == 0 && !s.Items.OfType<UserItem>().Any());
         }
     }
 
@@ -433,15 +551,22 @@ public sealed partial class MainViewModel
         }
         var groups = new List<(SessionGroupViewModel Group, List<SessionItemViewModel> Items, DateTimeOffset Newest)>();
         var chats = new List<SessionItemViewModel>();
+        var archived = new List<SessionItemViewModel>();
         foreach (var item in Sessions)
         {
-            if (Chats.Contains(item.Cwd))
+            var isChat = Chats.Contains(item.Cwd);
+            // A removed project stays out of the list, the open chat's too (it had stayed until the app restarted)
+            if (!isChat && hidden.Contains(item.Cwd)) continue;
+            if (item.IsArchived)
+            {
+                archived.Add(item);
+                continue;
+            }
+            if (isChat)
             {
                 chats.Add(item);
                 continue;
             }
-            // A removed project stays out of the list, the open chat's too (it had stayed until the app restarted)
-            if (hidden.Contains(item.Cwd)) continue;
             var i = groups.FindIndex(x => SessionCatalog.PathComparer.Equals(x.Group.Cwd, item.Cwd));
             if (i < 0) groups.Add((GroupFor(item.Cwd), [], item.Model.LastMessageAt));
             else if (item.Model.LastMessageAt > groups[i].Newest) groups[i] = groups[i] with { Newest = item.Model.LastMessageAt };
@@ -449,7 +574,8 @@ public sealed partial class MainViewModel
         }
         foreach (var g in groups) Reconcile(g.Group.Items, g.Items);
         var ordered = groups.OrderByDescending(g => g.Newest).Select(g => g.Group).ToList();
-        if (SessionFilter.Trim().Length == 0)
+        var unfiltered = SessionFilter.Trim().Length == 0 && StatusFilter == SessionStatusFilter.All;
+        if (unfiltered)
         {
             // Folders added from the sidebar that have no session yet go first, as just added; pinned ones are listed
             // even without a session
@@ -465,11 +591,12 @@ public sealed partial class MainViewModel
         _chatsGroup ??= new SessionGroupViewModel(Chats.Root, false, isChatsGroup: true) { NewSessionCommand = NewChatCommand };
         _chatsGroup.IsCurrentProject = IsProjectless;
         Reconcile(_chatsGroup.Items, chats);
-        if (chats.Count > 0 || (IsProjectless && SessionFilter.Trim().Length == 0)) ordered.Insert(0, _chatsGroup);
+        if (chats.Count > 0 || (IsProjectless && unfiltered)) ordered.Insert(0, _chatsGroup);
         // Pinned projects above everything, in the order they were pinned
         var pinnedGroups = ordered.Where(g => g.IsProject && g.IsPinned).OrderBy(g => PinnedIndex(g.Cwd)).ToList();
         ordered.RemoveAll(g => g.IsProject && g.IsPinned);
         ordered.InsertRange(0, pinnedGroups);
+        if (ArchiveGroup(archived) is { } archive) ordered.Add(archive); // MainViewModel.SidebarNav.cs
         Reconcile(SessionGroups, ordered);
         OnPropertyChanged(nameof(ShowNoSessionMatch));
     }
@@ -545,6 +672,12 @@ public sealed partial class MainViewModel
         if (at >= 0) _pinnedProjects!.RemoveAt(at);
         else _pinnedProjects!.Add(Path.TrimEndingDirectorySeparator(group.Cwd));
         SaveProjectPrefs();
+        if (at >= 0) ShowUnpinUndo(group.Name, () =>
+        {
+            if (PinnedIndex(group.Cwd) < 0) _pinnedProjects!.Insert(Math.Min(at, _pinnedProjects.Count), Path.TrimEndingDirectorySeparator(group.Cwd));
+            SaveProjectPrefs();
+            return Task.CompletedTask;
+        });
     }
 
     /// <summary>Group header: the name the sidebar and the header show for the project (the folder is not renamed); an
@@ -574,6 +707,13 @@ public sealed partial class MainViewModel
     private async Task AddProjectAsync()
     {
         if (PickFolderRequested is not { } pick || await pick() is not { } picked) return;
+        AddProjectFolder(picked);
+    }
+
+    /// <summary>The folder picker and a folder dropped on the sidebar share the same project-list operation.</summary>
+    internal void AddProjectFolder(string picked)
+    {
+        if (!Directory.Exists(picked)) return;
         var folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(picked));
         var (added, hidden) = ProjectPrefs();
         hidden.Remove(folder);
@@ -586,9 +726,10 @@ public sealed partial class MainViewModel
     /// Group header: take a project off the sidebar. A project without chats goes at once (Undo on the card); one with
     /// chats asks first: keep its chats on disk (only the list changes), or delete them too.
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanMutateSession))]
     private void RemoveProject(SessionGroupViewModel? group)
     {
+        if (IsReadOnly) return;
         if (group is not { IsProject: true }) return;
         var chats = Sessions.Where(s => SessionCatalog.PathComparer.Equals(s.Cwd, group.Cwd)).ToList();
         if (chats.Count == 0)
@@ -617,19 +758,32 @@ public sealed partial class MainViewModel
     /// <summary>Deletes a project's chats (each open one closed first; the one on screen gets a new session), then hides it.</summary>
     private async Task DeleteProjectChatsAsync(SessionCardViewModel card, SessionGroupViewModel group, List<SessionItemViewModel> chats)
     {
+        if (IsReadOnly) return;
         card.State = SessionCardState.Running;
         card.Message = Loc.T("Deleting…");
         card.Primary = card.Secondary = card.Tertiary = null;
         var failed = new List<string>();
         foreach (var chat in chats)
         {
-            if (FindOpen(chat.Model.Path) is { } open)
+            var open = FindOpen(chat.Model.Path);
+            var draftId = open?.DraftId;
+            var composer = open == _open ? CaptureDraft(_open) : null;
+            if (open is not null)
             {
                 if (open == _open) await NewChatAsync(); // off the chat on screen first (to a chat: the project goes), so it can be closed
                 if (FindOpen(chat.Model.Path) is { } still) await CloseSessionAsync(still);
             }
-            try { await Task.Run(() => SessionCatalog.DeleteSession(chat.Model.Path)); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { failed.Add($"{chat.Title}: {e.Message}"); }
+            try
+            {
+                if (FindOpen(chat.Model.Path) is not null) throw new IOException(Loc.T("The session could not be closed safely."));
+                await _host.DeleteSessionAsync(chat.Model.Path);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or RpcConnectionClosedException or TimeoutException)
+            {
+                failed.Add($"{chat.Title}: {e.Message}");
+                continue;
+            }
+            RemoveDeletedDrafts(chat.Model.Path, chat.Model.Cwd, draftId, closedComposer: composer);
         }
         RequestCatalogRefresh();
         HideProject(group, announce: false);
@@ -657,29 +811,21 @@ public sealed partial class MainViewModel
             SaveProjectPrefs();
             CloseSessionCard();
         }));
-        ShowCard(card);
-        _cardTimer = new DispatcherTimer(TimeSpan.FromSeconds(8), DispatcherPriority.Background, (_, _) =>
-        {
-            if (ReferenceEquals(SessionCard, card)) CloseSessionCard();
-        });
-        _cardTimer.Start();
+        ShowTimedCard(card, UndoCardDuration);
     }
 
     [RelayCommand]
-    private void CopyProjectPath(SessionGroupViewModel? group)
-    {
-        if (group is not { IsProject: true }) return;
-        CopyTextRequested?.Invoke(group.Cwd);
-        ShowBrief("IconCopy", Loc.T("Project path copied"), "", group.Cwd);
-    }
+    private Task CopyProjectPath(SessionGroupViewModel? group) =>
+        group is { IsProject: true } ? CopyTextAsync(group.Cwd, Loc.T("Project path copied")) : Task.CompletedTask;
 
     // ───────────── Row menu: rename, pin, copy path; cycling with Ctrl+Tab ─────────────
 
     /// <summary>Rename from the sidebar: omp renames the open session only, so another one is opened first; the
     /// header's name field then takes the new name.</summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanMutateSession))]
     private async Task RenameSessionItemAsync(SessionItemViewModel? item)
     {
+        if (IsReadOnly) return;
         if (item is null) return;
         if (!item.IsCurrent)
         {
@@ -693,48 +839,60 @@ public sealed partial class MainViewModel
     /// <summary>Pin or unpin in omp's own pin list, so omp's session picker agrees.</summary>
     private int _pinsVersion;
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanMutateSession))]
     private async Task TogglePinItemAsync(SessionItemViewModel? item)
     {
-        if (item is null || SessionPins.PathFor(item.Model.Path) is not { } file) return;
+        if (item is null) return;
         var pin = !item.IsPinned;
+        if (await SetSessionPinAsync(item.Model, pin) && !pin)
+            ShowUnpinUndo(item.Title, async () => { await SetSessionPinAsync(item.Model, true); });
+    }
+
+    private async Task<bool> SetSessionPinAsync(SessionSummary model, bool pin)
+    {
+        if (IsReadOnly || SessionPins.PathFor(model.Path) is not { } file) return false;
+        if (FindOpen(model.Path, readOnly: true) is not null && FindOpen(model.Path, readOnly: false) is null) return false;
         try
         {
-            var pins = await Task.Run(() => SessionPins.Set(file, item.Model.Id, pin));
+            var pins = await Task.Run(() => SessionPins.Set(file, model.Id, pin));
             Interlocked.Increment(ref _pinsVersion);
             _pinnedIds = pins;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             ShowBrief("IconPin", pin ? Loc.T("Not pinned") : Loc.T("Not unpinned"), e.Message);
-            return;
+            return false;
         }
-        if (item.Model.Path == _open.Last?.SessionFile) IsSessionPinned = pin;
+        if (model.Path == _open.Last?.SessionFile) IsSessionPinned = pin;
         ApplySessionFilter();
         RequestCatalogRefresh(); // a scan under way read the pins before this change: one more scan reads them again
+        return true;
+    }
+
+    private void ShowUnpinUndo(string title, Func<Task> restore)
+    {
+        var card = new SessionCardViewModel("brief", "IconPinOff", Loc.T("Unpinned"), title);
+        card.Primary = new SessionCardAction(Loc.T("Undo"), new AsyncRelayCommand(async () =>
+        {
+            CloseSessionCard();
+            await restore();
+        }));
+        ShowTimedCard(card, UndoCardDuration);
     }
 
     [RelayCommand]
-    private void CopySessionPath(SessionItemViewModel? item)
-    {
-        if (item is null) return;
-        CopyTextRequested?.Invoke(item.Model.Path);
-        ShowBrief("IconCopy", Loc.T("Session file path copied"), Loc.T("omp keeps the whole conversation in this file (JSON lines)."), item.Model.Path);
-    }
+    private Task CopySessionPath(SessionItemViewModel? item) => item is null ? Task.CompletedTask
+        : CopyTextAsync(item.Model.Path, Loc.T("Session file path copied"), Loc.T("omp keeps the whole conversation in this file (JSON lines)."));
 
     /// <summary>Sidebar row: the session's id (its file's header id: what omp --resume and /pin take).</summary>
     [RelayCommand]
-    private void CopySessionItemId(SessionItemViewModel? item)
-    {
-        if (item is not { Model.Id: { Length: > 0 } id }) return;
-        CopyTextRequested?.Invoke(id);
-        ShowBrief("IconCopy", Loc.T("Session ID copied"), Loc.T("omp --resume takes it (a unique start of it is enough)."), id);
-    }
+    private Task CopySessionItemId(SessionItemViewModel? item) => item is { Model.Id: { Length: > 0 } id }
+        ? CopyTextAsync(id, Loc.T("Session ID copied"), Loc.T("omp --resume takes it (a unique start of it is enough).")) : Task.CompletedTask;
 
     /// <summary>Ctrl+Tab / Ctrl+Shift+Tab: the next or previous session in the sidebar's order (wrapping).</summary>
     internal bool CycleSession(int direction)
     {
-        var order = SessionGroups.SelectMany(g => g.Items).ToList();
+        var order = ListedRows(); // MainViewModel.SidebarNav.cs: a folded archive is skipped
         if (order.Count == 0) return false;
         // From the chat itself: a chat whose omp is still starting has no current row yet
         var current = ShownFile;
@@ -750,9 +908,10 @@ public sealed partial class MainViewModel
     /// then starts a new session); another one is deleted as omp's own session picker does, its omp stopped first when the
     /// chat is open in the background (omp would write the file again), which ends its run when it is working.
     /// </summary>
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanMutateSession))]
     private void DeleteSessionItem(SessionItemViewModel? item)
     {
+        if (IsReadOnly) return;
         if (item is null) return;
         if (item.Model.Path == ShownFile)
         {
@@ -774,6 +933,7 @@ public sealed partial class MainViewModel
             card.Message = Loc.T("Deleting…");
             card.Primary = null;
             card.Secondary = null;
+            var draftId = FindOpen(item.Model.Path)?.DraftId;
             if (FindOpen(item.Model.Path) is { } still)
             {
                 if (still == _open)
@@ -785,12 +945,17 @@ public sealed partial class MainViewModel
                 }
                 await CloseSessionAsync(still); // MainViewModel.OpenSessions.cs
             }
-            try { await Task.Run(() => SessionCatalog.DeleteSession(item.Model.Path)); }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            try
+            {
+                if (FindOpen(item.Model.Path) is not null) throw new IOException(Loc.T("The session could not be closed safely."));
+                await _host.DeleteSessionAsync(item.Model.Path);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or RpcConnectionClosedException or TimeoutException)
             {
                 card.Finish(false, Loc.T("Not deleted"), e.Message, secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
                 return;
             }
+            RemoveDeletedDrafts(item.Model.Path, item.Model.Cwd, draftId);
             RequestCatalogRefresh();
             ShowBrief("IconTrash", Loc.T("Session deleted"), item.Title);
         }));

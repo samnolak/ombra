@@ -36,8 +36,9 @@ public sealed class SessionTests
         await RunAsync(s, "second session message");
 
         var catalog = await SessionCatalog.ScanAsync(SessionCatalog.SessionsRootOf(second.SessionFile)!);
-        Assert.Equal(2, catalog.Count);
-        var old = Assert.Single(catalog, c => c.Path == first.SessionFile);
+        Assert.True(catalog.IsAuthoritative);
+        Assert.Equal(2, catalog.Sessions.Count);
+        var old = Assert.Single(catalog.Sessions, c => c.Path == first.SessionFile);
         Assert.Equal("first session message", old.Title);
         Assert.True(SessionCatalog.SamePath(project, old.Cwd));
 
@@ -51,7 +52,7 @@ public sealed class SessionTests
     }
 
     [Fact]
-    public async Task Opening_a_session_of_another_project_restarts_omp_there_and_resumes_it()
+    public async Task Opening_another_project_replaces_only_the_logical_session_and_resumes_it()
     {
         var root = TestProcesses.TempDir("sessions");
         var projectA = TestProcesses.TempDir("project-a");
@@ -70,11 +71,11 @@ public sealed class SessionTests
         var pid = s.ProcessId;
         await s.OpenSessionAsync(inB.SessionFile!, inB.Cwd!);
         var resumed = s.Snapshot();
-        Assert.NotEqual(pid, s.ProcessId);
+        Assert.Equal(pid, s.ProcessId);
         Assert.True(SessionCatalog.SamePath(projectB, resumed.Cwd));
         Assert.Equal(inB.SessionFile, resumed.SessionFile);
         Assert.Equal(["work in B"], UserTexts(resumed));
-        Assert.Throws<ArgumentException>(() => System.Diagnostics.Process.GetProcessById(pid!.Value));
+        using (var engine = System.Diagnostics.Process.GetProcessById(pid!.Value)) Assert.False(engine.HasExited);
         await RunAsync(s, "more in B");
         Assert.Equal(["work in B", "more in B"], UserTexts(s.Snapshot()));
     }
@@ -90,7 +91,9 @@ public sealed class SessionTests
         await s.RenameSessionAsync("Refactor the parser");
         var snap = s.Snapshot();
         Assert.Equal("Refactor the parser", snap.SessionName);
-        var entry = Assert.Single(await SessionCatalog.ScanAsync(SessionCatalog.SessionsRootOf(snap.SessionFile)!));
+        var catalog = await SessionCatalog.ScanAsync(SessionCatalog.SessionsRootOf(snap.SessionFile)!);
+        Assert.True(catalog.IsAuthoritative);
+        var entry = Assert.Single(catalog.Sessions);
         Assert.Equal("Refactor the parser", entry.Title);
     }
 

@@ -1,0 +1,41 @@
+{
+  "sources": [
+    {
+      "name": "AvaloniaEdit and AvaloniaEdit.TextMate",
+      "repository": "https://github.com/AvaloniaUI/AvaloniaEdit",
+      "commit": "be976eacf40ed3c6992ca3157773e8f1e7315eae",
+      "archive": "https://codeload.github.com/AvaloniaUI/AvaloniaEdit/tar.gz/be976eacf40ed3c6992ca3157773e8f1e7315eae",
+      "license": "MIT",
+      "licenseFile": "AvaloniaEdit/LICENSE",
+      "importedPaths": ["src/AvaloniaEdit", "src/AvaloniaEdit.TextMate", "LICENSE"],
+      "localChanges": ["Projects target inherited net10.0 and Avalonia 12.1.3 without upstream packaging", "TextMate references resolve to owned source projects", "Native discontiguous MultiSelection, Ctrl+Alt-click caret creation, selection rendering and native input-command integration", "Host-reported edit rejection with native undo rollback for input, commands, paste and search; clipboard retrieval does not hold a document update open"]
+    },
+    {
+      "name": "TextMateSharp and TextMateSharp.Grammars",
+      "repository": "https://github.com/danipen/TextMateSharp",
+      "commit": "e0db45be30278c0f3f80302c31f498c8f8f1c4f2",
+      "archive": "https://codeload.github.com/danipen/TextMateSharp/tar.gz/e0db45be30278c0f3f80302c31f498c8f8f1c4f2",
+      "license": "MIT",
+      "licenseFile": "TextMateSharp/LICENSE.md",
+      "importedPaths": ["src/TextMateSharp", "src/TextMateSharp.Grammars", "LICENSE.md"],
+      "localChanges": ["Projects target inherited net10.0 without upstream signing/packaging", "Onigwrap dependency pinned to upstream 1.0.11"]
+    }
+  ],
+  "binaryDependencies": [
+    {
+      "name": "Onigwrap",
+      "version": "1.0.11",
+      "repository": "https://github.com/aikawayataro/Onigwrap",
+      "commit": "dd8a1cbbe3190c18033b96f2922b95c1761ae793",
+      "license": "MIT; bundled Oniguruma BSD-2-Clause",
+      "noticeFile": "Onigwrap-THIRD-PARTY-NOTICES.txt"
+    }
+  ],
+  "nativeReleaseGates": [
+    "Build and headless UI behavioral tests with Avalonia 12.1.3",
+    "macOS arm64/x64, Windows x64/arm64, Linux glibc/musl x64/arm64 native Onigwrap loading and TextMate highlighting",
+    "IME composition/commit, dead keys, Unicode surrogate pairs and clipboard on each native platform",
+    "Discontiguous Ctrl+Alt-click carets, rectangular selection, insertion/deletion, movement and grouped undo/redo",
+    "Light/dark grammar theme, search/replace, folding, scrolling large files, diagnostics and runtime completion/hover/definition/rename"
+  ]
+}

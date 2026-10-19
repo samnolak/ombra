@@ -35,15 +35,17 @@ public static class OmpBuiltins
         "branch", "rewind", "fork", "tree", "login", "logout",
     };
 
-    /// <summary>The command's name: "mcp" for "/mcp add x --url …"; null when the text is not a slash command.</summary>
+    /// <summary>The builtin parser's name, ending at the first whitespace or colon (omp 18.8.0 helpers/parse.ts).</summary>
     public static string? NameOf(string text)
     {
-        var t = text.TrimStart();
-        if (t.Length < 2 || t[0] != '/') return null;
+        if (text.Length < 2 || text[0] != '/') return null;
         var end = 1;
-        while (end < t.Length && !char.IsWhiteSpace(t[end])) end++;
-        return t[1..end];
+        while (end < text.Length && !IsRuntimeWhitespace(text[end]) && text[end] != ':') end++;
+        return end == 1 ? null : text[1..end];
     }
+
+    // JavaScript /\s/: unlike Char.IsWhiteSpace, BOM is a separator and NEXT LINE is not.
+    private static bool IsRuntimeWhitespace(char value) => value == '\uFEFF' || value != '\u0085' && char.IsWhiteSpace(value);
 
     /// <summary>True when omp runs <paramref name="text"/> itself over RPC (instead of sending it to the model).</summary>
     public static bool RunsOverRpc(string text) => NameOf(text) is { } n && OverRpc.Contains(n);
@@ -51,14 +53,13 @@ public static class OmpBuiltins
     /// <summary>
     /// True when omp runs <paramref name="text"/> itself according to the commands it listed (get_available_commands
     /// lists exactly the builtins it runs over RPC). An omp that lacks the builtin would hand the text to the model as
-    /// a message, so a command it does not list must never be sent. An empty catalog (not read yet) falls back to
-    /// <see cref="OverRpc"/>.
+    /// a message, so a command it does not list must never be sent. Only an empty catalog (not read yet) falls back
+    /// to <see cref="OverRpc"/>. Catalog names and aliases are authoritative, including new runtime builtins.
     /// </summary>
     public static bool RunsOverRpc(string text, IReadOnlyList<SlashCommand> catalog)
     {
-        if (!RunsOverRpc(text)) return false;
-        if (!catalog.Any(c => c.Source == "builtin")) return true;
-        var name = NameOf(text)!;
+        if (NameOf(text) is not { } name) return false;
+        if (catalog.Count == 0) return OverRpc.Contains(name);
         return catalog.Any(c => c.Source == "builtin" && (c.Name == name || c.Aliases.Contains(name)));
     }
 }

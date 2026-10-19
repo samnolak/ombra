@@ -5,7 +5,7 @@ namespace Ombra.Tests;
 
 internal static class TestProcesses
 {
-    /// <summary>Launch spec for the scripted fake omp (built next to this test project).</summary>
+    /// <summary>Shared fake engine executable and the scenario for one logical session.</summary>
     public static OmpLaunchSpec Fake(string scenario)
     {
         var dll = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory.Replace("Ombra.Tests", "Ombra.FakeOmp"), "Ombra.FakeOmp.dll"));
@@ -13,7 +13,8 @@ internal static class TestProcesses
         return new OmpLaunchSpec
         {
             FileName = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet",
-            Arguments = [dll, scenario],
+            Arguments = [dll],
+            SessionArguments = [scenario],
         };
     }
 
@@ -21,11 +22,13 @@ internal static class TestProcesses
     public static Func<LaunchRequest, OmpLaunchSpec> FakeFactory(string scenario, string sessionDir) => req =>
     {
         var spec = Fake(scenario);
-        return new OmpLaunchSpec
+        return spec with
         {
-            FileName = spec.FileName,
-            Arguments = req.ResumeSessionFile is { } r ? [.. spec.Arguments, "--resume", r] : spec.Arguments,
+            SessionArguments = [.. spec.SessionArguments,
+                .. (req.ResumeSessionFile is { } resume ? new[] { "--resume", resume } : Array.Empty<string>()),
+                .. (req.ApprovalMode is { } mode ? new[] { "--approval-mode", mode } : Array.Empty<string>())],
             WorkingDirectory = req.WorkingDirectory,
+            ResumeOnCurrentModel = req.ResumeOnCurrentModel,
             Environment = new Dictionary<string, string?> { ["FAKE_SESSION_DIR"] = sessionDir },
         };
     };
@@ -39,7 +42,7 @@ internal static class TestProcesses
         var spec = Fake("cli");
         var env = new Dictionary<string, string?> { ["FAKE_OMP_CLI"] = answers };
         if (log is not null) env["FAKE_OMP_CLI_LOG"] = log;
-        return new OmpLaunchSpec { FileName = spec.FileName, Arguments = [.. spec.Arguments, .. cliArgs], WorkingDirectory = dir, Environment = env };
+        return new OmpLaunchSpec { FileName = spec.FileName, Arguments = [.. spec.Arguments, "cli", .. cliArgs], WorkingDirectory = dir, Environment = env };
     };
 
     /// <summary>The fake omp for <paramref name="scenario"/> answering builtin slash commands from <paramref name="commands"/> (prefix → text).</summary>

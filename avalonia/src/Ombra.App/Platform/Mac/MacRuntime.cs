@@ -20,6 +20,9 @@ internal static unsafe class MacRuntime
     public readonly record struct CGRect(double X, double Y, double Width, double Height);
 
     [StructLayout(LayoutKind.Sequential)]
+    public readonly record struct CGSize(double Width, double Height);
+
+    [StructLayout(LayoutKind.Sequential)]
     public readonly record struct NSRange(nuint Location, nuint Length);
 
     /// <summary>A new <c>NSString</c> (+1: release it).</summary>

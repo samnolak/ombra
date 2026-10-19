@@ -8,6 +8,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App.Controls;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore.Browser;
 
@@ -217,7 +218,7 @@ public sealed class BrowserDialogTests
         // The next card in line keeps the same picture (the page did not change underneath)
         _ = vm.Dialogs.Broker.AlertAsync(new AlertRequest("Done") { PageUrl = Local }, CancellationToken.None);
         await Settle();
-        Assert.Equal("1 more", vm.Dialogs.Card!.QueueText);
+        Assert.Equal(Loc.F("{0} more", 1), vm.Dialogs.Card!.QueueText);
         vm.Dialogs.Card.PrimaryCommand.Execute(null);
         Assert.True(await task);
         await Settle();
@@ -253,22 +254,22 @@ public sealed class BrowserDialogTests
     }
 
     [AvaloniaTheory]
-    [InlineData(false, false, "studio.example.com wants you to sign in", null, null)]
-    [InlineData(true, false, "studio.example.com wants you to sign in", "That username or password didn't work", null)]
-    [InlineData(false, true, "studio.example.com:8080 wants you to sign in", null, "This site doesn't use a secure connection.")]
-    public void The_sign_in_card_says_who_asks_and_why(bool failedBefore, bool http, string title, string? error, string? warning)
+    [InlineData(false, false, "studio.example.com", null, null)]
+    [InlineData(true, false, "studio.example.com", "That username or password didn't work", null)]
+    [InlineData(false, true, "studio.example.com:8080", null, "This site doesn't use a secure connection.")]
+    public void The_sign_in_card_says_who_asks_and_why(bool failedBefore, bool http, string site, string? error, string? warning)
     {
         using var vm = new BrowserDialogsViewModel();
         var page = http ? new Uri("http://studio.example.com:8080/") : Studio;
         _ = vm.Broker.RequestCredentialsAsync(new CredentialRequest("studio.example.com", page.Port, "Studio", false, failedBefore, "ada") { PageUrl = page }, CancellationToken.None);
         var card = new BrowserDialogCardViewModel(vm.Broker.Current!, vm);
-        Assert.Equal(title, card.Title);
-        Assert.Equal("Realm: Studio", card.Detail);
-        Assert.Equal(error, card.Error);
-        Assert.Equal(warning, card.Warning);
+        Assert.Equal(Loc.F("{0} wants you to sign in", site), card.Title);
+        Assert.Equal(Loc.F("Realm: {0}", "Studio"), card.Detail);
+        Assert.Equal(error is null ? null : Loc.T(error), card.Error);
+        Assert.Equal(warning is null ? null : Loc.T(warning), card.Warning);
         Assert.Equal("ada", card.UserName);
         Assert.Equal("Password", card.FirstFocus); // the user name is filled in already
-        Assert.Equal(("Sign in", "Cancel"), (card.PrimaryLabel, card.SecondaryLabel));
+        Assert.Equal((Loc.T("Sign in"), Loc.T("Cancel")), (card.PrimaryLabel, card.SecondaryLabel));
     }
 
     [AvaloniaFact]
@@ -291,20 +292,20 @@ public sealed class BrowserDialogTests
         }
 
         var alert = Card(new AlertRequest("Saved") { PageUrl = Local });
-        Assert.Equal("localhost:3000 says", alert.Title);
+        Assert.Equal(Loc.F("{0} says", "localhost:3000"), alert.Title);
         Assert.False(alert.HasSecondary);
         var leave = Card(new BeforeUnloadRequest("page text is never shown") { PageUrl = Local });
-        Assert.Equal(("Leave this page?", "Changes you made may not be saved.", "Leave", "Stay"), (leave.Title, leave.Message, leave.PrimaryLabel, leave.SecondaryLabel));
+        Assert.Equal((Loc.T("Leave this page?"), Loc.T("Changes you made may not be saved."), Loc.T("Leave"), Loc.T("Stay")), (leave.Title, leave.Message, leave.PrimaryLabel, leave.SecondaryLabel));
         var file = Card(new FileChooserRequest(true, [".png", "image/jpeg"]) { PageUrl = Local });
-        Assert.Equal(("localhost:3000 wants you to choose files", "Accepted types: .png, image/jpeg", "Choose files…"), (file.Title, file.Detail, file.PrimaryLabel));
+        Assert.Equal((Loc.F("{0} wants you to choose files", "localhost:3000"), Loc.F("Accepted types: {0}", ".png, image/jpeg"), Loc.T("Choose files…")), (file.Title, file.Detail, file.PrimaryLabel));
         var download = Card(new DownloadRequest("report.pdf", 1536 * 1024, new Uri("https://files.example/r.pdf")) { PageUrl = Local });
-        Assert.Equal(("Download report.pdf?", "Save", "Save as…", "Cancel"), (download.Title, download.PrimaryLabel, download.TertiaryLabel, download.SecondaryLabel));
-        Assert.StartsWith("1.5 MB from files.example", download.Detail!.Replace(',', '.'));
+        Assert.Equal((Loc.F("Download {0}?", "report.pdf"), Loc.T("Save"), Loc.T("Save as…"), Loc.T("Cancel")), (download.Title, download.PrimaryLabel, download.TertiaryLabel, download.SecondaryLabel));
+        Assert.StartsWith(Loc.F("{0} from {1}", Loc.F("{0} MB", "1.5"), "files.example"), download.Detail!.Replace(',', '.'));
         var cam = Card(new PermissionRequest(PermissionKind.CameraAndMicrophone, "https://meet.example"));
-        Assert.Equal(("meet.example wants to use your camera and microphone", "Allow once", "Always allow on this site", "Don't allow"),
+        Assert.Equal((Loc.F("{0} wants to {1}", "meet.example", Loc.T("use your camera and microphone")), Loc.T("Allow once"), Loc.T("Always allow on this site"), Loc.T("Don't allow")),
             (cam.Title, cam.PrimaryLabel, cam.TertiaryLabel, cam.SecondaryLabel));
         var popup = Card(new PopupNoticeRequest(new Uri("https://accounts.example/o/auth")) { PageUrl = Studio });
-        Assert.Equal(("studio.example.com wants to open a new window", "Open", "Don't open"), (popup.Title, popup.PrimaryLabel, popup.SecondaryLabel));
+        Assert.Equal((Loc.F("{0} wants to open a new window", "studio.example.com"), Loc.T("Open"), Loc.T("Don't open")), (popup.Title, popup.PrimaryLabel, popup.SecondaryLabel));
     }
 
     [AvaloniaFact]
@@ -361,7 +362,7 @@ public sealed class BrowserDialogTests
         var task = vm.Dialogs.Broker.RequestCredentialsAsync(new CredentialRequest("studio.example.com", 443, "Studio", false, false) { PageUrl = Studio }, CancellationToken.None);
         await Settle();
         Assert.True(Named<Panel>(panel, "BrowserDialogLayer").IsEffectivelyVisible);
-        Assert.Equal("studio.example.com wants you to sign in", Named<SelectableTextBlock>(panel, "BrowserDialogTitle").Text);
+        Assert.Equal(Loc.F("{0} wants you to sign in", "studio.example.com"), Named<SelectableTextBlock>(panel, "BrowserDialogTitle").Text);
         var user = Named<TextBox>(panel, "BrowserDialogUser");
         Assert.True(user.IsFocused);
         w.KeyTextInput("ada");
@@ -384,7 +385,7 @@ public sealed class BrowserDialogTests
         var prompt = vm.Dialogs.Broker.PromptAsync(new PromptRequest("Your name?", "Ann") { PageUrl = Local }, CancellationToken.None);
         await Settle();
         Assert.True(Named<Button>(panel, "BrowserDialogPrimary").IsFocused);
-        Assert.Equal("1 more", vm.Dialogs.Card!.QueueText);
+        Assert.Equal(Loc.F("{0} more", 1), vm.Dialogs.Card!.QueueText);
         w.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
         Assert.False(await confirm);
         await Settle();

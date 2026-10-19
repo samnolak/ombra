@@ -10,6 +10,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.Services;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
@@ -145,7 +146,7 @@ public sealed class UpdateUiTests
         await Until(() => vm.UpdateReady, "update downloaded and unpacked by the automatic check");
         await Settle();
         Assert.True(w.FindControl<Button>("UpdatePill")!.IsEffectivelyVisible);
-        Assert.Equal("Restart to update to 0.2.0", vm.UpdatePill);
+        Assert.Equal(Loc.F("Restart to update to {0}", "0.2.0"), vm.UpdatePill);
         Take(w, $"{theme}-sidebar-ready");
 
         vm.OpenUpdatesCommand.Execute(null);

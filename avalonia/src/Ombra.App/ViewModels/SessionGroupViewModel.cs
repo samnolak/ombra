@@ -10,11 +10,21 @@ namespace Ombra.App.ViewModels;
 /// all in). Pinned projects come first, then Chats, then the other projects by their newest message.
 /// A group lives as long as its folder is listed: a refresh updates <see cref="Items"/>, <see cref="IsCurrentProject"/>,
 /// <see cref="Name"/> and <see cref="IsPinned"/> in place.</summary>
-public sealed partial class SessionGroupViewModel(string cwd, bool isCurrentProject, bool isChatsGroup = false) : ObservableObject
+public sealed partial class SessionGroupViewModel(string cwd, bool isCurrentProject, bool isChatsGroup = false, bool isArchiveGroup = false) : ObservableObject
 {
     public string Cwd { get; } = cwd;
     public bool IsChatsGroup { get; } = isChatsGroup;
-    public bool IsProject => !IsChatsGroup;
+    /// <summary>Archived: the sessions archived from the sidebar, last in the list and folded until opened (or searched).</summary>
+    public bool IsArchiveGroup { get; } = isArchiveGroup;
+    public bool IsProject => !IsChatsGroup && !IsArchiveGroup;
+
+    /// <summary>The archive's rows are shown (its header toggles them; a search shows them while it lasts).</summary>
+    [ObservableProperty] private bool _isExpanded = !isArchiveGroup;
+    /// <summary>"Archived 3".</summary>
+    [ObservableProperty] private string _archiveLabel = "";
+
+    [RelayCommand]
+    private void ToggleExpanded() => IsExpanded = !IsExpanded;
 
     /// <summary>The folder's own name (what the project is called unless the user renamed it).</summary>
     public string FolderName { get; } = isChatsGroup ? Loc.T("Chats")
@@ -73,4 +83,6 @@ public sealed partial class SessionGroupViewModel(string cwd, bool isCurrentProj
     public System.Windows.Input.ICommand? RevealCommand { get; init; }
     /// <summary>Takes <c>(group, name)</c>.</summary>
     public System.Windows.Input.ICommand? RenameCommand { get; init; }
+    /// <summary>Archived's header: every archived session back into its group.</summary>
+    public System.Windows.Input.ICommand? UnarchiveAllCommand { get; init; }
 }

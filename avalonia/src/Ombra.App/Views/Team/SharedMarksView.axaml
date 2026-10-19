@@ -1,0 +1,93 @@
+<!-- K4 shared marks on the Team page (DataContext: MainViewModel.TeamMarks, ViewModels/Team/SharedMarksViewModel): comments team
+     members left for me (open at the place, done or dismissed with a short note) and the ones I sent with each
+     recipient's status. No replies: a new thought is a new mark. A title above list cards of rows (as TeamPage). -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Ombra.App.Localization"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
+             x:Class="Ombra.App.Views.Team.SharedMarksView"
+             x:DataType="vm:SharedMarksViewModel">
+  <Border x:Name="SharedMarksCard">
+    <StackPanel Spacing="8">
+      <Grid Classes="list-head"><TextBlock Classes="section" Text="{loc:T 'Comments'}" /></Grid>
+      <TextBlock Classes="muted" Text="{Binding Message}" TextWrapping="Wrap" Margin="4,0,0,0" IsVisible="{Binding Message, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+      <Border Classes="plug-list" IsVisible="{Binding IsEmpty}">
+        <StackPanel Classes="plug-body">
+          <TextBlock x:Name="SharedMarksEmpty" Classes="muted" TextWrapping="Wrap"
+                     Text="{loc:T 'Comments on code and pages that you send to members, or they send to you, appear here.'}" />
+        </StackPanel>
+      </Border>
+
+      <StackPanel Spacing="8" IsVisible="{Binding HasReceived}">
+        <TextBlock Classes="caps" Text="{loc:T 'For you'}" Margin="4,8,0,0" />
+        <Border Classes="plug-list">
+          <ItemsControl x:Name="ReceivedMarksList" ItemsSource="{Binding Received}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ReceivedMarkRow">
+                <StackPanel>
+                  <Border Classes="plug-sep flush" />
+                  <Grid Classes="plug-row" ColumnDefinitions="*,Auto">
+                    <StackPanel Classes="plug-lead">
+                      <TextBlock Classes="conn-name" Text="{Binding Note}" TextWrapping="Wrap" TextTrimming="None" />
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Classes="plug-line" Text="{Binding Author}" VerticalAlignment="Center" />
+                        <TextBlock Classes="plug-line" Classes.mono="{Binding IsCode}" Text="{Binding Where}" MaxWidth="360" VerticalAlignment="Center" ToolTip.Tip="{Binding Where}" />
+                        <Border Classes="conn-tag"><TextBlock Text="{Binding StatusText}" /></Border>
+                      </StackPanel>
+                      <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding MayHaveMoved}" Margin="0,2,0,0">
+                        <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,0,6,0" VerticalAlignment="Top" />
+                        <TextBlock Grid.Column="1" Classes="warning" Text="{Binding MovedText}" FontSize="{DynamicResource GuiFontCaption}" TextWrapping="Wrap" />
+                      </Grid>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                      <Button Classes="outline" Content="{loc:T 'To my agent'}" Command="{Binding ToAgentCommand}"
+                              ToolTip.Tip="{loc:T 'Add this comment to your message so your agent works on it'}" />
+                      <Button Classes="accent" Content="{loc:T 'Open'}" Command="{Binding OpenCommand}"
+                              AutomationProperties.Name="{Binding Where, StringFormat={loc:T 'Open {0}'}}" />
+                    </StackPanel>
+                  </Grid>
+                  <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Margin="16,0,12,12">
+                    <TextBox Classes="sm" Text="{Binding ReplyNote}" MaxLength="280" PlaceholderText="{loc:T 'Short note (optional)'}" AutomationProperties.Name="{loc:T 'Short note'}" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" Classes="outline" Content="{loc:T 'Mark as done'}" Command="{Binding DoneCommand}" VerticalAlignment="Center" />
+                    <Button Grid.Column="2" Classes="flat" Content="{loc:T 'Dismiss comment'}" Command="{Binding DismissCommand}" VerticalAlignment="Center" />
+                  </Grid>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </Border>
+      </StackPanel>
+
+      <!-- Sent: the note, where, a line per recipient, all from one start; how many answered on the right -->
+      <StackPanel Spacing="8" IsVisible="{Binding HasSent}">
+        <TextBlock Classes="caps" Text="{loc:T 'Sent by you'}" Margin="4,8,0,0" />
+        <Border Classes="plug-list">
+          <ItemsControl x:Name="SentMarksList" ItemsSource="{Binding Sent}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:SentMarkRow">
+                <StackPanel>
+                  <Border Classes="plug-sep flush" />
+                  <Grid Classes="plug-row" ColumnDefinitions="*,Auto">
+                    <StackPanel Classes="plug-lead">
+                      <TextBlock Classes="conn-name" Text="{Binding Note}" TextWrapping="Wrap" TextTrimming="None" />
+                      <TextBlock Classes="plug-line" Classes.mono="{Binding IsCode}" Text="{Binding Where}" ToolTip.Tip="{Binding Where}" />
+                      <ItemsControl ItemsSource="{Binding Recipients}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:SentRecipientRow">
+                            <TextBlock Classes="plug-line" Text="{Binding Line}" ToolTip.Tip="{Binding Line}" />
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                    <TextBlock Grid.Column="1" Classes="plug-scope end" Text="{Binding Summary}" />
+                  </Grid>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </Border>
+      </StackPanel>
+    </StackPanel>
+  </Border>
+</UserControl>

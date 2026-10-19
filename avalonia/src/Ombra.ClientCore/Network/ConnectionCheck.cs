@@ -81,6 +81,7 @@ public static class ConnectionCheck
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
+                CreateNoWindow = true,
                 WorkingDirectory = spec.WorkingDirectory,
             };
             foreach (var a in spec.Arguments) start.ArgumentList.Add(a);

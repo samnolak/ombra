@@ -1,4 +1,5 @@
 using Ombra.App.Localization;
+using Ombra.ClientCore;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
@@ -42,12 +43,21 @@ public sealed class MarkdownView : ContentControl
 
     /// <summary>Beyond this the text stays plain: a control tree for megabytes of Markdown costs more than it gives.</summary>
     private const int MaxMarkdownChars = 200_000;
+    internal const int MaxTableRows = 100;
+    internal const int CodeFoldThreshold = 28;
+    internal const int CodePreviewLines = 24;
+    private static readonly object CodeFoldKey = new();
+    private const int MaxTableColumns = 16;
+    private const int MaxTableCellChars = 1024;
+    private static readonly object TableSourceKey = new();
     /// <summary>Plain text is laid out whole on every change: while such a reply streams, a few times a second is enough.</summary>
     private const long PlainIntervalMs = 250;
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder().UsePipeTables().UseEmphasisExtras().UseAutoLinks().UseTaskLists().Build();
 
     /// <summary>The top-level blocks on screen, in order: the children of <see cref="_root"/>.</summary>
     private readonly List<RenderedBlock> _blocks = [];
+    private readonly Dictionary<int, CodeFoldState> _codeFolds = [];
+    private string? _foldSource;
     private StackPanel? _root;
     private string? _rendered;
     private bool _frameRequested;
@@ -147,6 +157,15 @@ public sealed class MarkdownView : ContentControl
     {
         var text = Markdown ?? "";
         if (text == _rendered && Content is not null) return;
+        if (_foldSource is { } previous && !text.StartsWith(previous, StringComparison.Ordinal) && _codeFolds.Count > 0)
+        {
+            // A replacement document is a new source identity, not a continuation of the expanded blocks.
+            _codeFolds.Clear();
+            _root = null;
+            _blocks.Clear();
+            ClearAnchors();
+        }
+        _foldSource = text;
         if (text.Length > MaxMarkdownChars || !RenderBlocks(text)) ShowPlain(text);
         _rendered = text; // only once it is on screen: a failed render is retried with the next text
         _renderedTheme = AppTheme;
@@ -163,8 +182,13 @@ public sealed class MarkdownView : ContentControl
         _blocks.Clear();
         ClearAnchors();
         // The same block takes the new text: a selection in it stays, and no new control is made for each change
-        if (_plain is not null && ReferenceEquals(Content, _plain)) _plain.Text = text;
-        else Content = _plain = Paragraph(text);
+        var length = GraphemeText.PrefixLength(text, 16_384);
+        var preview = length < text.Length
+            ? text[..length] + "\n" + Loc.T("Preview truncated; right-click to copy original.")
+            : text;
+        if (_plain is not null && ReferenceEquals(Content, _plain)) _plain.Text = preview;
+        else Content = _plain = Paragraph(preview);
+        _plain.ContextFlyout = length < text.Length ? ContextMenus.ForCodeBlock(() => text) : null;
         _plainAt = Environment.TickCount64;
     }
 
@@ -202,6 +226,13 @@ public sealed class MarkdownView : ContentControl
             (keep, from) = (0, 0);
             _definitions = definitions;
         }
+        // Absolute source positions stay stable while a document grows, including nested code and theme rebuilds.
+        foreach (var code in doc.Descendants<CodeBlock>())
+        {
+            var at = from + code.Span.Start;
+            if (!_codeFolds.TryGetValue(at, out var state)) _codeFolds.Add(at, state = new CodeFoldState());
+            code.SetData(CodeFoldKey, state);
+        }
         Services.PerfLog.Count("markdown_build");
         var root = _root ??= new StackPanel { Spacing = 12 };
         // Each block's text runs from the line it starts on to the next block's (the last one's to the end): Markdig's
@@ -224,7 +255,7 @@ public sealed class MarkdownView : ContentControl
                 continue;
             }
             // Built once it comes near the view (BuildNearView, below): until then a placeholder of its estimated height
-            var rendered = new RenderedBlock { Start = start, Source = source, Control = new Unbuilt(source, atTop: i == 0), Pending = (block, text, from, end) };
+            var rendered = new RenderedBlock { Start = start, Source = source, Control = new Unbuilt(block, text, from, end, atTop: i == 0), Pending = (block, text, from, end) };
             if (old is not null)
             {
                 _blocks[i] = rendered;
@@ -332,14 +363,14 @@ public sealed class MarkdownView : ContentControl
     }
 
     /// <summary>A block not built yet: as tall as its text is estimated to be at the width it is given.</summary>
-    private sealed class Unbuilt(string source, bool atTop) : Control
+    private sealed class Unbuilt(MdBlock block, string source, int from, int end, bool atTop) : Control
     {
         private double _width = double.NaN;
         private double _height;
 
         public double Estimate(double width)
         {
-            if (!width.Equals(_width)) (_width, _height) = (width, MarkdownHeight.Estimate(source, width, atTop));
+            if (!width.Equals(_width)) (_width, _height) = (width, MarkdownHeight.Estimate(block, source, from, width, atTop, CodeExpanded, end));
             return _height;
         }
 
@@ -388,8 +419,13 @@ public sealed class MarkdownView : ContentControl
             }
             case FencedCodeBlock f:
             {
-                var code = new CodeBlockView(Lines(f), f.Info);
+                var code = CodeView(f);
                 return (code.Root, (next, _, _, _) => next is FencedCodeBlock grown && grown.Info == f.Info && code.Update(Lines(grown)));
+            }
+            case CodeBlock c:
+            {
+                var code = CodeView(c);
+                return (code.Root, (next, _, _, _) => next is CodeBlock grown && next is not FencedCodeBlock && code.Update(Lines(grown)));
             }
             case ListBlock l:
             {
@@ -428,7 +464,9 @@ public sealed class MarkdownView : ContentControl
         MarkdownDocument doc;
         try { doc = Markdig.Markdown.Parse(markdown, Pipeline); }
         catch (ArgumentException) { return null; }
-        return Depth(doc) > MaxNesting ? null : doc;
+        if (Depth(doc) > MaxNesting) return null;
+        foreach (var table in doc.Descendants<Table>()) table.SetData(TableSourceKey, markdown);
+        return doc;
     }
 
     /// <summary>The control tree for a Markdown text (public for tests), plain text when it cannot be parsed.</summary>
@@ -452,8 +490,7 @@ public sealed class MarkdownView : ContentControl
     {
         HeadingBlock h => Heading(h),
         ParagraphBlock p => Text(p.Inline),
-        FencedCodeBlock f => new CodeBlockView(Lines(f), f.Info).Root,
-        CodeBlock c => new CodeBlockView(Lines(c), null).Root,
+        CodeBlock c => CodeView(c).Root,
         ListBlock l => List(l),
         QuoteBlock q => Quote(q),
         ThematicBreakBlock => new Border { Classes = { "md-rule" } },
@@ -609,12 +646,27 @@ public sealed class MarkdownView : ContentControl
             {
                 ToolTip.SetTip(this, null);
                 Cursor = null;
+                RestoreMenu();
                 return;
             }
             run!.TextDecorations = Avalonia.Media.TextDecorations.Underline;
             Cursor = HandCursor ??= new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand);
             ToolTip.SetTip(this, new ToolTip { Classes = { "path-peek" }, Content = PathLinks.Preview(_target, handler!.ProjectRoot) });
             ToolTip.SetPlacement(this, PlacementMode.Pointer);
+            // A right click on the path opens the path's menu (ContextMenus.ForPath) instead of the text's or the message's
+            if (!ContextMenus.IsPathMenu(ContextFlyout)) _ownMenu = ContextFlyout;
+            if (ContextFlyout is { IsOpen: true }) return;
+            var menu = ContextMenus.ForPath(_target, handler!);
+            menu.Closed += (_, _) => { if (_target is null) RestoreMenu(); };
+            ContextFlyout = menu;
+        }
+
+        private Avalonia.Controls.Primitives.FlyoutBase? _ownMenu;
+
+        /// <summary>Off a path: the text's own menu again (not while the path's menu is open; it restores when it closes).</summary>
+        private void RestoreMenu()
+        {
+            if (ContextFlyout is { IsOpen: false } menu && ContextMenus.IsPathMenu(menu)) ContextFlyout = _ownMenu;
         }
 
         /// <summary>The path run under <paramref name="point"/>, by the layout's hit test and the runs' text offsets.</summary>
@@ -747,6 +799,7 @@ public sealed class MarkdownView : ContentControl
         BorderThickness = new Thickness(0),
         Classes = { "md-link" },
         ContextFlyout = ContextMenus.ForLink(uri.AbsoluteUri),
+        [ToolTip.TipProperty] = uri.AbsoluteUri,
     };
 
     /// <summary>
@@ -780,25 +833,51 @@ public sealed class MarkdownView : ContentControl
         }
     }
 
+    private sealed class CodeFoldState
+    {
+        public bool Expanded { get; set; }
+    }
+
+    private static bool CodeExpanded(CodeBlock block) => block.GetData(CodeFoldKey) is CodeFoldState { Expanded: true };
+
+    private static CodeBlockView CodeView(CodeBlock block) =>
+        new(Lines(block), (block as FencedCodeBlock)?.Info, block.GetData(CodeFoldKey) as CodeFoldState ?? new CodeFoldState());
+
     /// <summary>
     /// A code block as a card (ChatGPT): a header row (a code icon and the language on the left, Copy on the right) over
-    /// the code, which scrolls sideways; its context menu copies the code too. A block that grows (streaming) highlights
-    /// only its new lines.
+    /// the code, which scrolls sideways; its context menu copies the whole code too. Long blocks initially build only
+    /// their first 24 lines, with an explicit fold action. A visible block that grows highlights only its new lines.
     /// </summary>
     private sealed class CodeBlockView
     {
         private readonly SelectableTextBlock _text = new() { Classes = { "md-code" }, TextWrapping = TextWrapping.NoWrap };
         private readonly SyntaxHighlighter.Language? _language;
         private string _code = "";
+        private string _shown = "";
+        private readonly CodeFoldState _foldState;
+        private readonly Button _fold = new()
+        {
+            Classes = { "link", "md-code-fold" },
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(16, 0, 16, 12),
+            MinHeight = 24,
+        };
         /// <summary>Where the last line starts in the code, how many inlines come before it, and the highlighter's state
         /// there (inside a block comment or not): the lines before it are final, the last one may still grow.</summary>
         private int _lastLineStart;
         private int _lastLineInline;
         private bool _lastLineInBlock;
 
-        public CodeBlockView(string code, string? language)
+        public CodeBlockView(string code, string? language, CodeFoldState foldState)
         {
             _language = SyntaxHighlighter.ForName(language?.Trim().Split(' ')[0]);
+            _foldState = foldState;
+            Avalonia.Automation.AutomationProperties.SetAutomationId(_fold, "MarkdownCodeFold");
+            _fold.Click += (_, _) =>
+            {
+                _foldState.Expanded = !_foldState.Expanded;
+                ShowCode();
+            };
             // The DS copy icon, a check for a moment once copied (Claude Code)
             var glyph = new Icon { Data = Glyph("IconCopy"), Size = 16 };
             var copy = new Button
@@ -813,9 +892,7 @@ public sealed class MarkdownView : ContentControl
             copy.Click += (_, _) =>
             {
                 CopyRequested?.Invoke(_code);
-                if (TopLevel.GetTopLevel(copy)?.Clipboard is { } clipboard) _ = Avalonia.Input.Platform.ClipboardExtensions.SetTextAsync(clipboard, _code);
-                glyph.Data = Glyph("IconCheck");
-                DispatcherTimer.RunOnce(() => glyph.Data = Glyph("IconCopy"), TimeSpan.FromSeconds(1.5));
+                _ = ContextMenus.CopyAsync(copy, _code); // the check for 1.5 s once it is on the clipboard
             };
             // Codex's wrap toggle: long lines wrap in the block instead of scrolling sideways, and back
             var wrap = new Button
@@ -859,6 +936,7 @@ public sealed class MarkdownView : ContentControl
                     {
                         head,
                         new Border { Classes = { "md-code-body" }, Child = new SideScroller { Content = _text } },
+                        _fold,
                     },
                 },
                 ContextFlyout = ContextMenus.ForCodeBlock(() => _code),
@@ -868,20 +946,49 @@ public sealed class MarkdownView : ContentControl
 
         public Border Root { get; }
 
-        /// <summary>Shows the block's code, coloured by its language (the info string after the fence) as in diffs and the
-        /// file viewer. A selection made in it stays.</summary>
+        /// <summary>Keeps the complete code for copying, but only highlights and lays out the visible prefix.</summary>
         public bool Update(string code)
         {
-            var (start, end) = (_text.SelectionStart, _text.SelectionEnd);
-            if (_language is null) _text.Text = code;
-            else Highlight(code);
             _code = code;
+            ShowCode();
+            return true;
+        }
+
+        private void ShowCode()
+        {
+            var preview = PreviewLength(_code);
+            _fold.IsVisible = preview >= 0;
+            var label = Loc.T(_foldState.Expanded ? "Show less" : "Show more");
+            _fold.Content = label;
+            Avalonia.Automation.AutomationProperties.SetName(_fold, label);
+            var length = preview >= 0 && !_foldState.Expanded ? preview : _code.Length;
+            // Appending a hidden tail must not rebuild syntax runs or invalidate the text layout.
+            if (_shown.Length == length && _code.AsSpan(0, length).SequenceEqual(_shown.AsSpan())) return;
+            var visible = length == _code.Length ? _code : _code[..length];
+            var (start, end) = (_text.SelectionStart, _text.SelectionEnd);
+            if (_language is null) _text.Text = visible;
+            else Highlight(visible);
+            _shown = visible;
             if (start != end)
             {
-                _text.SelectionStart = start;
-                _text.SelectionEnd = end;
+                _text.SelectionStart = Math.Min(start, length);
+                _text.SelectionEnd = Math.Min(end, length);
             }
-            return true;
+        }
+
+        /// <summary>Finds the first 24 lines only if there are more than 28; never scans the hidden tail.</summary>
+        private static int PreviewLength(string code)
+        {
+            var from = 0;
+            var preview = 0;
+            for (var line = 1; line <= CodeFoldThreshold; line++)
+            {
+                var end = code.IndexOf('\n', from);
+                if (end < 0) return -1;
+                if (line == CodePreviewLines) preview = end > 0 && code[end - 1] == '\r' ? end - 1 : end;
+                from = end + 1;
+            }
+            return preview;
         }
 
         private void Highlight(string code)
@@ -889,7 +996,7 @@ public sealed class MarkdownView : ContentControl
             var inlines = _text.Inlines!;
             var from = 0;
             var inBlock = false;
-            if (_code.Length > 0 && code.Length >= _lastLineStart && string.CompareOrdinal(code, 0, _code, 0, _lastLineStart) == 0)
+            if (_shown.Length > 0 && code.Length >= _lastLineStart && string.CompareOrdinal(code, 0, _shown, 0, _lastLineStart) == 0)
             {
                 // The lines before the last are as they were: the last line on is coloured again
                 while (inlines.Count > _lastLineInline) inlines.RemoveAt(inlines.Count - 1);
@@ -1026,21 +1133,50 @@ public sealed class MarkdownView : ContentControl
     private static Control TableControl(Table table)
     {
         var grid = new Grid { Classes = { "md-table" } };
-        var rows = table.OfType<TableRow>().ToList();
-        var columns = rows.Select(r => r.Count).DefaultIfEmpty(0).Max();
+        var rows = table.OfType<TableRow>().Take(MaxTableRows).ToList();
+        var columns = Math.Min(MaxTableColumns, rows.Select(r => r.Count).DefaultIfEmpty(0).Max());
+        var truncated = table.Count > rows.Count || rows.Any(r => r.Count > columns);
+        var source = (string)table.GetData(TableSourceKey)!;
         for (var c = 0; c < columns; c++) grid.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
         for (var r = 0; r < rows.Count; r++)
         {
             var row = rows[r];
             grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            var cells = row.OfType<TableCell>().ToList();
+            var cells = row.OfType<TableCell>().Take(columns).ToList();
             var textClass = row.IsHeader ? "md-th-text" : "md-td-text";
+            Border? hover = null;
+            if (!row.IsHeader && columns > 0)
+            {
+                hover = new Border { Classes = { "md-row-hover" }, IsHitTestVisible = false };
+                Grid.SetRow(hover, r);
+                Grid.SetColumnSpan(hover, columns);
+                grid.Children.Add(hover);
+            }
             for (var c = 0; c < columns; c++)
             {
                 // A short row is filled up with empty cells, so the rules run the full width.
-                var content = c < cells.Count && cells[c].FirstOrDefault() is ParagraphBlock p
-                    ? Text(p.Inline, weight: row.IsHeader ? FontWeight.SemiBold : null, textClass: textClass)
-                    : new SelectableTextBlock { Classes = { textClass } };
+                SelectableTextBlock content;
+                if (c < cells.Count && cells[c].FirstOrDefault() is ParagraphBlock p)
+                {
+                    // Bound before making any inline controls or measuring text. Oversized cells show a
+                    // plain Markdown prefix; ordinary cells retain their links and inline formatting.
+                    var length = p.Span.Length;
+                    if (length > MaxTableCellChars)
+                    {
+                        // Markdig trims LiteralInline.Content for pipe-cell padding, but leaves its
+                        // source Span unchanged. Apply the same leading trim before budgeting raw text.
+                        var raw = source.AsSpan(p.Span.Start, length).TrimStart();
+                        content = new SelectableTextBlock
+                        {
+                            Text = raw[..GraphemeText.PrefixLength(raw, MaxTableCellChars)].ToString() + Loc.T("… (cell truncated)"),
+                            Classes = { textClass },
+                            TextWrapping = TextWrapping.Wrap,
+                        };
+                        truncated = true;
+                    }
+                    else content = Text(p.Inline, weight: row.IsHeader ? FontWeight.SemiBold : null, textClass: textClass);
+                }
+                else content = new SelectableTextBlock { Classes = { textClass } };
                 var border = new Border
                 {
                     Classes = { "md-cell" },
@@ -1048,16 +1184,40 @@ public sealed class MarkdownView : ContentControl
                     Child = content,
                 };
                 if (row.IsHeader) border.Classes.Add("md-th");
+                if (hover is { } highlight)
+                {
+                    border.Background = Brushes.Transparent;
+                    border.PointerEntered += (_, _) => highlight.Classes.Add("active");
+                    border.PointerExited += (_, _) => highlight.Classes.Remove("active");
+                }
                 Grid.SetRow(border, r);
                 Grid.SetColumn(border, c);
                 grid.Children.Add(border);
             }
         }
-        return new FittedTable(grid, columns)
+        var fitted = new FittedTable(grid, columns)
         {
             Child = new SideScroller
             {
                 Content = new Border { Classes = { "md-table-frame" }, Child = grid, HorizontalAlignment = HorizontalAlignment.Left },
+            },
+        };
+        if (!truncated) return fitted;
+        var copy = new Button { Content = Loc.T("Copy original table"), Classes = { "link" } };
+        copy.Click += (_, _) =>
+        {
+            var original = source.Substring(table.Span.Start, table.Span.Length);
+            CopyRequested?.Invoke(original);
+            _ = ContextMenus.CopyAsync(copy, original, Loc.T("Table copied"));
+        };
+        return new StackPanel
+        {
+            Spacing = 6,
+            Children =
+            {
+                new TextBlock { Text = Loc.T("Table preview truncated; copy the original to see all content."), Classes = { "tertiary" }, TextWrapping = TextWrapping.Wrap },
+                copy,
+                fitted,
             },
         };
     }

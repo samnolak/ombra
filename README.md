@@ -1,10 +1,11 @@
 # Ombra
 
-A cross-platform desktop client for [oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp`), the coding agent. The
-client starts omp as a separate process and controls it over JSONL RPC on stdio. The current runtime pack ships
-upstream omp 18.8.0 unchanged. For the next release, the project maintains its own omp fork: integration fixes belong
-in the runtime when that removes client workarounds; upstream changes are reviewed and integrated deliberately.
-See the [next-release roadmap](docs/NEXT_RELEASE_ROADMAP.md).
+A cross-platform desktop client with an owned coding-agent engine derived from
+[oh-my-pi](https://github.com/can1357/oh-my-pi) (`omp`). The beta source tree lives in
+[`runtime/engine`](runtime/engine): one app-owned Bun host runs independent logical chat sessions,
+connected to the .NET client by multiplexed JSONL RPC. It does not launch an omp CLI process per chat.
+Upstream changes are reviewed and integrated into our source, then shipped as a verified immutable engine pack.
+See the [next-release roadmap](docs/NEXT_RELEASE_ROADMAP.md) for implementation and verification status.
 
 The client is built with .NET 10 and Avalonia and lives in [`avalonia/`](avalonia). It is an independent project,
 not an official product of the omp, Bun, Anthropic or OpenAI projects.
@@ -82,6 +83,10 @@ The versions are the ones [.NET 10 supports](https://github.com/dotnet/core/blob
 .NET installation needed) and not signed with Apple or Microsoft certificates: macOS 15+ asks you to allow the first
 start in *Privacy & Security* (the [user guide](avalonia/docs/USER_GUIDE.md#install) has the steps). Releases and
 their update feed are signed with the project's release key, and the app checks that signature before installing.
+Unicode filename matching uses the operating system's globalization data. Linux installations also need the
+distribution's ICU runtime package (`libicu` / `libicuNN`, depending on the distribution); Windows and macOS
+provide this data with the OS. Do not enable .NET globalization-invariant mode: it disables Unicode normalization
+([.NET behavior and dependencies](https://github.com/dotnet/runtime/blob/main/docs/design/features/globalization-invariant-mode.md)).
 
 Every release package is started on CI with a clean home folder (self-test: native libraries, omp install, omp over
 RPC) on macOS arm64, macOS x64 (Rosetta), Windows x64 and Linux x64; the arm64 Linux and Windows packages are
@@ -95,7 +100,7 @@ Requires the .NET 10 SDK ([`avalonia/global.json`](avalonia/global.json)). From 
 
 ```
 dotnet build Ombra.sln
-dotnet run --project src/Ombra.App             # first run offers to install omp; or --config <ombra.local.json>
+dotnet run --project src/Ombra.App             # first run offers engine setup; or --config <ombra.local.json>
 dotnet test tests/Ombra.Tests                  # real-omp and acceptance tests run only when OMBRA_TEST_CONFIG is set
 dotnet build Ombra.sln -c Release && tools/ci/real-omp-smoke.sh <work-dir>
                                                 # installs the pinned runtime and runs those tests against a stand-in

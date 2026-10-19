@@ -1,8 +1,10 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Presenters;
 using Avalonia.Input.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Input;
+using Avalonia.Input.TextInput;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -10,6 +12,8 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App.Services;
 using Ombra.App.ViewModels;
+using Ombra.App.Controls;
+using Ombra.App.Localization;
 
 namespace Ombra.App.Views;
 
@@ -17,9 +21,12 @@ namespace Ombra.App.Views;
 public sealed partial class MainWindow : Window
 {
     private const double NarrowWidth = 760;
+    private TextInputMethodClient? _textInputClient;
+    private object? _textInputOwner;
 
     /// <summary>OS notifications (chosen per platform by the composition root).</summary>
     public Ombra.App.Platform.INotifier Notifier { get; set; } = new Ombra.App.Platform.NoNotifier();
+    public Ombra.App.Platform.IDockAttention? DockAttention { get; set; }
 
     /// <summary>Opens the chat of the last notification while the window was in the background (where activating the
     /// window is the notification's click).</summary>
@@ -30,12 +37,43 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         // macOS: the top row is the window's title bar (MainWindow.Chrome.cs)
         SetUpChrome();
+        // Observe the same client the platform IME uses, after the focused editor supplies it. macOS asks every newly
+        // focused element; one that gives no client (the conversation, the sidebar) takes no text of its own.
+        AddHandler(TextInputMethodClientRequestedEvent, (_, e) =>
+        {
+            if (e.Client is null || !ReferenceEquals(e.Source, FocusManager?.GetFocusedElement())) return;
+            _textInputClient = e.Client;
+            _textInputOwner = e.Source;
+        }, RoutingStrategies.Bubble, handledEventsToo: true);
+        AddHandler(LostFocusEvent, (_, e) =>
+        {
+            if (!ReferenceEquals(e.Source, _textInputOwner)) return;
+            _textInputClient = null;
+            _textInputOwner = null;
+        }, RoutingStrategies.Bubble, handledEventsToo: true);
+        // TextBox itself leaves preedit keys unhandled. Keep them out of application shortcuts,
+        // including dictation, suggestions and the window's abort, without changing IME state.
+        AddHandler(KeyDownEvent, GuardCompositionKey, RoutingStrategies.Tunnel);
         // Dictation keys first (tunnel): Ctrl/⌘+Shift+Space toggles it anywhere; while the bar shows, Esc cancels and
         // Enter finishes — before the composer's own Enter could send.
         AddHandler(KeyDownEvent, (_, e) => { if (Vm is { } vm) Ombra.App.Controls.DictationBar.HandleKey(vm, e); }, RoutingStrategies.Tunnel);
-        // 1–9 answer the card (Claude Code's menus): 1 Allow / 2 Deny, or a numbered choice. Not while typing: only when
-        // the keyboard is outside text fields, or in the message box while it is empty.
-        AddHandler(KeyDownEvent, OnDigitForDialog, RoutingStrategies.Tunnel);
+        // Authorization and numeric dispatch share one handler: independent tunnel subscriptions must not decide order.
+        AddHandler(KeyDownEvent, (sender, e) =>
+        {
+            GuardApprovalKeyboard(sender, e);
+            OnDigitForDialog(sender, e);
+        }, RoutingStrategies.Tunnel);
+        AddHandler(KeyUpEvent, (_, e) =>
+        {
+            _pressedApprovalKeys.Remove(e.Key);
+            _releasedApprovalKeys.Add(e.Key);
+        }, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerPressedEvent, GuardApprovalPointerPress, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerReleasedEvent, GuardApprovalPointerRelease, RoutingStrategies.Tunnel, handledEventsToo: true);
+        DialogHost.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == ContentControl.ContentProperty) _approvalKeyboardSince = System.Diagnostics.Stopwatch.GetTimestamp();
+        };
         AddHandler(TextInputEvent, (_, e) => { if (_swallowText) { _swallowText = false; e.Handled = true; } }, RoutingStrategies.Tunnel);
         Composer.AddHandler(KeyDownEvent, OnComposerKeyDown, RoutingStrategies.Tunnel);
         // After the box took the typed text (its own handler marks it handled): "@" and a name open the files menu
@@ -67,22 +105,56 @@ public sealed partial class MainWindow : Window
             Dispatcher.UIThread.Post(CenterCurrentSettingsTab, DispatcherPriority.Background);
         };
         CardsScroll.PropertyChanged += (_, e) => { if (e.Property == BoundsProperty || e.Property == ScrollViewer.MaxHeightProperty) FitCardsShadowRoom(); };
+        CardsScroll.LayoutUpdated += (_, _) => KeepDialogAnswerInView();
         SidebarScrim.PointerPressed += (_, e) => { if (Vm is { ShowSidebar: true } vm) { vm.ToggleSidebarCommand.Execute(null); e.Handled = true; } };
         WireSidebarGrip();
+        WireSplitters(); // MainWindow.Splitters.cs: double-click restores a panel's default size
+        WireWindowLayout();
+        WireTypeToFocus(); // MainWindow.TypeToFocus.cs: typing in the conversation or sidebar writes in the composer
+        WireKeyboardFocus();
+        // A note that closes by itself waits while it is read (hovered) or used from the keyboard
+        SessionCardHost.PropertyChanged += (_, e) =>
+        {
+            if (e.Property == IsPointerOverProperty || e.Property == IsKeyboardFocusWithinProperty)
+                Vm?.HoldTimedCard(SessionCardHost.IsPointerOver || SessionCardHost.IsKeyboardFocusWithin);
+        };
         // Ctrl+Tab / Ctrl+Shift+Tab: the next / previous session in the sidebar (before Tab moves the focus)
         AddHandler(KeyDownEvent, (_, e) =>
         {
-            if (e.Key != Key.Tab || (e.KeyModifiers & ~KeyModifiers.Shift) != KeyModifiers.Control || Vm is not { IsSettingsOpen: false, IsImageViewerOpen: false } vm) return;
+            if (e.Handled || e.Key != Key.Tab || (e.KeyModifiers & ~KeyModifiers.Shift) != KeyModifiers.Control
+                || Vm is not { IsSettingsOpen: false, IsImageViewerOpen: false } vm || IsBrowserShortcutContext()) return;
             vm.CycleSession(e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? -1 : 1);
             e.Handled = true;
+        }, RoutingStrategies.Tunnel);
+        // ⌘1–⌘9: the sidebar's nth chat; ⌘[ / ⌘]: back and forward through the chats shown; ⌥⌘A: the next chat that
+        // waits on you (MainViewModel.SidebarNav.cs). Ctrl in place of ⌘ off macOS.
+        AddHandler(KeyDownEvent, (_, e) =>
+        {
+            if (e.Handled || Vm is not { IsSettingsOpen: false, IsImageViewerOpen: false } vm || IsBrowserShortcutContext()) return;
+            var command = this.GetPlatformSettings()?.HotkeyConfiguration.CommandModifiers ?? KeyModifiers.Control;
+            if (e.KeyModifiers == command)
+            {
+                var n = e.Key is >= Key.D1 and <= Key.D9 ? e.Key - Key.D0 : 0;
+                if (n > 0) vm.OpenNthSession(n);
+                else if (e.Key == Key.OemOpenBrackets) vm.NavigateHistory(back: true);
+                else if (e.Key == Key.OemCloseBrackets) vm.NavigateHistory(back: false);
+                else return;
+                e.Handled = true;
+            }
+            else if (e.KeyModifiers == (command | KeyModifiers.Alt) && e.Key == Key.A)
+            {
+                vm.OpenNextWaiting();
+                e.Handled = true;
+            }
         }, RoutingStrategies.Tunnel);
         SettingsScroll.SizeChanged += (_, e) => SettingsColumn.Width = Math.Max(0, Math.Min(SettingsColumn.MaxWidth, e.NewSize.Width - SettingsColumn.Margin.Left - SettingsColumn.Margin.Right));
         Ombra.App.Controls.SideScrollStrip.Attach(SettingsNavStrip);
         Ombra.App.Controls.SideScrollStrip.Attach(TerminalTabScroller);
         RenameBox.AddHandler(KeyDownEvent, OnRenameKeyDown, RoutingStrategies.Tunnel);
+        WireFindKeys(); // MainWindow.Find.cs: ⌘F, ⌘G, the find bar's Enter and Esc
         // Files and images dropped anywhere on the window go to the composer.
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
-        AddHandler(DragDrop.DragLeaveEvent, (_, _) => ComposerBox.Classes.Set("dragover", false));
+        AddHandler(DragDrop.DragLeaveEvent, (_, _) => ClearDropFeedback());
         AddHandler(DragDrop.DropEvent, OnDrop);
         DragDrop.SetAllowDrop(this, true);
         RenameBox.LostFocus += (_, _) => { if (Vm is { IsRenaming: true } vm) vm.CommitRenameCommand.Execute(null); };
@@ -90,11 +162,10 @@ public sealed partial class MainWindow : Window
         // The model picker works from the keyboard: it opens with the filter focused, Enter takes the first match
         // (or the entry chosen with the arrows), Esc closes it.
         ModelPopup.Opened += (_, _) => Dispatcher.UIThread.Post(() => ModelFilterBox.Focus(), DispatcherPriority.Background);
-        // Closing hands focus back to the chip that opened it; after a choice it goes to the composer instead (else the
-        // next Space re-opens the picker and the message goes into its filter). Esc returns to the chip.
+        // Cancelling returns to the opener. Choosing deliberately starts a message, so Space cannot reopen the chip.
         ModelPopup.Closed += (_, _) => Dispatcher.UIThread.Post(() =>
         {
-            if (_modelMenuEscaped) ModelButton.Focus();
+            if (_modelMenuEscaped) ReturnFocus(_modelFocusReturn);
             else if (Composer.IsEffectivelyEnabled) Composer.Focus();
             else RestoreLostFocus();
             _modelMenuEscaped = false;
@@ -106,6 +177,7 @@ public sealed partial class MainWindow : Window
             AssistantRowViewModel.CopyRequested += CopyToClipboard;
         };
         Closed += (_, _) => AssistantRowViewModel.CopyRequested -= CopyToClipboard;
+        Closed += (_, _) => DockAttention?.Update(0, false);
         // Like native apps, the caret blinks only in the active window, and (like GTK's cursor-blink-timeout) stops
         // blinking after a while without input. A blinking caret repaints twice a second: with software rendering
         // that alone cost 2–5% of a core at idle (measured). Not relying on activation
@@ -122,12 +194,20 @@ public sealed partial class MainWindow : Window
         Activated += (_, _) =>
         {
             ResumeCaret();
+            _approvalKeyboardSince = System.Diagnostics.Stopwatch.GetTimestamp();
+            _releasedApprovalKeys.Clear();
+            _approvalPointerDialog = null;
+            _approvalPointerButton = null;
+            _approvalPointer = null;
             Vm?.SetWindowActive(true);
             // Where the notification is the flashing window itself, bringing it to the front is its click
             if (Notifier.ClickActivatesWindow && Interlocked.Exchange(ref _notificationClick, null) is { } open) open();
         };
         Deactivated += (_, _) =>
         {
+            _approvalPointerDialog = null;
+            _approvalPointerButton = null;
+            _approvalPointer = null;
             _caretIdle.Stop();
             StopCaretBlink(visible: false);
             Vm?.SetWindowActive(false);
@@ -147,14 +227,6 @@ public sealed partial class MainWindow : Window
         ComposerLeft.SizeChanged += (_, e) => { if (e.WidthChanged) QueueComposerFit(); };
         ComposerRight.SizeChanged += (_, e) => { if (e.WidthChanged) QueueComposerFit(); };
         ComposerBox.PropertyChanged += (_, e) => { if (e.Property == BoundsProperty && e.OldValue is Rect o && e.NewValue is Rect n && o.Height != n.Height || e.Property == MarginProperty) FitPanels(); };
-        // A dragged right panel or Events width, and the terminal's height, are kept for the next time they open (a
-        // splitter between two docked panels resizes both)
-        RightPanelSplitter.DragCompleted += (_, _) => KeepDraggedWidths();
-        DebugSplitter.DragCompleted += (_, _) => KeepDraggedWidths();
-        TerminalSplitter.DragCompleted += (_, _) =>
-        {
-            if (WorkArea.RowDefinitions[2].ActualHeight > 0) _terminalHeight = WorkArea.RowDefinitions[2].ActualHeight;
-        };
     }
 
     private bool _composerFitQueued;
@@ -179,7 +251,9 @@ public sealed partial class MainWindow : Window
     private const double ChatMinWidth = 420, RightPanelMinWidth = 320, DebugMinWidth = 320;
     /// <summary>The conversation's least height beside an open terminal, and the cards' least room in it (their scroller's floor).</summary>
     private const double ChatMinHeight = 300, TerminalMinHeight = 120, CardsMinHeight = 96;
-    private double _rightPanelWidth = 480, _debugWidth = 420, _terminalHeight = 260;
+    /// <summary>The panels' sizes before any drag, and after a double-click on their splitter (MainWindow.Splitters).</summary>
+    private const double RightPanelDefaultWidth = 480, DebugDefaultWidth = 420, TerminalDefaultHeight = 260;
+    private double _rightPanelWidth = RightPanelDefaultWidth, _debugWidth = DebugDefaultWidth, _terminalHeight = TerminalDefaultHeight;
 
     private void KeepDraggedWidths()
     {
@@ -267,10 +341,15 @@ public sealed partial class MainWindow : Window
             panel.ZIndex = !open ? 0 : panel == DebugPanel ? 13 : 12;
         }
         var terminal = FitTerminal(vm);
-        // Cards (an approval, setup, todos) never push the composer off a low window: they scroll instead
-        // (40 = the message box's margins and some air; its top margin grows by the pet's band when a pet is shown)
-        CardsScroll.MaxHeight = Math.Max(CardsMinHeight, Bounds.Height - terminal - TitleBarHeight - Math.Max(ComposerBox.Bounds.Height, 96) - 34 - ComposerBox.Margin.Top
-            - (ComposerFooter.IsVisible ? Math.Max(0, ComposerFooter.Bounds.Height + ComposerFooter.Margin.Top) : 0));
+        // Share the vertical budget: cards scroll and the input shrinks before either covers the transcript.
+        const double transcriptRoom = 64;
+        var footer = ComposerFooter.IsVisible
+            ? Math.Max(0, ComposerFooter.Bounds.Height + ComposerFooter.Margin.Top + ComposerFooter.Margin.Bottom) : 0;
+        var available = Bounds.Height - terminal - TitleBarHeight - HeaderBar.Bounds.Height
+            - ComposerBox.Margin.Top - ComposerBox.Margin.Bottom - transcriptRoom - footer;
+        var composerChrome = Math.Max(0, ComposerBox.Bounds.Height - Composer.Bounds.Height);
+        Composer.MaxHeight = Math.Clamp(available - CardsMinHeight - composerChrome, 48, 214);
+        CardsScroll.MaxHeight = Math.Max(CardsMinHeight, available - Math.Max(ComposerBox.Bounds.Height, 96));
         UpdateHeaderDensity();
         FitEmptyState();
     }
@@ -547,6 +626,8 @@ public sealed partial class MainWindow : Window
             foreach (var b in new[] { ThinkingBox, AttachButton, ProjectButton, ApprovalButton })
                 if (b.Flyout is Flyout { Content: Control content }) content.DataContext = vm;
             vm.ScrollToLatestRequested += FollowLatest;
+            WireFindModel(vm); // MainWindow.Find.cs
+            if (OperatingSystem.IsMacOS()) WireBrowserWindow(vm); // MainWindow.BrowserWindow.cs
             vm.ModelRowsNavigated += FocusModelRow;
             vm.FocusComposerRequested += () => Dispatcher.UIThread.Post(() =>
             {
@@ -556,9 +637,6 @@ public sealed partial class MainWindow : Window
             }, DispatcherPriority.Background);
             vm.Rows.CollectionChanged += (_, _) => UpdateEmptyLayout(vm);
             UpdateEmptyLayout(vm);
-            // The rail's Skills: the settings page scrolls to that section once the page is laid out (after its own
-            // scroll to the top, posted at Background)
-            vm.SettingsAnchorRequested += anchor => Dispatcher.UIThread.Post(() => ScrollSettingsTo(anchor), DispatcherPriority.ApplicationIdle);
             vm.OpenUrlRequested += url => _ = Launcher.LaunchUriAsync(new Uri(url));
             // "Restart now" is the user's own choice to quit (it refuses during a run), and the update script already
             // waits for this process: asking again could leave it waiting for a quit that comes much later.
@@ -566,7 +644,11 @@ public sealed partial class MainWindow : Window
             vm.PickFolderRequested += PickFolderAsync;
             vm.PickImagesRequested += PickImagesAsync;
             vm.SaveFileRequested += SaveFileAsync;
-            vm.CaretToEndRequested += () => Dispatcher.UIThread.Post(() => Composer.CaretIndex = Composer.Text?.Length ?? 0);
+            vm.CaretToEndRequested += () => Dispatcher.UIThread.Post(() =>
+            {
+                Composer.Focus();
+                Composer.CaretIndex = Composer.Text?.Length ?? 0;
+            });
             vm.Terminals.CollectionChanged += (_, e) => SyncTerminals(vm);
             vm.AttentionRequested += (title, message, open) =>
             {
@@ -579,10 +661,11 @@ public sealed partial class MainWindow : Window
                 if (!IsActive) _notificationClick = open;
                 Notifier.Notify(title, message, TryGetPlatformHandle()?.Handle ?? 0, Clicked);
             };
+            vm.DockAttentionChanged += (count, request) => DockAttention?.Update(count, request);
             // Each chat keeps where its reader was while another one is shown (MainWindow.ChatScroll.cs)
             vm.SaveScrollRequested += SaveChatScroll;
             vm.RestoreScrollRequested += RestoreChatScroll;
-            vm.CopyTextRequested += text => { if (Clipboard is { } c) _ = c.SetTextAsync(text); };
+            vm.CopyTextRequested += text => ContextMenus.CopyAsync(this, text);
             // The event list follows the newest entry while it is open (once per UI apply, not per entry).
             vm.DebugLogAppended += () =>
             {
@@ -603,9 +686,6 @@ public sealed partial class MainWindow : Window
                     or nameof(MainViewModel.ActivePane) or nameof(MainViewModel.IsTerminalOpen) or nameof(MainViewModel.SidebarWidth))
                     FitPanels();
                 if (e.PropertyName == nameof(MainViewModel.ShowSetupScreen)) UpdateEmptyLayout(vm);
-                // A question on a low window: its answer buttons (at the card's end) in view, not its top
-                if (e.PropertyName == nameof(MainViewModel.HasDialog) && vm.HasDialog)
-                    Dispatcher.UIThread.Post(() => CardsScroll.ScrollToEnd(), DispatcherPriority.Background);
                 // Dictation over: the typing goes on in the message field
                 if (e.PropertyName == nameof(MainViewModel.IsDictationBarVisible) && !vm.IsDictationBarVisible)
                     Dispatcher.UIThread.Post(() => Composer.Focus(), DispatcherPriority.Background);
@@ -637,20 +717,6 @@ public sealed partial class MainWindow : Window
         SettingsNavStrip.Offset = new Vector(Math.Clamp(x, 0, max), 0);
     }
 
-    /// <summary>
-    /// The settings page scrolled so that a section is at its top ("skills": the Skills card of Plugins and skills,
-    /// named SkillsSection in Views/Settings/PluginsSettings).
-    /// </summary>
-    private void ScrollSettingsTo(string anchor)
-    {
-        var name = anchor switch { "skills" => "SkillsSection", _ => null };
-        if (name is null || !SettingsPage.IsVisible) return;
-        var section = SettingsColumn.GetVisualDescendants().OfType<Control>().FirstOrDefault(c => c.Name == name);
-        if (section?.TranslatePoint(default, SettingsColumn) is not { } at) return;
-        var max = Math.Max(0, SettingsScroll.Extent.Height - SettingsScroll.Viewport.Height);
-        SettingsScroll.Offset = new Vector(0, Math.Clamp(SettingsColumn.Margin.Top + at.Y - 12, 0, max));
-    }
-
     protected override void OnLoaded(RoutedEventArgs e)
     {
         base.OnLoaded(e);
@@ -673,11 +739,20 @@ public sealed partial class MainWindow : Window
                 KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.M, command | KeyModifiers.Shift), Command = vm.ToggleDeviceModeCommand });
                 // The right panel's tools (MainViewModel.Panes.cs): Files, Changes, Plan, Background tasks
                 KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.F, command | KeyModifiers.Shift), Command = vm.TogglePaneCommand, CommandParameter = SidePane.Files });
-                KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.G, command | KeyModifiers.Shift), Command = vm.TogglePaneCommand, CommandParameter = SidePane.Changes });
+                // ⇧⌘G is Find Previous while the find bar is open (window key bindings run before its tunnel handler)
+                KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.G, command | KeyModifiers.Shift), Command = new CommunityToolkit.Mvvm.Input.RelayCommand(() =>
+                {
+                    if (vm.IsFindOpen) vm.FindPreviousCommand.Execute(null);
+                    else vm.TogglePaneCommand.Execute(SidePane.Changes);
+                }) });
                 KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.P, command | KeyModifiers.Shift), Command = vm.TogglePaneCommand, CommandParameter = SidePane.Plan });
                 KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.T, command | KeyModifiers.Shift), Command = vm.TogglePaneCommand, CommandParameter = SidePane.Tasks });
                 // Claude Code's shortcut sheet
                 KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.OemQuestion, command), Command = vm.ToggleShortcutsCommand });
+                // The command palette (MainViewModel.Palette.cs): ⌘K everything, ⌘P the project's files. Both were free
+                // (⇧⌘F/G/P/T/B/S/M are the panes and the preview, ⌘F/⌘G find in chat); ⌘P is Codex's and VS Code's "Go to file"
+                KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.K, command), Command = vm.OpenPaletteCommand });
+                KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.P, command), Command = vm.OpenFilePaletteCommand });
             }
         }
         CloseOnChoice(ThinkingBox);
@@ -713,6 +788,7 @@ public sealed partial class MainWindow : Window
     {
         foreach (var gone in _terminals.Keys.Except(vm.Terminals).ToList())
         {
+            gone.ReadLines = null;
             KillTerminal(_terminals[gone]);
             TerminalHost.Children.Remove(_terminals[gone]);
             _terminals.Remove(gone);
@@ -736,7 +812,10 @@ public sealed partial class MainWindow : Window
                 if (e.PropertyName == nameof(TerminalViewModel.IsSelected) && t.IsSelected)
                     Dispatcher.UIThread.Post(() => FocusTerminal(control), DispatcherPriority.Background);
             };
+            // What the agent's terminal_read sees (MainViewModel.HostTools.cs)
+            t.ReadLines = max => control.Terminal is { } terminal ? Ombra.App.Controls.TerminalText.Tail(terminal, max) : [];
             _terminals[t] = control;
+            TerminalMenus.Attach(control);
             TerminalHost.Children.Add(control);
         }
     }
@@ -801,9 +880,10 @@ public sealed partial class MainWindow : Window
         return pids;
     }
 
-    private void CopyToClipboard(string text)
+    private void CopyToClipboard(AssistantRowViewModel row, string text)
     {
-        if (IsActive && Clipboard is { } clipboard) _ = clipboard.SetTextAsync(text);
+        if (DataContext is MainViewModel vm && vm.Rows.Contains(row))
+            _ = ContextMenus.CopyAsync(this, text, Loc.T("Copied"));
     }
 
     /// <summary>
@@ -821,8 +901,6 @@ public sealed partial class MainWindow : Window
     }
 
     private bool IsModelMenuOpenNow() => ModelPopup.IsOpen;
-
-    private bool _modelMenuEscaped;
 
     private void OnModelMenuKeyDown(object? sender, KeyEventArgs e)
     {
@@ -918,6 +996,14 @@ public sealed partial class MainWindow : Window
         return folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
     }
 
+    private void GuardCompositionKey(object? sender, KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Escape or Key.Enter or Key.Up or Key.Down or Key.Tab)) return;
+        if (ReferenceEquals(_textInputOwner, FocusManager?.GetFocusedElement())
+            && _textInputClient?.TextViewVisual is TextPresenter { PreeditText.Length: > 0 })
+            e.Handled = true;
+    }
+
     private void OnComposerKeyDown(object? sender, KeyEventArgs e)
     {
         if (Vm is not { } vm) return;
@@ -959,6 +1045,11 @@ public sealed partial class MainWindow : Window
         {
             e.Handled = true;
         }
+        else if (e.Key == Key.Enter && e.KeyModifiers == (KeyModifiers.Alt | KeyModifiers.Shift))
+        {
+            e.Handled = true;
+            if (vm.InterruptAndSendCommand.CanExecute(null)) vm.InterruptAndSendCommand.Execute(null);
+        }
         else if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.Alt)
         {
             e.Handled = true;
@@ -991,9 +1082,10 @@ public sealed partial class MainWindow : Window
     /// The message box's paste: files on the clipboard attach (images) or go in as paths, an image attaches, a long
     /// text becomes a chip (sent in full), and anything else goes in at the caret as the box's own paste would.
     /// </summary>
-    private async Task PasteAsync()
+    internal async Task PasteAsync()
     {
-        if (Clipboard is not { } clipboard || Vm is not { } vm) return;
+        if (Clipboard is not { } clipboard || Vm is not { } vm || vm.IsPasting) return;
+        vm.IsPasting = true;
         try
         {
             var files = await clipboard.TryGetFilesAsync();
@@ -1007,13 +1099,16 @@ public sealed partial class MainWindow : Window
                 using (bitmap) vm.TryAddImage(ImageAttachments.FromBitmap("pasted.png", bitmap), "Pasted image");
                 return;
             }
-            if (await clipboard.TryGetTextAsync() is not { Length: > 0 } text || vm.TryAddPastedText(text)) return;
-            Composer.SelectedText = text;
+            if (await clipboard.TryGetTextAsync() is not { Length: > 0 } text) return;
+            text = vm.CleanPastedText(text);
+            if (text.Length == 0) return;
+            if (!vm.TryAddPastedText(text)) Composer.SelectedText = text;
         }
         catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or IOException)
         {
             vm.ComposerMessage = "Could not read the clipboard: " + ex.Message;
         }
+        finally { vm.IsPasting = false; }
     }
 
     /// <summary>
@@ -1026,18 +1121,39 @@ public sealed partial class MainWindow : Window
         ModelPopup.VerticalOffset = -at.Y - 6;
     }
 
+    private bool IsProjectDrop(DragEventArgs e) =>
+        Sidebar.IsEffectivelyVisible && new Rect(Sidebar.Bounds.Size).Contains(e.GetPosition(Sidebar))
+        && e.DataTransfer.TryGetFiles()?.Any(f => f is IStorageFolder) == true;
+
+    private void ClearDropFeedback()
+    {
+        ComposerBox.Classes.Set("dragover", false);
+        FileDropOverlay.IsVisible = false;
+        ProjectDropOverlay.IsVisible = false;
+    }
+
     private void OnDragOver(object? sender, DragEventArgs e)
     {
         var hasFiles = e.DataTransfer.Contains(DataFormat.File);
+        var project = hasFiles && IsProjectDrop(e);
         e.DragEffects = hasFiles ? DragDropEffects.Copy : DragDropEffects.None;
-        ComposerBox.Classes.Set("dragover", hasFiles);
+        ComposerBox.Classes.Set("dragover", hasFiles && !project);
+        FileDropOverlay.IsVisible = hasFiles && !project;
+        ProjectDropOverlay.IsVisible = project;
     }
 
     private async void OnDrop(object? sender, DragEventArgs e)
     {
-        ComposerBox.Classes.Set("dragover", false);
+        var project = IsProjectDrop(e);
+        ClearDropFeedback();
         if (Vm is not { } vm || e.DataTransfer.TryGetFiles() is not { Length: > 0 } files) return;
         e.Handled = true;
+        if (project)
+        {
+            foreach (var folder in files.OfType<IStorageFolder>())
+                if (folder.TryGetLocalPath() is { } path) vm.AddProjectFolder(path);
+            return;
+        }
         await vm.AddFilesAsync([.. files.Select(f => f.TryGetLocalPath()).OfType<string>()]);
         Composer.Focus();
     }
@@ -1054,14 +1170,118 @@ public sealed partial class MainWindow : Window
     }
 
     private bool _swallowText;
+    private readonly HashSet<Key> _pressedApprovalKeys = [];
+    private readonly HashSet<Key> _releasedApprovalKeys = [];
+    private DialogViewModel? _approvalKeyboardDialog;
+    private long _approvalKeyboardSince = System.Diagnostics.Stopwatch.GetTimestamp();
+    private DialogViewModel? _approvalPointerDialog;
+    private Button? _approvalPointerButton;
+    private IPointer? _approvalPointer;
+
+    private static Button? FindApprovalActionButton(object? source)
+    {
+        for (var visual = source as Visual; visual is not null; visual = visual.GetVisualParent())
+            if (visual is Button button)
+                return button.Name is "AllowButton" or "AllowSessionButton" or "AllowProjectButton" or "AllowAlwaysButton"
+                    ? button : null;
+        return null;
+    }
+
+    private void GuardApprovalPointerPress(object? sender, PointerPressedEventArgs e)
+    {
+        _approvalPointerDialog = null;
+        _approvalPointerButton = null;
+        _approvalPointer = null;
+        if (FindApprovalActionButton(e.Source) is not { } button || !DialogHost.IsVisualAncestorOf(button)
+            || Vm?.CurrentDialog is not { IsApproval: true } dialog) return;
+        if (e.Handled || Vm.IsSettingsOpen || Vm.IsImageViewerOpen || Vm.IsShortcutsOpen || e.ClickCount != 1
+            || !e.GetCurrentPoint(button).Properties.IsLeftButtonPressed
+            || System.Diagnostics.Stopwatch.GetElapsedTime(_approvalKeyboardSince) < TimeSpan.FromMilliseconds(500))
+        {
+            e.Handled = true;
+            return;
+        }
+        _approvalPointerDialog = dialog;
+        _approvalPointerButton = button;
+        _approvalPointer = e.Pointer;
+    }
+
+    private void GuardApprovalPointerRelease(object? sender, PointerReleasedEventArgs e)
+    {
+        var button = FindApprovalActionButton(e.Source);
+        var approved = button is not null && ReferenceEquals(button, _approvalPointerButton)
+            && ReferenceEquals(e.Pointer, _approvalPointer)
+            && ReferenceEquals(Vm?.CurrentDialog, _approvalPointerDialog)
+            && Vm is { IsSettingsOpen: false, IsImageViewerOpen: false, IsShortcutsOpen: false }
+            && DialogHost.IsVisualAncestorOf(button);
+        _approvalPointerDialog = null;
+        _approvalPointerButton = null;
+        _approvalPointer = null;
+        if (button is null || approved) return;
+        e.Handled = true;
+        e.Pointer.Capture(null);
+    }
+
+    private void GuardApprovalKeyboard(object? sender, KeyEventArgs e)
+    {
+        var repeated = !_pressedApprovalKeys.Add(e.Key);
+        if (Vm?.CurrentDialog is not { IsApproval: true } dialog)
+        {
+            _approvalKeyboardDialog = null;
+            return;
+        }
+        if (!ReferenceEquals(_approvalKeyboardDialog, dialog))
+        {
+            _approvalKeyboardDialog = dialog;
+            // A release observed for the previous card does not establish intent for its replacement. Check
+            // identity at input time as well: binding/layout work can consume the whole appearance interval.
+            _releasedApprovalKeys.Clear();
+        }
+        var focused = FocusManager?.GetFocusedElement();
+        var accessAllow = IsAllowAccessKey(e);
+        var digitAllow = e.Key is Key.D1 or Key.NumPad1 && e.KeyModifiers == KeyModifiers.None;
+        var buttonActivation = e.Key is Key.Enter or Key.Space
+            && FindApprovalActionButton(focused) is { } button && DialogHost.IsVisualAncestorOf(button);
+        if (digitAllow && (focused is not Visual visual || !DialogHost.IsVisualAncestorOf(visual))) return;
+        if (!accessAllow && !digitAllow && !buttonActivation) return;
+        // A new/replaced card or window activation cannot consume input already in flight.
+        // A key held outside the window is unknowable until its own release, even after the timer.
+        if (Vm.IsImageViewerOpen || Vm.IsSettingsOpen || Vm.IsShortcutsOpen || repeated || !_releasedApprovalKeys.Contains(e.Key)
+            || System.Diagnostics.Stopwatch.GetElapsedTime(_approvalKeyboardSince) < TimeSpan.FromMilliseconds(500)
+            || accessAllow && focused is TextBox textBox && !ReferenceEquals(textBox, Composer))
+        {
+            e.Handled = true;
+            if (!_releasedApprovalKeys.Contains(e.Key) && !repeated && !Vm.IsImageViewerOpen && !Vm.IsSettingsOpen && !Vm.IsShortcutsOpen)
+                Vm.ExplainApprovalKeyboardGuard();
+        }
+    }
+
+    private bool IsAllowAccessKey(KeyEventArgs e)
+    {
+        if (!e.KeyModifiers.HasFlag(KeyModifiers.Alt)) return false;
+        // Read the rendered AccessText, not an English Key.A assumption: translations and keyboard layouts may
+        // choose another character. Without a symbol, unknown Alt activations must fail closed as well.
+        foreach (var visual in DialogHost.GetVisualDescendants())
+        {
+            if (visual is not Avalonia.Controls.Primitives.AccessText access
+                || access.FindAncestorOfType<Button>() is not { Name: "AllowButton" }) continue;
+            var key = access.AccessKey;
+            if (string.IsNullOrEmpty(key)) continue;
+            var ascii = key.Length == 1 ? char.ToUpperInvariant(key[0]) : '\0';
+            return e.KeySymbol is null || string.Equals(e.KeySymbol, key, StringComparison.OrdinalIgnoreCase)
+                || ascii is >= 'A' and <= 'Z' && e.Key == Key.A + (ascii - 'A');
+        }
+        return true;
+    }
 
     private void OnDigitForDialog(object? sender, KeyEventArgs e)
     {
         // Not while the image viewer holds the keyboard: the card behind it is out of sight
-        if (Vm?.CurrentDialog is not { } dialog || Vm.IsImageViewerOpen || e.KeyModifiers != KeyModifiers.None) return;
+        if (e.Handled || Vm?.CurrentDialog is not { } dialog || Vm.IsImageViewerOpen || e.KeyModifiers != KeyModifiers.None) return;
         var digit = e.Key is >= Key.D1 and <= Key.D9 ? e.Key - Key.D0 : e.Key is >= Key.NumPad1 and <= Key.NumPad9 ? e.Key - Key.NumPad0 : 0;
         if (digit == 0) return;
         var focused = FocusManager?.GetFocusedElement();
+        if (dialog.IsApproval && digit == 1 && (focused is not Visual visual || !DialogHost.IsVisualAncestorOf(visual))) return;
         var typing = focused is TextBox box && !(ReferenceEquals(box, Composer) && string.IsNullOrEmpty(Composer.Text));
         if (typing || !dialog.TryPick(digit)) return;
         e.Handled = true;
@@ -1089,6 +1309,13 @@ public sealed partial class MainWindow : Window
         if (e.Key == Key.Escape && Vm is { IsShortcutsOpen: true } sheet)
         {
             sheet.CloseShortcutsCommand.Execute(null);
+            e.Handled = true;
+            base.OnKeyDown(e);
+            return;
+        }
+        if (e.Key == Key.Escape && Vm is { IsPaletteOpen: true } palette)
+        {
+            palette.ClosePaletteCommand.Execute(null);
             e.Handled = true;
             base.OnKeyDown(e);
             return;

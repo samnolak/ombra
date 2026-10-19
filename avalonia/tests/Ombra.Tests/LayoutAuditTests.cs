@@ -310,7 +310,30 @@ public sealed class LayoutAuditTests
                 new Button { Classes = { "round" }, Width = 32, Height = 32, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center },
                 new Button { Classes = { "send" }, Width = 32, Height = 32, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center, [Grid.ColumnProperty] = 2 },
             } } };
-        var w = new Window { Width = 600, Height = 400, Content = new StackPanel { Spacing = 12, Margin = new Thickness(20), Children = { low, stuck, over, box, card } } };
+        // The old status badge: its text stretched to the badge, drawn at its top, above the 12 px text beside it
+        var badge = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8, Children =
+        {
+            new Border { MinHeight = 20, Padding = new Thickness(8, 1), VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                Background = Avalonia.Media.Brushes.Gray, Child = new TextBlock { Text = "Running", FontSize = 12 } },
+            new TextBlock { Text = "task", FontSize = 12, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center },
+        } };
+        // The old Nightly consent strip: an accent pill beside a default rounded rectangle
+        var pair = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8, Children =
+        {
+            new Button { Classes = { "accent" }, Content = "Use Nightly" },
+            new Button { Content = "Keep the built-in preview" },
+        } };
+        // The old Team invite: a 36 px picker beside the 32 px "Create link" pill
+        var picker = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 8, Children =
+        {
+            new ComboBox { Name = "TallPicker", MinHeight = 36 },
+            new Button { Classes = { "accent" }, Content = "Create link" },
+        } };
+        // The old Team members: one row ends with Remove, the next 8 px further in
+        Grid Row(double right) => new Grid { Classes = { "plug-row" }, ColumnDefinitions = new ColumnDefinitions("*,Auto"), Children =
+            { new Button { Content = "More", Margin = new Thickness(0, 0, right, 0), [Grid.ColumnProperty] = 1 } } };
+        var list = new Border { Classes = { "plug-list" }, Child = new StackPanel { Children = { Row(0), Row(8) } } };
+        var w = new Window { Width = 600, Height = 520, Content = new StackPanel { Spacing = 12, Margin = new Thickness(20), Children = { low, stuck, over, box, card, badge, pair, picker, list } } };
         w.Show();
         await Settle();
         var found = LayoutAudit.Run(w);
@@ -319,7 +342,32 @@ public sealed class LayoutAuditTests
         Assert.Contains(found, f => f.Kind == "overlap");
         Assert.Contains(found, f => f.Kind == "frame-centre");
         Assert.Contains(found, f => f.Kind == "frame-overflow");
+        Assert.Contains(found, f => f.Kind == "badge-baseline");
         Assert.Contains(found, f => f.Kind == "mirror");
+        Assert.Contains(found, f => f.Kind == "button-pair");
+        Assert.Contains(found, f => f.Kind == "button-pair" && f.Where.Contains("TallPicker"));
+        Assert.Contains(found, f => f.Kind == "row-edge");
         w.Close();
+    }
+
+    /// <summary>
+    /// Colours come from the tokens (Tokens.axaml, the Gui* brushes) so both themes follow: a view that writes #66000000 or
+    /// White draws the same in light and dark. The pairing QR code keeps its white quiet zone on purpose.
+    /// </summary>
+    [Fact]
+    public void Views_take_colours_from_the_tokens()
+    {
+        var src = Path.GetDirectoryName(RuntimeInstallerTests.RepoFile(Path.Combine("avalonia", "src", "Ombra.App", "Ombra.App.csproj")))!;
+        var literal = new System.Text.RegularExpressions.Regex(
+            @"\b(Background|Foreground|BorderBrush|Fill|Stroke|Color)=""(#[0-9A-Fa-f]{3,8}|White|Black|Red|Green|Blue|Gray|Grey|Yellow|Orange)""");
+        var found = Directory.EnumerateFiles(src, "*.axaml", SearchOption.AllDirectories)
+            .Where(f => !f.Split(Path.DirectorySeparatorChar).Any(d => d is "bin" or "obj"))
+            .Where(f => !Path.GetFileName(f).StartsWith("Styles", StringComparison.Ordinal) && Path.GetFileName(f) != "Tokens.axaml")
+            .SelectMany(f => { var lines = File.ReadAllLines(f); return lines.Select((line, i) => (f, line, i, next: i + 1 < lines.Length ? lines[i + 1] : "")); })
+            // An OpacityMask's stops are alpha, not a colour of the theme
+            .Where(x => literal.IsMatch(x.line) && !x.line.Contains("GradientStop", StringComparison.Ordinal) && !x.next.Contains("PairingQr", StringComparison.Ordinal))
+            .Select(x => $"{Path.GetFileName(x.f)}:{x.i + 1}: {x.line.Trim()}")
+            .ToList();
+        Assert.True(found.Count == 0, "Use a Gui* token (DynamicResource) instead of a literal colour:\n" + string.Join("\n", found));
     }
 }

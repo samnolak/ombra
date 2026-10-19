@@ -3,6 +3,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Media.Imaging;
 using Avalonia.VisualTree;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views.Session;
 using Ombra.App.Views.Settings;
@@ -12,8 +13,8 @@ using static Ombra.Tests.SessionAreaTests;
 namespace Ombra.Tests;
 
 /// <summary>
-/// Plan usage of the signed-in providers (<c>omp usage --json</c>, a side process) in the context ring's popover and
-/// in Settings → Model providers, and this session's tokens and cost (<c>get_session_stats</c>).
+/// Full plan reports and saved resets only in Settings → Model providers; active account stages, context and session
+/// totals in the composer, without launching a CLI report process.
 /// </summary>
 public sealed class ProviderUsageTests
 {
@@ -43,24 +44,30 @@ public sealed class ProviderUsageTests
         Assert.Equal(["5 hours", "7 days"], codex.Limits.Select(l => l.Label));
         Assert.Equal(0.16, codex.Limits[1].UsedFraction);
         Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1791978687000), codex.Limits[1].ResetsAt);
-        Assert.Equal("16% used", ProviderUsage.Amount(codex.Limits[1]));
+        Assert.Equal(Loc.F("{0:0}% used", 16.0), ProviderUsageViewModel.Amount(codex.Limits[1]));
         Assert.Equal(["Claude 5 Hour", "Claude 7 Day (Fable)"], reports[1].Limits.Select(l => l.Label));
         Assert.Null(ProviderUsage.Parse("No credentials found. Run `omp` and use /login to add accounts."));
         Assert.Empty(ProviderUsage.Parse("""{"generatedAt":1,"reports":[],"accountsWithoutUsage":[]}""")!);
 
-        // Amounts without a fraction (API spend, request quotas), and the countdown
+        // Amounts without a fraction (API spend, request quotas), and the countdown, in the app's language and culture
         var spend = new ProviderUsageLimit("x", "Monthly spend", null, 12.4, null, "usd", null, "resets", "ok");
-        Assert.Equal("$12.40 used", ProviderUsage.Amount(spend));
-        Assert.Equal("1,200 of 5,000 requests", ProviderUsage.Amount(spend with { Used = 1200, Limit = 5000, Unit = "requests" }));
-        Assert.Equal("", ProviderUsage.Amount(spend with { Used = null }));
+        Assert.Equal(Loc.F("{0} used", 12.4.ToString("$#,0.00", System.Globalization.CultureInfo.CurrentCulture)), ProviderUsageViewModel.Amount(spend));
+        Assert.Equal(Loc.F("{0} of {1}", 1200.0.ToString("#,0.##", System.Globalization.CultureInfo.CurrentCulture), 5000.0.ToString("#,0.##", System.Globalization.CultureInfo.CurrentCulture) + " requests"),
+            ProviderUsageViewModel.Amount(spend with { Used = 1200, Limit = 5000, Unit = "requests" }));
+        Assert.Equal("", ProviderUsageViewModel.Amount(spend with { Used = null }));
         var now = DateTimeOffset.UnixEpoch;
         Assert.Equal("resets in 2h 10m", ProviderUsage.ResetsIn(now.AddMinutes(130), now));
         Assert.Equal("resets in 3d 4h", ProviderUsage.ResetsIn(now.AddHours(76), now));
         Assert.Equal("resets in 45m", ProviderUsage.ResetsIn(now.AddMinutes(45), now));
         Assert.Equal("regen soon", ProviderUsage.ResetsIn(now.AddSeconds(20), now, "regen"));
+        Assert.Equal(Loc.F("resets in {0}", Loc.F("{0}h {1}m", 2, 10)), ProviderUsageViewModel.ResetsIn(now.AddMinutes(130), now, "resets"));
+        Assert.Equal(Loc.F("resets in {0}", Loc.F("{0}d", 3) + " " + Loc.F("{0}h", 4)), ProviderUsageViewModel.ResetsIn(now.AddHours(76), now, "resets"));
+        Assert.Equal(Loc.T("resets soon"), ProviderUsageViewModel.ResetsIn(now.AddSeconds(20), now, "resets"));
+        Assert.Equal("regen soon", ProviderUsageViewModel.ResetsIn(now.AddSeconds(20), now, "regen")); // omp's own word
 
         // Meter names in sentence case, by window
         Assert.Equal("5-hour limit", ProviderUsage.DisplayLabel(reports[1].Limits[0], "Claude"));
+        Assert.Equal(Loc.T("Weekly limit") + " (Fable)", ProviderUsage.DisplayLabel(reports[1].Limits[1], "Claude", Loc.T));
         Assert.Equal("Weekly limit (Fable)", ProviderUsage.DisplayLabel(reports[1].Limits[1], "Claude"));
         Assert.Equal("Weekly limit", ProviderUsage.DisplayLabel(codex.Limits[1], "ChatGPT"));
         Assert.Equal("Monthly spend", ProviderUsage.DisplayLabel(spend, "Kimi"));
@@ -89,9 +96,19 @@ public sealed class ProviderUsageTests
         Assert.Equal((3, 0, "blocked by Claude 5h, Claude Opus weekly"), (blocked.Saved, blocked.Usable, blocked.Unavailable));
         Assert.Equal(soon, blocked.SoonestExpiry!.Value, TimeSpan.FromSeconds(1));
         // omp's own reason wins; a cooldown next; none usable without a reason says so
-        Assert.Equal("not eligible for this plan", Read("""{"availableCount":1,"redeemableCount":0,"reason":"not eligible for this plan","cooldownUntil":"x"}""")!.Unavailable);
-        Assert.Equal("cooldown until 2026-10-16", Read("""{"availableCount":1,"redeemableCount":0,"cooldownUntil":"2026-10-16"}""")!.Unavailable);
-        Assert.Equal("not usable right now", Read("""{"availableCount":1,"redeemableCount":0}""")!.Unavailable);
+        var omps = Read("""{"availableCount":1,"redeemableCount":0,"reason":"not eligible for this plan","cooldownUntil":"x"}""")!;
+        Assert.Equal("not eligible for this plan", omps.Unavailable);
+        var cooldown = Read("""{"availableCount":1,"redeemableCount":0,"cooldownUntil":"2026-10-16"}""")!;
+        Assert.Equal("cooldown until 10/16/2026", cooldown.Unavailable);
+        var none = Read("""{"availableCount":1,"redeemableCount":0}""")!;
+        Assert.Equal("not usable right now", none.Unavailable);
+        // Shown in the app's language and date format; omp's own reason as omp said it
+        var now = DateTimeOffset.UtcNow;
+        string Detail(string reason) => Loc.F("{0} usable now", 0) + " · " + Loc.F("unavailable: {0}", reason);
+        Assert.Equal(Detail("not eligible for this plan"), ProviderUsageGroupViewModel.ResetsDetail(omps, now));
+        Assert.Equal(Detail(Loc.F("cooldown until {0:d}", new DateTime(2026, 10, 16))), ProviderUsageGroupViewModel.ResetsDetail(cooldown, now));
+        Assert.Equal(Detail(Loc.T("not usable right now")), ProviderUsageGroupViewModel.ResetsDetail(none, now));
+        Assert.Equal(Detail(Loc.F("blocked by {0}", "Claude 5h, Claude Opus weekly")), ProviderUsageGroupViewModel.ResetsDetail(blocked with { SoonestExpiry = null }, now));
 
         // /usage reset's list (omp 18.8.0): the account a report is about, by provider and e-mail (organization after it)
         var listed = ProviderUsage.ParseSavedResetAccounts("""
@@ -112,6 +129,45 @@ public sealed class ProviderUsageTests
     }
 
     [AvaloniaFact]
+    public async Task Failed_usage_refresh_keeps_the_dated_report_until_a_successful_empty_report()
+    {
+        var e = await OpenAsync(model: Claude);
+        try
+        {
+            await e.Vm.OpenSettingsAtAsync("providers");
+            var usage = e.Vm.ProviderUsage;
+            await Until(() => usage.HasGroups && !usage.IsLoading, "initial usage");
+            var reports = usage.Groups.Select(g => g.Report).ToArray();
+            var note = usage.Note;
+            Assert.NotEmpty(note);
+            var cli = Path.Combine(Path.GetDirectoryName(e.Cli)!, "cli.json");
+            await File.WriteAllTextAsync(cli, System.Text.Json.JsonSerializer.Serialize(
+                new Dictionary<string, object> { ["usage --json"] = new { stdout = "invalid report" } }));
+            await usage.RefreshCommand.ExecuteAsync(null);
+            Assert.True(usage.RefreshFailed);
+            Assert.Equal(reports, usage.Groups.Select(g => g.Report));
+            Assert.Equal(note, usage.Note);
+            await File.WriteAllTextAsync(cli, System.Text.Json.JsonSerializer.Serialize(
+                new Dictionary<string, object> { ["usage --json"] = new { stdout = """{"reports":[]}""" } }));
+            await usage.RefreshCommand.ExecuteAsync(null);
+            Assert.False(usage.RefreshFailed);
+            Assert.False(usage.HasGroups);
+            Assert.Empty(usage.Note);
+        }
+        finally { await Close(e); }
+    }
+
+    [AvaloniaFact]
+    public void Usage_advice_starts_at_eighty_percent_and_includes_exhausted_limits()
+    {
+        var meter = new UsageMeterViewModel("Weekly", 0.79, "", "resets soon", false);
+        Assert.False(meter.ShowAdvice);
+        Assert.True((meter with { Fraction = 0.8 }).ShowAdvice);
+        Assert.True((meter with { Fraction = null, Exhausted = true }).ShowAdvice);
+        Assert.Equal(Loc.T("Near the plan limit. Wait for the reset or choose another provider."), meter.Advice);
+    }
+
+    [AvaloniaFact]
     public async Task A_saved_reset_shows_with_the_limits_and_is_spent_only_after_asking()
     {
         const string applied = "Reset applied for dev@example.com · Example (Claude) — Claude's 5h session limit has been refreshed; weekly limits are unchanged.";
@@ -121,17 +177,15 @@ public sealed class ProviderUsageTests
             ["/usage reset anthropic/2"] = applied,
         });
         var vm = e.Vm;
-        await Send(e, "Look at the parser");
-        await Until(() => vm.Usage.HasPercent && vm.Phase == SessionPhase.Ready, "context ring");
-        vm.Usage.IsOpen = true;
-        await Until(() => !vm.Usage.IsLoading && vm.Usage.HasLimits, "plan usage in the popover");
-        var claude = Assert.Single(vm.Usage.Limits);
+        await vm.OpenSettingsAtAsync("providers");
+        await Until(() => vm.ProviderUsage.HasGroups && !vm.ProviderUsage.IsLoading, "plan usage in settings");
+        var claude = vm.ProviderUsage.Groups.Single(g => g.Provider == "anthropic");
         Assert.True(claude.HasSavedResets);
-        Assert.Equal("2 saved resets", claude.SavedResetsText);
-        Assert.Equal("1 usable now · the soonest expires in 3d", claude.SavedResetsDetail);
+        Assert.Equal(Loc.Plural(2, "{0} saved reset", "{0} saved resets"), claude.SavedResetsText);
+        Assert.Equal(Loc.F("{0} usable now", 1) + " · " + Loc.F("the soonest expires in {0}", Loc.F("{0}d", 3)), claude.SavedResetsDetail);
         Assert.True(claude.CanSpendReset);
         await Settle(300);
-        var view = e.W.GetVisualDescendants().OfType<UsageIndicator>().Single().Popup.Child!.GetVisualDescendants().OfType<ProviderUsageGroupView>().Single();
+        var view = e.W.GetVisualDescendants().OfType<ProviderUsageGroupView>().Single(v => ReferenceEquals(v.DataContext, claude));
         Assert.True(view.FindControl<Button>("UseSavedResetButton")!.IsEffectivelyVisible);
 
         // Asked in place first: nothing is spent until the user confirms
@@ -143,14 +197,49 @@ public sealed class ProviderUsageTests
         Assert.False(claude.IsConfirmingSpend);
 
         var reads = UsageReads(e);
+        var runs = vm.Session.Snapshot().RunsEnded;
         claude.AskSpendResetCommand.Execute(null);
         await claude.SpendResetCommand.ExecuteAsync(null);
         Assert.Equal(["/usage reset", "/usage reset anthropic/2"], Sent(e).Where(l => l.StartsWith("/usage", StringComparison.Ordinal)));
         Assert.Equal(reads + 1, UsageReads(e)); // the limits are read again
+        Assert.Equal(runs, vm.Session.Snapshot().RunsEnded); // listing and spending resets are local commands
         // omp's answer stays under the group made from the new read
-        var after = Assert.Single(vm.Usage.Limits);
+        var after = vm.ProviderUsage.Groups.Single(g => g.Provider == "anthropic");
         Assert.Equal((applied, false), (after.SpendMessage, after.SpendFailed));
         await Close(e);
+    }
+
+    [AvaloniaFact]
+    public async Task A_saved_reset_completed_away_from_settings_invalidates_the_cached_report()
+    {
+        var e = await OpenAsync(model: Claude, extraCommands: _ => new()
+        {
+            ["/usage reset"] = "Saved rate-limit resets:\n- dev@example.com [Claude · anthropic/2]: 2 saved, 1 usable now (active)",
+            ["/usage reset anthropic/2"] = "Reset applied for dev@example.com (Claude) — Claude's 5h session limit has been refreshed; weekly limits are unchanged.",
+        });
+        try
+        {
+            var vm = e.Vm;
+            await vm.OpenSettingsAtAsync("providers");
+            await Until(() => vm.ProviderUsage.HasGroups && !vm.ProviderUsage.IsLoading, "initial reports");
+            var group = vm.ProviderUsage.Groups.Single(g => g.Provider == "anthropic");
+            var reads = UsageReads(e);
+            group.AskSpendResetCommand.Execute(null);
+            var spending = group.SpendResetCommand.ExecuteAsync(null);
+            await vm.OpenSettingsAtAsync("general");
+            await spending;
+            Assert.False(group.SpendFailed);
+            Assert.Equal(reads, UsageReads(e)); // mutation must not start a hidden report process
+            var report = RealUsageJson.Replace("\"ig*\"", "\"dev@example.com\"", StringComparison.Ordinal);
+            await File.WriteAllTextAsync(Path.Combine(Path.GetDirectoryName(e.Cli)!, "cli.json"),
+                System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object> { ["usage --json"] = new { stdout = report } }));
+            await vm.OpenSettingsAtAsync("providers");
+            await Until(() => UsageReads(e) == reads + 1 && !vm.ProviderUsage.IsLoading, "post-spend report");
+            var refreshed = Assert.Single(vm.ProviderUsage.Groups, g => g.Provider == "anthropic");
+            Assert.False(refreshed.CanSpendReset);
+            Assert.Equal(6, refreshed.Meters[0].Value);
+        }
+        finally { await Close(e); }
     }
 
     [AvaloniaFact]
@@ -169,47 +258,44 @@ public sealed class ProviderUsageTests
         Assert.Equal(["/usage reset"], Sent(e).Where(l => l.StartsWith("/usage", StringComparison.Ordinal)));
         var after = vm.ProviderUsage.Groups.Single(g => g.Provider == "anthropic");
         Assert.True(after.SpendFailed);
-        Assert.Equal("omp did not list this account among the ones with saved resets.", after.SpendMessage);
+        Assert.Equal(Loc.T("omp did not list this account among the ones with saved resets."), after.SpendMessage);
         await Close(e);
     }
 
     private static int UsageReads(Env e) => File.Exists(e.Cli) ? File.ReadAllLines(e.Cli).Count(l => l == "usage --json") : 0;
 
     [AvaloniaFact]
-    public async Task The_models_plan_usage_shows_in_the_ring_popover_and_every_provider_in_settings()
+    public async Task Composer_usage_never_launches_reports_but_explicit_settings_still_reads_all_accounts()
     {
         var e = await OpenAsync(model: Claude);
         var vm = e.Vm;
         await Send(e, "Look at the parser"); // a new chat has no ring: it shows with the conversation
         await Until(() => vm.Usage.HasPercent && vm.Phase == SessionPhase.Ready && vm.Rows.OfType<AssistantRowViewModel>().Any(), "context ring");
         Assert.Equal(0, UsageReads(e)); // nothing read before it is looked at
+        var runs = vm.Session.Snapshot().RunsEnded;
 
         vm.Usage.IsOpen = true;
-        await Until(() => !vm.Usage.IsLoading && vm.Usage.HasLimits, "plan usage in the popover");
-        var claude = Assert.Single(vm.Usage.Limits); // only the session model's provider
-        Assert.Equal(("anthropic", "Claude", "dev@example.com"), (claude.Provider, claude.Name, claude.Account));
-        Assert.Equal(["5-hour limit", "Weekly limit"], claude.Meters.Select(m => m.Label));
-        Assert.Equal(("42% used", 42.0), (claude.Meters[0].Amount, claude.Meters[0].Value));
-        Assert.Matches(@"^resets in 2h (9|10)m$", claude.Meters[0].Resets);
-        Assert.Matches(@"^resets in 3d (3|4)h$", claude.Meters[1].Resets);
-        Assert.True(claude.Meters[1].IsHigh);
-        Assert.False(claude.Meters[0].IsHigh);
+        await Until(() => !vm.Usage.IsLoading && vm.Usage.HasContext && vm.Usage.HasTotals, "context and session totals");
         var ring = e.W.GetVisualDescendants().OfType<UsageIndicator>().Single();
         await Settle(300);
-        var meters = ring.Popup.Child!.GetVisualDescendants().OfType<ProviderUsageGroupView>().Single();
-        Assert.True(meters.IsEffectivelyVisible);
-        Assert.Equal(1, UsageReads(e));
+        Assert.Empty(ring.Popup.Child!.GetVisualDescendants().OfType<ProviderUsageGroupView>());
+        Assert.Equal(0, UsageReads(e));
+        Assert.Equal(runs, vm.Session.Snapshot().RunsEnded); // /context is a read, not another agent turn
 
-        // Opened again at once: omp is not asked again (no polling)
+        // Reopening and an explicit composer refresh still use only the session connection.
         vm.Usage.IsOpen = false;
         vm.Usage.IsOpen = true;
         await Until(() => !vm.Usage.IsLoading, "reopened");
-        Assert.Equal(1, UsageReads(e));
+        await vm.Usage.RefreshCommand.ExecuteAsync(null);
+        Assert.Equal(0, UsageReads(e));
+        Assert.Equal(runs, vm.Session.Snapshot().RunsEnded);
 
-        // A run ended while it is open: the limits are read again, the session's tallies grow
+        // A run ended while it is open: session tallies grow, without a report process.
+        var contextReads = Sent(e).Count(l => l == "/context");
         await Send(e, "Explain the parser change");
-        await Until(() => UsageReads(e) == 2 && !vm.Usage.IsLoading, "read again after the run");
-        await Until(() => vm.Usage.Totals.Any(t => t.Label == "Cost"), "the session's cost");
+        await Until(() => Sent(e).Count(l => l == "/context") > contextReads && !vm.Usage.IsLoading, "context refreshed after run");
+        Assert.Equal(runs + 1, vm.Session.Snapshot().RunsEnded);
+        await Until(() => vm.Usage.Totals.Any(t => t.Label == Loc.T("Cost")), "the session's cost");
         Assert.DoesNotContain(Sent(e), l => l.StartsWith("/usage", StringComparison.Ordinal)); // never a command in the conversation
 
         // Settings → Model providers: every provider that reports usage
@@ -217,8 +303,15 @@ public sealed class ProviderUsageTests
         await vm.OpenSettingsAtAsync("providers");
         await Until(() => vm.ProviderUsage.Groups.Count == 2 && !vm.ProviderUsage.IsLoading, "plan usage in settings");
         Assert.Equal(["Claude", "ChatGPT"], vm.ProviderUsage.Groups.Select(g => g.Name));
-        Assert.Equal("dev@example.com · Plus plan", vm.ProviderUsage.Groups[1].Account);
-        Assert.Equal(["5-hour limit", "Weekly limit"], vm.ProviderUsage.Groups[1].Meters.Select(m => m.Label));
+        Assert.Equal(1, UsageReads(e));
+        var claude = vm.ProviderUsage.Groups.Single(g => g.Provider == "anthropic");
+        Assert.Equal(("Claude", "dev@example.com"), (claude.Name, claude.Account));
+        Assert.Equal([Loc.T("5-hour limit"), Loc.T("Weekly limit")], claude.Meters.Select(m => m.Label));
+        Assert.Equal((Loc.F("{0:0}% used", 42.0), 42.0), (claude.Meters[0].Amount, claude.Meters[0].Value));
+        Assert.True(claude.Meters[1].IsHigh);
+        Assert.False(claude.Meters[0].IsHigh);
+        Assert.Equal("dev@example.com · " + Loc.F("{0} plan", "Plus"), vm.ProviderUsage.Groups[1].Account);
+        Assert.Equal([Loc.T("5-hour limit"), Loc.T("Weekly limit")], vm.ProviderUsage.Groups[1].Meters.Select(m => m.Label));
         await Settle(200);
         var card = e.W.GetVisualDescendants().OfType<ProviderUsageSettings>().Single().FindControl<Border>("ProviderUsageCard")!;
         Assert.True(card.IsEffectivelyVisible);
@@ -234,15 +327,16 @@ public sealed class ProviderUsageTests
     [AvaloniaFact]
     public async Task Providers_without_a_usage_source_show_no_meters()
     {
-        // The session's provider reports nothing: the popover has no plan section (no made-up numbers)
+        // No exceptional stage reported: show no badge, never infer a percentage or full quota.
         var e = await OpenAsync();
         var vm = e.Vm;
         await Send(e, "Look at the parser"); // a new chat has no ring: it shows with the conversation
         await Until(() => vm.Usage.HasPercent && vm.Phase == SessionPhase.Ready && vm.Rows.OfType<AssistantRowViewModel>().Any(), "context ring");
         vm.Usage.IsOpen = true;
-        await Until(() => !vm.Usage.IsLoading && vm.Usage.HasContext && UsageReads(e) == 1, "popover loaded");
-        Assert.False(vm.Usage.HasLimits);
-        Assert.Empty(vm.Usage.Limits);
+        await Until(() => !vm.Usage.IsLoading && vm.Usage.HasContext, "popover loaded");
+        Assert.False(vm.Usage.HasUsageLimit);
+        Assert.Equal("", vm.Usage.LimitStatus);
+        Assert.Equal(0, UsageReads(e));
         await Close(e);
 
         // omp has no usage to report (no credentials): Settings shows no plan usage card
@@ -272,7 +366,7 @@ public sealed class ProviderUsageTests
             await Send(e, "Explain the parser change");
             await Until(() => vm.Phase == SessionPhase.Ready && vm.Usage.HasPercent, "reply");
             vm.Usage.IsOpen = true;
-            await Until(() => !vm.Usage.IsLoading && vm.Usage.HasLimits && vm.Usage.HasTotals, "popover");
+            await Until(() => !vm.Usage.IsLoading && vm.Usage.HasContext && vm.Usage.HasTotals, "popover");
             await Settle(400);
             Save(e.W.CaptureRenderedFrame(), dir, $"{theme}-usage-window");
             vm.Usage.IsOpen = false;

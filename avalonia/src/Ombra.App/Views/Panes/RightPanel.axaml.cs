@@ -20,6 +20,15 @@ public partial class RightPanel : UserControl
     /// <summary>The browser tab's view (the window's Esc handling, tests).</summary>
     internal PreviewPanel Browser => PreviewPanel;
 
+    /// <summary>
+    /// The panel takes the height the chat column gives it and asks for none: it spans the column's rows, and a page that
+    /// wants all the height it is offered (the Nightly pane, as a web view does) made the grid share that height out to
+    /// the rows once more, its two star rows (the new-session and setup layouts, MainWindow.FitEmptyState) rounded to a
+    /// device pixel each — half a point taller than the window in all, so the page got a fractional height and its frame
+    /// was no longer shown 1:1.
+    /// </summary>
+    protected override Avalonia.Size MeasureOverride(Avalonia.Size availableSize) => base.MeasureOverride(availableSize).WithHeight(0);
+
     protected override void OnDataContextChanged(EventArgs e)
     {
         base.OnDataContextChanged(e);

@@ -34,6 +34,11 @@ public sealed class TernBlock : ITernEventSink
     private BrowserDialog? _held;
     private IReadOnlyList<string>? _files;
     private CredentialAnswer? _credentials;
+    /// <summary>The only origin (scheme, host, port) <see cref="_credentials"/> may answer.</summary>
+    private Uri? _credentialsOrigin;
+    /// <summary>The main frame's document (last <c>committed</c>), and where omp's <c>goto</c> is taking it meanwhile.</summary>
+    private Uri? _top;
+    private Uri? _navTarget;
     private string[] _allowed = [];
     private ITernPage? _page;
     private DialogBroker? _broker;
@@ -98,6 +103,11 @@ public sealed class TernBlock : ITernEventSink
         var e = fields ?? new JsonObject();
         lock (_gate)
         {
+            if (type == "committed")
+            {
+                _top = Uri.TryCreate(e["url"]?.GetValue<string>(), UriKind.Absolute, out var top) ? top : null;
+                _navTarget = null;
+            }
             e["seq"] = ++_seq;
             e["type"] = type;
             _events.Add(e);
@@ -173,6 +183,7 @@ public sealed class TernBlock : ITernEventSink
                 if (!Uri.TryCreate(address, UriKind.Absolute, out var url) || url.Scheme is not ("http" or "https" or "about"))
                     throw new TernException(TernException.Invalid, $"The Ombra browser opens http and https pages only, not {address}.");
                 if (!AllowsNavigation(url)) return [];
+                lock (_gate) _navTarget = url;
                 using (page.BeginAgentAction()) await page.NavigateAsync(url, ct).ConfigureAwait(false);
                 return [];
             }
@@ -317,7 +328,14 @@ public sealed class TernBlock : ITernEventSink
             case "credentials":
             {
                 var user = Str(p, "username");
-                lock (_gate) _credentials = user is null ? null : new CredentialAnswer(user, Str(p, "password") ?? "");
+                Uri? origin = null;
+                if (user is not null && (!Uri.TryCreate(Str(p, "origin"), UriKind.Absolute, out origin) || origin.Scheme is not ("http" or "https")))
+                    throw Invalid("credentials needs the http(s) origin they are for");
+                lock (_gate)
+                {
+                    _credentials = user is null ? null : new CredentialAnswer(user, Str(p, "password") ?? "");
+                    _credentialsOrigin = origin;
+                }
                 return [];
             }
             case "allow":
@@ -437,13 +455,30 @@ public sealed class TernBlock : ITernEventSink
         foreach (var w in waiters) w.TrySetResult();
     }
 
+    /// <summary>
+    /// Whether omp's credentials answer <paramref name="c"/> (under <see cref="_gate"/>): a server (never a proxy) sign-in,
+    /// not refused before, at exactly the origin omp gave them for, while the main frame shows (or omp's <c>goto</c> is
+    /// loading) that same origin. Sign-ins of other hosts, and of frames other pages embed, go to the user.
+    /// </summary>
+    private bool ForCredentials(CredentialRequest c)
+    {
+        if (_credentialsOrigin is not { } origin || c.IsProxy || c.FailedBefore) return false;
+        if (!SameHost(c.Host, origin.IdnHost) || c.Port != origin.Port) return false;
+        // Where the engine reports the challenged address, its scheme must match too
+        if (c.PageUrl is { } at && SameHost(at.IdnHost, c.Host) && at.Port == c.Port && at.Scheme != origin.Scheme) return false;
+        return (_navTarget ?? _top) is { } top && top.Scheme == origin.Scheme && SameHost(top.IdnHost, origin.IdnHost) && top.Port == origin.Port;
+    }
+
+    private static bool SameHost(string a, string b) =>
+        string.Equals(a.Trim('[', ']').TrimEnd('.'), b.Trim('[', ']').TrimEnd('.'), StringComparison.OrdinalIgnoreCase);
+
     private void Handle(DialogBroker broker, BrowserDialog d)
     {
         if (d.Kind == BrowserDialogKind.Credentials)
         {
             CredentialAnswer? credentials;
-            lock (_gate) credentials = _credentials;
-            if (credentials is not null && d.Request is CredentialRequest { FailedBefore: false }) d.Complete(credentials);
+            lock (_gate) credentials = d.Request is CredentialRequest c && d.CausedByAgent && ForCredentials(c) ? _credentials : null;
+            if (credentials is not null) d.Complete(credentials);
             return;
         }
         if (!d.RoutedToAgent) return;

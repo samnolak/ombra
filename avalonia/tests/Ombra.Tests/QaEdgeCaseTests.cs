@@ -6,6 +6,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.ClientCore;
@@ -32,11 +33,12 @@ public sealed class QaEdgeCaseTests(ITestOutputHelper log)
         }
     }
 
-    private static async Task Until(Func<bool> c, int seconds = 20)
+    private static async Task Until(Func<bool> c, string what, int seconds = 20)
     {
         var d = DateTime.UtcNow.AddSeconds(seconds);
         while (!c() && DateTime.UtcNow < d) { Dispatcher.UIThread.RunJobs(); await Task.Delay(15); }
         Dispatcher.UIThread.RunJobs();
+        Assert.True(c(), "UI never reached: " + what);
     }
 
     private static object Text(string t) => new { type = "text", text = t };
@@ -113,11 +115,26 @@ public sealed class QaEdgeCaseTests(ITestOutputHelper log)
         var s = new SessionController(TestProcesses.FakeFactory("normal", root), new LaunchRequest(cwd, ResumeSessionFile: resume));
         var vm = new MainViewModel(s, new AppArgs());
         var w = new MainWindow { DataContext = vm, Width = width, Height = height };
-        w.Show();
-        vm.OnWindowOpened();
-        await Until(() => vm.Phase is SessionPhase.Ready or SessionPhase.Faulted);
-        await Settle(600);
-        return (w, vm);
+        try
+        {
+            w.Show();
+            vm.OnWindowOpened();
+            await Until(() => vm.Phase is SessionPhase.Ready or SessionPhase.Faulted, "session startup");
+            Assert.True(vm.Phase == SessionPhase.Ready, vm.StatusText);
+            if (resume is not null)
+            {
+                Assert.True(SessionCatalog.SamePath(resume, s.SessionFile), "the requested session was resumed");
+                await Until(() => vm.History.LoadedMessages > 0, "the resumed conversation");
+            }
+            await Settle(600);
+            return (w, vm);
+        }
+        catch
+        {
+            try { await vm.DisposeAsync(); }
+            finally { w.Close(); }
+            throw;
+        }
     }
 
     private readonly StringBuilder _report = new();
@@ -158,7 +175,7 @@ public sealed class QaEdgeCaseTests(ITestOutputHelper log)
         {
             // The provider error ends the conversation: it offers Retry; the dropped task counts neither way
             Assert.True(vm.Rows.OfType<AssistantRowViewModel>().Single(r => r.HasError).CanRetry);
-            Assert.Equal("4 of 13 done", vm.Plan.ProgressText);
+            Assert.Equal(Loc.F("{0} of {1} done", 4, 13), vm.Plan.ProgressText);
             Take(w, $"{tag}-conversation");
             // As a reader would: the wheel over the conversation (a programmatic scroll is pinned back to the end)
             var over = new Point(width / 2 + 60, 200);
@@ -305,7 +322,7 @@ public sealed class ReadmeScreenshotTests
         var spec = TestProcesses.Fake("normal");
         var s = new SessionController(req => spec with
         {
-            Arguments = [.. spec.Arguments, "--resume", file],
+            SessionArguments = [.. spec.SessionArguments, "--resume", file],
             WorkingDirectory = req.WorkingDirectory,
             Environment = new Dictionary<string, string?> { ["FAKE_SESSION_DIR"] = root, ["FAKE_MODEL"] = "local/coder" },
         }, new LaunchRequest(cwd, ResumeSessionFile: file, ApprovalMode: "write")); // as the app starts omp: an explicit mode

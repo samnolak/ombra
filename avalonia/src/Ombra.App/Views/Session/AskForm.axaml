@@ -1,0 +1,106 @@
+<!-- omp's ask form (set_ask_dialog): every question of one ask tool call in the question card, one tab each. A question
+     takes one option (a round mark) or any number (a square check box) and always the user's own answer; Submit sends
+     every answer at once. DataContext: AskFormViewModel. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:loc="using:Ombra.App.Localization"
+             xmlns:ctl="using:Ombra.App.Controls"
+             x:Class="Ombra.App.Views.Session.AskForm"
+             x:DataType="vm:AskFormViewModel">
+  <UserControl.Styles>
+    <!-- A chosen option keeps a strong outline, so the choice reads before the answers are sent -->
+    <Style Selector="Button.option.checked">
+      <Setter Property="BorderThickness" Value="1.5" />
+      <Setter Property="BorderBrush" Value="{DynamicResource GuiInverse}" />
+    </Style>
+    <!-- One choice: a round mark -->
+    <Style Selector="Border.md-check.radio">
+      <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
+    </Style>
+  </UserControl.Styles>
+
+  <StackPanel Spacing="12">
+    <!-- The questions as tabs (the tool's short header, or "Question 2"); a check once answered -->
+    <ItemsControl x:Name="AskTabs" ItemsSource="{Binding Questions}" IsVisible="{Binding HasTabs}">
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate><WrapPanel ItemSpacing="6" LineSpacing="6" /></ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:AskQuestionViewModel">
+          <Button Classes="chip choice" Classes.current="{Binding IsCurrent}" AutomationProperties.Name="{Binding TabLabel}"
+                  Command="{Binding $parent[ItemsControl].((vm:AskFormViewModel)DataContext).ShowCommand}" CommandParameter="{Binding}">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <ctl:Icon Data="{StaticResource IconCheck}" Size="12" StrokeThickness="3" IsVisible="{Binding IsAnswered}" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding TabLabel}" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+
+    <!-- The question shown: its words (a single question's are the card's title), what it takes, its options -->
+    <StackPanel Spacing="8" DataContext="{Binding Current}" x:DataType="vm:AskQuestionViewModel">
+      <SelectableTextBlock x:Name="AskQuestionText" Text="{Binding Question}" TextWrapping="Wrap" FontWeight="Medium"
+                           IsVisible="{Binding $parent[UserControl].((vm:AskFormViewModel)DataContext).HasTabs}" />
+      <TextBlock x:Name="AskHint" Classes="muted" Text="{Binding Hint}" />
+      <ItemsControl x:Name="AskOptions" ItemsSource="{Binding Options}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate><StackPanel Spacing="6" /></ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:AskChoiceViewModel">
+            <Button Classes="option" Classes.checked="{Binding IsChecked}" Command="{Binding ChooseCommand}" HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Left" AutomationProperties.Name="{Binding Label}">
+              <Grid ColumnDefinitions="Auto,Auto,*">
+                <!-- The mark: square for any-that-apply, round for one -->
+                <Border Classes="md-check" Classes.checked="{Binding IsChecked}" Classes.radio="{Binding !Multi}"
+                        Width="16" Height="16" VerticalAlignment="Top" Margin="0,2,10,0">
+                  <ctl:Icon Data="{StaticResource IconCheck}" Size="12" StrokeThickness="3.5" IsVisible="{Binding IsChecked}"
+                            HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <!-- The key that picks it (1–9) -->
+                <Border Grid.Column="1" Classes="key-badge" IsVisible="{Binding HasNumber}" VerticalAlignment="Top" Margin="0,1,10,0">
+                  <TextBlock Text="{Binding Number}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel Grid.Column="2" Spacing="2">
+                  <WrapPanel ItemSpacing="8" LineSpacing="2">
+                    <TextBlock Text="{Binding Label}" TextWrapping="Wrap" FontWeight="Medium" VerticalAlignment="Center" />
+                    <Border Classes="status" IsVisible="{Binding Recommended}" VerticalAlignment="Center" RenderTransform="translate(0px, 1.5px)">
+                      <TextBlock Text="{loc:T 'Recommended'}" />
+                    </Border>
+                  </WrapPanel>
+                  <TextBlock Classes="muted" Text="{Binding Description}" IsVisible="{Binding HasDescription}" TextWrapping="Wrap" FontWeight="Normal" />
+                  <Border Classes="details" IsVisible="{Binding HasPreview}" Margin="0,4,0,0">
+                    <TextBlock Classes="mono" Text="{Binding Preview}" TextWrapping="Wrap" MaxHeight="120" Padding="12,8" LineHeight="19" />
+                  </Border>
+                </StackPanel>
+              </Grid>
+            </Button>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+      <!-- The user's own answer (omp's "Other"): always offered -->
+      <TextBox x:Name="AskOwnAnswer" Text="{Binding CustomText}" AcceptsReturn="False" TextWrapping="Wrap"
+               PlaceholderText="{loc:T 'Or type your own answer'}" AutomationProperties.Name="{loc:T 'Your own answer'}" />
+    </StackPanel>
+
+    <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasError}">
+      <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
+      <TextBlock x:Name="AskError" Grid.Column="1" Classes="error" Text="{Binding Error}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+    </Grid>
+
+    <Grid ColumnDefinitions="*,Auto">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button x:Name="AskSubmitButton" Classes="accent md" MinWidth="96" Content="{loc:T 'Submit'}" Command="{Binding SubmitCommand}"
+                ToolTip.Tip="{loc:T 'Send every answer to omp'}" />
+        <Button x:Name="AskNextButton" Classes="md outline" MinWidth="96" Content="{loc:T 'Next'}" Command="{Binding NextCommand}" IsVisible="{Binding HasNext}"
+                ToolTip.Tip="{loc:T 'The next question'}" />
+        <Button x:Name="AskBackButton" Classes="md flat" Content="{loc:T 'Back'}" Command="{Binding PreviousCommand}" IsVisible="{Binding HasPrevious}" />
+        <Button x:Name="AskCancelButton" Classes="md flat" Content="{loc:T 'Cancel'}" Command="{Binding CancelCommand}"
+                ToolTip.Tip="{loc:T 'Close without answering; omp treats it as no answer'}" />
+      </StackPanel>
+      <TextBlock Grid.Column="1" Classes="tertiary" Text="{Binding Position}" IsVisible="{Binding HasTabs}" VerticalAlignment="Center" Margin="12,0,0,0" />
+    </Grid>
+  </StackPanel>
+</UserControl>

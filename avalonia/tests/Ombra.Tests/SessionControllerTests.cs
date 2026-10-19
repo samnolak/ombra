@@ -65,15 +65,47 @@ public sealed class SessionControllerTests
         Assert.Contains("exited unexpectedly", snap.LastError);
     }
 
-    [Fact]
-    public async Task Garbage_on_stdout_is_reported_and_the_session_keeps_working()
+    [Theory]
+    [InlineData(QueueKind.FollowUp)]
+    [InlineData(QueueKind.Steer)]
+    public async Task Input_queued_after_crash_finalization_is_recovered_without_resending(QueueKind kind)
     {
-        await using var s = new SessionController(TestProcesses.Fake("garbage"));
-        await s.StartAsync();
-        await s.PromptAsync("hello");
-        var snap = await TestProcesses.Eventually(s.Snapshot, x => x.Phase == SessionPhase.Ready && x.MessagesCompleted == 1, Wait, "run end");
-        Assert.Contains(snap.Items, i => i is NoticeItem n && n.Text.Contains("malformed"));
-        Assert.Contains(snap.DebugTail, d => d.Type == "some_future_event");
+        await using var session = new SessionController(TestProcesses.Fake("slow-stream"));
+        await session.StartAsync();
+        await session.PromptAsync("running question");
+        await TestProcesses.Eventually(session.Snapshot,
+            snapshot => snapshot.Items.OfType<AssistantItem>().Any(), Wait, "streaming");
+        using (var process = System.Diagnostics.Process.GetProcessById(session.ProcessId!.Value)) process.Kill();
+        await TestProcesses.Eventually(session.Snapshot,
+            snapshot => snapshot.Phase == SessionPhase.Faulted, Wait, "crash finalized");
+
+        // A stale Running UI can submit after the fault has already recovered the existing queue.
+        Assert.False(await session.QueueAsync(kind, "unsent input", []));
+        var failed = session.Snapshot();
+        Assert.Equal(SessionPhase.Faulted, failed.Phase);
+        Assert.Equal("unsent input", Assert.Single(failed.Queued).Text);
+        Assert.True(failed.Queued[0].Recovered);
+        Assert.DoesNotContain(failed.Items, item => item is UserItem { Text: "unsent input" });
+
+        await session.RecoverAsync();
+        var recovered = session.Snapshot();
+        Assert.Equal(SessionPhase.Ready, recovered.Phase);
+        Assert.True(Assert.Single(recovered.Queued).Recovered);
+        Assert.DoesNotContain(recovered.Items, item => item is UserItem { Text: "unsent input" });
+    }
+
+    [Fact]
+    public async Task Malformed_engine_output_faults_every_chat_instead_of_guessing_the_owner()
+    {
+        await using var first = new SessionController(request => TestProcesses.Fake(request.ApprovalMode == "yolo" ? "garbage" : "normal"), new LaunchRequest());
+        await first.StartAsync();
+        await using var second = first.Sibling(new LaunchRequest(ApprovalMode: "yolo"));
+        var openingError = await Record.ExceptionAsync(() => second.StartAsync());
+        Assert.True(openingError is Ombra.Rpc.OmpStartException or Ombra.Rpc.RpcConnectionClosedException);
+        var firstFault = await TestProcesses.Eventually(first.Snapshot, snapshot => snapshot.Phase == SessionPhase.Faulted, Wait, "first fault");
+        var secondFault = await TestProcesses.Eventually(second.Snapshot, snapshot => snapshot.Phase == SessionPhase.Faulted, Wait, "second fault");
+        Assert.NotNull(firstFault.LastError);
+        Assert.NotNull(secondFault.LastError);
     }
 
     [Fact]
@@ -128,6 +160,31 @@ public sealed class SessionControllerTests
     }
 
     [Fact]
+    public async Task Wall_clock_rollback_does_not_delay_settling_a_finished_run()
+    {
+        var clock = new UtcOffsetClock();
+        await using var s = new SessionController(TestProcesses.Fake("nonterminal-end"), clock: clock)
+        {
+            SettleQuietPeriod = TimeSpan.FromMilliseconds(500),
+        };
+        await s.StartAsync();
+        await s.PromptAsync("hello");
+        await TestProcesses.Eventually(() => s.SettleProbeActive, active => active, Wait, "settle probe armed");
+        clock.MoveUtc(TimeSpan.FromHours(-1));
+        var snapshot = await TestProcesses.Eventually(s.Snapshot,
+            state => state.Phase == SessionPhase.Ready && state.MessagesCompleted == 1,
+            TimeSpan.FromSeconds(5), "finished run settles despite wall-clock rollback");
+        Assert.Contains(snapshot.DebugTail, entry => entry.Type == "settle");
+    }
+
+    private sealed class UtcOffsetClock : TimeProvider
+    {
+        private long _offsetTicks;
+        public override DateTimeOffset GetUtcNow() => DateTimeOffset.UtcNow.AddTicks(Interlocked.Read(ref _offsetTicks));
+        public void MoveUtc(TimeSpan delta) => Interlocked.Add(ref _offsetTicks, delta.Ticks);
+    }
+
+    [Fact]
     public async Task Settle_probe_stops_when_omp_dies_while_awaiting_settle()
     {
         await using var s = new SessionController(TestProcesses.Fake("nonterminal-end")) { SettleQuietPeriod = TimeSpan.FromSeconds(30) };
@@ -162,8 +219,8 @@ public sealed class SessionControllerTests
         await s.StartAsync();
         var pid = s.ProcessId!.Value;
         await s.PromptAsync("go");
-        var snap = await TestProcesses.Eventually(s.Snapshot, x => x.Phase == SessionPhase.Faulted, Wait, "fault");
-        Assert.Contains("RPC stream broke", snap.LastError);
+        await TestProcesses.Eventually(s.Snapshot, x => x.Phase == SessionPhase.Faulted, Wait, "fault");
+        Assert.IsType<Ombra.Rpc.RpcProtocolException>(s.Connection!.CloseReason!.InnerException);
         await TestProcesses.Eventually(() => { try { return !System.Diagnostics.Process.GetProcessById(pid).HasExited; } catch (ArgumentException) { return false; } },
             alive => !alive, Wait, "omp stopped");
     }
@@ -189,5 +246,33 @@ public sealed class SessionControllerTests
         await s.DisposeAsync();
         await s.DisposeAsync();
         Assert.Equal(SessionPhase.Stopped, s.Snapshot().Phase);
+    }
+
+    [Fact]
+    public async Task Invalid_prompt_admission_is_visible_and_does_not_leave_a_pending_run()
+    {
+        await using var session = new SessionController(TestProcesses.Fake("invalid-admission"));
+        await session.StartAsync();
+        Assert.False(await session.PromptAsync("keep this input", []));
+        var snapshot = session.Snapshot();
+        Assert.Equal(SessionPhase.Ready, snapshot.Phase);
+        Assert.Contains(snapshot.Items, item => item is NoticeItem notice && notice.Text.Contains("invalid input acknowledgement"));
+    }
+
+    [Fact]
+    public async Task Invalid_deferred_admission_recovers_the_entire_fifo_without_sending_its_tail()
+    {
+        await using var session = new SessionController(TestProcesses.Fake("invalid-admission"));
+        await session.StartAsync();
+        session.Mutate(state => state.SetPhase(SessionPhase.Running, DateTimeOffset.UtcNow));
+        Assert.True(await session.QueueAsync(QueueKind.BuiltinCommand, "/rename first", []));
+        Assert.True(await session.QueueAsync(QueueKind.FollowUp, "later input", []));
+        session.Mutate(state => state.SetPhase(SessionPhase.Ready, DateTimeOffset.UtcNow));
+        var snapshot = await TestProcesses.Eventually(session.Snapshot,
+            state => state.Phase == SessionPhase.Ready && state.Queued.Count == 2 && state.Queued.All(input => input.Recovered),
+            Wait, "the malformed admission recovered both FIFO entries");
+        Assert.Equal(["/rename first", "later input"], snapshot.Queued.Select(input => input.Text));
+        Assert.DoesNotContain(snapshot.Items, item => item is UserItem user && user.Text == "later input");
+        Assert.Contains(snapshot.Items, item => item is NoticeItem notice && notice.Text.Contains("invalid input acknowledgement"));
     }
 }

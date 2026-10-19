@@ -120,11 +120,19 @@ internal static unsafe class MacObjC
     /// Registers an NSObject subclass conforming to <paramref name="protocol"/> with the given methods (each IMP an
     /// <c>[UnmanagedCallersOnly]</c> function taking <c>(self, _cmd, args…)</c>); the existing class when already registered.
     /// </summary>
-    public static nint DefineClass(string name, string? protocol, params (string Selector, nint Imp, string Types)[] methods)
+    public static nint DefineClass(string name, string? protocol, params (string Selector, nint Imp, string Types)[] methods) =>
+        DefineClass(Cls("NSObject"), name, protocol, methods);
+
+    /// <summary>
+    /// Registers a subclass of <paramref name="superclass"/> conforming to <paramref name="protocol"/> with the given
+    /// methods (each IMP an <c>[UnmanagedCallersOnly]</c> function taking <c>(self, _cmd, args…)</c>; those the superclass
+    /// has are overridden); the existing class when already registered.
+    /// </summary>
+    public static nint DefineClass(nint superclass, string name, string? protocol, params (string Selector, nint Imp, string Types)[] methods)
     {
         var existing = objc_getClass(name);
         if (existing != 0) return existing;
-        var cls = objc_allocateClassPair(Cls("NSObject"), name, 0);
+        var cls = objc_allocateClassPair(superclass, name, 0);
         if (cls == 0) throw new InvalidOperationException($"Could not allocate class {name}.");
         if (protocol is not null && objc_getProtocol(protocol) is var proto && proto != 0) class_addProtocol(cls, proto);
         foreach (var (selector, imp, types) in methods)
@@ -136,6 +144,9 @@ internal static unsafe class MacObjC
         Classes[name] = cls;
         return cls;
     }
+
+    /// <summary>Makes <paramref name="obj"/> an instance of <paramref name="cls"/> (a subclass of its class, defined above).</summary>
+    public static void SetClass(nint obj, nint cls) => object_setClass(obj, cls);
 
     /// <summary>
     /// Adds <paramref name="imp"/> as <paramref name="selector"/> to <paramref name="cls"/>. True when the class now
@@ -231,6 +242,9 @@ internal static unsafe class MacObjC
 
     [DllImport(LibObjC)]
     private static extern nint object_getClass(nint obj);
+
+    [DllImport(LibObjC)]
+    private static extern nint object_setClass(nint obj, nint cls);
 
     [DllImport(LibObjC)]
     private static extern nint class_getName(nint cls);

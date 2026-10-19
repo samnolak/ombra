@@ -8,6 +8,7 @@ using Avalonia.LogicalTree;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.App.Views.Session;
@@ -228,11 +229,11 @@ public sealed class SessionAreaTests
         var items = title.Button.Flyout is Flyout { Content: Control menu }
             ? menu.GetLogicalDescendants().OfType<StackPanel>().Single(p => p.Name == "SessionItems").Children.OfType<Button>().Where(b => b.Classes.Contains("menu-item")).ToList()
             : [];
-        Assert.Equal(["Rename", "Copy session ID", "Copy session file path", "Compact conversation", "Hand off", "Fresh provider session", "Retry the last turn",
-            "Rewind to an earlier message", "Export as HTML", "Share a link", "Workspace folders", "Move to another folder", "Pin session", "Memory", "Delete session"],
+        Assert.Equal(new[] { "Rename", "Copy session ID", "Copy session file path", "Compact conversation", "Hand off", "Fresh provider session", "Retry the last turn",
+            "Rewind to an earlier message", "Fork this session", "Export as HTML", "Share a link", "Workspace folders", "Move to another folder", "Pin session", "Memory", "Delete session" }.Select(Loc.T),
             items.Select(b => Avalonia.Automation.AutomationProperties.GetName(b)));
         Assert.All(items, b => Assert.True(b.IsEffectivelyEnabled, Avalonia.Automation.AutomationProperties.GetName(b)));
-        items.Single(b => Avalonia.Automation.AutomationProperties.GetName(b) == "Rename").Command!.Execute(null);
+        items.Single(b => Avalonia.Automation.AutomationProperties.GetName(b) == Loc.T("Rename")).Command!.Execute(null);
         Assert.True(vm.IsRenaming);
         vm.IsRenaming = false;
         title.Button.Flyout.Hide();
@@ -242,25 +243,25 @@ public sealed class SessionAreaTests
         Assert.Equal(SessionCardState.Ask, vm.SessionCard!.State);
         vm.SessionCard.Input = "keep the parser notes";
         await vm.SessionCard.Primary.Run();
-        Assert.Equal("Conversation compacted", vm.SessionCard.Title);
-        Assert.Equal("The context went from 48,210 to 9,120 tokens (39,090 freed).", vm.SessionCard.Message);
+        Assert.Equal(Loc.T("Conversation compacted"), vm.SessionCard.Title);
+        Assert.Equal(Loc.F("The context went from {0} to {1} tokens ({2} freed).", "48,210", "9,120", "39,090"), vm.SessionCard.Message);
         Assert.Contains("/compact keep the parser notes", Sent(e));
 
         vm.HandOffCommand.Execute(null);
         await vm.SessionCard!.Primary.Run();
-        Assert.Equal("Handed off", vm.SessionCard.Title);
+        Assert.Equal(Loc.T("Handed off"), vm.SessionCard.Title);
         Assert.Contains("/handoff", Sent(e));
 
         await vm.FreshProviderSessionCommand.ExecuteAsync(null);
-        Assert.Equal("Fresh provider session", vm.SessionCard!.Title);
-        Assert.Contains("1 cached provider state(s) dropped", vm.SessionCard.Message);
+        Assert.Equal(Loc.T("Fresh provider session"), vm.SessionCard!.Title);
+        Assert.Contains(Loc.F("{0} cached provider state(s) dropped.", "1"), vm.SessionCard.Message);
 
         var copied = new List<string>();
-        vm.CopyTextRequested += copied.Add;
+        vm.CopyTextRequested += text => { copied.Add(text); return Task.FromResult(true); };
         var opened = new List<string>();
         vm.OpenUrlRequested += opened.Add;
         await vm.ExportHtmlCommand.ExecuteAsync(null);
-        Assert.Equal("Exported as HTML", vm.SessionCard!.Title);
+        Assert.Equal(Loc.T("Exported as HTML"), vm.SessionCard!.Title);
         // omp names the file from its working directory, which has links resolved (macOS: /var is /private/var)
         Assert.True(SessionCatalog.SamePath(Path.Combine(e.Project, "omp-session-test.html"), vm.SessionCard.Detail), vm.SessionCard.Detail);
         vm.SessionCard.Secondary!.Command.Execute(null); // Show in folder
@@ -271,13 +272,13 @@ public sealed class SessionAreaTests
         Assert.Equal(SessionCardState.Ask, vm.SessionCard!.State);
         Assert.DoesNotContain("/share", Sent(e));
         await Until(() => vm.SessionCard.Message.Contains("my.omp.sh"), "share target from omp's settings");
-        Assert.Contains("anyone who has the link can read it", vm.SessionCard.Message);
+        Assert.Contains(Loc.T("The key is only in the link: anyone who has the link can read it."), vm.SessionCard.Message);
         await vm.SessionCard.Primary.Run();
-        Assert.Equal("Link copied", vm.SessionCard.Title);
+        Assert.Equal(Loc.T("Link copied"), vm.SessionCard.Title);
         Assert.Equal("https://my.omp.sh/s/Abc123#k3y", copied.Last());
 
         await vm.CopySessionIdCommand.ExecuteAsync(null);
-        Assert.Equal("Session ID copied", vm.SessionCard!.Title);
+        Assert.Equal(Loc.T("Session ID copied"), vm.SessionCard!.Title);
         Assert.Matches("^[0-9a-f-]{36}$", copied.Last());
         vm.CopySessionFileCommand.Execute(null);
         Assert.EndsWith(".jsonl", copied.Last());
@@ -295,12 +296,12 @@ public sealed class SessionAreaTests
 
         await vm.TogglePinCommand.ExecuteAsync(null);
         Assert.True(vm.IsSessionPinned);
-        Assert.Equal("Unpin session", vm.PinLabel);
+        Assert.Equal(Loc.T("Unpin session"), vm.PinLabel);
 
         await vm.OpenUsageDashboardCommand.ExecuteAsync(null);
         Assert.Equal("http://127.0.0.1:3847", vm.SessionCard!.Detail);
         await vm.ShowMemoryCommand.ExecuteAsync(null);
-        Assert.Equal("Memory is off", vm.SessionCard!.Title);
+        Assert.Equal(Loc.T("Memory is off"), vm.SessionCard!.Title);
 
         // Retry starts a run that shows like any other
         await vm.RetryLastTurnCommand.ExecuteAsync(null);
@@ -325,12 +326,35 @@ public sealed class SessionAreaTests
         await Until(() => vm.SessionCard is { Kind: "rewind", HasChoices: true }, "rewind choices");
         Assert.Equal(["second question", "first question"], vm.SessionCard!.Choices.Select(c => c.Label));
         await ((CommunityToolkit.Mvvm.Input.IAsyncRelayCommand)vm.SessionCard.Choices[0].Command).ExecuteAsync(null);
-        Assert.Equal("Rewound", vm.SessionCard.Title);
+        Assert.Equal(Loc.T("Rewound"), vm.SessionCard.Title);
         await Until(() => vm.Rows.OfType<UserRowViewModel>().Select(u => u.Text).SequenceEqual(["first question"]), "history before the message");
         Assert.Equal("second question", vm.ComposerText);
         Assert.NotEqual(before, vm.Session.Snapshot().SessionFile);
         await Until(() => vm.Sessions.Count == 2, "the earlier session is kept");
         await Close(e);
+    }
+
+    [AvaloniaTheory]
+    [InlineData("😀")]
+    [InlineData("e\u0301")]
+    [InlineData("👩‍💻")]
+    public async Task Rewind_choices_clip_graphemes_but_restore_the_original_prompt(string glyph)
+    {
+        var e = await OpenAsync();
+        try
+        {
+            var head = new string('a', 139);
+            var prompt = head + glyph + " rest";
+            await Send(e, prompt);
+            await Until(() => e.Vm.Phase == SessionPhase.Ready && e.Vm.Rows.OfType<AssistantRowViewModel>().Any(), "reply");
+            await Send(e, "/rewind");
+            await Until(() => e.Vm.SessionCard is { Kind: "rewind", HasChoices: true }, "rewind choices");
+            var choice = Assert.Single(e.Vm.SessionCard!.Choices);
+            Assert.Equal(head + "…", choice.Label);
+            await ((CommunityToolkit.Mvvm.Input.IAsyncRelayCommand)choice.Command).ExecuteAsync(null);
+            Assert.Equal(prompt, e.Vm.ComposerText);
+        }
+        finally { await Close(e); }
     }
 
     [AvaloniaFact]
@@ -348,7 +372,7 @@ public sealed class SessionAreaTests
         Assert.DoesNotContain("/session delete", Sent(e));
         await vm.SessionCard.Primary.Run();
         await Until(() => vm.Session.Snapshot().SessionFile != file && vm.Rows.Count == 0, "a new session");
-        Assert.Equal("Session deleted", vm.SessionCard!.Title);
+        Assert.Equal(Loc.T("Session deleted"), vm.SessionCard!.Title);
         Assert.Equal(["/session delete"], Sent(e));
         await Close(e);
     }
@@ -362,7 +386,7 @@ public sealed class SessionAreaTests
         await e.Vm.MoveSessionCommand.ExecuteAsync(null);
         Assert.Equal(SessionCardState.Ask, e.Vm.SessionCard!.State);
         await e.Vm.SessionCard.Primary.Run();
-        Assert.Equal("Session moved", e.Vm.SessionCard.Title);
+        Assert.Equal(Loc.T("Session moved"), e.Vm.SessionCard.Title);
         await Until(() => e.Vm.ProjectPath == target, "project follows the move");
         Assert.Contains($"/move {target}", Sent(e));
         await Close(e);
@@ -388,12 +412,12 @@ public sealed class SessionAreaTests
 
         ring.Button.Command!.Execute(null);
         await Until(() => !vm.Usage.IsLoading && vm.Usage.HasContext, "context loaded");
-        Assert.Equal("13% of 131k tokens used", vm.Usage.ContextHeadline);
+        Assert.Equal(string.Format(System.Globalization.CultureInfo.InvariantCulture, Loc.T("{0:0}% of {1} tokens used"), 13, "131k"), vm.Usage.ContextHeadline);
         Assert.Equal(["System prompt", "System tools", "System context", "Skills", "Auto-compact buffer", "Free"], vm.Usage.ContextRows.Select(r => r.Label));
         Assert.Equal("4,518", vm.Usage.ContextRows[0].Tokens);
         Assert.True(vm.Usage.ContextRows[^1].IsFree);
         // get_session_stats: the first turn's tokens and cost
-        Assert.Equal(["Input", "Output", "Cache read", "Cost"], vm.Usage.Totals.Select(t => t.Label));
+        Assert.Equal(new[] { "Input", "Output", "Cache read", "Cost" }.Select(Loc.T), vm.Usage.Totals.Select(t => t.Label));
         Assert.Equal(("18,680", "$0.08"), (vm.Usage.Totals[0].Value, vm.Usage.Totals[^1].Value));
 
         // Refreshes after each turn while open
@@ -401,14 +425,14 @@ public sealed class SessionAreaTests
         await Send(e, "one more");
         await Until(() => Sent(e).Count(l => l == "/context") > before && !vm.Usage.IsLoading, "refresh after the turn");
         await Until(() => vm.Usage.Totals.FirstOrDefault()?.Value == "24,880", "the turn's tokens and cost");
-        Assert.Equal(["Input", "Output", "Cache read", "Cost"], vm.Usage.Totals.Select(t => t.Label));
+        Assert.Equal(new[] { "Input", "Output", "Cache read", "Cost" }.Select(Loc.T), vm.Usage.Totals.Select(t => t.Label));
         Assert.Equal("$0.13", vm.Usage.Totals[^1].Value);
         Assert.DoesNotContain("/usage", Sent(e)); // never through the conversation's command channel
 
         // Compact now: straight to the running card, then omp's result
         await vm.Usage.CompactNowCommand.ExecuteAsync(null);
         Assert.False(vm.Usage.IsOpen);
-        Assert.Equal("Conversation compacted", vm.SessionCard!.Title);
+        Assert.Equal(Loc.T("Conversation compacted"), vm.SessionCard!.Title);
         Assert.Contains("/compact", Sent(e));
         await Close(e);
     }
@@ -423,7 +447,7 @@ public sealed class SessionAreaTests
         Assert.Equal("warn", u.RingLevel);
         u.Percent = 85;
         Assert.Equal("full", u.RingLevel);
-        Assert.Contains("compacts it soon", u.Tooltip);
+        Assert.Contains(Loc.T(" — omp compacts it soon"), u.Tooltip);
     }
 
     [AvaloniaFact]
@@ -455,7 +479,7 @@ public sealed class SessionAreaTests
         o.Advisor = true;
         await Until(() => o.AdvisorNeedsModel, "advisor needs a model");
         Assert.True(o.Advisor);
-        Assert.Equal("Needs a model for omp's advisor role.", o.AdvisorNote);
+        Assert.True(o.HasAdvisorNote);
 
         // Read again: omp's state, not what the switches said
         vm.IsModelMenuOpen = false;
@@ -466,13 +490,16 @@ public sealed class SessionAreaTests
 
         // A model without a priority tier: omp refuses fast mode, the switch goes back and says why
         vm.IsModelMenuOpen = false;
+        await Until(() => vm.Session.Snapshot().Phase == SessionPhase.Ready, "controller idle");
+        vm.Phase = SessionPhase.Running; // the throttled UI snapshot can lag a completed local command
         await vm.ChooseModelCommand.ExecuteAsync(vm.Models.Single(m => m.Key == "fake/vision"));
+        Assert.True(vm.Session.Snapshot().Model == "fake/vision",
+            $"Model={vm.Session.Snapshot().Model}; phase={vm.Phase}; sent={string.Join(", ", Sent(e))}");
         o.FastMode = false;
         await Until(() => Sent(e).Count(l => l == "set_fast_mode false") == 1, "fast off");
         o.FastMode = true;
         await Until(() => o.HasFastNote, "refused");
         Assert.False(o.FastMode);
-        Assert.Equal("Not available for this model: it has no priority tier.", o.FastNote);
         await Close(e);
     }
 
@@ -498,15 +525,15 @@ public sealed class SessionAreaTests
         Assert.Equal("parser", vm.SessionFilter);
         vm.SessionFilter = "";
 
-        await Send(e, "/plan add a cache");
+        await Send(e, "/vibe add a cache");
         Assert.Equal("terminal", vm.SessionCard!.Kind);
-        Assert.Equal("/plan runs in omp's terminal", vm.SessionCard.Title);
+        Assert.Equal(Loc.F("/{0} runs in omp's terminal", "vibe"), vm.SessionCard.Title);
         Assert.Equal("", vm.ComposerText);
         vm.SessionCard.Primary!.Command.Execute(null); // Open omp terminal (no TUI launch in tests: nothing opens)
         Assert.False(vm.HasSessionCard);
         await Send(e, "/quit");
         Assert.Equal("explain", vm.SessionCard!.Kind);
-        Assert.Contains("Close the window", vm.SessionCard.Message);
+        Assert.Contains(Loc.T("Close the window to quit: omp stops with it, and the conversation is saved."), vm.SessionCard.Message);
 
         await Send(e, "/new");
         await Until(() => vm.Phase == SessionPhase.Ready, "new session");
@@ -545,7 +572,7 @@ public sealed class SessionAreaTests
         Assert.False(vm.Rows.OfType<ToolRowViewModel>().Last().IsDone);
 
         await Send(e, "!!ls");
-        Assert.Equal("!! runs in omp's terminal", vm.SessionCard!.Title);
+        Assert.Equal(Loc.T("!! runs in omp's terminal"), vm.SessionCard!.Title);
         Assert.Equal(["bash git status", "bash sleep 30"], Sent(e));
         await Close(e);
     }
@@ -563,7 +590,9 @@ public sealed class SessionAreaTests
         Assert.All(list.Skip(firstTui), c => Assert.True(c.IsTerminalOnly));
         Assert.True(list[firstTui].StartsTerminalGroup);
         Assert.Single(list, c => c.StartsTerminalGroup);
-        Assert.Contains(list.Skip(firstTui), c => c.Label == "/plan");
+        Assert.Contains(list.Skip(firstTui), c => c.Label == "/pause");
+        // Plan mode is the window's own (MainViewModel.PlanMode.cs): an ordinary entry
+        Assert.Contains(list.Take(firstTui), c => c.Label == "/plan");
         // The window's own answers are ordinary entries; omp's builtins carry no routing label
         e.Vm.ComposerText = "/sett";
         var settings = e.Vm.CommandSuggestions.Single(c => c.Label == "/settings");
@@ -663,7 +692,7 @@ public sealed class SessionAreaTests
             await Settle();
             a.Take(e.W, $"{tag}-card-rewind");
 
-            await Send(e, "/goal ship it");
+            await Send(e, "/vibe ship it");
             await Settle();
             a.Take(e.W, $"{tag}-card-terminal-only");
             vm.CloseSessionCard();

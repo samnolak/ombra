@@ -263,8 +263,8 @@ public sealed partial class SshSettingsViewModel : WorkspacePageViewModel
         var via = d.Route switch { SshRoute.ProxyJump => Loc.T(" through the jump host"), SshRoute.ProxyCommand => Loc.T(" through the proxy command"), _ => "" };
         // A local or cached connection takes milliseconds: "0.0 s" had read like no time at all
         if (d.Connected) return (true, watch.Elapsed.TotalSeconds < 1
-            ? string.Format(CultureInfo.InvariantCulture, Loc.T("Connected{0} in {1} ms."), via, Math.Max(1, (int)watch.Elapsed.TotalMilliseconds))
-            : string.Format(CultureInfo.InvariantCulture, Loc.T("Connected{0} in {1:0.0} s."), via, watch.Elapsed.TotalSeconds));
+            ? Loc.F("Connected{0} in {1} ms.", via, Math.Max(1, (int)watch.Elapsed.TotalMilliseconds))
+            : Loc.F("Connected{0} in {1:0.0} s.", via, watch.Elapsed.TotalSeconds));
         return (false, Describe(d, r.Message, r.ExitCode));
     }
 

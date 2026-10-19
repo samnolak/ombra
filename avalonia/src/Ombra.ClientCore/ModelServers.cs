@@ -143,7 +143,7 @@ public static class ModelServerProbe
     private static string Snippet(string body)
     {
         var t = body.ReplaceLineEndings(" ").Trim();
-        return t.Length > 200 ? t[..200] + "…" : t;
+        return t.Length > 200 ? t[..GraphemeText.PrefixLength(t, 200)] + "…" : t;
     }
 
     public static bool IsLoopback(Uri u) =>

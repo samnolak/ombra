@@ -21,5 +21,7 @@
   <ItemGroup>
     <None Include="Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
     <Using Include="Xunit" />
+    <!-- As in Ombra.App (docs/PLATFORM_NOTES.md): macOS TLS via Network.framework, so the tests run the app's TLS stack. -->
+    <RuntimeHostConfigurationOption Include="System.Net.Security.UseNetworkFramework" Value="true" />
   </ItemGroup>
 </Project>

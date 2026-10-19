@@ -1,7 +1,9 @@
 using System.Reflection;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Avalonia.Headless.XUnit;
 using Ombra.App.Localization;
+using Ombra.App.ViewModels;
 using Xunit;
 
 namespace Ombra.Tests;
@@ -58,7 +60,13 @@ public sealed class LocalizationTests
         using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "template.json")));
         var strings = doc.RootElement.GetProperty("strings");
         Assert.Equal(BuiltInRu().Count, strings.EnumerateObject().Count());
-        Assert.All(strings.EnumerateObject(), p => Assert.Equal(p.Name, p.Value.GetString()));
+        Assert.All(strings.EnumerateObject(), p =>
+        {
+            var separator = p.Name.LastIndexOf('|');
+            var category = p.Name[(separator + 1)..];
+            var expected = separator >= 0 && category is "one" or "few" or "many" or "other" ? p.Name[..separator] : p.Name;
+            Assert.Equal(expected, p.Value.GetString());
+        });
         Assert.DoesNotContain(Loc.Available(settings), l => l.Code == "template");
     }
 
@@ -68,6 +76,42 @@ public sealed class LocalizationTests
         var placeholder = new Regex(@"\{\d+(:[^}]*)?\}");
         Assert.All(BuiltInRu(), kv =>
             Assert.Equal(placeholder.Matches(kv.Key).Select(m => m.Value).Order(), placeholder.Matches(kv.Value).Select(m => m.Value).Order()));
+    }
+
+    [AvaloniaFact]
+    public void The_permission_modes_speak_the_language_chosen_after_they_were_first_read()
+    {
+        var settings = Settings("loc-modes");
+        var previous = Loc.Current;
+        try
+        {
+            Loc.Load("en", settings);
+            Assert.Equal("Accept edits", MainViewModel.ApprovalModes.Single(m => m.Mode == "write").Label);
+            Loc.Load("ru", settings);
+            var write = MainViewModel.ApprovalModes.Single(m => m.Mode == "write");
+            Assert.Equal(BuiltInRu()["Accept edits"], write.Label);
+            Assert.Equal(BuiltInRu()[write.EnglishDescription], write.Description);
+        }
+        finally { Loc.Load(previous, settings); }
+    }
+
+    /// <summary>
+    /// A binding's StringFormat with words in it ('Remove {0}') bypasses the translation unless it is written
+    /// StringFormat={loc:T '…'}; only pure formats ('{}{0}  ✕', '{0:N0}') may stay literal.
+    /// </summary>
+    [Fact]
+    public void Every_string_format_with_words_in_the_views_is_translated()
+    {
+        var src = Path.GetDirectoryName(Path.GetDirectoryName(RuntimeInstallerTests.RepoFile(Path.Combine("avalonia", "src", "Ombra.App", "Ombra.App.csproj"))))!;
+        var literal = new Regex(@"StringFormat\s*=\s*(?:'(?<f>[^']*)'|""(?<f>[^""]*)"")");
+        var placeholder = new Regex(@"\{\}|\{\d+(:[^}]*)?\}");
+        var untranslated = Directory.EnumerateFiles(src, "*.axaml", SearchOption.AllDirectories)
+            .Where(f => !f.Split(Path.DirectorySeparatorChar).Any(d => d is "bin" or "obj"))
+            .SelectMany(f => literal.Matches(File.ReadAllText(f))
+                .Where(m => placeholder.Replace(m.Groups["f"].Value, "").Any(char.IsLetter))
+                .Select(m => $"{Path.GetFileName(f)}: {m.Value}"))
+            .ToList();
+        Assert.True(untranslated.Count == 0, "Write these as StringFormat={loc:T '…'} and add the Russian:\n" + string.Join("\n", untranslated));
     }
 
     private static Dictionary<string, string> BuiltInRu()

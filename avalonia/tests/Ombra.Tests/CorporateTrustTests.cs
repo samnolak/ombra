@@ -6,6 +6,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.Services;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
@@ -35,7 +36,7 @@ public sealed class CorporateTrustTests
 
     // ── Every launch path ──
 
-    [Fact]
+    [AvaloniaFact] // makes a MainViewModel: on the UI thread (see ConnectorsFlowTests)
     public async Task Every_launch_path_gets_the_trust_variable_of_the_chosen_mode()
     {
         var dir = TestProcesses.TempDir("corp-trust-launch");
@@ -127,7 +128,7 @@ public sealed class CorporateTrustTests
 
         var conflict = CorporateTrust.Inspect(new Dictionary<string, string?>(), Inh(CorporateTrust.NodeOptionsVariable, "--max-old-space-size=4096 --use-bundled-ca"));
         Assert.True(conflict.SystemCaConflict);
-        Assert.Equal("NODE_OPTIONS contains --use-bundled-ca (in the environment the app was started with)", NetworkTrustViewModel.Describe(conflict.NodeOptionsFlag!));
+        Assert.Equal(Loc.F("NODE_OPTIONS contains {0}", "--use-bundled-ca") + Loc.T(" (in the environment the app was started with)"), NetworkTrustViewModel.Describe(conflict.NodeOptionsFlag!));
         Assert.True(CorporateTrust.Inspect(new Dictionary<string, string?> { [CorporateTrust.SystemCaVariable] = "0" }, Clean).SystemCaConflict);
         var already = CorporateTrust.Inspect(new Dictionary<string, string?>(), Inh(CorporateTrust.NodeOptionsVariable, "--use-system-ca"));
         Assert.True(already.SystemCaAlreadyOn);
@@ -231,11 +232,16 @@ public sealed class CorporateTrustTests
         var log = Path.Combine(dir, "launches.jsonl");
         var project = SessionCatalog.ResolveLinks(TestProcesses.TempDir("corp-trust-project"));
         var fake = TestProcesses.Fake(scenario);
-        OmpLaunchSpec Launch(LaunchRequest r) => (store.Load() with
+        OmpLaunchSpec Launch(LaunchRequest r)
         {
-            Command = fake.FileName, PrefixArgs = [.. fake.Arguments], InheritedEnvironment = Clean,
-            Environment = new() { ["FAKE_OMP_LAUNCH_LOG"] = log, ["FAKE_SESSION_DIR"] = dir },
-        }).ToLaunchSpec(r);
+            var options = store.Load() with
+            {
+                Command = fake.FileName, PrefixArgs = [.. fake.Arguments], InheritedEnvironment = Clean,
+                Environment = new() { ["FAKE_OMP_LAUNCH_LOG"] = log, ["FAKE_SESSION_DIR"] = dir },
+            };
+            var spec = options.ToLaunchSpec(r);
+            return spec with { SessionArguments = [.. fake.SessionArguments, .. spec.SessionArguments] };
+        }
         var s = new SessionController(Launch, new LaunchRequest(project, ApprovalMode: "write"));
         var vm = new MainViewModel(s, new AppArgs(), settings: store);
         vm.NetworkTrust.Inherited = Clean;
@@ -282,15 +288,15 @@ public sealed class CorporateTrustTests
         Assert.Null(store.Load().CorporateTrustBundle);
         await Until(() => vm.Session.ProcessId != pid && vm.Phase == SessionPhase.Ready, "omp restarted");
         if (CorporateTrust.SystemModeSupported) Assert.Equal("1", LastEnv(log, CorporateTrust.SystemCaVariable));
-        Assert.StartsWith("On", page.StatusText);
-        Assert.Contains("omp restarted", page.Message);
+        Assert.StartsWith(Loc.T("On.").TrimEnd('.'), page.StatusText);
+        Assert.Contains(Loc.T(" omp restarted with it; new chats start with it."), page.Message);
 
         // Again: nothing changes, nothing restarts
         pid = vm.Session.ProcessId;
         var starts = Starts(log).Count;
         page.BeginSetupCommand.Execute(null);
         await page.EnableCommand.ExecuteAsync(null);
-        Assert.Contains("nothing changed", page.Message);
+        Assert.Contains(Loc.T("Already on with these settings: nothing changed."), page.Message);
         Assert.Equal(pid, vm.Session.ProcessId);
         Assert.Equal(starts, Starts(log).Count);
 
@@ -304,7 +310,7 @@ public sealed class CorporateTrustTests
     }
 
     [AvaloniaFact]
-    public async Task A_working_chat_keeps_its_run_and_restarts_with_it_after()
+    public async Task A_working_chat_defers_the_shared_trust_restart_until_all_chats_are_idle()
     {
         var (w, vm, store, log) = await OpenAsync("multi");
         vm.ComposerText = "FOREVER in A";
@@ -316,6 +322,9 @@ public sealed class CorporateTrustTests
         await Until(() => vm.Session != a && vm.Phase == SessionPhase.Ready, "B ready");
         var b = vm.Session;
         var pidB = b.ProcessId;
+        Assert.NotNull(pidA);
+        Assert.Equal(pidA, pidB);
+        var starts = Starts(log).Count;
 
         var page = vm.NetworkTrust;
         page.UseFileInsteadCommand.Execute(null);
@@ -323,15 +332,26 @@ public sealed class CorporateTrustTests
         page.ChooseFile(ca);
         await page.EnableCommand.ExecuteAsync(null);
         var bundle = CorporateTrust.BundlePathFor(store.Path);
-        await Until(() => b.ProcessId != pidB && b.Snapshot().Phase == SessionPhase.Ready, "the idle chat restarted now");
-        Assert.Equal(pidA, a.ProcessId); // the working one keeps its run
+        Assert.Equal(pidA, a.ProcessId);
+        Assert.Equal(pidA, b.ProcessId);
+        Assert.Equal(starts, Starts(log).Count);
         Assert.Equal(SessionPhase.Running, a.Snapshot().Phase);
-        Assert.Contains("restarts omp with the change when its run ends", page.RestartNote);
-        Assert.Equal(bundle, LastEnv(log, CorporateTrust.ExtraCaVariable));
+        Assert.Equal(SessionPhase.Ready, b.Snapshot().Phase);
+        Assert.Equal(2, vm.PendingEngineRestarts);
+        Assert.True(page.HasRestartNote);
+        Assert.NotEqual(bundle, LastEnv(log, CorporateTrust.ExtraCaVariable));
 
         await a.AbortAsync();
-        await Until(() => a.ProcessId != pidA && a.Snapshot().Phase == SessionPhase.Ready, "the working chat restarted after its run");
-        Assert.All(Starts(log).TakeLast(2), s => Assert.Equal(bundle, s["env"]![CorporateTrust.ExtraCaVariable]?.GetValue<string>()));
+        await Until(() => a.ProcessId != pidA && a.ProcessId == b.ProcessId
+            && a.Snapshot().Phase == SessionPhase.Ready && b.Snapshot().Phase == SessionPhase.Ready,
+            "both chats resumed together after the run ended");
+        var restarted = Starts(log).Skip(starts).ToList();
+        Assert.Equal(2, restarted.Count);
+        Assert.Single(restarted.Select(s => s["pid"]!.GetValue<int>()).Distinct());
+        Assert.All(restarted, s => Assert.Equal(bundle, s["env"]![CorporateTrust.ExtraCaVariable]?.GetValue<string>()));
+        Assert.Contains(a.Snapshot().Items, item => item is UserItem { Text: "FOREVER in A" });
+        Assert.Empty(b.Snapshot().Items.OfType<UserItem>());
+        Assert.Equal(0, vm.PendingEngineRestarts);
         await Until(() => !page.HasRestartNote, "the note gone");
         await vm.DisposeAsync();
         w.Close();
@@ -351,7 +371,7 @@ public sealed class CorporateTrustTests
         Assert.False(page.CanEnable); // nothing chosen yet
         page.ChooseFile(leaf);
         Assert.False(page.CanEnable);
-        Assert.Contains("not a certificate authority", page.ChosenFileText);
+        Assert.Contains(Loc.T("The certificate is not a certificate authority (it looks like a server's or a person's certificate). Choose your organisation's root or intermediate CA certificate."), page.ChosenFileText);
         page.ChooseFile(good);
         Assert.True(page.CanEnable);
         var pid = vm.Session.ProcessId;
@@ -361,7 +381,7 @@ public sealed class CorporateTrustTests
         Assert.True(File.Exists(bundle));
         await Until(() => vm.Session.ProcessId != pid && vm.Phase == SessionPhase.Ready, "omp restarted");
         Assert.Equal(bundle, LastEnv(log, CorporateTrust.ExtraCaVariable));
-        Assert.StartsWith("On: omp also trusts 1 certificate authority", page.StatusText);
+        Assert.StartsWith(Loc.Plural(1, "On: omp also trusts {0} certificate authority, valid until {1:d MMMM yyyy}.", "On: omp also trusts {0} certificate authorities, valid until {1:d MMMM yyyy}.", "\0").Split('\0')[0], page.StatusText);
 
         // Set up again with the same certificates: checked again, nothing changes
         pid = vm.Session.ProcessId;
@@ -370,7 +390,7 @@ public sealed class CorporateTrustTests
         Assert.True(page.ChosenFileOk); // the app's copy, checked again
         page.ChooseFile(good);
         await page.EnableCommand.ExecuteAsync(null);
-        Assert.Contains("nothing changed", page.Message);
+        Assert.Contains(Loc.T("Already on with these settings: nothing changed."), page.Message);
         Assert.Equal(pid, vm.Session.ProcessId);
 
         await page.TurnOffCommand.ExecuteAsync(null);
@@ -403,7 +423,7 @@ public sealed class CorporateTrustTests
         page.UseFileInsteadCommand.Execute(null);
         page.ChooseFile(CorporateTrustCerts.Write(TestProcesses.TempDir("corp-trust-block"), "team.pem", CorporateTrustCerts.Ca().ExportCertificatePem()));
         Assert.True(page.ChosenFileOk);
-        Assert.Contains("NODE_EXTRA_CA_CERTS is set", page.Blocker);
+        Assert.Contains(Loc.F("{0} is set", "NODE_EXTRA_CA_CERTS"), page.Blocker);
         Assert.DoesNotContain("/home/me", page.Blocker); // their path is not repeated
         Assert.False(page.CanEnable);
         await page.EnableCommand.ExecuteAsync(null);

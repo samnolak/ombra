@@ -9,6 +9,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Ombra.App.ViewModels"
              xmlns:ctl="using:Ombra.App.Controls"
+             xmlns:chrome="using:Avalonia.Controls.Chrome"
              xmlns:cb="using:Ombra.ClientCore.Browser"
              x:Class="Ombra.App.Controls.PreviewPanel"
              x:DataType="vm:PreviewViewModel"
@@ -37,19 +38,50 @@
     </Style>
     <!-- The device bar (shown in device mode) -->
     <Style Selector="Border.preview-device-bar">
-      <Setter Property="Padding" Value="6,4" />
+      <Setter Property="Padding" Value="8,6" />
       <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
       <Setter Property="BorderThickness" Value="0,0,0,1" />
     </Style>
     <!-- Downloads of the pane's pages, under the page -->
     <Style Selector="Border.preview-downloads">
-      <Setter Property="Padding" Value="10,8" />
+      <Setter Property="Padding" Value="8" />
       <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
       <Setter Property="BorderThickness" Value="0,1,0,0" />
     </Style>
   </UserControl.Styles>
 
   <DockPanel>
+    <!-- The Browser page's own tabs (MainWindow's BrowserPage): a row of the window's band, centred in it; on macOS the
+         title bar, its empty part moves the window (Styles.Workspace: after the traffic lights while the sidebar is hidden) -->
+    <DockPanel DockPanel.Dock="Top" Classes="preview-tab-strip" IsVisible="{Binding ShowTabStrip, RelativeSource={RelativeSource AncestorType=ctl:PreviewPanel}}"
+               chrome:WindowDecorationProperties.ElementRole="TitleBar">
+      <Button DockPanel.Dock="Right" Classes="icon" Command="{Binding NewTabCommand}"
+              ToolTip.Tip="{loc:T 'New tab'}" AutomationProperties.Name="{loc:T 'New tab'}">
+        <ctl:Icon Data="{StaticResource IconPlus}" Size="16" />
+      </Button>
+      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+        <ItemsControl ItemsSource="{Binding Tabs}">
+          <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:PreviewTab">
+              <Border Classes="panel-tab" Classes.active="{Binding IsActive}" IsVisible="{Binding ShowsInStrip}" ctl:TabMenus.Enabled="True">
+                <DockPanel>
+                  <Button DockPanel.Dock="Right" Classes="icon panel-tab-close" IsEnabled="{Binding CanClose}"
+                          Command="{Binding $parent[ctl:PreviewPanel].((vm:PreviewViewModel)DataContext).CloseTabCommand}" CommandParameter="{Binding}"
+                          ToolTip.Tip="{loc:T 'Close tab'}" AutomationProperties.Name="{loc:T 'Close tab'}">
+                    <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+                  </Button>
+                  <Button Classes="flat panel-tab-button" Command="{Binding $parent[ctl:PreviewPanel].((vm:PreviewViewModel)DataContext).SelectTabCommand}"
+                          CommandParameter="{Binding}" ToolTip.Tip="{Binding ToolTip}" AutomationProperties.Name="{Binding Header}">
+                    <TextBlock Text="{Binding Header}" MaxWidth="180" TextTrimming="CharacterEllipsis" />
+                  </Button>
+                </DockPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </DockPanel>
     <!-- ── Toolbar ── -->
     <Panel DockPanel.Dock="Top">
       <Border Classes="preview-toolbar">
@@ -124,7 +156,7 @@
             <DataTemplate x:DataType="vm:DevicePreset">
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
-                <TextBlock Classes="tertiary" Text="{Binding SizeText}" VerticalAlignment="Center" FontSize="{DynamicResource GuiFontS}" />
+                <TextBlock Classes="muted" Text="{Binding SizeText}" VerticalAlignment="Center" />
               </StackPanel>
             </DataTemplate>
           </ComboBox.ItemTemplate>
@@ -152,6 +184,22 @@
             </DataTemplate>
           </ComboBox.ItemTemplate>
         </ComboBox>
+        <!-- The Nightly runtime emulates these too: devicePixelRatio, and touch (pointer: coarse, touch events, the mouse as a finger) -->
+        <ComboBox x:Name="DevicePixelRatioBox" ItemsSource="{x:Static vm:PreviewViewModel.DevicePixelRatios}" SelectedItem="{Binding DevicePixelRatio}"
+                  IsVisible="{Binding UseNightly}" MinWidth="90" VerticalAlignment="Center"
+                  ToolTip.Tip="{loc:T 'The device pixel ratio the page sees (devicePixelRatio, resolution media queries)'}"
+                  AutomationProperties.Name="{loc:T 'Pixel ratio'}">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="x:Double">
+              <TextBlock Text="{Binding Converter={x:Static vm:PreviewViewModel.PixelRatioNameConverter}}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <Button x:Name="DeviceTouchButton" Classes="icon" Classes.on="{Binding DeviceTouch}" Command="{Binding ToggleTouchCommand}"
+                IsVisible="{Binding UseNightly}" VerticalAlignment="Center" AutomationProperties.Name="{loc:T 'Touch'}"
+                ToolTip.Tip="{loc:T 'Touch: the page sees a touch screen (pointer: coarse, touch events) and the mouse acts as a finger'}">
+          <ctl:Icon Data="{StaticResource IconTouch}" Size="16" />
+        </Button>
         <Button x:Name="CloseDeviceButton" Classes="icon" Command="{Binding ClearDeviceCommand}" VerticalAlignment="Center"
                 ToolTip.Tip="{loc:T 'Fit the pane again (Ctrl/⌘+Shift+M)'}" AutomationProperties.Name="{loc:T 'Leave device mode'}">
           <ctl:Icon Data="{StaticResource IconClose}" Size="16" />
@@ -161,7 +209,7 @@
 
     <!-- ── Suggestions (local addresses from tool output) while nothing is open ── -->
     <ItemsControl x:Name="SuggestionRow" DockPanel.Dock="Top" ItemsSource="{Binding Suggestions}"
-                  IsVisible="{Binding ShowSuggestionRow}" Margin="10,10,10,0">
+                  IsVisible="{Binding ShowSuggestionRow}" Margin="8,8,8,0">
       <ItemsControl.ItemsPanel>
         <ItemsPanelTemplate>
           <WrapPanel ItemSpacing="6" LineSpacing="6" />
@@ -181,17 +229,61 @@
     </ItemsControl>
 
     <!-- ── Why an address was refused or a page failed ── -->
-    <Border x:Name="MessageBar" DockPanel.Dock="Top" Classes="notice error" Margin="10,10,10,0" IsVisible="{Binding HasMessage}">
+    <Border x:Name="MessageBar" DockPanel.Dock="Top" Classes="notice error" Margin="8,8,8,0" IsVisible="{Binding HasMessage}">
       <DockPanel>
         <ctl:Icon DockPanel.Dock="Left" Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,0,8,0" VerticalAlignment="Top" />
         <TextBlock Classes="error" Text="{Binding Message}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
       </DockPanel>
     </Border>
 
+    <!-- ── First run (macOS): may pages move to Nightly? (PreviewNightly.cs) ── -->
+    <Border x:Name="NightlyConsentBar" DockPanel.Dock="Top" Classes="card" Margin="8,8,8,0" IsVisible="{Binding NeedsNightlyConsent}">
+      <StackPanel Spacing="12">
+        <StackPanel Spacing="6">
+          <TextBlock Classes="card-title" Text="{loc:T 'Show pages with Nightly?'}" TextWrapping="Wrap" />
+          <TextBlock Classes="muted" TextWrapping="Wrap"
+                     Text="{loc:T 'Ombra can show pages in Nightly, a full browser engine it installs and runs with its own profile. Pages, sign-ins and downloads stay on this Mac. You can change this in Settings › General.'}" />
+        </StackPanel>
+        <WrapPanel ItemSpacing="8" LineSpacing="8">
+          <Button x:Name="NightlyAcceptButton" Classes="accent md" Content="{loc:T 'Use Nightly'}" Command="{Binding AcceptNightlyCommand}" />
+          <Button x:Name="NightlyDeclineButton" Classes="outline md" Content="{loc:T 'Keep the built-in preview'}" Command="{Binding DeclineNightlyCommand}" />
+        </WrapPanel>
+      </StackPanel>
+    </Border>
+
+    <!-- ── Nightly was chosen but cannot show pages: the built-in preview does, and says why ── -->
+    <Border x:Name="NightlyFallbackBar" DockPanel.Dock="Top" Classes="notice warning" Margin="8,8,8,0" IsVisible="{Binding ShowNightlyFallback}">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" Margin="8,0,0,0" VerticalAlignment="Top">
+          <Button x:Name="NightlyInstallButton" Classes="accent" Content="{loc:T 'Install Nightly'}" Command="{Binding InstallNightlyCommand}"
+                  IsVisible="{Binding CanInstallNightly}" />
+          <Button x:Name="NightlyRetryButton" Content="{loc:T 'Try again'}" Command="{Binding RetryNightlyCommand}"
+                  IsVisible="{Binding !CanInstallNightly}" />
+        </StackPanel>
+        <ctl:Icon DockPanel.Dock="Left" Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,0,8,0" VerticalAlignment="Top" />
+        <StackPanel Spacing="4">
+          <TextBlock x:Name="NightlyFallbackText" Text="{Binding NightlyFallbackReason}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+          <TextBlock Classes="tertiary" Text="{loc:T 'The built-in preview shows pages meanwhile.'}" TextWrapping="Wrap" />
+          <TextBlock x:Name="NightlyInstallStatusText" Classes="tertiary" Text="{Binding NightlyInstallStatus}" TextWrapping="Wrap"
+                     IsVisible="{Binding NightlyInstallStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          <StackPanel Spacing="4" IsVisible="{Binding HasNightlyFallbackDetail}">
+            <ToggleButton x:Name="NightlyDetailToggle" Classes="thinking-toggle" AutomationProperties.Name="{loc:T 'Show details'}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="{loc:T 'Show details'}" VerticalAlignment="Center" />
+                <ctl:Icon Classes="chevron" Data="{StaticResource IconChevronRight}" Size="16" />
+              </StackPanel>
+            </ToggleButton>
+            <SelectableTextBlock x:Name="NightlyFallbackDetailText" Classes="mono muted" Text="{Binding NightlyFallbackDetail}" TextWrapping="Wrap"
+                                 FontSize="{DynamicResource GuiFontXs}" IsVisible="{Binding #NightlyDetailToggle.IsChecked}" />
+          </StackPanel>
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
     <!-- ── Downloads (saved where the user chose; the folder opens from here) ── -->
     <Border x:Name="DownloadsStrip" DockPanel.Dock="Bottom" Classes="preview-downloads" IsVisible="{Binding HasDownloads}">
       <DockPanel>
-        <Button x:Name="ClearDownloadsButton" DockPanel.Dock="Right" Classes="icon" Width="26" Height="26" VerticalAlignment="Top"
+        <Button x:Name="ClearDownloadsButton" DockPanel.Dock="Right" Classes="icon sm" VerticalAlignment="Top"
                 Command="{Binding ClearDownloadsCommand}" ToolTip.Tip="{loc:T 'Clear finished downloads'}" AutomationProperties.Name="{loc:T 'Clear downloads'}">
           <ctl:Icon Data="{StaticResource IconClose}" Size="16" />
         </Button>
@@ -216,7 +308,16 @@
                   <StackPanel Spacing="2">
                     <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" FontSize="{DynamicResource GuiFontS}"
                                ToolTip.Tip="{Binding Path}" />
-                    <TextBlock Classes="tertiary" Text="{Binding StatusText}" TextTrimming="CharacterEllipsis" FontSize="{DynamicResource GuiFontXs}" />
+                    <TextBlock Classes="tertiary" TextTrimming="CharacterEllipsis" FontSize="{DynamicResource GuiFontXs}">
+                      <TextBlock.Text>
+                        <MultiBinding Converter="{x:Static vm:Converters.DownloadStatus}">
+                          <Binding Path="State" />
+                          <Binding Path="BytesReceived" />
+                          <Binding Path="TotalBytes" />
+                          <Binding Path="Error" />
+                        </MultiBinding>
+                      </TextBlock.Text>
+                    </TextBlock>
                   </StackPanel>
                 </DockPanel>
               </DataTemplate>
@@ -229,22 +330,23 @@
     <Panel x:Name="PageArea">
       <!-- Empty: nothing opened yet -->
       <StackPanel x:Name="EmptyState" IsVisible="{Binding ShowEmptyState}" HorizontalAlignment="Center" VerticalAlignment="Center"
-                  Spacing="10" Margin="24" MaxWidth="360">
-        <ctl:Icon Data="{StaticResource IconGlobe}" Size="28" HorizontalAlignment="Center"
-                  TextElement.Foreground="{DynamicResource GuiTextTertiary}" />
+                  Spacing="8" Margin="24" MaxWidth="360">
+        <ctl:Icon Classes="pane-empty-mark" Data="{StaticResource IconGlobe}" Size="28" />
         <TextBlock Classes="muted" Text="{Binding EmptyText}" TextWrapping="Wrap" TextAlignment="Center" />
       </StackPanel>
 
       <!-- The platform's engine is missing: offer the system browser -->
       <Border x:Name="FallbackCard" Classes="card" IsVisible="{Binding ShowFallback}" HorizontalAlignment="Center" VerticalAlignment="Center"
               Margin="24" MaxWidth="420">
-        <StackPanel Spacing="10">
-          <DockPanel>
-            <ctl:Icon DockPanel.Dock="Left" Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,0,10,0" VerticalAlignment="Top" />
-            <TextBlock Classes="section" Text="{Binding FallbackText}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontM}" />
-          </DockPanel>
-          <TextBlock Classes="muted" Text="{Binding EngineDetail}" TextWrapping="Wrap" IsVisible="{Binding EngineDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-          <Button x:Name="FallbackOpenButton" Classes="accent" Content="{loc:T 'Open in browser'}" Command="{Binding OpenExternallyCommand}"
+        <StackPanel Spacing="12">
+          <StackPanel Spacing="6">
+            <DockPanel>
+              <ctl:Icon DockPanel.Dock="Left" Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,1,10,0" VerticalAlignment="Top" />
+              <TextBlock Classes="card-title" Text="{Binding FallbackText}" TextWrapping="Wrap" />
+            </DockPanel>
+            <TextBlock Classes="muted" Text="{Binding EngineDetail}" TextWrapping="Wrap" IsVisible="{Binding EngineDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+          </StackPanel>
+          <Button x:Name="FallbackOpenButton" Classes="accent md" Content="{loc:T 'Open in browser'}" Command="{Binding OpenExternallyCommand}"
                   HorizontalAlignment="Left" />
         </StackPanel>
       </Border>
@@ -252,32 +354,36 @@
       <!-- The page's web process ended: no blank page, one click brings it back -->
       <Border x:Name="CrashPage" Classes="card" IsVisible="{Binding ShowCrashPage}" HorizontalAlignment="Center" VerticalAlignment="Center"
               Margin="24" MaxWidth="420">
-        <StackPanel Spacing="10">
-          <DockPanel>
-            <ctl:Icon DockPanel.Dock="Left" Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,0,10,0" VerticalAlignment="Top" />
-            <TextBlock Classes="section" Text="{loc:T 'This page stopped working'}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontM}" />
-          </DockPanel>
-          <TextBlock Classes="muted" Text="{loc:T 'Its web content process ended. Reload to open it again.'}" TextWrapping="Wrap" />
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button x:Name="CrashReloadButton" Classes="accent" Content="{loc:T 'Reload'}" Command="{Binding ReloadCommand}" />
-            <Button x:Name="CrashOpenExternallyButton" Content="{loc:T 'Open in browser'}" Command="{Binding OpenExternallyCommand}" />
+        <StackPanel Spacing="12">
+          <StackPanel Spacing="6">
+            <DockPanel>
+              <ctl:Icon DockPanel.Dock="Left" Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" Margin="0,1,10,0" VerticalAlignment="Top" />
+              <TextBlock Classes="card-title" Text="{loc:T 'This page stopped working'}" TextWrapping="Wrap" />
+            </DockPanel>
+            <TextBlock Classes="muted" Text="{loc:T 'Its web content process ended. Reload to open it again.'}" TextWrapping="Wrap" />
           </StackPanel>
+          <WrapPanel ItemSpacing="8" LineSpacing="8">
+            <Button x:Name="CrashReloadButton" Classes="accent md" Content="{loc:T 'Reload'}" Command="{Binding ReloadCommand}" />
+            <Button x:Name="CrashOpenExternallyButton" Classes="outline md" Content="{loc:T 'Open in browser'}" Command="{Binding OpenExternallyCommand}" />
+          </WrapPanel>
         </StackPanel>
       </Border>
 
       <!-- The navigation failed (server unreachable, refused certificate…): why, and Try again -->
       <Border x:Name="ErrorPage" Classes="card" IsVisible="{Binding ShowErrorPage}" HorizontalAlignment="Center" VerticalAlignment="Center"
               Margin="24" MaxWidth="420">
-        <StackPanel Spacing="10">
-          <DockPanel>
-            <ctl:Icon DockPanel.Dock="Left" Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" Margin="0,0,10,0" VerticalAlignment="Top" />
-            <TextBlock x:Name="ErrorPageTitle" Classes="section" Text="{Binding ErrorTitle}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontM}" />
-          </DockPanel>
-          <SelectableTextBlock x:Name="ErrorPageDetail" Classes="muted" Text="{Binding ErrorDetail}" TextWrapping="Wrap" />
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button x:Name="ErrorRetryButton" Classes="accent" Content="{loc:T 'Try again'}" Command="{Binding ReloadCommand}" />
-            <Button x:Name="ErrorOpenExternallyButton" Content="{loc:T 'Open in browser'}" Command="{Binding OpenExternallyCommand}" />
+        <StackPanel Spacing="12">
+          <StackPanel Spacing="6">
+            <DockPanel>
+              <ctl:Icon DockPanel.Dock="Left" Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" Margin="0,1,10,0" VerticalAlignment="Top" />
+              <TextBlock x:Name="ErrorPageTitle" Classes="card-title" Text="{Binding ErrorTitle}" TextWrapping="Wrap" />
+            </DockPanel>
+            <SelectableTextBlock x:Name="ErrorPageDetail" Classes="muted" Text="{Binding ErrorDetail}" TextWrapping="Wrap" />
           </StackPanel>
+          <WrapPanel ItemSpacing="8" LineSpacing="8">
+            <Button x:Name="ErrorRetryButton" Classes="accent md" Content="{loc:T 'Try again'}" Command="{Binding ReloadCommand}" />
+            <Button x:Name="ErrorOpenExternallyButton" Classes="outline md" Content="{loc:T 'Open in browser'}" Command="{Binding OpenExternallyCommand}" />
+          </WrapPanel>
         </StackPanel>
       </Border>
 
@@ -330,10 +436,10 @@
                     <TextBox x:Name="BrowserDialogPassword" Text="{Binding Password}" PasswordChar="•" PlaceholderText="{loc:T 'Password'}" AutomationProperties.Name="{loc:T 'Password'}" />
                   </StackPanel>
                   <TextBox x:Name="BrowserDialogPrompt" Text="{Binding PromptText}" IsVisible="{Binding IsPrompt}" AutomationProperties.Name="{loc:T 'Answer'}" />
-                  <TextBlock Classes="muted" Text="{Binding Note}" IsVisible="{Binding HasNote}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+                  <TextBlock Classes="muted" Text="{Binding Note}" IsVisible="{Binding HasNote}" TextWrapping="Wrap" />
                   <!-- Two answers: in a row, the main one last. Three (permission, download): stacked full width, the main one first. -->
                   <WrapPanel ItemSpacing="8" LineSpacing="8" HorizontalAlignment="Right" IsVisible="{Binding !HasTertiary}">
-                    <Button x:Name="BrowserDialogSecondary" Classes="md" Content="{Binding SecondaryLabel}" Command="{Binding SecondaryCommand}" IsVisible="{Binding HasSecondary}"
+                    <Button x:Name="BrowserDialogSecondary" Classes="md outline" Content="{Binding SecondaryLabel}" Command="{Binding SecondaryCommand}" IsVisible="{Binding HasSecondary}"
                             AutomationProperties.Name="{Binding SecondaryLabel}" ToolTip.Tip="Esc" />
                     <Button x:Name="BrowserDialogPrimary" Classes="accent md" MinWidth="88" Content="{Binding PrimaryLabel}" Command="{Binding PrimaryCommand}"
                             AutomationProperties.Name="{Binding PrimaryLabel}" ToolTip.Tip="Enter" />
@@ -341,9 +447,9 @@
                   <StackPanel Spacing="8" IsVisible="{Binding HasTertiary}">
                     <Button x:Name="BrowserDialogPrimaryStacked" Classes="accent md" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                             Content="{Binding PrimaryLabel}" Command="{Binding PrimaryCommand}" AutomationProperties.Name="{Binding PrimaryLabel}" ToolTip.Tip="Enter" />
-                    <Button x:Name="BrowserDialogTertiary" Classes="md" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    <Button x:Name="BrowserDialogTertiary" Classes="md outline" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                             Content="{Binding TertiaryLabel}" Command="{Binding TertiaryCommand}" AutomationProperties.Name="{Binding TertiaryLabel}" />
-                    <Button x:Name="BrowserDialogSecondaryStacked" Classes="md" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    <Button x:Name="BrowserDialogSecondaryStacked" Classes="md outline" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                             Content="{Binding SecondaryLabel}" Command="{Binding SecondaryCommand}" AutomationProperties.Name="{Binding SecondaryLabel}" ToolTip.Tip="Esc" />
                   </StackPanel>
                 </StackPanel>

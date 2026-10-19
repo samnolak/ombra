@@ -14,7 +14,7 @@
        row's file as its DataContext), so it acts on the row clicked, and empty space under the rows has none -->
   <UserControl.Resources>
     <Flyout x:Key="FileMenu" Placement="Pointer" ctl:ChoiceMenu.CloseOnChoice="True">
-      <StackPanel x:DataType="vm:FileNodeViewModel" Width="250" Spacing="2">
+      <StackPanel x:DataType="vm:FileNodeViewModel" MinWidth="250" Spacing="2">
         <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                 Command="{Binding $parent[ListBox].((vm:FilesViewModel)DataContext).ActivateCommand}" CommandParameter="{Binding}" AutomationProperties.Name="{loc:T 'Open'}">
           <Grid ColumnDefinitions="Auto,*">
@@ -27,6 +27,13 @@
           <Grid ColumnDefinitions="Auto,*">
             <ctl:Icon Data="{StaticResource IconAt}" Size="16" Margin="0,0,10,0" />
             <TextBlock Grid.Column="1" Text="{loc:T 'Add to message'}" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsVisible="{Binding IsFile}"
+                Command="{Binding $parent[ListBox].((vm:FilesViewModel)DataContext).Owner.ShareFileCommand}" CommandParameter="{Binding FullPath}" AutomationProperties.Name="{loc:T 'Share with team…'}">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconShare}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="{loc:T 'Share with team…'}" VerticalAlignment="Center" />
           </Grid>
         </Button>
         <Border Classes="menu-separator" />
@@ -77,6 +84,24 @@
         <TextBlock Grid.Column="1" Classes="muted" Text="{Binding RootName}" Margin="8,0,8,0" VerticalAlignment="Center"
                    TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Root}" />
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+          <Button Content="{loc:T 'Unsaved'}" IsVisible="{Binding HasUnsavedDocuments}" ToolTip.Tip="{loc:T 'Open an unsaved or recovered document'}">
+            <Button.Flyout>
+              <Flyout>
+                <ItemsControl ItemsSource="{Binding UnsavedDocuments}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:EditorBufferItem">
+                      <Button Classes="menu-item" Content="{Binding Label}" ToolTip.Tip="{Binding FullPath}"
+                              Command="{Binding $parent[ItemsControl].((vm:FilesViewModel)DataContext).OpenEditorBufferCommand}" CommandParameter="{Binding}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Flyout>
+            </Button.Flyout>
+          </Button>
+          <Button x:Name="ShareChangesButton" Classes="icon" Command="{Binding Owner.ShareChangesCommand}" IsVisible="{Binding IsChangedMode}"
+                  ToolTip.Tip="{loc:T 'Share the changes with the team as a patch'}" AutomationProperties.Name="{loc:T 'Share changes'}">
+            <ctl:Icon Data="{StaticResource IconShare}" Size="16" />
+          </Button>
           <Button x:Name="RefreshButton" Classes="icon" Command="{Binding RefreshNowCommand}" IsVisible="{Binding HasProject}"
                   ToolTip.Tip="{loc:T 'Read the files again'}" AutomationProperties.Name="{loc:T 'Refresh files'}">
             <ctl:Icon Data="{StaticResource IconReload}" Size="16" />
@@ -215,7 +240,7 @@
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <ctl:Icon Classes="file-icon" Data="{StaticResource IconFile}" Size="16" Margin="0,0,8,0" VerticalAlignment="Center" />
                 <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center" ToolTip.Tip="{Binding FullPath}">
-                  <TextBlock x:Name="ViewerName" Classes="viewer-name" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                  <TextBlock x:Name="ViewerName" Classes="viewer-name" Text="{Binding DocumentName}" TextTrimming="CharacterEllipsis" />
                   <TextBlock Classes="tertiary" Text="{Binding Subtitle}" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
                 <Border Grid.Column="2" Classes="toolbar-pill" Margin="8,0,0,0">
@@ -232,7 +257,7 @@
                     <ctl:Icon Data="{StaticResource IconMoreHorizontal}" Size="16" />
                     <Button.Flyout>
                       <Flyout Placement="BottomEdgeAlignedRight" ctl:ChoiceMenu.CloseOnChoice="True">
-                        <StackPanel Width="250" Spacing="2">
+                        <StackPanel MinWidth="250" Spacing="2">
                           <ItemsControl ItemsSource="{Binding Owner.Editors}">
                             <ItemsControl.ItemTemplate>
                               <DataTemplate x:DataType="svc:EditorApp">
@@ -294,6 +319,58 @@
                 </Border>
               </Grid>
             </Border>
+            <StackPanel DockPanel.Dock="Top" IsVisible="{Binding HasDocument}" Spacing="4" Margin="8,4">
+              <Grid ColumnDefinitions="Auto,Auto">
+                <Button x:Name="SaveDocumentButton" Content="{loc:T 'Save'}" Command="{Binding SaveDocumentCommand}" IsEnabled="{Binding CanSaveDocument}" />
+                <Button Grid.Column="1" Content="{loc:T 'Editor actions'}" Margin="4,0">
+                  <Button.Flyout>
+                    <Flyout ctl:ChoiceMenu.CloseOnChoice="True">
+                      <StackPanel Spacing="4" MaxWidth="340">
+                        <Button Classes="menu-item" Content="{loc:T 'Reload from disk…'}" Command="{Binding AskReloadDocumentCommand}" />
+                        <Button Classes="menu-item" Content="{loc:T 'Copy unsaved text'}" Command="{Binding CopyUnsavedDocumentCommand}" IsVisible="{Binding IsDirty}" />
+                        <Button Classes="menu-item" Content="{loc:T 'Save copy…'}" Click="OnSaveDocumentCopy" IsVisible="{Binding IsDirty}" />
+                        <Button Classes="menu-item" Content="{loc:T 'Add selection to message'}" Click="OnAddEditorSelection" IsVisible="{Binding ShowEditor}" />
+                        <Button Classes="menu-item" Content="{loc:T 'Enable language services…'}" Command="{Binding Owner.AskEditorTrustCommand}" IsVisible="{Binding !Owner.IsEditorTrusted}" />
+                        <Button Classes="menu-item" Content="{loc:T 'Disable language services'}" Command="{Binding Owner.DisableEditorLanguageCommand}" IsVisible="{Binding Owner.IsEditorTrusted}" />
+                        <TextBlock Classes="tertiary" Text="{Binding Owner.EditorLanguageStatus}" TextWrapping="Wrap" />
+                        <TextBlock Classes="tertiary" Text="{Binding SnapshotNotice}" IsVisible="{Binding IsDirty}" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </Flyout>
+                  </Button.Flyout>
+                </Button>
+              </Grid>
+              <TextBlock Classes="danger-text" Text="{Binding DocumentError}" TextWrapping="Wrap" />
+              <TextBlock Classes="tertiary" Text="{Binding DocumentNotice}" IsVisible="{Binding DocumentNotice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" TextWrapping="Wrap" />
+              <!-- The disk file changed under unsaved text, usually because omp edited it: nothing is lost either way -->
+              <Border x:Name="DocumentConflictBanner" Classes="notice warning" IsVisible="{Binding HasConflict}">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="{loc:T 'omp changed this file on disk. Your unsaved text is kept in the editor.'}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+                  <WrapPanel ItemSpacing="6" LineSpacing="6">
+                    <Button x:Name="ReloadKeepingCopyButton" Classes="accent" Content="{loc:T 'Reload (keeps your text as a copy)'}" Command="{Binding ReloadKeepingCopyCommand}" />
+                    <Button x:Name="KeepMineButton" Classes="outline" Content="{loc:T 'Keep mine'}" Command="{Binding KeepMineDocumentCommand}" IsEnabled="{Binding CanKeepMine}"
+                            ToolTip.Tip="{loc:T 'Keep your text; the next save replaces the changed file'}" />
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
+              <Border Classes="notice warning" IsVisible="{Binding IsConfirmingReload}">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="{loc:T 'Discard the unsaved buffer and reload the disk version? Copy your text first if you need to keep it.'}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+                  <WrapPanel ItemSpacing="6" LineSpacing="6">
+                    <Button Classes="danger" Content="{loc:T 'Discard and reload'}" Command="{Binding ReloadDocumentCommand}" />
+                    <Button Classes="flat" Content="{loc:T 'Cancel'}" Command="{Binding CancelReloadDocumentCommand}" />
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
+              <Border Classes="notice warning" IsVisible="{Binding Owner.IsConfirmingEditorTrust}">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="{loc:T 'Trust this workspace to run its configured language-server commands? Language servers execute local programs and can read project files. Syntax highlighting does not require this permission.'}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+                  <WrapPanel ItemSpacing="6" LineSpacing="6">
+                    <Button Classes="accent" Content="{loc:T 'Trust and enable'}" Command="{Binding Owner.EnableEditorLanguageCommand}" />
+                    <Button Classes="outline" Content="{loc:T 'Cancel'}" Command="{Binding Owner.CancelEditorTrustCommand}" />
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
+            </StackPanel>
             <!-- A file git sees changed: the file or its Changes since the last commit (Codex's and Claude Code's review),
                  and there "Revert file…", which asks first -->
             <Border x:Name="ViewerReviewBar" DockPanel.Dock="Top" Classes="viewer-review" IsVisible="{Binding HasChanges}">
@@ -339,7 +416,12 @@
             <Panel>
               <DockPanel x:Name="DiffPanel" IsVisible="{Binding ShowChanges}">
                 <Border DockPanel.Dock="Top" Classes="viewer-notice" IsVisible="{Binding HasDiffMessage}">
-                  <TextBlock Classes="tertiary" Text="{Binding DiffMessage}" TextWrapping="Wrap" />
+                  <DockPanel>
+                    <Button x:Name="ShowMoreDiffButton" DockPanel.Dock="Right" Classes="chip" Margin="8,0,0,0" VerticalAlignment="Center"
+                            IsVisible="{Binding CanShowMoreDiff}" Command="{Binding ShowMoreDiffCommand}" Content="{loc:T 'Show more'}"
+                            AutomationProperties.Name="{loc:T 'Show more of the changes'}" />
+                    <TextBlock Classes="tertiary" Text="{Binding DiffMessage}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                  </DockPanel>
                 </Border>
                 <ScrollViewer x:Name="DiffScroll" HorizontalScrollBarVisibility="Disabled">
                   <ItemsControl x:Name="DiffList" ItemsSource="{Binding DiffRows}" Margin="0,4,0,12">
@@ -387,7 +469,9 @@
                 </ScrollViewer>
               </DockPanel>
               <Panel IsVisible="{Binding !ShowChanges}">
-                <ctl:CodeView x:Name="Code" Text="{Binding Text}" FileName="{Binding Name}" TargetLine="{Binding TargetLine}" IsVisible="{Binding ShowCode}" />
+                <ctl:DocumentEditor x:Name="Editor" WorkspaceDocument="{Binding Document}" LanguageService="{Binding Owner.LanguageService}" TargetLine="{Binding TargetLine}" IsVisible="{Binding ShowEditor}"
+                                    AttachedToVisualTree="OnEditorAttached" DetachedFromVisualTree="OnEditorDetached" />
+                <ctl:CodeView x:Name="Code" Text="{Binding PreviewText}" FileName="{Binding Name}" TargetLine="{Binding TargetLine}" IsVisible="{Binding ShowPreview}" />
                 <ScrollViewer IsVisible="{Binding ShowMarkdown}" HorizontalScrollBarVisibility="Disabled">
                   <ctl:MarkdownView Markdown="{Binding MarkdownText}" Margin="16,12,16,24" />
                 </ScrollViewer>

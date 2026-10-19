@@ -1,9 +1,10 @@
-# Feature parity: omp 18.2.0 vs Ombra
+# Feature parity: pinned omp 18.8.0 vs Ombra
 
-Every omp CLI flag and subcommand, every builtin slash command and every RPC feature of **omp 18.2.0**, and what the
-GUI offers for it. Source of truth: omp's own code (`packages/coding-agent/src`: `cli/args.ts`, `slash-commands/
-builtin-*.ts`, `modes/rpc/rpc-mode.ts`, `modes/rpc/rpc-types.ts`) and its help (`omp --help`, `omp <cmd> --help`),
-checked against a running omp 18.2.0 (`tests/Ombra.Tests/RealSessionAreaTests.cs`, `RealOmpCommandTests`).
+The original inventory covered omp 18.2.0 CLI flags, builtins and RPC, using its source (`packages/coding-agent/src`:
+`cli/args.ts`, `slash-commands/builtin-*.ts`, `modes/rpc/rpc-mode.ts`, `modes/rpc/rpc-types.ts`) and running help/tests.
+The current runtime pin is **omp 18.8.0**. Beta R0.2 updates the recovery and approval rows below; this does not
+claim a fresh exhaustive audit of every historical row. Additional pin capabilities and remaining gaps are tracked
+in [PARITY_ROADMAP](PARITY_ROADMAP.md), with executed gates in [NEXT_RELEASE_ROADMAP](../../docs/NEXT_RELEASE_ROADMAP.md).
 
 Status:
 
@@ -18,11 +19,46 @@ Status:
 An area in italics (*Panes*, *Files*, *Connectors*, *Workspace*) names the part of the client that does it; every row
 was checked against the merged client and its tests.
 
+## F. Compatible runtime and upgrade contract
+
+| Gate | Contract |
+|---|---|
+| F1: owned runtime pin | `ombra-engine-18.8.0-bun-1.4.2-v1`: complete repository-owned engine sources based on omp **18.8.0**, not a patched installed npm tree; Bun **1.4.2**, frozen dependency lockfile and integrity-pinned downloads. |
+| F2: protocol and source identity | Shared-engine protocol **1** wraps session RPC v2 framing. Installer requires the host's `--self-check` to report protocol 1 and omp 18.8.0 before activation. Manifest/source SHA256 and source identity must match this client; tests reject protocol 0/2 and another omp version. |
+| F3: upgrade path | Engine upgrades ship with the client. Review the upstream source changes, update canonical `runtime/engine` and any dependency/version pins, run `python3 runtime/generate-engine-artifact.py`, then its `--check` gate, runtime installer/source tests and real-engine smoke. In particular recheck steer/settle semantics before raising the upstream base. Staging failure preserves the existing installation; older packs are retained for explicit cleanup, never silently selected as compatible fallbacks. |
+
+For isolated local smoke builds, build `tests/Ombra.Tests` in Release with
+`--artifacts-path <absolute-path>`, then pass that same path as `OMBRA_ARTIFACTS_PATH`
+to `tools/ci/real-omp-smoke.sh <work-dir>`. Without that variable, existing CI build
+locations remain unchanged. The smoke uses a **stand-in model**, but the installed
+engine, provider transport, RPC and tools are real; it does not certify native rendering.
+
+2026-10-18 macOS arm64 verification: `python3 runtime/generate-engine-artifact.py --check`
+passed; `OMP_SMOKE_PORT=18436 OMBRA_ARTIFACTS_PATH="$PWD/.temp/ParityF/artifacts"
+bash avalonia/tools/ci/real-omp-smoke.sh .temp/ParityF/smoke` passed the real installer
+(1 test), installed Bun engine contracts (59 tests), and real-omp/acceptance suite
+(16 tests, including steer, abort, recovery and v2 chunking). The smoke now runs its
+stand-in server with the installed pinned Bun rather than requiring a separate Node,
+and fails immediately if that server does not start.
+
+The script's additional perf-lite gate **did not pass**: warm 10k history 2305.5 ms
+against 1500 ms (cold 3910.5 ms), measured during concurrent team builds/tests.
+Re-measure on a quiet machine in RC; the threshold is unchanged. The 30-second
+headless stream completed (631 RPC frames, footprint +2.06%); this short run does
+not exercise the native cadence or long-duration memory gates.
+
+Installer/source regression command:
+`dotnet test avalonia/tests/Ombra.Tests -c Release --artifacts-path .temp/ParityF/artifacts --filter 'FullyQualifiedName~RuntimeSourceArtifactTests|FullyQualifiedName~RuntimeInstallerTests'`
+— **35 passed, 0 failed, 0 skipped**, including the added protocol rejection and
+manifest version/entry consistency assertions.
+
 ## 1. Launch flags (`omp [flags] [messages]`)
 
-The GUI starts omp as `omp --mode rpc-ui --approval-mode <mode> [--resume <file>] [--model <m>] <extraArgs>` in the
-project folder. `extraArgs` (and `environment`) in the GUI's settings file (`ombra.local.json`) pass any other flag;
-"settings file only" below means there is no control for it in the window.
+The GUI opens a logical session in its shared engine with explicit project cwd and session arguments:
+`--approval-mode <mode> [--resume <file>] [--model <m>] <extraArgs>`. It does not launch a CLI for each chat.
+`extraArgs` in `ombra.local.json` applies to logical sessions; `environment` configures the shared host and
+requires a coordinated restart. Explicit management/TUI commands remain separate from GUI session transport.
+"Settings file only" below means there is no control for it in the window.
 
 | Flag | What omp does | GUI |
 |---|---|---|
@@ -32,7 +68,7 @@ project folder. `extraArgs` (and `environment`) in the GUI's settings file (`omb
 | `--plan-yolo`, `--plan-yolo-into` | Start in plan mode and auto-approve the plan | **Via omp terminal** (plan mode is TUI-only in 18.2.0) |
 | `--provider` | Legacy provider selector | **Not applicable** (superseded by `--model`) |
 | `--api-key` | API key for this run | **Not applicable** by design: keys stay in omp's configuration (Settings › Model providers signs in; `environment` in the settings file can pass a key variable) |
-| `--system-prompt`, `--append-system-prompt` | Replace / extend the system prompt | **Missing** (settings file only). Plan: an "Instructions" field in Settings › Advanced |
+| `--system-prompt`, `--append-system-prompt` | Replace / extend the system prompt | **Configuration only by design** (owner principle, 2026-10-18): no separate Instructions settings editor; project rule files use the existing file editor |
 | `--allow-home` | Allow starting in `~` | **Missing** (settings file only): opening your home folder as a project lets omp switch to a temp folder |
 | `--profile` | Isolated profile | **Done** — Settings › Advanced › Profile |
 | `--alias` | Create a shell shortcut for a profile | **Not applicable** (a shell alias) |
@@ -43,7 +79,7 @@ project folder. `extraArgs` (and `environment`) in the GUI's settings file (`omb
 | `-p`, `--print`, `--print-thoughts` | Non-interactive run | **Not applicable** (one-shot CLI mode) |
 | `-c`, `--continue` | Continue the previous session | **Done** — the sidebar lists the project's sessions newest first; the GUI reopens the last project |
 | `-r`, `--resume` | Resume by id / path / picker | **Done** — sidebar sessions (another project restarts omp there with `--resume`); `/resume` opens the list |
-| `--from-claude`, `--from-codex` | Import a Claude Code / Codex session | **Via omp terminal** (`/resume @claude`, `@codex`). Plan: an "Import…" entry in the sidebar |
+| `--from-claude`, `--from-codex` | Import a Claude Code / Codex session | **Via omp terminal** (`/resume @claude`, `@codex`). A separate GUI import wizard is not planned (owner principle, 2026-10-18); this is not GUI import parity |
 | `--session-dir` | Session storage directory | **Missing** (settings file only); the sessions list follows the folder omp reports |
 | `--no-session` | Ephemeral session | **Not applicable** (the GUI lists and resumes sessions) |
 | `--models` | Models for Ctrl+P cycling | **Not applicable** (TUI key cycling; the picker lists every available model) |
@@ -54,8 +90,8 @@ project folder. `extraArgs` (and `environment`) in the GUI's settings file (`omb
 | `--hide-thinking` | Hide thinking blocks (display) | **Done** — thinking is folded ("Thought for 4s") |
 | `--advisor` | Enable the advisor | **Done** — Model menu › Advisor (`/advisor on|off`, for the session) |
 | `--external-thinking` | Private scratchpad instead of provider reasoning | **Missing** (settings file only) |
-| `--hook`, `-e/--extension`, `--no-extensions`, `--plugin-dir` | Load / disable extensions | **Done** for installed ones — Settings › Plugins and skills — *Connectors* area; the flags: settings file only |
-| `--no-skills`, `--skills` | Skills discovery / filter | **Done** — Settings › Plugins and skills (skills on/off) — *Connectors* area |
+| `--hook`, `-e/--extension`, `--no-extensions`, `--plugin-dir` | Load / disable extensions | **Done** for installed ones — Plugins page › Plugins — *Connectors* area; the flags: settings file only |
+| `--no-skills`, `--skills` | Skills discovery / filter | **Done** — Plugins page › Skills (skills on/off) — *Connectors* area |
 | `--no-rules` | Rules discovery | **Missing** (settings file only) |
 | `--export` | Export a session file to HTML | **Done** for the open session — session menu › Export as HTML |
 | `--no-title` | No title generation | **Missing** (settings file only); rename in the session menu |
@@ -81,7 +117,7 @@ project folder. `extraArgs` (and `environment`) in the GUI's settings file (`omb
 | `gc` | **Via omp terminal** |
 | `git` | **Via omp terminal** (omp's git TUI); the branch / worktree chip — *Workspace* area |
 | `grievances`, `images`, `ttsr`, `tiny-models`, `token` | **Via omp terminal** |
-| `install`, `plugin` | **Done** — Settings › Plugins and skills — *Connectors* area |
+| `install`, `plugin` | **Done** — Plugins page › Plugins and catalog — *Connectors* area |
 | `models` | **Done** for listing (model picker); `omp models refresh`: via omp terminal |
 | `ps` | **Done** for the session's jobs — Background tasks pane — *Panes* area; the daemon process list: via omp terminal |
 | `say` | **Not applicable** (text to speech on the speakers) |
@@ -121,7 +157,7 @@ extension commands that omp lists itself keep going to omp.
 | `/handoff [focus]` | yes (background) | **Done** — session menu › Hand off… (omp writes a handoff document and goes on from it *in the same session*; it is not a new session over RPC) |
 | `/retry` | yes (starts a turn) | **Done** — session menu › Retry the last turn; the retried turn shows like any run |
 | `/branch`, `/rewind` | TUI (RPC `branch`) | **Done** — session menu › Rewind…, also what typing `/branch` or `/rewind` opens (`get_branch_messages` + `branch`: a new session from before the chosen message, the message back in the box, the old session kept) |
-| `/fork` | TUI | **Via omp terminal** (copies the whole session; no RPC for `fork`). Rewind covers "start over from a message" |
+| `/fork` | TUI (RPC `fork`) | **Done** — chat menu › Fork (also what typing `/fork` does: the whole conversation in a new session) and **Fork from here** on a reply (its hover action and right-click menu: a new session up to that reply, `get_entries` finds its entry); the original session stays; omp's `session_busy` refusal shows on the card |
 | `/tree` | TUI | **Via omp terminal** (session tree navigation). Plan: needs an RPC for `navigateTree` |
 | `/pin [session id]` | yes | **Done** — session menu › Pin / Unpin session; pinned sessions are listed first in the sidebar with a pin |
 | `/move <path>` | yes | **Done** — session menu › Move to another folder… (the window follows omp to the new folder) |
@@ -130,22 +166,23 @@ extension commands that omp lists itself keep going to omp.
 | `/memory view\|clear\|sync` | yes | **Done** — session menu › Memory (what goes into the context, Update now, Clear memory… with a confirmation, or "Memory is off") |
 | `/memory stats\|diagnose\|queue\|enqueue\|rebuild` | yes | **Done (typed)**; `/memory mm …`: omp refuses it outside its TUI |
 | `/todo …` | yes | **Done** — tasks card above the message box; Plan pane — *Panes* area; `/todo` subcommands typed |
-| `/jobs` | yes | **Done** — Background tasks pane — *Panes* area |
+| `/jobs` | yes | **Done** — Background tasks pane — *Panes* area (read over RPC `get_jobs`, not the `/jobs` text) |
 | `/usage [show]` | yes | **Done** — context popover (tokens and cost, or the provider's plan limits with bars) |
 | `/usage reset …` | yes | **Done** — the account's saved resets under its plan limits (popover and Settings → Model providers), **Use a saved reset** spends one after asking (`/usage reset` lists the account ids, then `/usage reset <provider>/<id>`); typing it works too |
 | `/context` | yes | **Done** — the context ring and its popover (the breakdown as bars) |
 | `/stats` | yes | **Done** — context popover › Usage dashboard (link to omp's local dashboard) |
 | `/changelog [full]`, `/tools` | yes | **Done (typed)** |
 | `/hotkeys` | TUI | **Done** — opens the keyboard shortcut sheet (also ⌘/ / Ctrl+/); omp's TUI keys: its terminal |
-| `/extensions`, `/status` | TUI | **Done** — card → Settings › Plugins and skills — *Connectors* area; omp's dashboard: terminal |
+| `/extensions`, `/status` | TUI | **Done** — card → Plugins page — *Connectors* area; omp's dashboard: terminal |
 | `/agents` | TUI | **Via omp terminal** (per-agent models, prewalk, advisor config) |
 | `/git [revision]` | TUI | **Via omp terminal** (git TUI); branch chip — *Workspace* area |
 | `/hub` | TUI | **Done** — opens Background tasks — *Panes* area |
 | `/login [provider]` | TUI (RPC `login`) | **Done** — Settings › Model providers (RPC sign-in with the browser link / code card) |
 | `/logout [provider]` | TUI (RPC `get_logout_accounts`, `logout`, omp 18.8.0) | **Done** — Settings › Model providers (the sign-out icon beside *Signed in*: pick the stored account to remove) |
-| `/mcp …` | yes | **Done** — Settings › Connectors — *Connectors* area |
+| `/mcp …` | yes | **Done** — Plugins page › MCP — *Connectors* area (sign-in / sign in again, Reconnect all, server forms over RPC) |
 | `/ssh …` | yes | **Done** — Settings › SSH hosts — *Workspace* area |
-| `/btw`, `/tan`, `/omfg`, `/cleanse`, `/debug` | TUI | **Via omp terminal** |
+| `/btw` | TUI | **Done** over the owned engine's RPC (`btw`, `btw_cancel`, `get_btw_history`): the BTW panel above the message box, also while omp works (*Session* area); an omp without them: via omp terminal |
+| `/tan`, `/omfg`, `/cleanse`, `/debug` | TUI | **Via omp terminal** |
 | `/exit`, `/quit`, `/q` | TUI | **Not applicable**: the card says to close the window (omp stops with it) |
 | `/restart` | TUI | **Done** — restarts omp on the session (`/restart`, Restart omp) |
 
@@ -166,7 +203,8 @@ extension commands that omp lists itself keep going to omp.
 | `/setup`, `/providers` | TUI | **Done** — opens Settings › Model providers |
 | Custom and local providers (`models.yml`) | — (omp reads the file at start) | **Done** — Settings › Model providers › Local and custom: Ollama, LM Studio, llama.cpp, vLLM (running or not, Add / remove) and custom OpenAI- or Anthropic-compatible providers (test, add, edit, remove); the app edits `models.yml` in place and restarts omp |
 | `/plan`, `/plan-review` | TUI | **Via omp terminal** (plan mode). The Plan pane (*Panes* area) shows omp's todo plan |
-| `/vibe`, `/goal`, `/guided-goal`, `/loop` | TUI | **Via omp terminal** (omp's goal updates still show in the conversation) |
+| `/goal` | TUI | **Done** over the owned engine's RPC (`goal`): the goal bar above the message box — objective, status, time, Pause/Resume, Edit, Clear; an omp without it: via omp terminal |
+| `/vibe`, `/guided-goal`, `/loop` | TUI | **Via omp terminal** |
 | `/queue <message>` | TUI | **Done** differently: while omp works, Enter queues (`follow_up`) and Alt+Enter steers (`steer`); × or ↑ takes a queued message back (`remove_queued_message`) |
 | `/live`, `/pause` | TUI | **Via omp terminal** |
 
@@ -184,7 +222,7 @@ extension commands that omp lists itself keep going to omp.
 | `/copy` | TUI | **Done** differently: select text, or the copy buttons under replies and code blocks |
 | `/open` | TUI | **Done** differently: links in the conversation open on click |
 | `/collab`, `/join`, `/leave` | TUI | **Via omp terminal** |
-| `/marketplace …`, `/plugins …`, `/reload-plugins` | yes | **Done** — Settings › Plugins and skills — *Connectors* area |
+| `/marketplace …`, `/plugins …`, `/reload-plugins` | yes | **Done** — Plugins page › catalog and plugin sources — *Connectors* area |
 | `/skill:<name>`, prompt templates, extension commands | yes (omp's catalog) | **Done** — the slash menu (from `available_commands_update`), sent to omp |
 
 ### Message box prefixes (omp's TUI input rules)
@@ -203,16 +241,21 @@ extension commands that omp lists itself keep going to omp.
 |---|---|
 | `negotiate_protocol`, `ready`, `rpc_chunk` (v2 framing) | **Done** — transport |
 | `prompt`, `steer`, `follow_up`, `abort` | **Done** — message box, Queue / Steer, Stop / Esc |
-| `abort_and_prompt` | **Missing** (Stop, then send). Plan: "Stop and send" when a message is typed during a run |
+| `set_event_filter` | **Implemented** — pinned 18.8.0, `events:null,messageUpdates:"delta"` immediately after negotiation; every event type retained, full final message preserved. Real-runtime text equivalence and client/tool/abort/large-reply scenarios verified |
+| `abort_and_restore_queue` | **Implemented in beta R0.2** — Stop withdraws runtime queued text/images into editable recovery; local originals survive limited payloads, nothing is automatically resent |
+| `abort_and_prompt` | **Done** — "Stop and send" (Alt+Shift+Enter) while omp works; a refused prompt returns its text and images to the message box. `promote_queued_message`: "Send now" on a queued follow-up |
 | `new_session`, `switch_session` | **Done** — sidebar |
 | `branch`, `get_branch_messages` | **Done** — session menu › Rewind… |
+| `fork`, `get_entries` | **Done** — chat menu › Fork, a reply's Fork from here (`get_entries` maps the reply to its message entry) |
 | `get_state` | **Done** — model, thinking, session name, todos, context ring, model options, queue settle |
 | `set_fast_mode` | **Done** — Model menu › Fast mode |
 | `get_available_commands`, `available_commands_update` | **Done** — slash menu |
 | `remove_queued_message` | **Done** — × on a queued message; ↑ in the empty box puts the last one back to edit (with its images) |
-| `set_todos` | **Missing** (the GUI shows todos; editing them: `/todo` typed) |
-| `set_host_tools`, `host_tool_*`, `set_host_uri_schemes`, `host_uri_*` | **Not applicable** (the GUI offers no tools of its own to the agent) |
+| `set_todos` | **Done** — Plan pane: the box marks a task done / to do; ⋯ edits its text in place, sets To do / In progress / Done / Dropped, moves it up or down, deletes it; "Add a task" appends (a new plan when there is none). Each change sends the whole list (details and notes kept) and the pane shows omp's answer, then get_state; changes are in the plan's History. omp keeps the edit in memory only: its next todo tool call builds on it, a reload of the session restores the last list the todo tool saved |
+| `set_host_tools`, `host_tool_*` | **Done** — `terminal_read`: the agent reads a terminal tab of the window (selected tab or by number, last 200 lines by default, at most 2000 lines / 64 K characters), registered on every connection; omp's approval gate applies; `host_tool_cancel` stops it |
+| `set_host_uri_schemes`, `host_uri_*` | **Not applicable** (the GUI offers no URI schemes of its own to the agent) |
 | `set_subagent_subscription`, `get_subagents`, `get_subagent_messages`, `subagent_*` | **Done** — Background tasks pane — *Panes* area |
+| `get_jobs`, `cancel_job`, `get_job_output` (Ombra engine) | **Done** — Background tasks pane: each job's status (incl. «Waiting for input»), **Stop**, **Show output** (byte-cursor tail, last 64 K characters kept) |
 | `set_model`, `get_available_models` | **Done** — model picker |
 | `cycle_model`, `cycle_thinking_level` | **Not applicable** (TUI key cycling; the pickers choose directly) |
 | `set_thinking_level` | **Done** — thinking chip |
@@ -227,27 +270,35 @@ extension commands that omp lists itself keep going to omp.
 | `get_last_assistant_text` | **Not applicable** (the GUI has the text) |
 | `set_session_name`, `session_info_update` | **Done** — rename |
 | `handoff` | **Not used on purpose**: blocks the queue like `compact`; `/handoff` runs in the background |
-| `get_messages`, `get_messages_page` | **Done** — history when a session opens |
+| `get_messages`, `get_messages_page` | **Partial** — initial history still uses `get_messages`; paginated loading remains in the beta roadmap |
 | `get_login_providers`, `login`, `get_logout_accounts`, `logout` | **Done** — Settings › Model providers |
-| `extension_ui_request` select / confirm / input / editor / notify / cancel | **Done** — question and approval cards, notices |
+| `extension_ui_request` select / confirm / input / editor / notify / cancel | **Done** — question/approval cards and notices; beta R0.2 preserves non-auth typed replies on observed cancel/revoke with quoted context (remote acceptance races still need runtime acknowledgement) |
+| `set_ask_dialog`, `extension_ui_request` ask | **Done** — opted in on every connection: all questions of one `ask` call come as one card with a tab per question (the tool's header), one choice or any-that-apply (multi-select), the user's own words on every question, the recommended option marked (never preselected), digits pick options; Submit sends every answer in question order, Cancel answers "cancelled". An omp without the command keeps the per-question select/input cards |
 | `extension_ui_request` setStatus / setWidget / set_editor_text / open_url | **Done** — status in the activity tooltip, widgets above the message box, text into the message box, the sign-in link card |
 | `extension_ui_request` setTitle | **Missing** (an extension setting the window title is ignored) |
 | `config_update`, `thinking_level_changed`, `model_changed` | **Done** — model and thinking chips follow |
-| `auto_compaction_*`, `auto_retry_*`, `retry_fallback_*`, `ttsr_triggered`, `todo_reminder`, `goal_updated`, `notice` | **Done** — notices in the conversation |
+| `auto_compaction_*`, `auto_retry_*`, `retry_fallback_*`, `ttsr_triggered`, `todo_reminder`, `notice` | **Done** — notices in the conversation |
+| `goal_updated`, `btw_delta`, `btw_record` | **Done** — the goal bar and the BTW panel |
 | `irc_message` | **Done** — a message card between agents (sender → recipient, folded to two lines, Markdown when open), also from the history (`irc:incoming`); a tool result omp skipped for a message that came first (`interrupt_skipped`) is a neutral *Skipped* step, not a failure |
 | `command_output` | **Done** — typed builtins: in the conversation; the GUI's own: on the session card / popover / settings pages |
 | `prompt_result`, `session_settled`, non-terminal `agent_end` | **Done** — run end detection |
 
 ## 5. What omp 18.2.0 does not offer over RPC (so the GUI cannot, except through the terminal)
 
-Plan / goal / vibe / loop modes, `/clear`, `/fork` (whole-session copy), `/tree`, `/logout` (over RPC since 18.8.0), live collaboration
-(`/collab`, `/join`), realtime voice (`/live`), `/pause`, `/btw`, `/tan`, `/omfg`, `/cleanse`, the agents hub and
-`/advisor configure`, omp's git TUI, MCP OAuth sign-in (TUI-only). The GUI never sends these to omp: they would
+Plan / goal / vibe / loop modes, `/clear`, `/tree`, `/logout` (over RPC since 18.8.0; plan, goal and `/btw` are in the
+GUI over the owned engine's RPC), live collaboration (`/collab`, `/join`), realtime voice (`/live`), `/pause`, `/tan`, `/omfg`, `/cleanse`, the agents hub and
+`/advisor configure`, omp's git TUI. (MCP OAuth sign-in and MCP forms are over RPC in the owned runtime:
+`get_mcp_servers`, `mcp_login`, `mcp_reconnect`, `elicit` — Plugins page › MCP and the form card.) The GUI never sends these to omp: they would
 reach the model as a message. Each has the "runs in omp's terminal" card; the terminal panel's **+ omp TUI** starts
 omp's own interface for them.
 
 ## 6. What the client adds (omp has no counterpart)
 
+- **Micro-UX (M)** — shared checked copy feedback; contextual image/tool/error/event/queue/paste actions; code insertion
+  and selected-text quoting; tab close menus, browser shortcuts, safe terminal right-click; persisted explicit unread
+  state and window/panel layout; keyboard source-list/resize/focus-return behavior; reduced-motion-aware interaction
+  transitions and new-activity indicator; Russian cardinal plural forms. The row-by-row implementation, exclusions,
+  headless recorder evidence and native OS gates are in [PARITY_ROADMAP §6.9](PARITY_ROADMAP.md#69-аудит-m-2026-10-18-итоговая-таблица-и-доказательства).
 - **Files pane** — the project tree with git marks and "changed in this session", Go to file, a code viewer, open in an
   editor or the file manager (*Files* area).
 - **Browser preview and page comments** — a local web app beside the conversation; comments pinned to page elements
@@ -312,3 +363,12 @@ omp's own interface for them.
   rules (command prefix like `bash(npm test:*)`, exact command, or whole tool; this session / this project / always,
   Settings › Permissions) and answers covered requests itself, noting *Allowed automatically* in the conversation.
   A deny cannot carry a reason over RPC: the reason goes as a steering message, read right after the denied tool.
+- **Durable input recovery (beta R0.2)** — per-config atomic draft journal, 500 ms debounce and lifecycle flushes;
+  composer text/images/pastes/comments, queued input and uncertain submissions reopen for review, never auto-send.
+  Successful session deletion removes its old journal records; active unsent composer content moves to the new chat.
+  Owned draft-only chat folders survive cleanup and can be recreated on recovery; missing external projects are not created.
+  Local plaintext and multi-instance/runtime-ack limits are documented in [USER_GUIDE](USER_GUIDE.md).
+- **Approval safety (beta R0.2)** — hidden/control characters are visible without rewriting executed source;
+  prefix rules reject shell syntax and ambiguous Git invocations, and exact persistence cannot widen a grant.
+  Keyboard approval is ordered behind a release/appearance/activation guard, including localized access keys.
+  Explicit exact grants and mouse buttons remain deliberate supported actions; this is not a shell sandbox.

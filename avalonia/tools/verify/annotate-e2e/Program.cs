@@ -66,8 +66,8 @@ async Task Script()
     await Task.Delay(300);
     Shot("04-typed");
     X("key", "Return");
-    await Until(() => vm.Preview.Annotations.Count == 1, 5);
-    Check("comment-1", vm.Preview.Annotations.Count == 1, vm.Preview.Annotations.FirstOrDefault()?.Element.Selector);
+    await Until(() => vm.Marks.Items.Count == 1, 5);
+    Check("comment-1", vm.Marks.Items.Count == 1, vm.Marks.Items.FirstOrDefault()?.Page?.Element.Selector);
     await Task.Delay(600);
 
     var heading = Screen(host, new Point(40 + 60, 24 + 16));
@@ -75,8 +75,8 @@ async Task Script()
     await Task.Delay(700);
     X("type", "--delay", "25", "Shorter heading: Shop");
     X("key", "Return");
-    await Until(() => vm.Preview.Annotations.Count == 2, 5);
-    Check("comment-2", vm.Preview.Annotations.Count == 2, vm.Preview.Annotations.LastOrDefault()?.Element.Selector);
+    await Until(() => vm.Marks.Items.Count == 2, 5);
+    Check("comment-2", vm.Marks.Items.Count == 2, vm.Marks.Items.LastOrDefault()?.Page?.Element.Selector);
     await Task.Delay(600);
     Shot("05-two-pins");
 
@@ -97,14 +97,14 @@ async Task Script()
     Check("pins-after-reload", Dec(pins) == "host", pins);
     Shot("06-after-reload");
 
-    Check("composer-chips", w.GetVisualDescendants().OfType<ItemsControl>().First(c => c.Name == "PageCommentsChip").IsEffectivelyVisible);
+    Check("composer-chips", w.GetVisualDescendants().OfType<ItemsControl>().First(c => c.Name == "MarksList").IsEffectivelyVisible);
     var send = w.GetVisualDescendants().OfType<Button>().First(b => b.Name == "SendButton");
     Click(Screen(send, new Point(send.Bounds.Width / 2, send.Bounds.Height / 2)));
     await Until(() => vm.Rows.OfType<UserRowViewModel>().Any(), 10);
     var sent = vm.Rows.OfType<UserRowViewModel>().FirstOrDefault()?.Text ?? "";
     Check("sent", sent.Contains("1. Make this button bigger and blue") && sent.Contains("Selector: #buy") && sent.Contains("2. Shorter heading"), "");
     Console.WriteLine("---- sent ----\n" + sent + "\n--------------");
-    Check("cleared", vm.Preview.Annotations.Count == 0);
+    Check("cleared", vm.Marks.Items.Count == 0);
     await Task.Delay(1500);
     Shot("07-sent");
     Console.WriteLine(fails == 0 ? "ALL PASSED" : $"{fails} FAILED");

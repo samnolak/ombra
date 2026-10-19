@@ -109,33 +109,26 @@ public static class ProjectFiles
     /// A path as the agent wrote it (relative to the project, absolute, "~/…", "./…"), as a full path; null when it
     /// is not a usable path.
     /// </summary>
-    public static string? Resolve(string? root, string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return null;
-        var p = path.Trim().Trim('`', '"', '\'');
-        if (p.StartsWith("~/", StringComparison.Ordinal) || p == "~")
-            p = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), p.Length > 2 ? p[2..] : "");
-        if (p.StartsWith("file://", StringComparison.OrdinalIgnoreCase) && Uri.TryCreate(p, UriKind.Absolute, out var uri)) p = uri.LocalPath;
-        if (p.IndexOfAny(Path.GetInvalidPathChars()) >= 0) return null;
-        // Relative to what? Without a project, not to wherever the app happens to run
-        if (!Path.IsPathRooted(p) && root is null) return null;
-        try
-        {
-            return Path.GetFullPath(Path.IsPathRooted(p) ? p : Path.Combine(root!, p));
-        }
-        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return null;
-        }
-    }
+    public static string? Resolve(string? root, string? path) => LocalFilePaths.Resolve(root, path);
 
     /// <summary>
     /// Every file of the project for the name search, relative and '/'-separated: git's own list when the folder is in a
     /// repository (tracked and untracked, without what .gitignore excludes), else a walk that skips hidden and heavy
     /// folders. At most <see cref="MaxIndexedFiles"/>.
     /// </summary>
-    public static async Task<(List<string> Paths, bool Truncated)> IndexAsync(string root, bool useGit, CancellationToken ct)
+    public static Task<(List<string> Paths, bool Truncated)> IndexAsync(string root, bool useGit, CancellationToken ct) =>
+        IndexAsync(root, useGit, ct, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsMacOS());
+
+    internal static async Task<(List<string> Paths, bool Truncated)> IndexAsync(string root, bool useGit, CancellationToken ct, string home, bool macOS)
     {
+        // Searching a broad root that contains the macOS home directory must not enumerate protected folders or run
+        // git's recursive listing. Show root-level files only; opening an individual folder remains user-driven.
+        var topLevelOnly = macOS && IsSameOrAncestor(root, home);
+        if (topLevelOnly)
+        {
+            var (paths, _) = await Task.Run(() => Walk(root, ct, topLevelOnly: true), ct);
+            return (paths, true); // the index is deliberately incomplete, so callers must not present it as exhaustive
+        }
         if (useGit)
         {
             var listed = await Git.RunAsync(root, ["-c", "core.quotepath=off", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], ct, TimeSpan.FromSeconds(20));
@@ -149,13 +142,27 @@ public static class ProjectFiles
                     paths.Add(p);
                     if (paths.Count >= MaxIndexedFiles) return (paths, true);
                 }
-                return (paths, false);
+                // Nothing listed: an empty folder, or one its enclosing repository ignores (git lists none of an ignored
+                // folder's files), whose own files are read from disk instead
+                if (paths.Count > 0 || await Git.RunAsync(root, ["check-ignore", "-q", "--", "."], ct, TimeSpan.FromSeconds(20)) is not { ExitCode: 0 })
+                    return (paths, false);
             }
         }
         return await Task.Run(() => Walk(root, ct), ct);
     }
 
-    private static (List<string>, bool) Walk(string root, CancellationToken ct)
+    private static bool IsSameOrAncestor(string candidate, string path)
+    {
+        var parent = Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidate));
+        var child = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        if (string.Equals(parent, child, PathComparison)) return true;
+        var relative = Path.GetRelativePath(parent, child);
+        return !Path.IsPathRooted(relative)
+            && relative != ".."
+            && !relative.StartsWith(".." + Path.DirectorySeparatorChar, PathComparison);
+    }
+
+    private static (List<string>, bool) Walk(string root, CancellationToken ct, bool topLevelOnly = false)
     {
         var paths = new List<string>();
         var pending = new Stack<(string Dir, string Rel)>();
@@ -175,7 +182,7 @@ public static class ProjectFiles
                 if (e is DirectoryInfo d)
                 {
                     // No heavy folders, and no links to folders (a link can loop back up the tree)
-                    if (Heavy.Contains(e.Name) || d.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
+                    if (topLevelOnly || Heavy.Contains(e.Name) || d.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
                     pending.Push((d.FullName, r));
                 }
                 else
@@ -188,28 +195,43 @@ public static class ProjectFiles
         return (paths, false);
     }
 
+    /// <summary>Original paths and cached NFC matching keys; normalization never changes a path used for file access.</summary>
+    /// <remarks>The caller transfers ownership of the path list and must not mutate it after construction.</remarks>
+    public sealed class SearchIndex(IReadOnlyList<string> paths)
+    {
+        public IReadOnlyList<string> Paths { get; } = paths;
+        internal string[] Keys { get; } = paths.Select(NormalizeSearchKey).ToArray();
+    }
+
+    internal static string NormalizeSearchKey(string text)
+    {
+        try { return text.Normalize(NormalizationForm.FormC); }
+        // A path already accepted by the index may contain invalid UTF-16. Keep its existing ordinal behavior.
+        catch (ArgumentException) { return text; }
+    }
+
     /// <summary>
     /// The best <paramref name="max"/> matches of <paramref name="query"/> (case-insensitive): the file name equal,
     /// starting with, containing the query, then the path containing it, then the name's letters in order. Several
     /// words must all be in the path; the last one ranks. A query with '/' matches against the path.
     /// </summary>
-    public static List<FileHit> Search(IReadOnlyList<string> paths, string query, int max, CancellationToken ct)
+    public static List<FileHit> Search(SearchIndex index, string query, int max, CancellationToken ct)
     {
-        var words = query.Trim().Replace('\\', '/').Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var words = NormalizeSearchKey(query).Trim().Replace('\\', '/').Split(' ', StringSplitOptions.RemoveEmptyEntries);
         if (words.Length == 0) return [];
         var last = words[^1];
         var byPath = last.Contains('/');
         var hits = new List<FileHit>();
-        for (var i = 0; i < paths.Count; i++)
+        for (var i = 0; i < index.Paths.Count; i++)
         {
             if ((i & 4095) == 0) ct.ThrowIfCancellationRequested();
-            var path = paths[i];
+            var path = index.Keys[i];
             var ok = true;
             for (var w = 0; w < words.Length - 1 && ok; w++) ok = path.Contains(words[w], StringComparison.OrdinalIgnoreCase);
             if (!ok) continue;
             var name = path[(path.LastIndexOf('/') + 1)..];
             var score = byPath ? PathScore(path, last) : NameScore(name, path, last);
-            if (score >= 0) hits.Add(new FileHit(path, score));
+            if (score >= 0) hits.Add(new FileHit(index.Paths[i], score));
         }
         hits.Sort((a, b) => a.Score != b.Score ? a.Score.CompareTo(b.Score)
             : a.RelativePath.Length != b.RelativePath.Length ? a.RelativePath.Length.CompareTo(b.RelativePath.Length)
@@ -402,7 +424,7 @@ public static class Git
         if (r is not { ExitCode: 0 }) return null;
         var lines = r.Output.Split('\n');
         if (lines[0].Trim() is not { Length: > 0 } printed) return null;
-        var top = Path.GetFullPath(printed);
+        if (LocalFilePaths.Resolve(dir, printed) is not { } top) return null;
         // The prefix is dir's place below the top ("src/app/"): that many folders up from dir is the top, as dir names it
         var depth = lines.Length > 1 ? lines[1].Trim().Split('/', StringSplitOptions.RemoveEmptyEntries).Length : 0;
         var named = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dir));
@@ -423,9 +445,28 @@ public static class Git
     /// GIT_OPTIONAL_LOCKS=0: reading the status never takes the index lock the agent's own git commands need. Past
     /// <paramref name="maxOutput"/> characters git is stopped and the result says so (no output, <c>TooLong</c>).
     /// </summary>
-    public static async Task<Result?> RunAsync(string dir, IReadOnlyList<string> args, CancellationToken ct, TimeSpan timeout, int maxOutput = int.MaxValue)
+    public static Task<Result?> RunAsync(string dir, IReadOnlyList<string> args, CancellationToken ct, TimeSpan timeout, int maxOutput = int.MaxValue) =>
+        RunWithProgramAsync(Program, dir, args, ct, timeout, maxOutput);
+
+    internal static async Task<Result?> RunWithProgramAsync(string program, string dir, IReadOnlyList<string> args, CancellationToken ct,
+        TimeSpan timeout, int maxOutput = int.MaxValue)
     {
-        var psi = new ProcessStartInfo(Program)
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(timeout);
+        try { return await RunCoreAsync(program, dir, args, limit.Token, timeout, maxOutput); }
+        catch (OperationCanceledException)
+        {
+            ct.ThrowIfCancellationRequested();
+            return null;
+        }
+    }
+
+    private static async Task<Result?> RunCoreAsync(string program, string dir, IReadOnlyList<string> args, CancellationToken ct, TimeSpan timeout, int maxOutput)
+    {
+        var prepared = await WorkspaceTools.PrepareGitEnvironmentAsync(program, dir, timeout, ct);
+        if (prepared.Error is not null) return null;
+        ct.ThrowIfCancellationRequested();
+        var psi = new ProcessStartInfo(program)
         {
             WorkingDirectory = dir,
             RedirectStandardOutput = true,
@@ -435,32 +476,32 @@ public static class Git
             CreateNoWindow = true,
             StandardOutputEncoding = new UTF8Encoding(false),
         };
-        foreach (var a in args) psi.ArgumentList.Add(a);
-        psi.Environment["GIT_OPTIONAL_LOCKS"] = "0";
-        psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
-        foreach (var (k, v) in WorkspaceTools.UntrustedRepoGit) psi.Environment[k] = v;
+        foreach (var a in WorkspaceTools.GitReadArguments(args)) psi.ArgumentList.Add(a);
+        foreach (var (k, v) in prepared.Environment!)
+        {
+            if (v is null) psi.Environment.Remove(k);
+            else psi.Environment[k] = v;
+        }
         Process? p;
         try { p = Process.Start(psi); }
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or IOException) { return null; }
         if (p is null) return null;
         using var process = p;
-        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        limit.CancelAfter(timeout);
         try
         {
             process.StandardInput.Close();
-            var error = process.StandardError.ReadToEndAsync(limit.Token);
-            var text = await ReadUpToAsync(process.StandardOutput, maxOutput, limit.Token);
+            var error = process.StandardError.ReadToEndAsync(ct);
+            var text = await ReadUpToAsync(process.StandardOutput, maxOutput, ct);
             if (text is null) Kill(process);
-            await process.WaitForExitAsync(limit.Token);
+            await process.WaitForExitAsync(ct);
             await error;
             return text is null ? new Result(-1, "", TooLong: true) : new Result(process.ExitCode, text);
         }
         catch (OperationCanceledException)
         {
             Kill(process);
-            ct.ThrowIfCancellationRequested();
-            return null;
+            await process.WaitForExitAsync(CancellationToken.None);
+            throw;
         }
     }
 

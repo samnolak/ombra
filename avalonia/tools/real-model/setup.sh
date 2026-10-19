@@ -12,7 +12,7 @@
 # SmolLM2 has an 8k context: omp's full tool set is ~20k tokens, so the profile starts omp with its own options
 # --tools=bash,read --no-skills --no-rules --no-lsp, and the server caps a reply at 384 tokens (-n 384).
 #
-#   tools/real-model/setup.sh <work-dir> <omp-runtime-dir> [port]     # omp-runtime-dir: …/omp-18.8.0-bun-1.4.2
+#   tools/real-model/setup.sh <work-dir> <omp-runtime-dir> [port]     # omp-runtime-dir: …/ombra-engine-18.8.0-bun-1.4.2-v1
 # Then:
 #   OMBRA_REAL_MODEL_CONFIG=<work-dir>/realmodel.json OMBRA_REAL_MODEL_ROUTE=local-llamacpp/smollm2-135m-instruct-q4_1 \
 #     dotnet test tests/Ombra.Tests --filter FullyQualifiedName~RealModelTests
@@ -67,7 +67,8 @@ EOF
 cat > "$WORK/realmodel.json" <<EOF
 {
   "command": "$RT/bun/bun",
-  "prefixArgs": ["--no-install", "$RT/omp/node_modules/@oh-my-pi/pi-coding-agent/src/cli.ts"],
+  "prefixArgs": ["--config=$RT/omp/bunfig.toml", "--no-env-file", "--no-install", "$RT/omp/engine/host.ts"],
+  "managementPrefixArgs": ["--config=$RT/omp/bunfig.toml", "--no-env-file", "--no-install", "$RT/omp/engine/coding-agent/src/cli.ts"],
   "profile": "realmodel",
   "workingDirectory": "$WORK/work",
   "extraArgs": ["--tools=bash,read", "--no-skills", "--no-rules", "--no-lsp"],

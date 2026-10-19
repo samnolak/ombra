@@ -1,0 +1,4 @@
+native/ombra-core/target
+**/bin
+**/obj
+tests

@@ -41,32 +41,20 @@ public sealed class BrowserDownload : INotifyPropertyChanged
     /// <summary>Where it is saved (set once a place was chosen).</summary>
     public string? Path { get; set => Set(ref field, value); }
 
-    public BrowserDownloadState State { get; set => Set(ref field, value, nameof(IsActive), nameof(IsFinished), nameof(StatusText)); }
+    public BrowserDownloadState State { get; set => Set(ref field, value, nameof(IsActive), nameof(IsFinished)); }
 
-    public long BytesReceived { get; set => Set(ref field, value, nameof(StatusText), nameof(Progress)); }
+    public long BytesReceived { get; set => Set(ref field, value, nameof(Progress)); }
 
     /// <summary>The size, when the server said it (else -1).</summary>
-    public long TotalBytes { get; set => Set(ref field, value, nameof(StatusText), nameof(Progress)); } = -1;
+    public long TotalBytes { get; set => Set(ref field, value, nameof(Progress)); } = -1;
 
-    public string? Error { get; set => Set(ref field, value, nameof(StatusText)); }
+    public string? Error { get; set => Set(ref field, value); }
 
     public bool IsActive => State is BrowserDownloadState.Asking or BrowserDownloadState.Saving;
     public bool IsFinished => State == BrowserDownloadState.Finished;
 
     /// <summary>0…1 while the size is known; -1 otherwise.</summary>
     public double Progress => TotalBytes > 0 ? Math.Clamp((double)BytesReceived / TotalBytes, 0, 1) : -1;
-
-    /// <summary>What the downloads list says under the name.</summary>
-    public string StatusText => State switch
-    {
-        BrowserDownloadState.Asking => "Waiting for a place to save it",
-        BrowserDownloadState.Saving => TotalBytes > 0
-            ? $"{FormatSize(BytesReceived)} of {FormatSize(TotalBytes)}"
-            : BytesReceived > 0 ? FormatSize(BytesReceived) : "Starting…",
-        BrowserDownloadState.Finished => TotalBytes > 0 ? $"Saved · {FormatSize(TotalBytes)}" : "Saved",
-        BrowserDownloadState.Failed => Error is { Length: > 0 } e ? $"Failed: {e}" : "Failed",
-        _ => "Canceled",
-    };
 
     /// <summary>Stops it (set by the engine hooks while it runs); false when it can no longer be stopped.</summary>
     public Func<bool>? Canceller { get; set; }
@@ -90,14 +78,6 @@ public sealed class BrowserDownload : INotifyPropertyChanged
     {
         if (name is not null) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
-
-    internal static string FormatSize(long bytes) => bytes switch
-    {
-        < 1024 => $"{bytes} bytes",
-        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
-        < 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024):0.#} MB",
-        _ => $"{bytes / (1024.0 * 1024 * 1024):0.##} GB",
-    };
 }
 
 /// <summary>

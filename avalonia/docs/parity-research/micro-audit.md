@@ -80,7 +80,7 @@
 | Notice (ошибка или предупреждение): Copy | Ошибку нужно уметь скопировать в баг-репорт одним действием | **Partial**: текст выделяемый (425), но меню нет | `ContextFlyout` с Copy на `Border.notice` | S | P3 |
 | Тултип со временем сообщения | Claude VSCode 2.1.284/2.1.290: время у промптов | **Missing** (уже в parity research, claude-a.md:13) | Минимум — тултип с временем на пузыре и футере хода | S | P3 |
 | Кнопка «Show more» в длинном пузыре | Свернуть или развернуть длинное сообщение | **Have**: `FoldLabel` (493-494) | Курсор-рука, как у `tool-more` (см. Hand) | S | P3 |
-| Выделение через несколько сообщений | Claude и ChatGPT: можно выделить текст через границы сообщений | **Missing** (каждая строка — отдельный `SelectableTextBlock`) | Ограничение Avalonia, только кастомный selection layer | L | P3 |
+| Выделение через несколько сообщений | Claude и ChatGPT: выделение через границы сообщений | **Не делаем (принцип владельца), 2026-10-18**: свой selection layer над виртуализацией — тяжёлый текстовый движок ради функции копирования | Использовать Copy / Copy as Markdown | L | P3 |
 | Hover-действия ряда | Claude: Copy и Rewind на hover и focus-within | **Have**: Styles.Session.axaml:189-194 | Fade (Motion) | S | P3 |
 | Ответ с ошибкой и Retry | Claude | **Have**: (524-532) | — | — | — |
 | Sticky-заголовок мыслей и консоли | Codex | **Have**: `StickyHeader` (509, 627) | — | — | — |
@@ -135,7 +135,7 @@
 | Терминал: средний клик закрывает, ⌘W, КМ (Rename, Close others) | Браузеры, VS Code, iTerm | **Missing**: (MainWindow.axaml:819-834) | `PointerReleased` с MiddleButton → Close; КМ вкладки | S | P2 |
 | Терминал: Copy, Paste, Clear в КМ, ⌘K | macOS Terminal: ⌘K очищает, КМ есть | **Missing**: КМ у `TerminalHost` нет, команды Clear нет | `ContextFlyout`: Copy, Paste, Clear, Select all | S | P2 |
 | Терминал: фокус при открытии и выборе вкладки | Набор сразу уходит в shell | **Have**: `FocusTerminal` (MainWindow.axaml.cs:680-720) | — | — | — |
-| Терминал: длинный заголовок вкладки | Обрезать и показывать тултип | **Missing**: у `TextBlock Title` нет `MaxWidth` и `TextTrimming`, тултипа нет (824) | MaxWidth 160, ellipsis, тултип | S | P3 |
+| Терминал: длинный заголовок вкладки | Обрезать и показывать тултип | **Have, 2026-10-18**: `MainWindow.axaml`, MaxWidth 160, CharacterEllipsis и полный `ToolTip.Tip`; `TerminalUiTests.A_shell_runs_in_the_project_folder_and_ends_with_the_window` проверяет в работающем UI, en/ru PASS | — | — | P3 |
 | Preview: ⌘L адрес, ⌘R reload, ⌘[ / ⌘] назад и вперёд, ⌘W закрыть вкладку | Конвенции браузеров (Safari) | **Missing**: из клавиш есть только Enter в адресе (PreviewPanel.axaml:86) | `KeyBindings` на `PreviewPanel` (учесть перехват WebKit в `NativeInput`) | S | P2 |
 | Preview: средний клик и КМ вкладки | Браузеры | **Missing**: (PreviewPanel.axaml:189-196) | Как у терминала | S | P3 |
 | Preview: × вкладки по hover | Safari и Chrome: × на неактивных вкладках появляется по hover | **Partial**: × виден всегда (`IsVisible=CanClose`, 191) | Opacity 0 → 1 на hover или active, освобождает место под заголовок | S | P3 |
@@ -167,8 +167,8 @@
 | Восстановление размера, позиции и Maximized окна | HIG и все desktop-приложения (Codex, Claude): окно открывается там, где было закрыто | **Missing**: жёстко 1100×760 `CenterScreen` (MainWindow.axaml:15-17); `SetWindowState` только в памяти (MainViewModel.cs:148-172); в `OmpRuntimeOptions` полей окна нет | Сохранять `Position/Width/Height/WindowState` при закрытии, при старте проверять, что окно на видимом экране | M | P1 |
 | Видимость сайдбара после перезапуска | Codex и Claude помнят скрытый сайдбар | **Missing**: `IsSidebarVisible` не сохраняется (сохраняется только ширина, MainViewModel.Sessions.cs:82-86) | Поле `SidebarHidden` | S | P2 |
 | Заголовок окна с маркером внимания | — | **Have**: «● » при `NeedsAttention` (MainViewModel.Attention.cs:20) | — | — | — |
-| Бейдж на иконке в Dock: сколько чатов ждут | macOS-конвенция: Mail, Slack, Claude desktop показывают badge | **Missing**: grep `badge` пуст | `NSApp.dockTile.badgeLabel` через `MacObjC` = число ждущих и непрочитанных | S | P2 |
-| Подпрыгивание иконки в Dock при вопросе в фоне | HIG: `requestUserAttention` | **Partial**: на Windows есть `FlashWindowEx` (Notifications.cs:61-78), на macOS — только notification | `[NSApp requestUserAttention:NSInformationalRequest]` | S | P2 |
+| Бейдж на иконке в Dock: сколько чатов ждут | macOS-конвенция | **Have, 2026-10-18**: `MacDockAttention`, число чатов с approval/question (не непрочитанных); ноль очищает badge, Notifications=false отключает. `AttentionTests` en/ru; native `micro-ux-attention` PASS, badgeLabel=1, screenshot просмотрен | — | — | P2 |
+| Подпрыгивание иконки в Dock при вопросе в фоне | HIG: `requestUserAttention` | **Have, 2026-10-18**: `NSInformationalRequest`, один запрос при переходе чата в ожидание на неактивном окне; повтор snapshot/settings-on не повторяет запрос. Native smoke + en/ru tests PASS | — | — | P2 |
 | Звук уведомления | macOS: опциональный звук | **Missing**: `display notification … with title` без `sound name` (Notifications.cs:58) | Переключатель «Sound» в Settings → General | S | P3 |
 | Клик по уведомлению открывает нужный чат | — | **Have**: MainWindow.axaml.cs:541-551 | — | — | — |
 | Edit-меню в menu bar на любом поле | HIG | **Have**: MainWindow.Menus.cs:35-80 | — | — | — |
@@ -243,7 +243,7 @@
 | Copy ответа: plain и Markdown | Claude | **Have**: два пункта (RowViewModels.cs:216-220) | — | — | — |
 | Rich-копирование (HTML и RTF) ответа | Claude и ChatGPT кладут в буфер HTML, чтобы вставка в Docs и Notes сохраняла форматирование | **Missing**: только `SetTextAsync` (MainWindow.axaml.cs:750-753) | `DataObject` с `text/plain` и `text/html` (Markdig → HTML) | S | P3 |
 | Copy image из меню миниатюры | Finder и Quick Look: КМ «Copy» | **Missing**: `ImageMenu` содержит только «Open» (91-102); копирование есть лишь в просмотрщике (ImageViewer.axaml.cs:48-52) | Пункты Copy image, Open in default app, Save as… в `ImageMenu` | S | P2 |
-| Ссылка: URL виден до клика | Браузеры: URL в статус-баре или тултипе | **Missing**: у `InlineLink` тултипа нет (MarkdownView.cs:740-750) | `ToolTip.Tip = uri.AbsoluteUri` | S | P2 |
+| Ссылка: URL виден до клика | Браузеры: URL в статус-баре или тултипе | **Have, 2026-10-18**: `MarkdownView.Link` задаёт полный `uri.AbsoluteUri` tooltip; rendered-link regression `MarkdownViewRenderTests.A_reply_with_links_finished_while_hidden_draws_without_throwing`, en/ru PASS | — | — | P2 |
 | Ссылка: «Open in Preview» | Встроенный браузер есть — ссылка должна в него открываться | **Missing**: `ForLink` = Open link и Copy link (ContextMenus.cs:35-37) | Третий пункт «Open in Preview» для http(s) | S | P2 |
 | Вставка файлов, картинок, длинного текста | Claude | **Have**: `PasteAsync` (MainWindow.axaml.cs:940-963) | — | — | — |
 | Drop файлов на окно → композер, с подсветкой | Claude и Codex | **Have**: 78-81, 975-989; Styles.Composer.axaml:19-22 | Текст-подсказка (см. Composer) | S | P3 |

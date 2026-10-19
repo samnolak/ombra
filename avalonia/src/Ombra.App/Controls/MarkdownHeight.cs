@@ -1,5 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
+using Markdig.Extensions.Tables;
+using Markdig.Syntax;
 
 namespace Ombra.App.Controls;
 
@@ -31,8 +33,64 @@ internal static class MarkdownHeight
     private enum Open { None, Paragraph, List, Table, Quote }
 
     /// <summary>The height <paramref name="markdown"/> takes at <paramref name="width"/>; <paramref name="atTop"/>: it starts
-    /// the view (a heading there has no space above it), else it is a block further down.</summary>
-    public static double Estimate(string markdown, double width, bool atTop = true)
+    /// the view (a heading there has no space above it), else it is a block further down. An expanded code placeholder
+    /// retains its full height when its controls are rebuilt for a theme change.</summary>
+    public static double Estimate(string markdown, double width, bool atTop = true, bool expandedCode = false) =>
+        Estimate(markdown.AsSpan(), width, atTop, expandedCode);
+
+    /// <summary>A parsed lazy block, including each descendant code block's own fold state. Container markers are
+    /// layout chrome, not code text: walking the existing tree avoids counting a quoted or listed hidden tail as prose.</summary>
+    internal static double Estimate(Block block, string source, int from, double width, bool atTop, Func<CodeBlock, bool> expanded, int? end = null) =>
+        Estimate(block, source, from, width, atTop, expanded, end ?? source.Length, quotes: 0);
+
+    private static double Estimate(Block block, string source, int from, double width, bool atTop, Func<CodeBlock, bool> expanded, int until, int quotes)
+    {
+        if (block is CodeBlock code)
+        {
+            var lines = code.Lines.Count;
+            while (lines > 0 && code.Lines.Lines[lines - 1].Slice.Length == 0) lines--;
+            return CodeHeight(lines, expanded(code));
+        }
+        if (block is ContainerBlock container && block is not Table)
+        {
+            var spacing = block is ListBlock ? ItemSpacing : NestedSpacing;
+            var childWidth = Math.Max(1, width - (block is ListBlock ? 28 : block is QuoteBlock ? 15 : 0));
+            var height = 0.0;
+            var first = true;
+            for (var i = 0; i < container.Count; i++)
+            {
+                if (!first) height += spacing;
+                var childEnd = i + 1 < container.Count ? from + container[i + 1].Span.Start : until;
+                height += Estimate(container[i], source, from, childWidth, atTop: first, expanded, childEnd, quotes + (block is QuoteBlock ? 1 : 0));
+                first = false;
+            }
+            return block is ListItemBlock ? Math.Max(Metrics().LineHeight, height) : height;
+        }
+        // Open EOF blocks can have a stale Span.End. Bound them by their next sibling (or their container's end),
+        // just as RenderBlocks does for top-level sources, rather than dropping the still-streaming tail.
+        var start = from + block.Span.Start;
+        var slice = source.AsSpan(start, until - start);
+        if (quotes == 0) return Estimate(slice, width, atTop, expandedCode: false);
+        // Every continuation line still carries the enclosing quotes' markers, which the raw estimator would read as
+        // separate quote blocks (Markdig has already released the leaf's marker-free lines after inline parsing).
+        var text = new System.Text.StringBuilder(slice.Length);
+        foreach (var line in slice.EnumerateLines())
+        {
+            var rest = line;
+            for (var q = 0; q < quotes; q++)
+            {
+                var trimmed = rest.TrimStart();
+                if (trimmed.IsEmpty || trimmed[0] != '>') break;
+                rest = trimmed[1..];
+                if (!rest.IsEmpty && rest[0] == ' ') rest = rest[1..];
+            }
+            if (text.Length > 0) text.Append('\n');
+            text.Append(rest);
+        }
+        return Estimate(text.ToString().AsSpan(), width, atTop, expandedCode: false);
+    }
+
+    private static double Estimate(ReadOnlySpan<char> markdown, double width, bool atTop, bool expandedCode)
     {
         var (fontSize, lineHeight) = Metrics();
         var perLine = Math.Max(8, width / (fontSize * AverageCharWidth));
@@ -42,6 +100,11 @@ internal static class MarkdownHeight
         var chars = 0;      // the open paragraph's or quote's text
         var height = 0.0;   // the open list's or table's height so far
         var codeLines = -1; // the open code block's lines (-1: not in one)
+        var codeTrailingBlanks = 0;
+        var indentedCodeLines = -1;
+        var indentedBlanks = 0;
+        var listIndent = 0;
+        var codeQuoteDepth = 0;
 
         void Add(double h)
         {
@@ -60,26 +123,52 @@ internal static class MarkdownHeight
             (open, chars, height) = (Open.None, 0, 0);
         }
 
-        foreach (var raw in markdown.AsSpan().EnumerateLines())
+        foreach (var raw in markdown.EnumerateLines())
         {
             var indent = raw.Length - raw.TrimStart().Length;
             var line = raw.Trim();
+            var codeRaw = CodeContent(raw, ref listIndent, ref codeQuoteDepth, codeLines >= 0 || indentedCodeLines >= 0);
+            var codeIndent = codeRaw.Length - codeRaw.TrimStart().Length;
+            var codeLine = codeRaw.Trim();
+            if (indentedCodeLines >= 0)
+            {
+                if (codeLine.IsEmpty) { indentedBlanks++; continue; }
+                if (codeIndent >= 4)
+                {
+                    indentedCodeLines += indentedBlanks + 1;
+                    indentedBlanks = 0;
+                    continue;
+                }
+                Add(CodeHeight(indentedCodeLines, expandedCode));
+                indentedCodeLines = -1;
+                indentedBlanks = 0;
+            }
             if (codeLines >= 0)
             {
-                if (IsFence(line)) { Add(CodeChrome + codeLines * CodeLine); codeLines = -1; }
-                else codeLines++;
+                if (IsFence(codeLine)) { Add(CodeHeight(codeLines - codeTrailingBlanks, expandedCode)); codeLines = -1; }
+                else
+                {
+                    codeLines++;
+                    codeTrailingBlanks = codeRaw.IsEmpty ? codeTrailingBlanks + 1 : 0;
+                }
                 continue;
             }
-            if (indent <= 3 && IsFence(line))
+            if (codeIndent <= 3 && IsFence(codeLine))
             {
                 Close();
                 codeLines = 0;
+                codeTrailingBlanks = 0;
                 continue;
             }
             if (line.IsEmpty)
             {
                 // A list goes on past a blank line when an item or its indented text follows
                 if (open != Open.List) Close();
+                continue;
+            }
+            if (codeIndent >= 4 && open == Open.None)
+            {
+                indentedCodeLines = 1;
                 continue;
             }
             if (indent <= 3 && HeadingLevel(line) is var level and > 0)
@@ -102,7 +191,12 @@ internal static class MarkdownHeight
                 if (open != Open.Table) Close();
                 open = Open.Table;
                 if (height == 0) height = TableChrome;
-                if (!IsTableRule(line)) height += TableRow;
+                if (!IsTableRule(line))
+                {
+                    if (chars < MarkdownView.MaxTableRows) height += TableRow;
+                    else if (chars == MarkdownView.MaxTableRows) height += 64; // truncation notice and copy action
+                    chars++;
+                }
                 continue;
             }
             if (line[0] == '>')
@@ -122,9 +216,56 @@ internal static class MarkdownHeight
             open = Open.Paragraph;
             chars += line.Length + 1; // lines of a paragraph join with a space
         }
-        if (codeLines >= 0) Add(CodeChrome + codeLines * CodeLine);
+        if (codeLines >= 0) Add(CodeHeight(codeLines - codeTrailingBlanks, expandedCode));
+        if (indentedCodeLines >= 0) Add(CodeHeight(indentedCodeLines, expandedCode));
         Close();
         return total;
+    }
+
+    /// <summary>Removes only container prefixes for recognizing code. Prose keeps the original line estimator;
+    /// code contents never establish list markers or deeper quotes. No strings or syntax trees are allocated.</summary>
+    private static ReadOnlySpan<char> CodeContent(ReadOnlySpan<char> line, ref int listIndent, ref int quoteDepth, bool inCode)
+    {
+        var depth = 0;
+        var markerIndent = 0;
+        var hasMarker = false;
+        while (true)
+        {
+            var trimmed = line.TrimStart();
+            var indent = line.Length - trimmed.Length;
+            if (indent <= 3 && trimmed.StartsWith(">") && (!inCode || depth < quoteDepth))
+            {
+                line = trimmed[1..];
+                if (!line.IsEmpty && line[0] == ' ') line = line[1..];
+                depth++;
+                markerIndent = 0;
+                hasMarker = false;
+                continue;
+            }
+            var marker = inCode ? 0 : ItemMarker(trimmed);
+            if (marker > 0 && indent <= listIndent + 3)
+            {
+                markerIndent += indent + marker;
+                line = trimmed[marker..];
+                hasMarker = true;
+                continue;
+            }
+            break;
+        }
+        if (!inCode)
+        {
+            if (depth != quoteDepth) listIndent = 0;
+            quoteDepth = depth;
+            if (hasMarker)
+            {
+                listIndent = markerIndent;
+                return line;
+            }
+        }
+        var remainingIndent = line.Length - line.TrimStart().Length;
+        if (listIndent > 0 && remainingIndent >= listIndent) return line[listIndent..];
+        if (!inCode && !line.IsWhiteSpace()) listIndent = 0;
+        return line;
     }
 
     /// <summary>The message text's size and line height (GuiFontMessage, GuiLineMessage).</summary>
@@ -137,6 +278,9 @@ internal static class MarkdownHeight
     }
 
     private static int Lines(double chars, double perLine) => Math.Max(1, (int)Math.Ceiling(chars / Math.Max(1, perLine)));
+
+    private static double CodeHeight(int lines, bool expanded) =>
+        CodeChrome + (lines > MarkdownView.CodeFoldThreshold ? (expanded ? lines : MarkdownView.CodePreviewLines) * CodeLine + 36 : lines * CodeLine);
 
     private static bool IsFence(ReadOnlySpan<char> line) => line.StartsWith("```") || line.StartsWith("~~~");
 

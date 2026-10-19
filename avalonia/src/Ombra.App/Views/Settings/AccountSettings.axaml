@@ -1,0 +1,58 @@
+<!-- Settings page "Account" (MainViewModel.Team): my team ID, my name in the team, the team server and its pin, sign out
+     (stops the team's background work). Other team features add one line each in the marked region. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Ombra.App.Localization"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:settings="using:Ombra.App.Views.Settings"
+             xmlns:ctl="using:Ombra.App.Controls"
+             x:Class="Ombra.App.Views.Settings.AccountSettings"
+             x:DataType="vm:MainViewModel">
+  <StackPanel Spacing="16">
+    <StackPanel DataContext="{Binding Team}" x:DataType="vm:TeamViewModel" Spacing="16">
+      <Border Classes="ws-note error" IsVisible="{Binding HasError}">
+        <SelectableTextBlock Text="{Binding Error}" TextWrapping="Wrap" />
+      </Border>
+      <Border Classes="section-card" IsVisible="{Binding IsSignedOut}">
+        <TextBlock x:Name="AccountSignedOut" Classes="muted" TextWrapping="Wrap" Text="{loc:T 'Not signed in to a team. Create or join one on the Team page.'}" />
+      </Border>
+      <Border x:Name="AccountCard" Classes="section-card" IsVisible="{Binding IsSignedIn}">
+        <StackPanel Spacing="12">
+          <TextBlock Classes="section" Text="{loc:T 'Account'}" />
+          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
+            <TextBlock Classes="muted" Text="{loc:T 'Name'}" VerticalAlignment="Center" />
+            <TextBox x:Name="DisplayNameBox" Grid.Column="1" Classes="sm" Text="{Binding DisplayName}" Watermark="{loc:T 'How the team sees you'}" />
+            <Button Grid.Column="2" Classes="sm" Content="{loc:T 'Save'}" Command="{Binding SaveNameCommand}" IsEnabled="{Binding !IsBusy}" />
+          </Grid>
+          <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'The name travels only inside the team, encrypted; the server never sees it.'}" />
+          <Button x:Name="SignOutButton" Classes="danger" HorizontalAlignment="Left" Content="{loc:T 'Sign out'}" Command="{Binding SignOutCommand}" />
+          <!-- technical details: IDs and the server's pin for support, folded away -->
+          <StackPanel x:Name="AccountTechDetails" Spacing="6">
+            <ToggleButton x:Name="AccountTechToggle" Classes="thinking-toggle" AutomationProperties.Name="{loc:T 'Technical details'}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="{loc:T 'Technical details'}" VerticalAlignment="Center" />
+                <ctl:Icon Classes="chevron" Data="{StaticResource IconChevronRight}" Size="16" />
+              </StackPanel>
+            </ToggleButton>
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16" RowDefinitions="Auto,Auto,Auto" RowSpacing="8" IsVisible="{Binding #AccountTechToggle.IsChecked}">
+              <TextBlock Classes="muted" Text="{loc:T 'My ID'}" VerticalAlignment="Center" />
+              <SelectableTextBlock x:Name="AccountId" Grid.Column="1" Classes="ws-value mono" Text="{Binding MyId}" TextWrapping="Wrap" VerticalAlignment="Center" />
+              <Button Grid.Column="2" Classes="flat sm" Content="{loc:T 'Copy'}" Command="{Binding CopyMyIdCommand}" />
+              <TextBlock Grid.Row="1" Classes="muted" Text="{loc:T 'Server'}" VerticalAlignment="Center" />
+              <SelectableTextBlock x:Name="AccountServer" Grid.Row="1" Grid.Column="1" Classes="ws-value" Text="{Binding Server}" TextWrapping="Wrap" VerticalAlignment="Center" />
+              <Button Grid.Row="1" Grid.Column="2" Classes="flat sm" Content="{loc:T 'Copy'}" Command="{Binding CopyServerCommand}" />
+              <TextBlock Grid.Row="2" Classes="muted" Text="{loc:T 'Certificate pin'}" VerticalAlignment="Top" />
+              <SelectableTextBlock Grid.Row="2" Grid.Column="1" Classes="ws-value mono" Text="{Binding Pin}" TextWrapping="Wrap" />
+              <Button Grid.Row="2" Grid.Column="2" Classes="flat sm" Content="{loc:T 'Copy'}" Command="{Binding CopyPinCommand}" />
+            </Grid>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+
+    <!-- ── sections of other features: one line each ── -->
+    <StackPanel x:Name="AccountFeatureSections" Spacing="16">
+      <settings:ProgressSettingsSection DataContext="{Binding TeamProgress}" />
+    </StackPanel>
+  </StackPanel>
+</UserControl>

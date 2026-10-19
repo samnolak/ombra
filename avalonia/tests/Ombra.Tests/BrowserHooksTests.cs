@@ -4,6 +4,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App.Controls;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore.Browser;
 
@@ -84,7 +85,7 @@ public sealed class BrowserHooksTests
         Assert.Same(tab, vm.ActiveTab); // the opener was on screen: the pop-up shows at once
         Assert.True(tab.CanClose);
         Assert.Equal("accounts.example.com", tab.Header);
-        Assert.Equal("accounts.example.com\nPop-up from app.example.com", tab.ToolTip);
+        Assert.Equal("accounts.example.com\n" + Loc.F("Pop-up from {0}", "app.example.com"), tab.ToolTip);
         Assert.Equal(2, vm.Tabs.Count); // the right panel's strip lists it with its "Pop-up" mark (PanelTab.IsPopup)
         // The engine's own view is hosted in the page area; omp's browser drives it like any tab
         var host = Assert.Single(Named<Panel>(panel, "WebHost").Children.OfType<PopupViewHost>());
@@ -173,7 +174,7 @@ public sealed class BrowserHooksTests
         Assert.True(vm.LoadFailed);
         Assert.Equal("", vm.Message); // the error page says it, not the notice bar
         var shown = Texts(panel);
-        Assert.Contains("The page couldn't be opened", shown);
+        Assert.Contains(Loc.T("The page couldn't be opened"), shown);
         Assert.Contains("http://localhost:3999/app: Could not connect to the server.", panel.GetVisualDescendants().OfType<SelectableTextBlock>().Select(t => t.Text));
         Assert.True(Named<Button>(panel, "ErrorRetryButton").IsEffectivelyVisible);
 
@@ -185,7 +186,7 @@ public sealed class BrowserHooksTests
 
         // A refused certificate says so
         vm.ActiveTab.Page.RaiseFailed(new BrowserLoadFailure(failed, "NSURLErrorDomain", -1202, "The certificate for this server is invalid.", true));
-        Assert.Equal("This connection isn't private", vm.ErrorTitle);
+        Assert.Equal(Loc.T("This connection isn't private"), vm.ErrorTitle);
 
         // The next page that loads clears it
         vm.OnNavigationCompleted(vm.ActiveTab, new Uri("http://localhost:3999/"), true, false, false);
@@ -211,7 +212,7 @@ public sealed class BrowserHooksTests
         Assert.False(await confirm.WaitAsync(TimeSpan.FromSeconds(5))); // the engine's no-answer default
         Assert.True(vm.ShowCrashPage);
         Assert.False(vm.ShowWebView);
-        Assert.Contains("This page stopped working", Texts(panel));
+        Assert.Contains(Loc.T("This page stopped working"), Texts(panel));
         Assert.True(Named<Button>(panel, "CrashReloadButton").IsEffectivelyVisible);
         Assert.True(Named<Button>(panel, "CrashOpenExternallyButton").IsEffectivelyVisible);
 
@@ -267,7 +268,7 @@ public sealed class BrowserHooksTests
             var first = page.ChooseDownloadPath(request, CancellationToken.None);
             Dispatcher.UIThread.RunJobs();
             var card = Assert.IsType<BrowserDialogCardViewModel>(vm.Dialogs.Card);
-            Assert.Equal("Download report.txt?", card.Title);
+            Assert.Equal(Loc.F("Download {0}?", "report.txt"), card.Title);
             await card.PrimaryCommand.ExecuteAsync(null);
             Assert.Equal(Path.Combine(folder, "picked-report.txt"), await first.WaitAsync(TimeSpan.FromSeconds(5)));
             Assert.Equal(new[] { ("report.txt", (string?)null) }, picks);
@@ -344,7 +345,7 @@ public sealed class BrowserHooksTests
         Assert.True(Named<Border>(panel, "DownloadsStrip").IsEffectivelyVisible);
         var texts = Texts(panel);
         Assert.Contains("data.csv", texts);
-        Assert.Contains("1 KB of 2 KB", texts);
+        Assert.Contains(Loc.F("{0} of {1}", Loc.F("{0} KB", "1"), Loc.F("{0} KB", "2")), texts);
         vm.CancelDownloadCommand.Execute(d);
         Assert.Equal(1, stops);
 
@@ -352,7 +353,7 @@ public sealed class BrowserHooksTests
         d.State = BrowserDownloadState.Finished;
         page.RaiseDownloadChanged(d);
         Dispatcher.UIThread.RunJobs();
-        Assert.Contains("Saved · 2 KB", Texts(panel));
+        Assert.Contains(Loc.F("Saved · {0}", Loc.F("{0} KB", "2")), Texts(panel));
         vm.ShowDownloadCommand.Execute(d);
         Assert.Equal(new[] { d }, shown);
         vm.CancelDownloadCommand.Execute(d);
@@ -438,7 +439,7 @@ public sealed class BrowserHooksTests
     [Fact]
     public void Always_allow_on_this_site_is_remembered_per_site_and_kind_across_restarts()
     {
-        var dir = Directory.CreateTempSubdirectory("ombra-sites-").FullName;
+        var dir = TestProcesses.TempDir("ombra-sites");
         try
         {
             var path = Path.Combine(dir, "browser-sites.json");

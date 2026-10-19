@@ -1,0 +1,46 @@
+[package]
+name = "ombra-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Ombra team core: OpenMLS 0.9.1 + roster/certificate/commit/Welcome/item-op validator behind one C ABI"
+license = "MIT"
+
+[lib]
+name = "ombra_core"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Attack helpers (commits/Welcomes/ops built WITHOUT local validation) used only by the
+# xUnit/attack test suites. Never enabled in release builds that ship to users or servers.
+# `openmls/test-utils` provides the "frankenstein" message builder, needed to forge a commit
+# carrying a ReInit proposal (OpenMLS' own commit builder drops ReInit).
+test-attacks = ["openmls/test-utils"]
+# Crash injection for the atomicity test (`store::failpoint`, OMBRA_CRASH_AT). Test builds only.
+failpoints = []
+
+[dependencies]
+openmls = "=0.9.1"
+openmls_rust_crypto = "=0.6.0"
+openmls_basic_credential = "=0.6.0"
+openmls_traits = "=0.6.0"
+openmls_memory_storage = "=0.6.0"
+tls_codec = "0.4"
+ed25519-dalek = "2.2"
+sha2 = "0.10"
+hmac = "0.12"
+hkdf = "0.12"
+aes-gcm = "0.10.3"
+getrandom = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zeroize = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[[bin]]
+name = "gen-vectors"
+path = "src/bin/gen_vectors.rs"
+
+[profile.release]
+opt-level = 3
+panic = "unwind"

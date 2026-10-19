@@ -9,7 +9,12 @@ using Ombra.Rpc;
 
 namespace Ombra.App.ViewModels;
 
-public sealed record ApprovalModeOption(string Mode, string Label, string Description);
+/// <summary>A permission mode of the menu; its words are read in the app's language when shown (the list is static).</summary>
+public sealed record ApprovalModeOption(string Mode, string EnglishLabel, string EnglishDescription)
+{
+    public string Label => Loc.T(EnglishLabel);
+    public string Description => Loc.T(EnglishDescription);
+}
 
 public enum ModelRowKind { Model, Family, Back, Provider }
 
@@ -121,9 +126,9 @@ public sealed partial class MainViewModel
     [
         // omp 18.2.0 tiers (tools/approval.ts): each mode auto-approves up to a tier and asks above it.
         // Named as Claude Code names its permission modes (Ask permissions, Accept edits, Bypass permissions)
-        new("always-ask", Loc.T("Ask permissions"), Loc.T("omp reads on its own and asks before it edits a file or runs a command.")),
-        new("write", Loc.T("Accept edits"), Loc.T("omp reads and edits files on its own and asks before it runs a command. Recommended.")),
-        new("yolo", Loc.T("Bypass permissions"), Loc.T("omp runs every tool without asking, shell commands included. Only for trusted, sandboxed work.")),
+        new("always-ask", "Ask permissions", "omp reads on its own and asks before it edits a file or runs a command."),
+        new("write", "Accept edits", "omp reads and edits files on its own and asks before it runs a command. Recommended."),
+        new("yolo", "Bypass permissions", "omp runs every tool without asking, shell commands included. Only for trusted, sandboxed work."),
     ];
 
     /// <summary>All of omp's thinking levels: the menu when omp cannot say which the model accepts (omp before 18.8.0).</summary>
@@ -182,17 +187,17 @@ public sealed partial class MainViewModel
     [NotifyPropertyChangedFor(nameof(ApprovalLabel), nameof(IsYolo), nameof(IsAcceptEdits), nameof(ShownApprovalMode))]
     private string? _approvalMode;
 
-    /// <summary>A mode chosen while omp runs: it takes effect (omp restarts) once the run ends.</summary>
+    /// <summary>A chosen mode stays pending until its chat has reopened and the new mode is projected into the UI.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ApprovalLabel), nameof(IsYolo), nameof(IsAcceptEdits), nameof(ApprovalPendingNote), nameof(ShownApprovalMode))]
     private string? _pendingApprovalMode;
 
-    /// <summary>The mode the menu ticks: the one waiting for the run to end, else the current one.</summary>
+    /// <summary>The mode the menu ticks: the latest choice until its restart is projected, else the current one.</summary>
     public string? ShownApprovalMode => PendingApprovalMode ?? ApprovalMode;
     public string ApprovalLabel => ApprovalModes.FirstOrDefault(m => m.Mode == ShownApprovalMode)?.Label ?? Loc.T("Default permissions");
     public bool IsYolo => ShownApprovalMode == "yolo";
     public bool IsAcceptEdits => ShownApprovalMode == "write";
-    public string? ApprovalPendingNote => PendingApprovalMode is null || !IsRunning ? null : Loc.T("Takes effect when the current run ends (omp restarts).");
+    public string? ApprovalPendingNote => PendingApprovalMode is null || !IsRunning ? null : Loc.T("Takes effect when the current run ends (the chat session restarts).");
 
     /// <summary>"Bypass permissions" waits for an explicit second confirmation.</summary>
     [ObservableProperty] private bool _confirmYolo;
@@ -205,6 +210,22 @@ public sealed partial class MainViewModel
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasUnsavedRuntime))] private string _settingsProfile = "";
     [ObservableProperty] private string _settingsTheme = "system";
     [ObservableProperty] private string _settingsMessage = "";
+    [ObservableProperty] private string _settingsWarning = "";
+
+    private void OnSettingsWarningsChanged() => PostToUi(RefreshSettingsWarning);
+
+    private void RefreshSettingsWarning()
+    {
+        var warnings = new List<string>();
+        if (_settings is { InvalidFields.Count: > 0 })
+            warnings.Add(Loc.F("Some settings could not be read; defaults are in use: {0}", string.Join(", ", _settings.InvalidFields)));
+        if (_settings is { IsPersistenceUnavailable: true })
+            warnings.Add(Loc.T("Settings cannot be saved. Changes are kept for this run only and will be lost when the app closes. Check write permissions for the settings folder, then change a setting to retry."));
+        var warning = string.Join("\n", warnings);
+        if (warning == SettingsWarning) return;
+        SettingsWarning = warning;
+        if (warning.Length > 0) Rows.Add(RowViewModel.Create(new NoticeItem(0, NoticeLevel.Warning, warning)));
+    }
     [ObservableProperty] private bool _providersLoading;
     /// <summary>What the last sign-out did (under the provider list); empty when there is nothing to say.</summary>
     [ObservableProperty]
@@ -215,22 +236,26 @@ public sealed partial class MainViewModel
     public string SettingsPath => _settings?.Path ?? Loc.T("(not saved: settings file unavailable)");
     public static IReadOnlyList<string> Themes => ["system", "light", "dark"];
 
-    /// <summary>omp stopped (crash or failed start) and can be started again on the same session.</summary>
-    public bool CanRecover => Phase is SessionPhase.Faulted or SessionPhase.Stopped;
+    /// <summary>omp stopped (crash or failed start) and can be started again on the same session. Not while another
+    /// process has the chat open: its own banner offers "Open here" (MainViewModel.Lease.cs).</summary>
+    public bool CanRecover => !IsReadOnly && !IsLeaseReadOnly && Phase is SessionPhase.Faulted or SessionPhase.Stopped;
 
-    public string RecoverTitle => StartProblem switch
+    public string RecoverTitle => IsAutoRecovering ? Loc.T("omp stopped unexpectedly") : StartProblem switch
     {
-        StartProblem.NotFound => Loc.T("Install omp to get started"),
+        StartProblem.NotFound => Loc.T("Set up engine"),
         StartProblem.NoModel => Loc.T("Connect a model provider"),
+        StartProblem.SessionModelUnavailable => Loc.T("Saved model unavailable"),
         _ => _open.Last?.StartFailed == true ? Loc.T("omp didn't start") : Loc.T("omp stopped"),
     };
 
-    public string RecoverHint => StartProblem switch
+    public string RecoverHint => IsAutoRecovering ? AutoRecoverText : StartProblem switch
     {
         StartProblem.NotFound when ShowInstallRuntime => RuntimeOffer,
         StartProblem.NotFound => Loc.T("omp was not found on this computer. Set where it is in Settings → Advanced, then try again."),
         // omp's own setup opens on its provider step: Sign in with the keys (the terminal takes the keyboard)
         StartProblem.NoModel => Loc.T("omp needs an AI provider before it can work. Open omp's setup, choose Sign in and a provider (or add an API key), then try again."),
+        StartProblem.SessionModelUnavailable => Loc.F("This conversation's saved model “{0}” is unavailable. Reconnect that provider and try again, or explicitly open on the current model. Your history and unsent input are kept.",
+            _open.Last?.UnavailableSessionModel ?? Loc.T("unknown")),
         _ => _open.Last?.StartFailed == true
             ? Loc.T("Check the omp command in Settings → Advanced, then try again. The error is under Show details.")
             : Loc.T("It can pick this conversation up where it stopped."),
@@ -242,7 +267,7 @@ public sealed partial class MainViewModel
     /// <summary>Mid-conversation, the same content is a card above the (disabled) message box.</summary>
     public bool ShowRecoverCard => CanRecover && !IsConversationEmpty;
 
-    public bool ShowGreeting => !CanRecover && IsConversationEmpty;
+    public bool ShowGreeting => !IsReadOnly && !IsLeaseReadOnly && !CanRecover && IsConversationEmpty;
 
     /// <summary>Nothing said yet: no rows, or only notices (a warning from omp's start does not end the new-session page).</summary>
     public bool IsConversationEmpty => Rows.All(r => r is NoticeRowViewModel);
@@ -253,13 +278,16 @@ public sealed partial class MainViewModel
 
     [ObservableProperty] private bool _isErrorDetailOpen;
 
-    public string RecoverLabel => _open.Last?.StartFailed == true ? Loc.T("Try again") : Loc.T("Restart omp");
+    public string RecoverLabel => IsAutoRecovering ? Loc.T("Restart now")
+        : _open.Last?.StartFailed == true ? Loc.T("Try again") : Loc.T("Restart omp");
 
     /// <summary>Getting started (omp not installed, no provider yet) is onboarding, not an error: the app mark, no warning.</summary>
     public bool IsOnboarding => StartProblem is StartProblem.NotFound or StartProblem.NoModel;
 
     /// <summary>"Try again" next to Install would retry what cannot work yet.</summary>
     public bool ShowRecoverButton => !ShowInstallRuntime;
+
+    public bool CanOpenOnCurrentModel => CanRecover && StartProblem == StartProblem.SessionModelUnavailable;
 
     public string RecoverSettingsLabel => StartProblem == StartProblem.NotFound ? Loc.T("Use my own omp…") : Loc.T("Settings");
 
@@ -355,16 +383,29 @@ public sealed partial class MainViewModel
 
     partial void OnNotificationsEnabledChanged(bool value)
     {
+        UpdateDockAttention();
         if (IsSettingsOpen) Persist(o => o with { Notifications = value });
     }
 
-    /// <summary>omp's browser tool drives the built-in browser (Settings → General; default on). Saved when chosen; omp
-    /// processes started from then on (new chats, restarts, the terminal's omp) follow it.</summary>
+    /// <summary>omp's browser tool drives the built-in browser. Process environment changes restart all chats together.</summary>
     [ObservableProperty] private bool _agentUsesGuiBrowser = true;
 
     partial void OnAgentUsesGuiBrowserChanged(bool value)
     {
-        if (IsSettingsOpen) Persist(o => o with { AgentUsesGuiBrowser = value });
+        if (IsSettingsOpen && Persist(o => o with { AgentUsesGuiBrowser = value }))
+            _ = ApplyBrowserEngineSettingsAsync();
+    }
+
+    private async Task ApplyBrowserEngineSettingsAsync()
+    {
+        try
+        {
+            SettingsMessage = await RestartAllSessionsAsync()
+                ? Loc.T("Saved. omp restarted with the new settings.")
+                : Loc.T("Saved. All chats will restart together after their current work finishes.");
+        }
+        catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+        catch (Exception e) { SettingsMessage = Loc.T("Couldn’t restart omp: ") + e.Message; }
     }
 
     /// <summary>
@@ -391,11 +432,63 @@ public sealed partial class MainViewModel
         Persist(o => o with { SendKey = key == "enter" ? null : key });
     }
 
-    private static void PostToUi(Action a) => Avalonia.Threading.Dispatcher.UIThread.Post(a);
+    /// <summary>
+    /// Settings › General › Agent browser: <c>nightly</c> (macOS default once the user agreed: pages render in the
+    /// embedded Nightly runtime) or <c>preview</c> (the built-in WebKit/WebView2 preview). Saved when chosen; open pages
+    /// move over. While Nightly cannot run (not installed, failed) the preview shows pages and says why
+    /// (<see cref="PreviewViewModel.NightlyFallbackReason"/>).
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UsesNightlyBrowser))]
+    private string _agentBrowserEngine = "preview";
+
+    public bool UsesNightlyBrowser => AgentBrowserEngine == "nightly";
+
+    /// <summary>The Nightly choice exists where the runtime can be embedded (macOS).</summary>
+    public static bool NightlyBrowserAvailable => OperatingSystem.IsMacOS();
+
+    /// <summary>
+    /// The saved choice at start. Never chosen on macOS: the preview asks once (first-run consent card) whether pages
+    /// may move to Nightly, and shows them in the built-in preview until answered.
+    /// </summary>
+    public void LoadAgentBrowserEngine(string? saved)
+    {
+        Action<bool> chosen = accepted => SetAgentBrowserEngine(accepted ? "nightly" : "preview");
+        var ask = saved is null && NightlyBrowserAvailable;
+        foreach (var p in new[] { Preview, Browser })
+        {
+            p.NightlyConsentChosen = chosen;
+            p.NeedsNightlyConsent = ask;
+        }
+        AgentBrowserEngine = saved == "nightly" && NightlyBrowserAvailable ? "nightly" : "preview";
+    }
+
+    [RelayCommand]
+    private void SetAgentBrowserEngine(string? engine)
+    {
+        if (engine is not ("preview" or "nightly") || (engine == "nightly" && !NightlyBrowserAvailable)) return;
+        Preview.NeedsNightlyConsent = Browser.NeedsNightlyConsent = false;
+        // Saved even when unchanged: an explicit choice answers the first-run question.
+        Persist(o => o with { AgentBrowserEngine = engine });
+        AgentBrowserEngine = engine;
+    }
+
+    partial void OnAgentBrowserEngineChanged(string value) =>
+        Preview.WantsNightly = Browser.WantsNightly = value == "nightly" && NightlyBrowserAvailable;
+
+    private void PostToUi(Action a)
+    {
+        if (IsClosing) return;
+        UiDispatcher.Post(() =>
+        {
+            if (!IsClosing) a();
+        });
+    }
 
     [RelayCommand]
     private async Task OpenModelMenuAsync()
     {
+        if (IsReadOnly) return;
         try
         {
             IsModelMenuOpen = true;
@@ -417,6 +510,7 @@ public sealed partial class MainViewModel
     [RelayCommand]
     private async Task ChooseModelAsync(ModelItemViewModel? item)
     {
+        if (IsReadOnly) return;
         try
         {
             if (item is null) return;
@@ -429,8 +523,8 @@ public sealed partial class MainViewModel
                 return;
             }
             IsModelMenuOpen = false;
-            if (Phase != SessionPhase.Ready) return;
             var open = _open;
+            if (open.Controller.Snapshot().Phase != SessionPhase.Ready) return;
             await open.Controller.SetModelAsync(item.Model, _cts.Token);
             ApplyIfShown(open);
         }
@@ -548,6 +642,7 @@ public sealed partial class MainViewModel
     [RelayCommand(AllowConcurrentExecutions = true)]
     private async Task SetApprovalModeAsync(string mode)
     {
+        if (IsReadOnly) return;
         try
         {
             if (mode == ShownApprovalMode) return;
@@ -563,7 +658,8 @@ public sealed partial class MainViewModel
             // applies once the keys pause.
             _chosenApprovalMode = mode;
             _approvalChosenAt = DateTime.UtcNow;
-            foreach (var open in _opens.Values) open.PendingApprovalMode = mode;
+            foreach (var open in _opens.Values)
+                if (!open.Controller.CurrentLaunch.ReadOnly) open.PendingApprovalMode = mode;
             PendingApprovalMode = mode;
             if (_approvalModeApplying) return; // the loop already waiting picks up the newest choice
             _approvalModeApplying = true;
@@ -598,21 +694,26 @@ public sealed partial class MainViewModel
                     continue;
                 }
                 var mode = open.PendingApprovalMode!;
+                if (s.ApprovalMode != mode)
+                {
+                    // An omp that is not running (crashed, stopped) starts with it when the user starts it again. With the
+                    // chat's own lifetime: closed meanwhile, its restart ends instead of starting an omp nobody stops.
+                    try
+                    {
+                        if (s.Phase is SessionPhase.Faulted or SessionPhase.Stopped) await open.Controller.SetNextApprovalModeAsync(mode, open.Lifetime.Token);
+                        else await open.Controller.SetApprovalModeAsync(mode, open.Lifetime.Token);
+                    }
+                    catch (OperationCanceledException) when (open.Lifetime.IsCancellationRequested && !_cts.IsCancellationRequested)
+                    {
+                        continue; // that chat closed; the others still switch
+                    }
+                }
+                // Keep the explicit choice visible throughout the restart. Core's launch request changes before the
+                // UI sees its new phase/mode; clearing early let the next Shift+Tab cycle from the previous mode.
+                ApplyIfShown(open);
+                if (open.PendingApprovalMode != mode) continue; // a newer choice arrived while this restart awaited
                 open.PendingApprovalMode = null;
                 if (open == _open) PendingApprovalMode = null;
-                if (s.ApprovalMode == mode) continue;
-                // An omp that is not running (crashed, stopped) starts with it when the user starts it again. With the
-                // chat's own lifetime: closed meanwhile, its restart ends instead of starting an omp nobody stops.
-                try
-                {
-                    if (s.Phase is SessionPhase.Faulted or SessionPhase.Stopped) await open.Controller.SetNextApprovalModeAsync(mode, open.Lifetime.Token);
-                    else await open.Controller.SetApprovalModeAsync(mode, open.Lifetime.Token);
-                }
-                catch (OperationCanceledException) when (open.Lifetime.IsCancellationRequested && !_cts.IsCancellationRequested)
-                {
-                    continue; // that chat closed; the others still switch
-                }
-                ApplyIfShown(open);
             }
             if (working == 0 || told) continue;
             told = true;
@@ -644,6 +745,7 @@ public sealed partial class MainViewModel
             SettingsTheme = o.Theme ?? "system";
             LoadLanguages(o);
             NotificationsEnabled = o.Notifications ?? true;
+            WatchGitRemotes = o.WatchGitRemotes ?? true;
             AgentUsesGuiBrowser = o.AgentUsesGuiBrowser ?? true;
             SettingsMessage = "";
             ProvidersMessage = "";
@@ -685,6 +787,7 @@ public sealed partial class MainViewModel
                 ok = await open.Controller.LoginAsync(p.Id, _cts.Token);
             p.IsBusy = false;
             p.IsAuthenticated = ok || p.IsAuthenticated;
+            if (ok) _providerUsage?.MarkStale();
             ApplyIfShown(open);
             // omp contacts a provider only once it is added (NetworkPrivacy): its models come with the next start
             if (ok && Privacy?.LastGate?.Added.Contains(p.Id) != true) _ = RestartOmpToApplyAsync();
@@ -782,7 +885,7 @@ public sealed partial class MainViewModel
             RefreshRuntimeStatus();
             SettingsMessage = Loc.T("Saved. Restarting omp…");
             if (!await RestartAllSessionsAsync())
-                SettingsMessage = Loc.T("Saved. omp is replying: it restarts with the new settings when the reply ends.");
+                SettingsMessage = Loc.T("Saved. All chats will restart together after their current work finishes.");
             else
                 SettingsMessage = Phase == SessionPhase.Ready ? Loc.T("Saved. omp restarted with the new settings.") : Loc.T("Saved, but omp did not start: see the conversation for the error.");
         }
@@ -819,6 +922,18 @@ public sealed partial class MainViewModel
         {
             // The window is closing: the request was abandoned on purpose.
         }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanOpenOnCurrentModel))]
+    private async Task OpenOnCurrentModelAsync()
+    {
+        var open = _open;
+        try
+        {
+            await open.Controller.OpenOnCurrentModelAsync(open.Lifetime.Token);
+            ApplyIfShown(open);
+        }
+        catch (OperationCanceledException) when (open.Lifetime.IsCancellationRequested) { }
     }
 
     private OmpRuntimeOptions LoadSettingsOrDefault()
@@ -892,7 +1007,7 @@ public sealed partial class MainViewModel
         }
         // The start-problem page and the recover card follow these alone (the rows and the runtime install notify on
         // their own): every binding on them is told again only when one changed, not on each streamed token.
-        var recover = (CanRecover, s.StartProblem, s.StartFailed, s.LastError);
+        var recover = (CanRecover, s.StartProblem, s.StartFailed, s.LastError, s.AutoRecover);
         if (recover == _recoverShown) return;
         _recoverShown = recover;
         OnPropertyChanged(nameof(CanRecover));
@@ -906,10 +1021,13 @@ public sealed partial class MainViewModel
         OnPropertyChanged(nameof(RecoverSettingsLabel));
         NotifyRecoverLayout();
         RecoverCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(CanOpenOnCurrentModel));
+        OpenOnCurrentModelCommand.NotifyCanExecuteChanged();
         ApplyRuntimeState();
+        ApplyAutoRecover(); // MainViewModel.AutoRecover.cs
     }
 
-    private (bool, StartProblem, bool, string?)? _recoverShown;
+    private (bool, StartProblem, bool, string?, AutoRecoverStatus?)? _recoverShown;
 
     /// <summary>Remembers the project folder for the next start (only when no folder is configured explicitly).</summary>
     private void RememberProject(string? cwd)

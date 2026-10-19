@@ -1,3 +1,4 @@
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore;
 
@@ -116,18 +117,18 @@ public class SshCheckTests
         var d = SshCheck.Diagnose(Run(255, Connecting, Established, LocalVersion, "Connection timed out during banner exchange", "Connection to 192.0.2.10 port 2222 timed out"));
         var text = SshSettingsViewModel.Describe(d, "Connection to 192.0.2.10 port 2222 timed out", 255);
         var lines = text.Split('\n');
-        Assert.Equal("TCP connection established, but the server's SSH greeting did not arrive within 8 s.", lines[0]);
-        Assert.Equal(["✓ Address", "✓ TCP connection", "✗ Server's SSH greeting", "– Protocol negotiation", "– Host key check", "– Sign-in"],
+        Assert.Equal(Loc.F("TCP connection established, but the server's SSH greeting did not arrive within {0} s.", "8"), lines[0]);
+        Assert.Equal(["✓ " + Loc.T("Address"), "✓ " + Loc.T("TCP connection"), "✗ " + Loc.T("Server's SSH greeting"), "– " + Loc.T("Protocol negotiation"), "– " + Loc.T("Host key check"), "– " + Loc.T("Sign-in")],
             lines[1..7].Select(l => l.Split(':')[0]));
-        Assert.Contains("Route: direct, port 2222.", lines);
-        Assert.Contains("Code: banner-timeout", lines);
+        Assert.Contains(Loc.T("Route: direct") + Loc.F(", port {0}.", 2222), lines);
+        Assert.Contains(Loc.T("Code: ") + "banner-timeout", lines);
         // No ssh debug lines, and no guess about who is to blame
         Assert.DoesNotContain("debug1", text);
         Assert.DoesNotContain("block", text, StringComparison.OrdinalIgnoreCase);
 
         // Through a jump host the local DNS and TCP steps belong to the jump host
         var proxied = SshSettingsViewModel.Describe(SshCheck.Diagnose(Run(255, ViaJump, ProxyExec, LocalVersion, "Connection timed out during banner exchange")), "x", 255);
-        Assert.Contains("– TCP connection: made by the jump host, not checked here", proxied);
-        Assert.StartsWith("The server's SSH greeting did not come through the jump host within 8 s.", proxied);
+        Assert.Contains("– " + Loc.T("TCP connection") + ": " + Loc.F("made by the {0}, not checked here", Loc.T("jump host")), proxied);
+        Assert.StartsWith(Loc.F("The server's SSH greeting did not come through the {0} within {1} s.", Loc.T("jump host"), "8"), proxied);
     }
 }

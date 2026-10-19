@@ -111,7 +111,7 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
                 }
                 catch (ModelsConfigException e)
                 {
-                    LoadError = e.Message + Loc.F(" Fix it in {0}; the app doesn't change a file it can't read.", ConfigFile);
+                    LoadError = Loc.F(e.Format, e.Args) + Loc.F(" Fix it in {0}; the app doesn't change a file it can't read.", ConfigFile);
                 }
             }
             OnPropertyChanged(nameof(CanChange));
@@ -146,7 +146,7 @@ public sealed partial class CustomProvidersViewModel : WorkspacePageViewModel
         try
         {
             try { await Task.Run(() => ModelsConfig.Save(path, edit(ModelsConfig.Load(path))), Main.Lifetime); }
-            catch (ModelsConfigException e) { return e.Message; }
+            catch (ModelsConfigException e) { return Loc.F(e.Format, e.Args); }
             await LoadAsync();
             Say(done + Loc.T(" Restarting omp…"));
             var now = await Main.RestartOmpToApplyAsync();
@@ -503,7 +503,9 @@ public sealed partial class CustomProviderRowViewModel(CustomProvidersViewModel 
             : CustomProvidersViewModel.Count(Entry.Models.Count),
     }.Where(s => s is not null));
 
-    public string ReadOnlyNote => Loc.F("Edit models.yml to change it: {0}.", Entry.NotEditable);
+    public string ReadOnlyNote => Loc.F("Edit models.yml to change it: {0}.", Entry.NotEditableSettings.Count == 0
+        ? Loc.T("it is written in a form this page doesn't edit")
+        : Loc.F("it uses settings this page doesn't edit ({0})", string.Join(", ", Entry.NotEditableSettings.Select(s => s == "model settings beyond the id" ? Loc.T(s) : s))));
 
     public string RemoveQuestion => (Entry.ApiKey is not null ? Loc.F("Remove {0} from omp's models.yml? omp stops using it and forgets the key written there.", Id) : Loc.F("Remove {0} from omp's models.yml? omp stops using it.", Id));
 

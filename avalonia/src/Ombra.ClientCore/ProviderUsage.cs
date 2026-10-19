@@ -30,8 +30,14 @@ public sealed record ProviderUsageReport(string Provider, string? Account, strin
 /// <param name="Saved">Resets banked, including ones that cannot be spent now.</param>
 /// <param name="Usable">The ones the provider says can be spent now.</param>
 /// <param name="SoonestExpiry">When the first one still to spend expires (else when the last one expired).</param>
-/// <param name="Unavailable">omp's reason none can be spent now ("cooldown until …", "blocked by Claude 5h").</param>
-public sealed record ProviderUsageResets(int Saved, int Usable, DateTimeOffset? SoonestExpiry, string? Unavailable);
+/// <param name="UnavailableFormat">Why none can be spent now, as an English format the app shows in its language with
+/// <paramref name="UnavailableArgs"/> ("cooldown until {0:d}", "blocked by {0}"); omp's own reason is "{0}" with it as is.</param>
+/// <param name="UnavailableArgs">The arguments of <paramref name="UnavailableFormat"/>.</param>
+public sealed record ProviderUsageResets(int Saved, int Usable, DateTimeOffset? SoonestExpiry, string? UnavailableFormat = null, object?[]? UnavailableArgs = null)
+{
+    /// <summary>The reason in English ("cooldown until 10/16/2026", "blocked by Claude 5h"); null when there is none.</summary>
+    public string? Unavailable => UnavailableFormat is null ? null : string.Format(CultureInfo.InvariantCulture, UnavailableFormat, UnavailableArgs ?? []);
+}
 
 /// <summary>An account <c>/usage reset</c> lists: <c>/usage reset &lt;Provider&gt;/&lt;CredentialId&gt;</c> spends one of its resets.</summary>
 /// <param name="Label">omp's name for it: the e-mail (or account id), then " · " and the organization when there is one.</param>
@@ -105,14 +111,20 @@ public static class ProviderUsage
         var blocking = hasSelected && selected.TryGetProperty("blocking", out var b) && b.ValueKind == JsonValueKind.Array
             ? b.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => ResetWindow(x.GetString()!)).ToList() : [];
         var status = hasSelected ? Str(selected, "status") : null;
-        var reason = Str(rc, "reason")
-            ?? (Str(rc, "cooldownUntil") is { } cooldown ? "cooldown until " + cooldown : null)
-            ?? (blocking.Count > 0 ? "blocked by " + string.Join(", ", blocking) : null)
-            ?? (status is not null && status != "available" ? status : null)
-            ?? (rc.TryGetProperty("eligible", out var el) && el.ValueKind == JsonValueKind.False ? "not eligible" : null)
-            ?? (saved > 0 && usable == 0 ? "not usable right now" : null);
-        return new ProviderUsageResets(saved, usable, soonest ?? latestExpired, reason);
+        (string Format, object?[] Args)? reason = Str(rc, "reason") is { } said ? ("{0}", [said]) // omp's words, as they are
+            : Str(rc, "cooldownUntil") is { } cooldown ? Cooldown(cooldown)
+            : blocking.Count > 0 ? ("blocked by {0}", [string.Join(", ", blocking)])
+            : status is not null && status != "available" ? ("{0}", [status])
+            : rc.TryGetProperty("eligible", out var el) && el.ValueKind == JsonValueKind.False ? ("not eligible", [])
+            : saved > 0 && usable == 0 ? ("not usable right now", [])
+            : null;
+        return new ProviderUsageResets(saved, usable, soonest ?? latestExpired, reason?.Format, reason?.Args);
     }
+
+    /// <summary>"cooldown until" a day (omp gave a date), a moment in local time, or omp's text when it is neither.</summary>
+    private static (string, object?[]) Cooldown(string until) => IsoTime(until) is not { } at ? ("cooldown until {0}", [until])
+        : until.Length == 10 ? ("cooldown until {0:d}", [at.UtcDateTime.Date])
+        : ("cooldown until {0:g}", [at.ToLocalTime().DateTime]);
 
     /// <summary>omp's <c>formatUsageResetWindow</c>: a window a saved reset covers, by name.</summary>
     private static string ResetWindow(string id) => id switch
@@ -180,9 +192,10 @@ public static class ProviderUsage
     /// <summary>
     /// The meter's name in sentence case: well-known windows by what they are ("5-hour limit", "Weekly limit"), keeping
     /// a model tier omp names in parentheses ("Weekly limit (Fable)"); otherwise omp's label without the provider's
-    /// name in front ("Claude 5 Hour" under Claude).
+    /// name in front ("Claude 5 Hour" under Claude). <paramref name="words"/> puts a well-known window's name in the app's
+    /// language.
     /// </summary>
-    public static string DisplayLabel(ProviderUsageLimit l, string providerName)
+    public static string DisplayLabel(ProviderUsageLimit l, string providerName, Func<string, string>? words = null)
     {
         var tier = l.Label.LastIndexOf(" (", StringComparison.Ordinal) is var p and > 0 && l.Label.EndsWith(')') ? l.Label[p..] : "";
         var window = l.WindowId switch
@@ -193,7 +206,7 @@ public static class ProviderUsage
             "30d" or "monthly" => "Monthly limit",
             _ => null,
         };
-        if (window is not null) return window + tier;
+        if (window is not null) return (words?.Invoke(window) ?? window) + tier;
         var label = l.Label.StartsWith(providerName + " ", StringComparison.OrdinalIgnoreCase) && l.Label.Length > providerName.Length + 1
             ? l.Label[(providerName.Length + 1)..] : l.Label;
         return label.Length > 0 ? char.ToUpperInvariant(label[0]) + label[1..] : label;
@@ -211,16 +224,6 @@ public static class ProviderUsage
         left.TotalDays >= 1 ? $"{(int)left.TotalDays}d" + (left.Hours > 0 ? $" {left.Hours}h" : "")
         : left.TotalHours >= 1 ? $"{(int)left.TotalHours}h" + (left.Minutes > 0 ? $" {left.Minutes}m" : "")
         : $"{(int)left.TotalMinutes}m";
-
-    /// <summary>The amount when there is no fraction to draw: "$12.40 used", "1,200 of 5,000 requests".</summary>
-    public static string Amount(ProviderUsageLimit l)
-    {
-        if (l.UsedFraction is { } f) return string.Create(CultureInfo.InvariantCulture, $"{Math.Round(f * 100):0}% used");
-        if (l.Used is not { } used) return "";
-        string N(double v) => l.Unit == "usd" ? v.ToString("$#,0.00", CultureInfo.InvariantCulture) : v.ToString("#,0.##", CultureInfo.InvariantCulture);
-        var unit = l.Unit is "usd" or "unknown" or "percent" ? "" : " " + l.Unit;
-        return l.Limit is { } max ? $"{N(used)} of {N(max)}{unit}" : $"{N(used)}{unit} used";
-    }
 
     /// <summary>A provider id as people know it ("openai-codex" → "ChatGPT").</summary>
     public static string ProviderName(string id) => id switch

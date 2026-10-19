@@ -14,13 +14,18 @@
       <Grid ColumnDefinitions="*,Auto,Auto">
         <TextBlock Classes="section" Text="{loc:T 'Plan usage'}" VerticalAlignment="Center" />
         <TextBlock Grid.Column="1" Classes="tertiary" Text="{loc:T 'Updating…'}" IsVisible="{Binding IsLoading}" VerticalAlignment="Center" Margin="0,0,6,0" />
-        <Button Grid.Column="2" Classes="icon" Width="26" Height="26" Command="{Binding RefreshCommand}" ToolTip.Tip="{loc:T 'Check again'}"
+        <Button Grid.Column="2" Classes="icon" Command="{Binding RefreshCommand}" ToolTip.Tip="{loc:T 'Check again'}"
                 AutomationProperties.Name="{loc:T 'Refresh plan usage'}">
           <ctl:Icon Data="{StaticResource IconReload}" Size="16" />
         </Button>
       </Grid>
       <TextBlock Classes="muted" TextWrapping="Wrap"
                  Text="{loc:T 'How much of each subscription’s limits is used, as the provider reports it to omp. Providers that report no usage are not listed.'}" />
+      <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding RefreshFailed}">
+        <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
+        <TextBlock Grid.Column="1" Classes="warning" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}"
+                   Text="{loc:T 'Could not refresh usage. The last successful report is shown; limits may have changed.'}" />
+      </Grid>
       <ItemsControl x:Name="ProviderUsageGroups" ItemsSource="{Binding Groups}">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate>

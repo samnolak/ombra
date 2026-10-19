@@ -306,9 +306,6 @@ public partial class MainViewModel
         _paneRunsEnded = Math.Max(_paneRunsEnded, s.RunsEnded);
     }
 
-    /// <summary>omp lists /jobs among the commands it runs over RPC (MainViewModel.Commands.cs keeps its catalog).</summary>
-    internal bool OmpListsJobs => _commands.Any(c => c.Name == "jobs");
-
     /// <summary>The window is closing (disposed or disposing): the panes stop reading from omp.</summary>
     internal bool IsClosing => Volatile.Read(ref _disposed) != 0;
 
@@ -318,9 +315,14 @@ public partial class MainViewModel
         catch (ObjectDisposedException) { return false; }
     }
 
-    internal async Task<(IReadOnlyList<SubagentMessage> Messages, string? Error)> GetSubagentMessagesAsync(string id)
+    internal async Task<(SubagentMessagesPage? Page, string? Error)> GetSubagentMessagesAsync(string id, long fromByte, CancellationToken ct)
     {
-        try { return IsClosing ? ([], Loc.T("the window is closing")) : await Session.GetSubagentMessagesAsync(id, _cts.Token); }
-        catch (Exception e) when (e is OperationCanceledException or ObjectDisposedException) { return ([], Loc.T("the window is closing")); }
+        if (IsClosing) return (null, Loc.T("the window is closing"));
+        try
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _cts.Token);
+            return await Session.GetSubagentMessagesAsync(id, fromByte, linked.Token);
+        }
+        catch (ObjectDisposedException) { return (null, Loc.T("the window is closing")); }
     }
 }

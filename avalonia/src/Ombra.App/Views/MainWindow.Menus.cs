@@ -3,6 +3,7 @@ using Avalonia.Input;
 using Avalonia.VisualTree;
 using CommunityToolkit.Mvvm.Input;
 using Ombra.App.ViewModels;
+using Ombra.App.Localization;
 
 namespace Ombra.App.Views;
 
@@ -16,6 +17,8 @@ public sealed partial class MainWindow
     /// and accessibility tools look for them, each item with its shortcut. A text box that has the keyboard handles its
     /// own shortcuts first (Avalonia offers the key to the menu only when the window left it unhandled), so the Edit
     /// items run when chosen with the mouse or VoiceOver, or when the keyboard is somewhere a key alone does nothing.
+    /// While the Browser page's Nightly window has the keyboard, the items' shortcuts are that window's
+    /// (<see cref="Nightly.NightlyShortcutMonitor"/> takes them before the menu).
     /// </summary>
     internal NativeMenu MenuBar(MainViewModel vm)
     {
@@ -39,9 +42,21 @@ public sealed partial class MainWindow
             Edit("Copy", EditAction.Copy, Key.C),
             Edit("Paste", EditAction.Paste, Key.V),
             Edit("Select All", EditAction.SelectAll, Key.A),
+            new NativeMenuItemSeparator(),
+            // Find in chat (MainWindow.Find.cs handles the keys first; the items are for the mouse and VoiceOver)
+            Item("Find…", vm.OpenFindCommand, Key.F),
+            Item("Find Next", vm.FindNextCommand, Key.G),
+            // No key equivalent: ⇧⌘G toggles the Changes tab, and the menu would take it first. With the bar open the
+            // tunnel handler gives ⇧⌘G to Find Previous.
+            Item("Find Previous", vm.FindPreviousCommand),
         };
         var view = new NativeMenu
         {
+            // The command palette (MainViewModel.Palette.cs): opening it again keeps it open, so the menu and the
+            // window's key binding may both take the key
+            Item("Command Palette…", vm.OpenPaletteCommand, Key.K),
+            Item("Go to File…", vm.OpenFilePaletteCommand, Key.P),
+            new NativeMenuItemSeparator(),
             Item("Sessions", vm.ToggleSidebarCommand),
             Item("Terminal", vm.ToggleTerminalCommand),
             Item("Events", vm.ToggleDebugCommand),
@@ -52,7 +67,13 @@ public sealed partial class MainWindow
             Item("Zoom", new RelayCommand(() => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized)),
             new NativeMenuItemSeparator(),
             // Through the close sequence: asks first while omp works or a shell runs (MainWindow.Closing.cs)
-            Item("Close", new RelayCommand(Close), Key.W),
+            Item("Close", new RelayCommand(CloseActiveSurface), Key.W),
+        };
+        var help = new NativeMenu
+        {
+            Item(Loc.T("Keyboard shortcuts"), new RelayCommand(() => vm.IsShortcutsOpen = true)),
+            Item(Loc.T("Report a problem"), new AsyncRelayCommand(() => vm.OpenSettingsAtAsync("diagnostics"))),
+            Item(Loc.T("What's new"), new AsyncRelayCommand(() => vm.OpenSettingsAtAsync("updates"))),
         };
         return
         [
@@ -60,6 +81,7 @@ public sealed partial class MainWindow
             new NativeMenuItem("Edit") { Menu = edit },
             new NativeMenuItem("View") { Menu = view },
             new NativeMenuItem("Window") { Menu = window },
+            new NativeMenuItem(Loc.T("Help")) { Menu = help },
         ];
     }
 

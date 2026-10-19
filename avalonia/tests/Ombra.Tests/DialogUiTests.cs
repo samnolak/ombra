@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.ClientCore;
@@ -79,12 +80,12 @@ public sealed class DialogUiTests
         var (w, vm, _) = await OpenAndPromptAsync("approval");
         var d = vm.CurrentDialog!;
         Assert.True(d.IsApproval);
-        Assert.Equal("Permission needed", d.Caption);
+        Assert.Equal(Loc.T("Permission needed"), d.Caption);
         Assert.Equal("Allow tool: bash", d.Headline);
         Assert.Equal("$ echo hi", d.Details);
-        Assert.Equal("Answer the request above, or press Esc to stop", vm.ComposerHint);
+        Assert.Equal(Loc.T("Answer the request above, or press Esc to stop"), vm.ComposerHint);
         // The activity line says what the run waits on, not "Working" (design review)
-        Assert.StartsWith("Waiting for your approval", vm.StatusText);
+        Assert.StartsWith(Loc.T("Waiting for your approval"), vm.StatusText);
         Assert.True(vm.IsWaitingOnUser);
         var allow = Find<Button>(w, b => b.Name == "AllowButton");
         var deny = Find<Button>(w, b => b.Name == "DenyButton");
@@ -93,8 +94,8 @@ public sealed class DialogUiTests
 
         Click(allow);
         await Until(() => vm.Phase == SessionPhase.Ready && !vm.HasDialog, "run end");
-        Assert.Equal("done", vm.Rows.OfType<ToolRowViewModel>().Single().StatusText);
-        Assert.Contains(vm.Rows.OfType<NoticeRowViewModel>(), n => n.Text == "Approved by you — bash");
+        Assert.Equal(Loc.T("done"), vm.Rows.OfType<ToolRowViewModel>().Single().StatusText);
+        Assert.Contains(vm.Rows.OfType<NoticeRowViewModel>(), n => n.Text == Loc.F("Approved by you — {0}", "bash"));
         Shot(w, "ui-approval-allowed");
         await vm.DisposeAsync();
         w.Close();
@@ -104,9 +105,12 @@ public sealed class DialogUiTests
     public async Task Deny_with_the_access_key_blocks_the_tool()
     {
         var (w, vm, _) = await OpenAndPromptAsync("approval");
-        w.KeyPress(Key.D, RawInputModifiers.Alt, PhysicalKey.D, "d");
+        // The access key is the underlined letter of the button's label in the UI's language ("_Deny": D)
+        var label = Loc.T("_Deny");
+        var key = char.ToLowerInvariant(label[label.IndexOf('_') + 1]).ToString();
+        w.KeyPress(Key.D, RawInputModifiers.Alt, PhysicalKey.D, key);
         Dispatcher.UIThread.RunJobs();
-        w.KeyRelease(Key.D, RawInputModifiers.Alt, PhysicalKey.D, "d");
+        w.KeyRelease(Key.D, RawInputModifiers.Alt, PhysicalKey.D, key);
         await Until(() => vm.Phase == SessionPhase.Ready && !vm.HasDialog, "run end");
         Assert.True(vm.Rows.OfType<ToolRowViewModel>().Single().IsFailed);
         await vm.DisposeAsync();
@@ -120,7 +124,8 @@ public sealed class DialogUiTests
         Assert.True(w.FindControl<TextBox>("Composer")!.IsFocused);
         w.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
         await Until(() => vm.Phase == SessionPhase.Ready && !vm.HasDialog, "stopped");
-        Assert.Contains(vm.Rows.OfType<NoticeRowViewModel>(), n => n.Text.StartsWith("Approval request closed (the run was stopped)", StringComparison.Ordinal));
+        var closed = Loc.F("{0} closed ({1}) — {2}", Loc.T("Approval request"), Loc.T("the run was stopped"), "\0").Split('\0')[0];
+        Assert.Contains(vm.Rows.OfType<NoticeRowViewModel>(), n => n.Text.StartsWith(closed, StringComparison.Ordinal));
         await vm.DisposeAsync();
         w.Close();
     }
@@ -143,7 +148,7 @@ public sealed class DialogUiTests
         w.KeyTextInput("Sky");
         Assert.Equal("Sky", vm.CurrentDialog!.InputText);
         Shot(w, "ui-ask-input");
-        Click(Find<Button>(w, b => b.Content as string == "Submit"));
+        Click(Find<Button>(w, b => b.Content as string == Loc.T("Submit")));
 
         await Until(() => vm.Phase == SessionPhase.Ready && !vm.HasDialog, "run end");
         Assert.Contains("color=Blue name=Sky", vm.Rows.OfType<ToolRowViewModel>().Single().Output);
@@ -247,7 +252,7 @@ public sealed class DialogUiTests
         await Until(() => vm.Phase == SessionPhase.Ready && !vm.HasDialog, "run end");
         // Only the dialog was dismissed: the run finished normally with "no answer" for the name.
         Assert.Contains("color=Red (Recommended) name=none", vm.Rows.OfType<ToolRowViewModel>().Single().Output);
-        Assert.NotEqual("Interrupted", vm.Rows.OfType<AssistantRowViewModel>().Last().Footer);
+        Assert.NotEqual(Loc.T("Interrupted"), vm.Rows.OfType<AssistantRowViewModel>().Last().Footer);
         await vm.DisposeAsync();
         w.Close();
     }
@@ -300,10 +305,45 @@ public sealed class DialogUiTests
     {
         var (w, vm, _) = await OpenAndPromptAsync("approval-timeout");
         Assert.True(vm.CurrentDialog!.HasDeadline);
-        Assert.EndsWith("s left", vm.CurrentDialog.Remaining);
+        var left = Loc.F("{0}s left", "\0").Split('\0');
+        Assert.StartsWith(left[0], vm.CurrentDialog.Remaining);
+        Assert.EndsWith(left[1], vm.CurrentDialog.Remaining);
         await Until(() => !vm.HasDialog, "expired");
-        Assert.Contains(vm.Rows.OfType<NoticeRowViewModel>(), n => n.Text.StartsWith("Approval request timed out", StringComparison.Ordinal));
+        var timedOut = Loc.F("{0} timed out without an answer; omp applied its default — {1}", Loc.T("Approval request"), "\0").Split('\0')[0];
+        Assert.Contains(vm.Rows.OfType<NoticeRowViewModel>(), n => n.Text.StartsWith(timedOut, StringComparison.Ordinal));
         await vm.DisposeAsync();
         w.Close();
+    }
+
+    [AvaloniaFact]
+    public void A_dialog_that_ends_without_an_answer_is_told_in_the_ui_language()
+    {
+        // Regression (ru): ConversationState's English notices ("Approval request closed (the run was stopped) — bash")
+        // showed untranslated in a Russian conversation. The request's own title stays as omp wrote it.
+        var form = Loc.F("Form from connector “{0}”", "github");
+        foreach (var (english, shown) in new[]
+        {
+            ("Approval request closed (the run was stopped) — Allow tool: bash",
+                Loc.F("{0} closed ({1}) — {2}", Loc.T("Approval request"), Loc.T("the run was stopped"), "Allow tool: bash")),
+            ("Question closed (this chat was opened elsewhere) — Pick a color",
+                Loc.F("{0} closed ({1}) — {2}", Loc.T("Question"), Loc.T("this chat was opened elsewhere"), "Pick a color")),
+            ("Form from connector “github” closed (omp is no longer running) — Sign in",
+                Loc.F("{0} closed ({1}) — {2}", form, Loc.T("omp is no longer running"), "Sign in")),
+            ("Question closed (omp was stopped) — Pick a color",
+                Loc.F("{0} closed ({1}) — {2}", Loc.T("Question"), Loc.T("omp was stopped"), "Pick a color")),
+            ("Approval request timed out without an answer; omp applied its default — Allow tool: bash",
+                Loc.F("{0} timed out without an answer; omp applied its default — {1}", Loc.T("Approval request"), "Allow tool: bash")),
+            ("Form from connector “github” dismissed by you — Sign in", Loc.F("{0} dismissed by you — {1}", form, "Sign in")),
+            ("Question withdrawn by omp — Pick a color", Loc.F("{0} withdrawn by omp — {1}", Loc.T("Question"), "Pick a color")),
+            ("Approval request declined (the run is being stopped) — Allow tool: bash",
+                Loc.F("{0} declined (the run is being stopped) — {1}", Loc.T("Approval request"), "Allow tool: bash")),
+            ("Form from connector “github” dismissed (the run is being stopped)",
+                Loc.F("Form from connector “{0}” dismissed (the run is being stopped)", "github")),
+            ("Sent by you: form from connector “github” — Sign in", Loc.F("Sent by you: form from connector “{0}” — {1}", "github", "Sign in")),
+            ("Declined by you: form from connector “github” — Sign in", Loc.F("Declined by you: form from connector “{0}” — {1}", "github", "Sign in")),
+            ("Question declined (omp sent no usable question)", Loc.T("Question declined (omp sent no usable question)")),
+            ("The plan was not changed: omp is busy", Loc.F("The plan was not changed: {0}", "omp is busy")),
+        })
+            Assert.Equal(shown, new NoticeRowViewModel(new NoticeItem(1, NoticeLevel.Warning, english)).Text);
     }
 }

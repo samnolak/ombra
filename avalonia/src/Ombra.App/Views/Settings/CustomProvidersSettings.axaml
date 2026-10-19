@@ -23,7 +23,7 @@
             <ctl:Icon Classes="ok-mark" Data="{StaticResource IconCheckCircle}" Size="16" IsVisible="{Binding !MessageIsError}" />
             <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" IsVisible="{Binding MessageIsError}" />
           </Panel>
-          <SelectableTextBlock x:Name="CustomProvidersMessage" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" />
+          <SelectableTextBlock x:Name="CustomProvidersMessage" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" VerticalAlignment="Center" />
           <Button Grid.Column="2" Classes="icon" Width="24" Height="24" Margin="8,-4,-6,-4" VerticalAlignment="Top" Command="{Binding DismissMessageCommand}"
                   ToolTip.Tip="{loc:T 'Dismiss'}" AutomationProperties.Name="{loc:T 'Dismiss'}">
             <ctl:Icon Data="{StaticResource IconClose}" Size="16" />
@@ -31,7 +31,7 @@
         </Grid>
       </Border>
       <Border Classes="ws-note error" IsVisible="{Binding HasLoadError}">
-        <SelectableTextBlock x:Name="CustomProvidersLoadError" Text="{Binding LoadError}" TextWrapping="Wrap" FontSize="13" />
+        <SelectableTextBlock x:Name="CustomProvidersLoadError" Text="{Binding LoadError}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
       </Border>
 
       <!-- Add or edit a custom provider: name (→ provider id), address, protocol, key, models -->
@@ -88,16 +88,16 @@
                 <ctl:Icon Classes="ok-mark" Data="{StaticResource IconCheckCircle}" Size="16" IsVisible="{Binding TestOk}" />
                 <ctl:Icon Classes="error-mark" Data="{StaticResource IconCrossCircle}" Size="16" IsVisible="{Binding !TestOk}" />
               </Panel>
-              <SelectableTextBlock x:Name="CustomProviderTestResult" Grid.Column="1" Text="{Binding TestResult}" TextWrapping="Wrap" FontSize="13" />
+              <SelectableTextBlock x:Name="CustomProviderTestResult" Grid.Column="1" Text="{Binding TestResult}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
             </Grid>
           </Border>
           <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasFormError}">
             <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" Margin="0,0,8,0" VerticalAlignment="Top" />
-            <SelectableTextBlock x:Name="CustomProviderFormError" Grid.Column="1" Text="{Binding FormError}" TextWrapping="Wrap" FontSize="13" />
+            <SelectableTextBlock x:Name="CustomProviderFormError" Grid.Column="1" Text="{Binding FormError}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
           </Grid>
           <StackPanel Orientation="Horizontal" Spacing="8">
             <Button x:Name="CustomProviderSave" Classes="accent" Content="{loc:T 'Save'}" Command="{Binding SaveFormCommand}" IsEnabled="{Binding CanChange}" />
-            <Button x:Name="CustomProviderTest" Content="{loc:T 'Test connection'}" Command="{Binding TestCommand}" IsEnabled="{Binding !Testing}" />
+            <Button x:Name="CustomProviderTest" Classes="outline" Content="{loc:T 'Test connection'}" Command="{Binding TestCommand}" IsEnabled="{Binding !Testing}" />
             <Button Content="{loc:T 'Cancel'}" Classes="flat" Command="{Binding CancelFormCommand}" />
             <TextBlock Classes="muted" Text="{loc:T 'Connecting…'}" IsVisible="{Binding Testing}" VerticalAlignment="Center" />
           </StackPanel>
@@ -126,22 +126,22 @@
                     </Border>
                     <Button Classes="icon" IsVisible="{Binding IsAdded}" Command="{Binding AskRemoveCommand}" VerticalAlignment="Center"
                             IsEnabled="{Binding $parent[ItemsControl].((vm:CustomProvidersViewModel)DataContext).CanChange}"
-                            ToolTip.Tip="{Binding Name, StringFormat='Remove {0}…'}" AutomationProperties.Name="{Binding Name, StringFormat='Remove {0}'}">
+                            ToolTip.Tip="{Binding Name, StringFormat={loc:T 'Remove {0}…'}}" AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Remove {0}'}}">
                       <ctl:Icon Data="{StaticResource IconTrash}" Size="16" />
                     </Button>
                     <Button Content="{loc:T 'Add'}" IsVisible="{Binding IsNotAdded}" Command="{Binding BeginAddCommand}" VerticalAlignment="Center"
                             IsEnabled="{Binding $parent[ItemsControl].((vm:CustomProvidersViewModel)DataContext).CanChange}"
-                            AutomationProperties.Name="{Binding Name, StringFormat='Add {0}'}" />
+                            AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Add {0}'}}" />
                   </StackPanel>
                 </Grid>
                 <Border Classes="conn-inset" IsVisible="{Binding IsAddOpen}" Margin="28,0,0,0">
                   <StackPanel Spacing="8">
-                    <TextBlock TextWrapping="Wrap" FontSize="13"
-                               Text="{Binding Name, StringFormat='omp will use {0} at this address and ask it for its models each time it starts.'}" />
+                    <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}"
+                               Text="{Binding Name, StringFormat={loc:T 'omp will use {0} at this address and ask it for its models each time it starts.'}}" />
                     <Grid ColumnDefinitions="*,Auto">
-                      <TextBox Classes="sm" Text="{Binding Url}" AutomationProperties.Name="{Binding Name, StringFormat='Address of {0}'}" />
+                      <TextBox Classes="sm" Text="{Binding Url}" AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Address of {0}'}}" />
                       <Button Grid.Column="1" Content="{loc:T 'Check'}" Margin="8,0,0,0" Command="{Binding CheckCommand}" IsEnabled="{Binding !Checking}"
-                              AutomationProperties.Name="{Binding Name, StringFormat='Check {0}'}" />
+                              AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Check {0}'}}" />
                     </Grid>
                     <StackPanel Orientation="Horizontal" Spacing="8">
                       <Button Classes="accent" Content="{loc:T 'Add to omp'}" Command="{Binding ConfirmAddCommand}"
@@ -154,13 +154,13 @@
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="{Binding RemoveQuestion}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0" />
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                      <Button Classes="danger" Content="{loc:T 'Remove'}" Command="{Binding ConfirmRemoveCommand}" AutomationProperties.Name="{Binding Name, StringFormat='Confirm removing {0}'}" />
+                      <Button Classes="danger" Content="{loc:T 'Remove'}" Command="{Binding ConfirmRemoveCommand}" AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Confirm removing {0}'}}" />
                       <Button Content="{loc:T 'Cancel'}" Classes="flat" Command="{Binding CancelRemoveCommand}" />
                     </StackPanel>
                   </Grid>
                 </Border>
                 <Border Classes="ws-note error" IsVisible="{Binding HasProblem}" Margin="28,0,0,0">
-                  <SelectableTextBlock Text="{Binding Problem}" TextWrapping="Wrap" FontSize="13" />
+                  <SelectableTextBlock Text="{Binding Problem}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
                 </Border>
               </StackPanel>
             </Border>
@@ -184,12 +184,12 @@
                   <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" Margin="12,0,0,0" VerticalAlignment="Center">
                     <Button Classes="icon" IsVisible="{Binding IsEditable}" Command="{Binding EditCommand}"
                             IsEnabled="{Binding $parent[ItemsControl].((vm:CustomProvidersViewModel)DataContext).CanChange}"
-                            ToolTip.Tip="{Binding Id, StringFormat='Edit {0}'}" AutomationProperties.Name="{Binding Id, StringFormat='Edit {0}'}">
+                            ToolTip.Tip="{Binding Id, StringFormat={loc:T 'Edit {0}'}}" AutomationProperties.Name="{Binding Id, StringFormat={loc:T 'Edit {0}'}}">
                       <ctl:Icon Data="{StaticResource IconPencil}" Size="16" />
                     </Button>
                     <Button Classes="icon" Command="{Binding AskRemoveCommand}"
                             IsEnabled="{Binding $parent[ItemsControl].((vm:CustomProvidersViewModel)DataContext).CanChange}"
-                            ToolTip.Tip="{Binding Id, StringFormat='Remove {0}…'}" AutomationProperties.Name="{Binding Id, StringFormat='Remove {0}'}">
+                            ToolTip.Tip="{Binding Id, StringFormat={loc:T 'Remove {0}…'}}" AutomationProperties.Name="{Binding Id, StringFormat={loc:T 'Remove {0}'}}">
                       <ctl:Icon Data="{StaticResource IconTrash}" Size="16" />
                     </Button>
                   </StackPanel>
@@ -199,13 +199,13 @@
                   <Grid ColumnDefinitions="*,Auto">
                     <TextBlock Text="{Binding RemoveQuestion}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0" />
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                      <Button Classes="danger" Content="{loc:T 'Remove'}" Command="{Binding ConfirmRemoveCommand}" AutomationProperties.Name="{Binding Id, StringFormat='Confirm removing {0}'}" />
+                      <Button Classes="danger" Content="{loc:T 'Remove'}" Command="{Binding ConfirmRemoveCommand}" AutomationProperties.Name="{Binding Id, StringFormat={loc:T 'Confirm removing {0}'}}" />
                       <Button Content="{loc:T 'Cancel'}" Classes="flat" Command="{Binding CancelRemoveCommand}" />
                     </StackPanel>
                   </Grid>
                 </Border>
                 <Border Classes="ws-note error" IsVisible="{Binding HasProblem}" Margin="28,0,0,0">
-                  <SelectableTextBlock Text="{Binding Problem}" TextWrapping="Wrap" FontSize="13" />
+                  <SelectableTextBlock Text="{Binding Problem}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
                 </Border>
               </StackPanel>
             </Border>

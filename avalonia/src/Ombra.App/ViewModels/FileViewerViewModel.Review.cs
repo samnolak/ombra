@@ -5,6 +5,9 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Ombra.App.Controls;
 using Ombra.App.Services;
+using Ombra.ClientCore;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Ombra.App.ViewModels;
 
@@ -58,8 +61,20 @@ public sealed partial class DiffRowViewModel(FileViewerViewModel owner, DiffRowK
 /// </summary>
 public sealed partial class FileViewerViewModel
 {
-    /// <summary>Rows shown at most; beyond, the notice says the rest is left out.</summary>
+    /// <summary>Rows shown at first; Show more adds as many again (the rest stays counted in the totals).</summary>
     public const int MaxDiffRows = 3000;
+    private int _diffRowLimit = MaxDiffRows;
+
+    /// <summary>The changes go on past the rows shown.</summary>
+    [ObservableProperty] private bool _canShowMoreDiff;
+
+    [RelayCommand]
+    private void ShowMoreDiff()
+    {
+        if (_diff is not { } diff) return;
+        _diffRowLimit += MaxDiffRows;
+        BuildRows(diff);
+    }
 
     private CancellationTokenSource? _diffCts;
     private FileDiff? _diff;
@@ -97,7 +112,7 @@ public sealed partial class FileViewerViewModel
     public bool HasChanges => GitMark is not (GitMark.None or GitMark.Ignored);
     public bool HasDiffMessage => DiffMessage.Length > 0;
     /// <summary>A new file's one hunk is the whole file: taking it out would delete the file without asking, so only Revert file applies.</summary>
-    public bool CanRevertHunks => _diff is { IsBinary: false, IsNewFile: false, TooLarge: false };
+    public bool CanRevertHunks => !IsDirty && !HasConflict && _diff is { IsBinary: false, IsNewFile: false, TooLarge: false };
     public string RevertLabel => GitMark == GitMark.Untracked ? Loc.T("Delete file…") : Loc.T("Revert file…");
     public string ConfirmRevertLabel => GitMark == GitMark.Untracked ? Loc.T("Delete") : Loc.T("Revert");
 
@@ -152,6 +167,7 @@ public sealed partial class FileViewerViewModel
         DiffRows.Clear();
         DiffStats = "";
         DiffMessage = message;
+        CanShowMoreDiff = false;
         OnPropertyChanged(nameof(CanRevertHunks));
     }
 
@@ -167,7 +183,7 @@ public sealed partial class FileViewerViewModel
         foreach (var hunk in diff.Hunks)
         {
             // Past the cap every hunk is still counted for the totals, just not shown
-            if (DiffRows.Count >= MaxDiffRows) cut = true;
+            if (DiffRows.Count >= _diffRowLimit) cut = true;
             else DiffRows.Add(new DiffRowViewModel(this, DiffRowKind.Hunk, hunk.Header.TrimEnd('\r'), hunk: hunk));
             int oldNo = hunk.OldStart, newNo = hunk.NewStart;
             var lines = new List<(DiffRowKind Kind, string Text, int? Old, int? New)>();
@@ -179,7 +195,7 @@ public sealed partial class FileViewerViewModel
                 int? @new = kind == DiffRowKind.Removed ? null : newNo++;
                 if (kind == DiffRowKind.Added) added++;
                 if (kind == DiffRowKind.Removed) removed++;
-                if (DiffRows.Count + lines.Count >= MaxDiffRows) cut = true;
+                if (DiffRows.Count + lines.Count >= _diffRowLimit) cut = true;
                 else lines.Add((kind, raw[1..].TrimEnd('\r').Replace("\t", "    "), old, @new));
             }
             // The words that changed in a line replaced by another (removed lines, then the added ones)
@@ -197,8 +213,9 @@ public sealed partial class FileViewerViewModel
         DiffMessage = diff.TooLarge ? Loc.T("These changes are too large to show here.")
             : diff.IsBinary ? Loc.T("A binary file: its changes can't be shown here.")
             : diff.Hunks.Count == 0 ? Loc.T("No changes since the last commit.")
-            : cut ? Loc.F("Showing the first {0:N0} lines of the changes.", MaxDiffRows)
+            : cut ? Loc.F("Showing the first {0:N0} lines of the changes.", _diffRowLimit)
             : "";
+        CanShowMoreDiff = cut;
         if (writing is not null && DiffRows.Where(r => r.Kind == writing.Kind && r.Text == writing.Text)
                 .MinBy(r => Math.Abs((r.Number ?? 0) - (writing.Number ?? 0))) is { } same)
         {
@@ -252,8 +269,27 @@ public sealed partial class FileViewerViewModel
     {
         var comment = row.CommentText.Trim();
         if (comment.Length == 0) return;
-        if (!Owner.Owner.AddCodeComment(RelativePath.Replace('\\', '/'), row.Number, row.Kind == DiffRowKind.Removed, row.Text, comment)) return;
+        var anchor = _diff is null ? null : new CodeCommentAnchor(
+            Document?.Uri ?? new Uri(Path.GetFullPath(FullPath)).AbsoluteUri,
+            Document?.Revision, IsDirty,
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(_diff.Text))).ToLowerInvariant(),
+            row.Hunk?.Header);
+        var at = DiffRows.IndexOf(row);
+        string[] Around(int from, int to) => [.. DiffRows.Skip(Math.Max(0, from)).Take(Math.Max(0, to - Math.Max(0, from)))
+            .Where(r => r.Kind != DiffRowKind.Hunk).Select(r => r.Text)];
+        var mark = new CodeAnchor(RelativePath.Replace('\\', '/'), row.Number, row.Kind == DiffRowKind.Removed, row.Text, CodeMarkOrigin.Review,
+            Before: at < 0 ? null : Around(at - 2, at), After: at < 0 ? null : Around(at + 1, at + 3), Snapshot: anchor);
+        if (!Owner.Owner.AddCodeMark(mark, comment)) return;
         EndComment(row);
+    }
+
+    /// <summary>A comment from the editor on lines of this file's buffer (DocumentEditor.Marks.cs), as a local mark.</summary>
+    internal bool AddEditorMark(Controls.EditorMarkRequest r)
+    {
+        var snapshot = new CodeCommentAnchor(r.DocumentUri, r.Revision, r.Unsaved, r.BufferSha256, null);
+        var anchor = new CodeAnchor(RelativePath.Replace('\\', '/'), r.FirstLine, false, r.Text, CodeMarkOrigin.Editor,
+            EndLine: r.LastLine > r.FirstLine ? r.LastLine : null, Before: r.Before, After: r.After, Snapshot: snapshot);
+        return Owner.Owner.AddCodeMark(anchor, r.Note);
     }
 }
 
@@ -282,6 +318,11 @@ public sealed partial class FilesViewModel
     internal async Task RevertHunkAsync(FileViewerViewModel v, FileDiff diff, DiffHunk hunk)
     {
         if (GitTop is not { } top) return;
+        if (v.IsDirty || v.HasConflict)
+        {
+            Report(Loc.T("Save or explicitly discard the editor buffer before reverting disk changes."));
+            return;
+        }
         Notice = "";
         var error = await GitReview.RevertHunkAsync(Owner.RunTool, top, diff, hunk, Owner.Lifetime);
         if (error is not null) Report(Loc.F("Could not revert that part: {0}", error));
@@ -291,6 +332,11 @@ public sealed partial class FilesViewModel
     internal async Task RevertFileAsync(FileViewerViewModel v)
     {
         if (GitTop is not { } top || ProjectFiles.Relative(top, v.FullPath) is not { Length: > 0 } rel) return;
+        if (v.IsDirty || v.HasConflict)
+        {
+            Report(Loc.T("Save or explicitly discard the editor buffer before reverting disk changes."));
+            return;
+        }
         Notice = "";
         var untracked = v.GitMark == GitMark.Untracked;
         var error = await GitReview.RevertFileAsync(Owner.RunTool, top, rel, untracked, v.RenamedFrom, Owner.Lifetime);

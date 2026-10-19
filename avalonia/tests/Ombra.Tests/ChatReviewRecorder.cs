@@ -18,6 +18,11 @@ public sealed class ChatReviewRecorder
 {
     private static readonly string? Dir = Environment.GetEnvironmentVariable("OMBRA_REVIEW_DIR");
 
+    public ChatReviewRecorder()
+    {
+        if (Dir is not null) Directory.CreateDirectory(Dir);
+    }
+
     private static double Y(Window w, Control c) => c.IsEffectivelyVisible ? c.TranslatePoint(new Point(0, 0), w)?.Y ?? -1 : -1;
 
     [AvaloniaFact]

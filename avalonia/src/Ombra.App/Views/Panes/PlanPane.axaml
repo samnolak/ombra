@@ -1,7 +1,9 @@
 <!-- The Plan pane (Claude Code's plan with checkboxes): omp's todo list by phase. Each task has a drawn box — checked
      when done, an info box with a dot while in progress (the current one on a fill, with what the run does now under
      it), a warning box and what it waits on when blocked, a cross and struck text when dropped. Earlier plans and every
-     change stay below, folded. DataContext: PlanViewModel. -->
+     change stay below, folded. The current plan can be edited: the box marks a task done or to do, its ⋯ menu edits,
+     reorders, sets the status or deletes it, and a task can be added at the end; each change goes to omp (set_todos).
+     DataContext: PlanViewModel. -->
 <UserControl xmlns:loc="using:Ombra.App.Localization"
              xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -9,30 +11,113 @@
              xmlns:ctl="using:Ombra.App.Controls"
              x:Class="Ombra.App.Views.Panes.PlanPane"
              x:DataType="vm:PlanViewModel">
+  <UserControl.Styles>
+    <!-- The box as a button: nothing around it but the box; not clickable on an earlier plan -->
+    <Style Selector="Button.plan-check">
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Button.plan-check:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.plan-check:pressed /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <!-- The ⋯ of a task: quiet until the row is hovered or the menu is open -->
+    <Style Selector="Border.plan-task Button.plan-more">
+      <Setter Property="Opacity" Value="0" />
+    </Style>
+    <Style Selector="Border.plan-task:pointerover Button.plan-more, Border.plan-task Button.plan-more:focus-visible, Border.plan-task Button.plan-more:flyout-open">
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+  </UserControl.Styles>
   <UserControl.Resources>
     <DataTemplate x:Key="PlanTaskTemplate" x:DataType="vm:PlanTaskViewModel">
       <Border Classes="plan-task" Classes.current="{Binding IsCurrent}" ToolTip.Tip="{Binding StatusName}"
               AutomationProperties.Name="{Binding AccessibleName}">
-        <Grid ColumnDefinitions="Auto,*">
-          <!-- The box sits on the text's first line (20 px line: 2 above, 16 box, 2 below) -->
-          <Border Classes="md-check" Classes.checked="{Binding IsDone}" Classes.active="{Binding IsActive}" Classes.dropped="{Binding IsDropped}"
-                  Classes.blocked="{Binding IsBlocked}" Width="16" Height="16" VerticalAlignment="Top" Margin="0,2,0,0">
-            <Panel>
-              <ctl:Icon Data="{StaticResource IconCheck}" Size="12" StrokeThickness="3.5" IsVisible="{Binding IsDone}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-              <Ellipse Classes="todo-active-dot" IsVisible="{Binding IsActive}" />
-              <ctl:Icon Data="{StaticResource IconClose}" Size="12" IsVisible="{Binding IsDropped}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-              <Border Classes="plan-hold" IsVisible="{Binding IsBlocked}" />
-            </Panel>
-          </Border>
+        <Grid ColumnDefinitions="Auto,*,Auto">
+          <!-- The box sits on the text's first line (20 px line: 2 above, 16 box, 2 below); a click marks it done or to do -->
+          <Button Classes="plan-check" Command="{Binding ToggleDoneCommand}" IsHitTestVisible="{Binding CanEdit}" Focusable="{Binding CanEdit}"
+                  Margin="0,2,0,0" AutomationProperties.Name="{Binding AccessibleName}" ToolTip.Tip="{loc:T 'Mark done or to do'}">
+            <Border Classes="md-check" Classes.checked="{Binding IsDone}" Classes.active="{Binding IsActive}" Classes.dropped="{Binding IsDropped}"
+                    Classes.blocked="{Binding IsBlocked}" Width="16" Height="16">
+              <Panel>
+                <ctl:Icon Data="{StaticResource IconCheck}" Size="12" StrokeThickness="3.5" IsVisible="{Binding IsDone}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                <Ellipse Classes="todo-active-dot" IsVisible="{Binding IsActive}" />
+                <ctl:Icon Data="{StaticResource IconClose}" Size="12" IsVisible="{Binding IsDropped}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                <Border Classes="plan-hold" IsVisible="{Binding IsBlocked}" />
+              </Panel>
+            </Border>
+          </Button>
           <StackPanel Grid.Column="1" Margin="10,0,0,0" Spacing="3">
             <TextBlock Classes="plan-text" Classes.done="{Binding IsDone}" Classes.dropped="{Binding IsDropped}" Classes.current="{Binding IsCurrent}"
-                       Text="{Binding Content}" />
+                       Text="{Binding Content}" IsVisible="{Binding !IsEditing}" />
+            <!-- Editing in place: Enter keeps the new text, Esc keeps the old -->
+            <TextBox x:Name="PlanTaskEditBox" Classes="sm" Text="{Binding EditText}" IsVisible="{Binding IsEditing}" TextWrapping="Wrap"
+                     AutomationProperties.Name="{loc:T 'Task text'}" ctl:FocusOnShow.When="{Binding IsEditing}">
+              <TextBox.KeyBindings>
+                <KeyBinding Gesture="Enter" Command="{Binding CommitEditCommand}" />
+                <KeyBinding Gesture="Escape" Command="{Binding CancelEditCommand}" />
+              </TextBox.KeyBindings>
+            </TextBox>
             <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding IsBlocked}">
               <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="15" Margin="0,2,6,0" VerticalAlignment="Top" />
               <TextBlock Grid.Column="1" Classes="plan-note" Text="{Binding BlockerText}" />
             </Grid>
             <TextBlock Classes="plan-activity" Text="{Binding Activity}" IsVisible="{Binding HasActivity}" TextTrimming="CharacterEllipsis" />
           </StackPanel>
+          <!-- The task's actions: edit, status, order, delete -->
+          <Button x:Name="PlanTaskMenu" Grid.Column="2" Classes="icon sm plan-more" IsVisible="{Binding CanEdit}" Margin="6,-4,0,0" VerticalAlignment="Top"
+                  AutomationProperties.Name="{loc:T 'Task actions'}" ToolTip.Tip="{loc:T 'Edit, reorder or delete this task'}">
+            <ctl:Icon Data="{StaticResource IconMoreHorizontal}" Size="16" />
+            <Button.Flyout>
+              <Flyout Placement="BottomEdgeAlignedRight" ctl:ChoiceMenu.CloseOnChoice="True">
+                <StackPanel MinWidth="200" Spacing="1">
+                  <Button Classes="menu-item" Command="{Binding StartEditCommand}" AutomationProperties.Name="{loc:T 'Edit text'}">
+                    <Grid ColumnDefinitions="Auto,*">
+                      <ctl:Icon Data="{StaticResource IconPencil}" Size="16" Margin="0,0,10,0" />
+                      <TextBlock Grid.Column="1" Text="{loc:T 'Edit text'}" VerticalAlignment="Center" />
+                    </Grid>
+                  </Button>
+                  <Border Classes="menu-separator" />
+                  <Button Classes="menu-item" Command="{Binding SetStatusCommand}" CommandParameter="pending" AutomationProperties.Name="{loc:T 'To do'}">
+                    <TextBlock Text="{loc:T 'To do'}" Margin="26,0,0,0" VerticalAlignment="Center" />
+                  </Button>
+                  <Button Classes="menu-item" Command="{Binding SetStatusCommand}" CommandParameter="in_progress" AutomationProperties.Name="{loc:T 'In progress'}">
+                    <TextBlock Text="{loc:T 'In progress'}" Margin="26,0,0,0" VerticalAlignment="Center" />
+                  </Button>
+                  <Button Classes="menu-item" Command="{Binding SetStatusCommand}" CommandParameter="completed" AutomationProperties.Name="{loc:T 'Done'}">
+                    <TextBlock Text="{loc:T 'Done'}" Margin="26,0,0,0" VerticalAlignment="Center" />
+                  </Button>
+                  <Button Classes="menu-item" Command="{Binding SetStatusCommand}" CommandParameter="abandoned" AutomationProperties.Name="{loc:T 'Dropped'}">
+                    <TextBlock Text="{loc:T 'Dropped'}" Margin="26,0,0,0" VerticalAlignment="Center" />
+                  </Button>
+                  <Border Classes="menu-separator" />
+                  <Button Classes="menu-item" Command="{Binding MoveUpCommand}" AutomationProperties.Name="{loc:T 'Move up'}">
+                    <Grid ColumnDefinitions="Auto,*">
+                      <ctl:Icon Data="{StaticResource IconArrowUp}" Size="16" Margin="0,0,10,0" />
+                      <TextBlock Grid.Column="1" Text="{loc:T 'Move up'}" VerticalAlignment="Center" />
+                    </Grid>
+                  </Button>
+                  <Button Classes="menu-item" Command="{Binding MoveDownCommand}" AutomationProperties.Name="{loc:T 'Move down'}">
+                    <Grid ColumnDefinitions="Auto,*">
+                      <ctl:Icon Data="{StaticResource IconArrowDown}" Size="16" Margin="0,0,10,0" />
+                      <TextBlock Grid.Column="1" Text="{loc:T 'Move down'}" VerticalAlignment="Center" />
+                    </Grid>
+                  </Button>
+                  <Border Classes="menu-separator" />
+                  <Button Classes="menu-item danger" Command="{Binding DeleteCommand}" AutomationProperties.Name="{loc:T 'Delete task'}">
+                    <Grid ColumnDefinitions="Auto,*">
+                      <ctl:Icon Data="{StaticResource IconTrash}" Size="16" Margin="0,0,10,0" />
+                      <TextBlock Grid.Column="1" Text="{loc:T 'Delete task'}" VerticalAlignment="Center" />
+                    </Grid>
+                  </Button>
+                </StackPanel>
+              </Flyout>
+            </Button.Flyout>
+          </Button>
         </Grid>
       </Border>
     </DataTemplate>
@@ -67,6 +152,23 @@
           </ItemsControl.ItemsPanel>
         </ItemsControl>
       </StackPanel>
+      <!-- Add a task at the end of the plan (a new plan when there is none): Enter or the + sends it to omp -->
+      <Grid x:Name="PlanAddTask" ColumnDefinitions="*,Auto" Margin="8,0" IsVisible="{Binding IsEditable}">
+        <TextBox x:Name="PlanNewTaskBox" Classes="sm" Text="{Binding NewTaskText}" PlaceholderText="{loc:T 'Add a task'}"
+                 AutomationProperties.Name="{loc:T 'New task'}">
+          <TextBox.KeyBindings>
+            <KeyBinding Gesture="Enter" Command="{Binding AddTaskCommand}" />
+          </TextBox.KeyBindings>
+        </TextBox>
+        <Button x:Name="PlanAddTaskButton" Grid.Column="1" Classes="icon sm" Margin="6,0,0,0" Command="{Binding AddTaskCommand}"
+                AutomationProperties.Name="{loc:T 'Add task'}" ToolTip.Tip="{loc:T 'Add this task to the plan (Enter)'}">
+          <ctl:Icon Data="{StaticResource IconPlus}" Size="16" />
+        </Button>
+      </Grid>
+      <Grid ColumnDefinitions="Auto,*" Margin="8,0" IsVisible="{Binding HasEditError}">
+        <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
+        <TextBlock x:Name="PlanEditError" Grid.Column="1" Classes="error" Text="{Binding EditError}" TextWrapping="Wrap" FontSize="13" />
+      </Grid>
       <TextBlock Classes="muted" Text="{loc:T 'No plan right now. The last one is below.'}" Margin="8,0" TextWrapping="Wrap">
         <TextBlock.IsVisible>
           <MultiBinding Converter="{x:Static BoolConverters.And}">

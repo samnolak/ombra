@@ -1,0 +1,80 @@
+# Ombra team server: server + postgres (+ caddy with the "domain" profile).
+# install.sh writes /etc/ombra/server.env, /etc/ombra/db_password and ./.env (COMPOSE_PROFILES, OMBRA_* below).
+# Only 443 is published; Postgres lives on the internal network only.
+# /etc/ombra is never mounted as a whole: the server gets exactly the files it reads, read-only (owned by uid 1654;
+# the rest of /etc/ombra stays root's). The offline TLS next key is not on this tree at all (§6.2).
+# `ombra-admin restore` rewrites token.key/server-id, so run it as a one-off with the directory mounted writable, e.g.
+#   docker compose run --rm --no-deps -v /etc/ombra:/restore-etc -e Ombra__TokenKeyFile=/restore-etc/token.key \
+#     -e Ombra__ServerIdFile=/restore-etc/server-id -u 0 --entrypoint ombra-admin server restore ...
+# then `chown 1654:1654 /etc/ombra/token.key /etc/ombra/server-id` and `docker compose up -d --force-recreate server`.
+name: ombra
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ombra
+      POSTGRES_DB: ombra
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ombra -d ombra"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "14" }
+
+  server:
+    image: ${OMBRA_IMAGE:-ombra-server:local}
+    restart: unless-stopped
+    env_file: /etc/ombra/server.env
+    depends_on:
+      postgres: { condition: service_healthy }
+    volumes:
+      - /etc/ombra/token.key:/etc/ombra/token.key:ro
+      - /etc/ombra/server-id:/etc/ombra/server-id:ro
+      - /etc/ombra/backup-recipients.txt:/etc/ombra/backup-recipients.txt:ro
+      - /etc/ombra/tls:/etc/ombra/tls:ro   # current.crt + current.key (IP mode); empty in domain mode
+      - ombra-data:/var/lib/ombra
+      - ${OMBRA_BACKUP_DIR:-/var/backups/ombra}:/backups
+    # IP mode: 0.0.0.0:443 → Kestrel TLS 1.3 with the pinned key. Domain mode: plain HTTP, published on
+    # 127.0.0.1:8443 only (Caddy is the only door); the default never exposes it beyond loopback.
+    ports:
+      - "${OMBRA_PUBLISH_ADDR:-127.0.0.1}:${OMBRA_PUBLISH_PORT:-443}:8443"
+    networks: [internal, edge]
+    logging: *logging
+
+  caddy:
+    image: caddy:2
+    profiles: [domain]
+    restart: unless-stopped
+    depends_on: [server]
+    ports:
+      - "443:443"
+    volumes:
+      - /etc/ombra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge]
+    logging: *logging
+
+secrets:
+  db_password:
+    file: /etc/ombra/db_password
+
+volumes:
+  pgdata:
+  ombra-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  internal:
+    internal: true
+  edge:

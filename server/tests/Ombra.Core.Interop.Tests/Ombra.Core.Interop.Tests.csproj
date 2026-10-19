@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    xUnit suite for ombra-core through the .NET wrapper: the 38 D1 probe checks (with a restart of every
+    device before each step), S1 negative tests (SERVER_DESIGN §9 row S1 + matrix) and the JSON test vectors.
+    Uses a separate native build with the `test-attacks` feature (attacker helpers that skip local
+    validation), loaded via the AppContext switch Ombra.Core.NativePath. Set SkipCargo=true to reuse an
+    existing build.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <CargoExe Condition="'$(CargoExe)' == '' and Exists('$(HOME)/.cargo/bin/cargo')">$(HOME)/.cargo/bin/cargo</CargoExe>
+    <CargoExe Condition="'$(CargoExe)' == ''">cargo</CargoExe>
+    <OmbraCrateDir>$(MSBuildThisFileDirectory)../../native/ombra-core/</OmbraCrateDir>
+    <OmbraAttackLibDir>$(OmbraCrateDir)target/attack/release/</OmbraAttackLibDir>
+    <OmbraAttackLib Condition="$([MSBuild]::IsOSPlatform('OSX'))">libombra_core.dylib</OmbraAttackLib>
+    <OmbraAttackLib Condition="$([MSBuild]::IsOSPlatform('Linux'))">libombra_core.so</OmbraAttackLib>
+    <OmbraAttackLib Condition="$([MSBuild]::IsOSPlatform('Windows'))">ombra_core.dll</OmbraAttackLib>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Ombra.Core.Interop/Ombra.Core.Interop.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <RuntimeHostConfigurationOption Include="Ombra.Core.NativePath" Value="native-attack/$(OmbraAttackLib)" />
+    <None Include="$(OmbraCrateDir)vectors/*.json" Link="vectors/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Target Name="BuildOmbraCoreAttack" BeforeTargets="BeforeBuild" Condition="'$(SkipCargo)' != 'true'">
+    <Exec Command="&quot;$(CargoExe)&quot; build --release --features test-attacks --target-dir target/attack" WorkingDirectory="$(OmbraCrateDir)" />
+  </Target>
+  <Target Name="CopyOmbraCoreAttack" AfterTargets="Build">
+    <Copy SourceFiles="$(OmbraAttackLibDir)$(OmbraAttackLib)" DestinationFolder="$(OutDir)native-attack" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

@@ -18,8 +18,17 @@ public enum GuiEquivalent
     DeleteSession,
     /// <summary>The session menu's Rewind (omp's RPC <c>branch</c>): pick a message, a new session from before it.</summary>
     Rewind,
+    /// <summary>The session menu's Fork (omp's RPC <c>fork</c>): the chat goes on in a copy of the session; a reply's
+    /// "Fork from here" forks at that reply.</summary>
+    Fork,
     /// <summary>The keyboard shortcut sheet.</summary>
     Shortcuts,
+    /// <summary>Plan mode over RPC (MainViewModel.PlanMode.cs) when this omp has it; else omp's terminal.</summary>
+    PlanMode,
+    /// <summary>Goal mode over RPC (MainViewModel.BtwGoal.cs: the goal bar) when this omp has it; else omp's terminal.</summary>
+    Goal,
+    /// <summary>Side questions over RPC (MainViewModel.BtwGoal.cs: the BTW panel) when this omp has them; else omp's terminal.</summary>
+    Btw,
     /// <summary>The GUI does it another way; the card says how (no terminal needed).</summary>
     Explain,
 }
@@ -60,22 +69,22 @@ public static class TerminalOnlyCommands
             Loc.T("Links in the conversation open in your browser when you click them.")),
         new("queue", Loc.T("Queue a message for after the agent yields"), GuiEquivalent.Explain,
             Loc.T("While omp works, Enter queues your message for when it finishes, and Alt+Enter hands it over at its next step.")),
-        new("plan", Loc.T("Toggle plan mode (agent plans before executing)"), GuiEquivalent.Terminal),
-        new("plan-review", Loc.T("Re-open the plan review for the latest plan (plan mode only)"), GuiEquivalent.Terminal),
+        new("plan", Loc.T("Toggle plan mode (agent plans before executing)"), GuiEquivalent.PlanMode),
+        new("plan-review", Loc.T("Re-open the plan review for the latest plan (plan mode only)"), GuiEquivalent.PlanMode),
         new("vibe", Loc.T("Toggle vibe mode (direct persistent fast/good worker sessions; read-only toolset)"), GuiEquivalent.Terminal),
-        new("goal", Loc.T("Toggle goal mode (persistent autonomous objective for this session)"), GuiEquivalent.Terminal),
+        new("goal", Loc.T("Toggle goal mode (persistent autonomous objective for this session)"), GuiEquivalent.Goal),
         new("guided-goal", Loc.T("Have the agent interview you in chat, then set up goal mode"), GuiEquivalent.Terminal),
         new("loop", Loc.T("Toggle loop mode: the next prompt re-submits after every yield"), GuiEquivalent.Terminal),
         new("agents", Loc.T("Open the agents hub (per-agent model, prewalk, and advisor)"), GuiEquivalent.Terminal),
         new("git", Loc.T("Open the git UI (split diff viewer, staging, commit composer)"), GuiEquivalent.Terminal),
         new("branch", Loc.T("Rewind to a previous message, keeping the old path as a branch"), GuiEquivalent.Rewind),
         new("rewind", Loc.T("Rewind to a previous message, keeping the old path as a branch"), GuiEquivalent.Rewind),
-        new("fork", Loc.T("Create a new fork from a previous message"), GuiEquivalent.Terminal),
+        new("fork", Loc.T("Create a new fork from a previous message"), GuiEquivalent.Fork),
         new("tree", Loc.T("Navigate session tree (switch branches)"), GuiEquivalent.Terminal),
         new("logout", Loc.T("Logout from OAuth provider"), GuiEquivalent.Providers),
         new("clear", Loc.T("Clear the conversation context in place, keeping the session"), GuiEquivalent.Terminal),
         new("drop", Loc.T("Delete the current session and start a new one"), GuiEquivalent.DeleteSession),
-        new("btw", Loc.T("Ask a side question, or browse this session's BTW history"), GuiEquivalent.Terminal),
+        new("btw", Loc.T("Ask a side question, or browse this session's BTW history"), GuiEquivalent.Btw),
         new("tan", Loc.T("Run a full background agent on tangential work"), GuiEquivalent.Terminal),
         new("omfg", Loc.T("Forge a TTSR rule from a complaint to stop a recurring behavior"), GuiEquivalent.Terminal),
         new("cleanse", Loc.T("Detect and fix project diagnostics with weighted parallel subagents"), GuiEquivalent.Terminal),

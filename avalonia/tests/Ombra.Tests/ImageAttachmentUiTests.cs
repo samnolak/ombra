@@ -9,6 +9,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
 using Ombra.App.Controls;
+using Ombra.App.Localization;
 using Ombra.App.Services;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
@@ -126,7 +127,7 @@ public sealed class ImageAttachmentUiTests
             Assert.True(vm.IsImageViewerOpen);
             await Until(() => vm.ViewerImage is not null, "viewer decoded");
             Assert.Equal("screenshot.png", vm.ViewerTitle);
-            Assert.Equal("1600 × 900 · 1 of 3", vm.ViewerDetail);
+            Assert.Equal("1600 × 900 · " + Loc.F("{0} of {1}", 1, 3), vm.ViewerDetail);
             Key(w, Avalonia.Input.Key.Escape, PhysicalKey.Escape);
             Assert.False(vm.IsImageViewerOpen);
             Assert.Equal(3, vm.Attachments.Count); // Esc closed the viewer only
@@ -194,7 +195,7 @@ public sealed class ImageAttachmentUiTests
         await Until(() => chip.Preview.Failed, "chip placeholder");
         Assert.Null(chip.Preview.Thumbnail);
         Assert.True(Find<Icon>(w, i => i.Classes.Contains("image-missing")).IsEffectivelyVisible);
-        Assert.Contains("can't be shown", chip.Preview.Tooltip);
+        Assert.Contains(Loc.F("{0}: can't be shown (not an image the app can read)", "\0").Split('\0')[1], chip.Preview.Tooltip);
 
         vm.ComposerText = "broken";
         vm.SendCommand.Execute(null);
@@ -280,7 +281,7 @@ public sealed class ImageAttachmentUiTests
         Assert.Empty(images[1].Data); // omp could not resolve the stored image: shown as "not kept"
         var lost = new ImagePreview(images[1], () => images);
         Assert.True(lost.Failed);
-        Assert.Equal("This image was not kept with the session", lost.Tooltip);
+        Assert.Equal(Loc.T("This image was not kept with the session"), lost.Tooltip);
     }
 
     private static byte[] MakeImageBytes() => [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];

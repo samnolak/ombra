@@ -38,7 +38,7 @@ public sealed partial class MainViewModel
         if (OmpBuiltins.NameOf(t) is not { Length: > 0 } name) return false;
         // omp advertised the name itself (a skill, prompt, extension or file command): it runs there
         if (_commands.Any(c => c.Source != "builtin" && (c.Name == name || c.Aliases.Contains(name)))) return false;
-        var args = t.Length > name.Length + 1 ? t[(name.Length + 1)..].Trim() : "";
+        var args = t.Length > name.Length + 1 ? t[(name.Length + 2)..].Trim() : "";
         if (name is "model" or "models" && args.Length == 0)
         {
             ComposerText = "";
@@ -56,8 +56,8 @@ public sealed partial class MainViewModel
                 _ = OpenSettingsAtAsync("providers");
                 return true;
             case GuiEquivalent.Plugins:
-                ShowCard(TerminalCard(cmd, Loc.T("Plugins, skills and extensions are in Settings → Plugins and skills. omp's own dashboard is in its terminal."),
-                    new SessionCardAction(Loc.T("Open Plugins and skills"), new RelayCommand(() => { CloseSessionCard(); _ = OpenSettingsAtAsync("plugins"); }))));
+                ShowCard(TerminalCard(cmd, Loc.T("Plugins, MCP servers and skills are in Settings → Plugins. omp's own dashboard is in its terminal."),
+                    new SessionCardAction(Loc.T("Open Plugins"), new RelayCommand(() => { CloseSessionCard(); _ = OpenPluginsPageCommand.ExecuteAsync(null); }))));
                 return true;
             case GuiEquivalent.NewSession:
                 _ = NewSessionHereAsync(); // MainViewModel.Chats.cs
@@ -79,11 +79,35 @@ public sealed partial class MainViewModel
                 if (RewindCommand.CanExecute(null)) _ = RewindCommand.ExecuteAsync(null);
                 else ShowCard(ExplainCard(cmd, Loc.T("Stop the current run first; then Rewind… in the session menu (the title) picks the message to start over from.")));
                 return true;
+            case GuiEquivalent.Fork:
+                if (ForkSessionCommand.CanExecute(null)) _ = ForkSessionCommand.ExecuteAsync(null);
+                else ShowCard(ExplainCard(cmd, Loc.T("Stop the current run first; then Fork in the session menu (the title) forks the session, or Fork from here on a reply forks at that reply.")));
+                return true;
             case GuiEquivalent.BackgroundTasks:
                 ShowPaneCommand.Execute(SidePane.Tasks);
                 return true;
             case GuiEquivalent.Shortcuts:
                 IsShortcutsOpen = true;
+                return true;
+            case GuiEquivalent.PlanMode when IsPlanModeAvailable:
+                if (cmd.Name == "plan-review")
+                {
+                    ShowCard(ExplainCard(cmd, HasPlanReview
+                        ? Loc.T("The proposed plan is above the message box: approve it there, or reject it and say what to change.")
+                        : Loc.T("No plan waits for review. In plan mode omp shows the plan it proposes above the message box.")));
+                    return true;
+                }
+                // As omp's /plan: text after it is the first planning message (left in the box to send)
+                _ = SetPlanModeAsync(!IsPlanMode);
+                if (args.Length > 0) ComposerText = args;
+                return true;
+            case GuiEquivalent.Goal when IsGoalAvailable:
+                // As omp's /goal: text after it is the objective; bare, it opens the goal bar's editor
+                OpenGoalFromCommand(args);
+                return true;
+            case GuiEquivalent.Btw when IsBtwAvailable:
+                // As omp's /btw: text after it is the question; bare, it opens the panel with the history
+                OpenBtwFromCommand(args);
                 return true;
             case GuiEquivalent.Explain:
                 ShowCard(ExplainCard(cmd, cmd.Explanation));
@@ -152,6 +176,8 @@ public sealed partial class MainViewModel
         return _commands.Concat(TerminalOnlyCommands.All
             .Where(c => !known.Contains(c.Name) && c.Gui != GuiEquivalent.Explain
                         && c.Name is not ("q" or "status" or "rewind" or "providers")) // aliases: one entry each
-            .Select(c => new SlashCommand(c.Name, c.Description, null, c.Gui == GuiEquivalent.Terminal ? TerminalOnlySource : "builtin", [], [])));
+            .Select(c => new SlashCommand(c.Name, c.Description, null,
+                c.Gui == GuiEquivalent.Terminal || (c.Gui == GuiEquivalent.PlanMode && !IsPlanModeAvailable)
+                || (c.Gui == GuiEquivalent.Goal && !IsGoalAvailable) || (c.Gui == GuiEquivalent.Btw && !IsBtwAvailable) ? TerminalOnlySource : "builtin", [], [])));
     }
 }

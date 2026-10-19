@@ -120,6 +120,14 @@ public sealed partial class PreviewViewModel : ObservableObject
     /// <summary>A tab left the pane: the view drops its web view.</summary>
     public event Action<PreviewTab>? TabClosed;
 
+    /// <summary>
+    /// Pages render in the embedded Nightly runtime instead of the platform's web view (Settings › General › Agent
+    /// browser: Nightly, experimental; macOS). The view moves open tabs over when it changes.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowWebView))]
+    private bool _useNightly;
+
     /// <summary>The last navigation failed (the server did not answer); reset when the next one starts.</summary>
     public bool LoadFailed
     {
@@ -145,7 +153,6 @@ public sealed partial class PreviewViewModel : ObservableObject
             OnPropertyChanged(nameof(ShowSuggestionRow));
             OnPropertyChanged(nameof(EmptyText));
         };
-        Annotations.CollectionChanged += (_, _) => OnAnnotationsChanged();
         Dialogs.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(BrowserDialogsViewModel.CoversPage)) OnPropertyChanged(nameof(ShowWebView));
@@ -185,8 +192,9 @@ public sealed partial class PreviewViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(ShowWebView))]
     private Avalonia.Media.Imaging.Bitmap? _pageUnderPopup;
 
-    /// <summary>The native web view shows; hidden while a card, the crash page, the error page or a pop-up's picture covers the page (it would draw over them).</summary>
-    public bool ShowWebView => HasPage && !IsEngineUnavailable && !Dialogs.CoversPage && !IsCrashed && LoadError is null && PageUnderPopup is null;
+    /// <summary>The page shows; hidden while a card, the crash page, the error page or a pop-up's picture covers the page. A native
+    /// web view would draw over a card; a Nightly pane is composed by Avalonia, so its live page stays under the card.</summary>
+    public bool ShowWebView => HasPage && !IsEngineUnavailable && !(Dialogs.CoversPage && !UseNightly) && !IsCrashed && LoadError is null && PageUnderPopup is null;
     public bool ShowCrashPage => HasPage && !IsEngineUnavailable && IsCrashed;
     public bool ShowErrorPage => HasPage && !IsEngineUnavailable && !IsCrashed && LoadError is not null;
     public string FallbackText => Loc.F("The embedded browser needs {0} on this system", EngineName);
@@ -328,13 +336,31 @@ public sealed partial class PreviewViewModel : ObservableObject
             tab.Url = popup.RequestedUrl;
             tab.Address = Display(popup.RequestedUrl!);
         }
+        InsertPopupTab(tab, opener);
+        PopupOpened?.Invoke(tab);
+        if (opener == ActiveTab) ActiveTab = tab;
+        return tab;
+    }
+
+    /// <summary>
+    /// A page in <paramref name="opener"/> opened a window in the Nightly runtime: a pop-up tab like
+    /// <see cref="OpenPopupTab"/>, which the view shows with a Nightly pane of that window. Its page reports where it is.
+    /// </summary>
+    public PreviewTab OpenNightlyPopupTab(PreviewTab opener)
+    {
+        var tab = Configure(new PreviewTab("", isAgentTab: false) { Opener = opener });
+        InsertPopupTab(tab, opener);
+        if (opener == ActiveTab) ActiveTab = tab;
+        return tab;
+    }
+
+    /// <summary>Right after the opener (and its other pop-ups), loading.</summary>
+    private void InsertPopupTab(PreviewTab tab, PreviewTab opener)
+    {
         tab.IsLoading = true;
         var at = Tabs.IndexOf(opener);
         while (at + 1 < Tabs.Count && IsPopupOf(Tabs[at + 1], opener)) at++;
         Tabs.Insert(at < 0 ? Tabs.Count : at + 1, tab);
-        PopupOpened?.Invoke(tab);
-        if (opener == ActiveTab) ActiveTab = tab;
-        return tab;
     }
 
     private static bool IsPopupOf(PreviewTab tab, PreviewTab opener)

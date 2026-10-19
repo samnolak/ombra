@@ -3,7 +3,7 @@ using Ombra.ClientCore;
 namespace Ombra.App.ViewModels;
 
 /// <summary>
-/// One open chat of the window: its omp process (<see cref="Controller"/>) and what the window keeps of the chat while
+/// One logical chat in the shared engine (<see cref="Controller"/>) and what the window keeps while
 /// another one is shown, so that coming back finds it as it was left: the rows built so far (and where the reader was),
 /// the message box's draft, the session card, the question omp asked, and what the background checks saw since.
 /// Only <see cref="MainViewModel"/> touches it, on the UI thread.
@@ -12,13 +12,14 @@ internal sealed class OpenSession(SessionController controller, CancellationToke
 {
     public SessionController Controller { get; } = controller;
 
-    /// <summary>Cancelled when the chat closes (or the window): a start still under way then stops its omp instead of
-    /// finishing it, and the chat's update loop ends.</summary>
+    /// <summary>Cancelled when the chat closes (or the window): an unfinished logical-session open is cancelled,
+    /// and this chat's update loop ends without stopping its peers.</summary>
     public CancellationTokenSource Lifetime { get; } = CancellationTokenSource.CreateLinkedTokenSource(windowClosing);
 
-    /// <summary>A saved session this chat's omp is switching to, until omp reports it: a second click on it finds this
-    /// chat instead of starting another omp on the same file (omp locks the file it writes).</summary>
+    /// <summary>A saved session this chat is switching to, until the engine reports it: a second click finds this
+    /// chat instead of opening another writer on the same file.</summary>
     public string? OpeningFile { get; set; }
+    public string? ReadOnlyResumeProject { get; set; }
 
     /// <summary>When the chat was opened: the sidebar's sort key for a chat omp has not written a file for yet (see
     /// <c>MainViewModel.UnsavedChats</c>).</summary>
@@ -45,13 +46,20 @@ internal sealed class OpenSession(SessionController controller, CancellationToke
     // ── The message box ──
 
     public string ComposerText { get; set; } = "";
+    public string DraftId { get; set; } = "";
+    public string? DraftSessionFile { get; set; }
+    public string DraftProject { get; set; } = "";
+    public HashSet<long> RecoveredSequences { get; } = [];
+    /// <summary>The chat's local marks while another chat is shown (MainViewModel.Marks holds the shown chat's).</summary>
+    public List<MarkViewModel> Marks { get; set; } = [];
+    public string? InFlightReply { get; set; }
     public string ComposerMessage { get; set; } = "";
     public List<AttachmentViewModel> Attachments { get; set; } = [];
     public List<PastedTextViewModel> PastedTexts { get; set; } = [];
-    public List<CodeCommentViewModel> CodeComments { get; set; } = [];
 
-    /// <summary>Nothing typed or attached (a chat with a draft is never closed to stay under the process limit).</summary>
-    public bool HasNoDraft => ComposerText.Trim().Length == 0 && Attachments.Count == 0 && PastedTexts.Count == 0 && CodeComments.Count == 0;
+
+    /// <summary>Nothing typed or attached; used before replacing an empty chat and when warning about unsaved work.</summary>
+    public bool HasNoDraft => ComposerText.Trim().Length == 0 && Attachments.Count == 0 && PastedTexts.Count == 0 && Marks.Count == 0;
 
     // ── What omp asked for, the cards, and the chat's own context ring and model options ──
 
@@ -67,11 +75,15 @@ internal sealed class OpenSession(SessionController controller, CancellationToke
     /// <summary>The chat's queued messages as shown (previews decoded once), while another chat is on screen.</summary>
     public List<QueuedItemViewModel> Queued { get; set; } = [];
 
-    /// <summary>A permission mode chosen while this chat's omp was busy: it restarts with it once idle.</summary>
+    /// <summary>The chosen permission mode, retained until this logical session finishes reopening with it.</summary>
     public string? PendingApprovalMode { get; set; }
 
-    /// <summary>A setting that omp reads only at start changed while this chat's omp was busy: it restarts once idle.</summary>
-    public bool RestartWhenIdle { get; set; }
+    /// <summary>The start of this chat the window last looked at for workspace trust (MainViewModel.WorkspaceTrust.cs).</summary>
+    public ProjectLaunch? TrustLaunch { get; set; }
+    /// <summary>The card asking whether to trust the folder (or restarting after Trust), until it is answered.</summary>
+    public SessionCardViewModel? TrustCard { get; set; }
+    /// <summary>Restart under the folder's current trust as soon as the chat is idle (a revoke or a move during a run).</summary>
+    public bool RestrictWhenIdle { get; set; }
 
     // ── What the window has noticed (for the sidebar's dot and the notifications) ──
 

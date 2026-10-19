@@ -35,6 +35,12 @@ public sealed partial class PluginRowViewModel : ObservableObject
     public bool IsProjectScope => Info.Scope == "project";
     public bool IsShadowed => Info.Shadowed;
 
+    /// <summary>The list's scope word: the project's own install, or the user's.</summary>
+    public string ScopeLabel => IsProjectScope ? Loc.T("Project") : Loc.T("Personal");
+
+    /// <summary>A project install in a folder the user has not trusted: omp leaves it out (MainViewModel.WorkspaceTrust.cs).</summary>
+    [ObservableProperty] private bool _needsTrust;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasDescription))]
     private string _description = "";
@@ -64,7 +70,7 @@ public sealed partial class PluginRowViewModel : ObservableObject
         _syncing = true;
         IsEnabled = info.Enabled;
         _syncing = false;
-        foreach (var p in new[] { nameof(Version), nameof(HasVersion), nameof(SourceLabel), nameof(SourceTip), nameof(IsProjectScope), nameof(IsShadowed) })
+        foreach (var p in new[] { nameof(Version), nameof(HasVersion), nameof(SourceLabel), nameof(SourceTip), nameof(IsProjectScope), nameof(IsShadowed), nameof(ScopeLabel) })
             OnPropertyChanged(p);
     }
 
@@ -84,16 +90,17 @@ public sealed partial class PluginRowViewModel : ObservableObject
 /// <summary>A configured marketplace; opened, it lists its plugins.</summary>
 public sealed partial class MarketplaceRowViewModel(PluginsViewModel page, MarketplaceInfo info) : ObservableObject
 {
+    private static readonly SecretRedactor DisplayRedactor = new();
     public string Name => info.Name;
-    public string Source => info.Source;
+    public string Source { get; } = DisplayRedactor.Redact(info.Source);
     public ObservableCollection<MarketplacePluginRowViewModel> Plugins { get; } = [];
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(BrowseLabel))]
-    private bool _isOpen;
+    /// <summary>The catalog view shows this marketplace's plugins (read once, then kept).</summary>
+    [ObservableProperty] private bool _isOpen;
 
-    public string BrowseLabel => IsOpen ? Loc.T("Hide plugins") : Loc.T("Browse");
     [ObservableProperty] private bool _isBusy;
+
+    partial void OnIsBusyChanged(bool value) => page.CatalogBusyChanged();
     [ObservableProperty] private bool _isConfirmingRemove;
 
     [ObservableProperty]
@@ -119,6 +126,13 @@ public sealed partial class MarketplacePluginRowViewModel(PluginsViewModel page,
     public string Description => info.Description ?? "";
     public bool HasDescription => Description.Length > 0;
     public string Id => $"{info.Name}@{marketplace.Name}";
+    public string MarketplaceName => marketplace.Name;
+
+    /// <summary>The catalog's category for it ("" when the catalog gives none).</summary>
+    public string Category { get; init; } = "";
+
+    /// <summary>The catalog marks it featured or popular (the catalog's "Popular" section).</summary>
+    public bool IsFeatured { get; init; }
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanInstall))]
@@ -131,6 +145,37 @@ public sealed partial class MarketplacePluginRowViewModel(PluginsViewModel page,
     public bool CanInstall => !IsInstalled && !IsBusy;
 
     [RelayCommand] private Task Install() => page.InstallFromMarketplaceAsync(this);
+}
+
+/// <summary>A section of the catalog: "Popular", a category, or "Other" (plugins the catalog gives no category).</summary>
+public sealed class CatalogSectionViewModel(string title, IReadOnlyList<MarketplacePluginRowViewModel> plugins)
+{
+    public string Title { get; } = title;
+    public IReadOnlyList<MarketplacePluginRowViewModel> Plugins { get; } = plugins;
+
+    /// <summary>
+    /// The sections of these plugins: those the catalog marks featured first (under "Popular"), then one section per
+    /// category in alphabetical order, then the rest under "Other". Within a section, by name.
+    /// </summary>
+    internal static List<CatalogSectionViewModel> Group(IEnumerable<MarketplacePluginRowViewModel> rows)
+    {
+        var all = rows.OrderBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        var sections = new List<CatalogSectionViewModel>();
+        if (all.Where(r => r.IsFeatured).ToList() is { Count: > 0 } featured) sections.Add(new(Loc.T("Popular"), featured));
+        var rest = all.Where(r => !r.IsFeatured).ToList();
+        foreach (var g in rest.Where(r => r.Category.Length > 0).GroupBy(r => Heading(r.Category), StringComparer.CurrentCultureIgnoreCase)
+                     .OrderBy(g => g.Key, StringComparer.CurrentCultureIgnoreCase))
+            sections.Add(new(g.Key, [.. g]));
+        if (rest.Where(r => r.Category.Length == 0).ToList() is { Count: > 0 } other) sections.Add(new(Loc.T("Other"), other));
+        return sections;
+    }
+
+    /// <summary>"developer-tools" → "Developer tools".</summary>
+    internal static string Heading(string category)
+    {
+        var t = category.Replace('-', ' ').Replace('_', ' ').Trim();
+        return t.Length == 0 ? t : char.ToUpper(t[0], System.Globalization.CultureInfo.CurrentCulture) + t[1..];
+    }
 }
 
 /// <summary>A skill omp offers as /skill:name (or one switched off in omp's disabledExtensions).</summary>
@@ -153,6 +198,21 @@ public sealed partial class SkillRowViewModel : ObservableObject
     public string Description { get; }
     public bool HasDescription => Description.Length > 0;
     public string Command => "/skill:" + Name;
+
+    /// <summary>The skill's folder (where omp found its SKILL.md), once looked up; null when not found.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ScopeLabel), nameof(HasFolder))]
+    private string? _folder;
+
+    /// <summary>Inside the project's folders.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ScopeLabel))]
+    private bool _isProject;
+
+    public bool HasFolder => Folder is not null;
+
+    /// <summary>The list's scope word: the project's, the user's own, or omp's (built in or from a plugin).</summary>
+    public string ScopeLabel => IsProject ? Loc.T("Project") : Folder is not null ? Loc.T("Personal") : "omp";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanUse))]
@@ -180,6 +240,9 @@ public sealed partial class SkillRowViewModel : ObservableObject
     }
 
     [RelayCommand] private void Use() => _page.UseSkill(this);
+
+    /// <summary>P5: share the skill's folder with the team.</summary>
+    [RelayCommand] private void Share() => _page.ShareSkill(this);
 }
 
 /// <summary>A switch for one of omp's <c>skills.*</c> settings.</summary>
@@ -226,7 +289,7 @@ public sealed partial class SkillDirectoryViewModel(PluginsViewModel page, strin
 }
 
 /// <summary>
-/// Settings → Plugins and skills: omp's plugins through its CLI (<c>omp plugin list|install|uninstall|enable|disable|
+/// The Plugins page's Plugins and Skills tabs (with <see cref="PluginsHubViewModel"/>): omp's plugins through its CLI (<c>omp plugin list|install|uninstall|enable|disable|
 /// upgrade|discover|marketplace</c>), then <c>/reload-plugins</c> over RPC so skills and commands apply at once; skills
 /// from omp's command catalog, switched with <c>disabledExtensions</c> (ids <c>skill:&lt;name&gt;</c>, as omp's own
 /// extensions dashboard does) and the <c>skills.*</c> settings through <c>omp config set</c>.
@@ -276,9 +339,20 @@ public sealed partial class PluginsViewModel : ObservableObject
 
     public ObservableCollection<PluginRowViewModel> Plugins { get; } = [];
     public ObservableCollection<MarketplaceRowViewModel> Marketplaces { get; } = [];
+
+    /// <summary>The catalog's plugins of every marketplace in sections: "Popular" (those the catalog marks), then each category, then "Other".</summary>
+    public ObservableCollection<CatalogSectionViewModel> CatalogSections { get; } = [];
+
+    /// <summary>A marketplace is reading its catalog.</summary>
+    public bool IsCatalogBusy => Marketplaces.Any(m => m.IsBusy);
     public ObservableCollection<SkillRowViewModel> Skills { get; } = [];
     public IReadOnlyList<SkillSourceViewModel> SkillSources { get; }
     public ObservableCollection<SkillDirectoryViewModel> Directories { get; } = [];
+
+    /// <summary>omp's <c>skills.customDirectories</c> as last read (where Share looks for a skill's folder too).</summary>
+    internal IReadOnlyList<string> SkillDirectories => _directories;
+
+    internal void ShareSkill(SkillRowViewModel skill) => _owner.ShareSkillCommand.Execute(skill);
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowPluginsEmpty), nameof(ShowPluginsLoading))]
@@ -455,6 +529,7 @@ public sealed partial class PluginsViewModel : ObservableObject
         Marketplaces.Clear();
         foreach (var m in parsed) Marketplaces.Add(new MarketplaceRowViewModel(this, m));
         foreach (var name in _catalogs.Keys.Where(k => parsed.All(m => m.Name != k)).ToList()) _catalogs.Remove(name);
+        CatalogChanged();
         foreach (var m in Marketplaces.Where(m => open.Contains(m.Name)))
         {
             m.IsOpen = true;
@@ -503,9 +578,9 @@ public sealed partial class PluginsViewModel : ObservableObject
         }
         SkillsMessage = Skills.Count > 0 ? ""
             : !_owner.CanRunOmpCommands ? Loc.T("Skills appear while omp is running.")
-            : !SkillSources[0].IsOn ? Loc.T("Skills are off (Skill sources below).")
-            : !SkillSources[1].IsOn ? Loc.T("Skill commands are off (Skill sources below), so omp lists no /skill: commands to show here.")
-            : Loc.T("omp found no skills. Add SKILL.md folders to one of the places below, or install a plugin that brings skills.");
+            : !SkillSources[0].IsOn ? Loc.T("Skills are off. Turn them on in “Where omp finds skills” below.")
+            : !SkillSources[1].IsOn ? Loc.T("Skill commands are off (“Where omp finds skills” below), so omp lists no skills here.")
+            : Loc.T("No skills yet. Add a skill folder with Add → Skill folder, or install a plugin that brings skills.");
         OnPropertyChanged(nameof(HasSkills));
     }
 
@@ -540,11 +615,59 @@ public sealed partial class PluginsViewModel : ObservableObject
     private void FillMarketplace(MarketplaceRowViewModel m)
     {
         m.Plugins.Clear();
-        if (!_catalogs.TryGetValue(m.Name, out var plugins)) return;
+        if (!_catalogs.TryGetValue(m.Name, out var plugins))
+        {
+            CatalogChanged();
+            return;
+        }
         var installed = Plugins.Where(p => p.IsMarketplace && p.SourceLabel == m.Name).Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var p in plugins) m.Plugins.Add(new MarketplacePluginRowViewModel(this, m, p) { IsInstalled = installed.Contains(p.Name) });
+        var meta = CatalogMeta(m.Name);
+        foreach (var p in plugins)
+        {
+            var info = meta.GetValueOrDefault(p.Name);
+            m.Plugins.Add(new MarketplacePluginRowViewModel(this, m, p) { IsInstalled = installed.Contains(p.Name), Category = info.Category ?? "", IsFeatured = info.Featured });
+        }
         m.Message = plugins.Count == 0 ? Loc.T("This marketplace lists no plugins.") : "";
+        CatalogChanged();
     }
+
+    /// <summary>A marketplace's plugins or the list of marketplaces changed: the catalog's sections are made again.</summary>
+    private void CatalogChanged()
+    {
+        CatalogSections.Clear();
+        foreach (var s in CatalogSectionViewModel.Group(Marketplaces.SelectMany(m => m.Plugins))) CatalogSections.Add(s);
+        OnPropertyChanged(nameof(IsCatalogBusy));
+    }
+
+    private readonly Dictionary<string, IReadOnlyDictionary<string, MarketplacePluginMeta>> _meta = new(StringComparer.Ordinal);
+    private string? _pluginsFolder;
+
+    /// <summary>
+    /// Each plugin's category and featured mark as the marketplace's catalog gives them (marketplace.json). omp's
+    /// <c>plugin discover</c> leaves them out, so they are read from the copy omp keeps in its plugins folder
+    /// (<c>cache/marketplaces/&lt;name&gt;/marketplace.json</c>); none when that is not there.
+    /// </summary>
+    private IReadOnlyDictionary<string, MarketplacePluginMeta> CatalogMeta(string marketplace)
+    {
+        if (_meta.TryGetValue(marketplace, out var known)) return known;
+        _pluginsFolder ??= InstalledPluginsFolder();
+        if (_pluginsFolder is null) return new Dictionary<string, MarketplacePluginMeta>();
+        IReadOnlyDictionary<string, MarketplacePluginMeta> map = new Dictionary<string, MarketplacePluginMeta>();
+        try
+        {
+            var file = Path.Combine(_pluginsFolder, "cache", "marketplaces", marketplace, "marketplace.json");
+            if (File.Exists(file)) map = OmpPlugins.ParseCatalogMeta(File.ReadAllText(file));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        return _meta[marketplace] = map;
+    }
+
+    internal void CatalogBusyChanged() => OnPropertyChanged(nameof(IsCatalogBusy));
+
+    /// <summary>omp's plugins folder as an installed marketplace plugin's path shows it (…/plugins/cache/plugins/…).</summary>
+    private string? InstalledPluginsFolder() =>
+        Plugins.Select(p => p.Info.Path).OfType<string>().Select(p => p.Replace('\\', '/'))
+            .Select(p => p.IndexOf("/cache/plugins/", StringComparison.Ordinal) is var i and > 0 ? p[..i] : null).FirstOrDefault(p => p is not null);
 
     // ── After a change ──
 
@@ -691,6 +814,25 @@ public sealed partial class PluginsViewModel : ObservableObject
         }
     }
 
+    /// <summary>An npm plugin's settings (<c>omp plugin config list &lt;name&gt; --json</c>): null with omp's words when unreadable.</summary>
+    internal async Task<(IReadOnlyList<PluginSettingInfo>? Settings, string Error)> ReadPluginSettingsAsync(PluginRowViewModel row)
+    {
+        var r = await _owner.RunOmpCliAsync(["plugin", "config", "list", row.Id, "--json"], CliWait);
+        if (!r.Ok) return (null, Why(r));
+        return OmpPlugins.ParsePluginSettings(r.Stdout) is { } list ? (list, "") : (null, Loc.T("omp's plugin settings could not be read."));
+    }
+
+    /// <summary>Saves one setting (<c>omp plugin config set</c>); plugins read their settings when omp starts. Null, or omp's words.</summary>
+    internal async Task<string?> SetPluginSettingAsync(PluginRowViewModel row, string key, string value)
+    {
+        ClearFeedback();
+        var r = await _owner.RunOmpCliAsync(["plugin", "config", "set", row.Id, key, value], CliWait);
+        if (!r.Ok) return Why(r);
+        PluginsFeedback.Notice = Loc.F("Saved “{0}” for “{1}”.", key, row.Name);
+        RequireRestart(PluginsFeedback, "Plugin tools, hooks and MCP servers load when omp starts. Restart it to apply the change.");
+        return null;
+    }
+
     [RelayCommand]
     private async Task InstallAsync()
     {
@@ -747,13 +889,21 @@ public sealed partial class PluginsViewModel : ObservableObject
         }
     }
 
+    /// <summary>Every marketplace's plugins in the catalog view.</summary>
+    internal async Task OpenAllMarketplacesAsync()
+    {
+        _pluginsFolder ??= InstalledPluginsFolder() ?? await _owner.OmpPluginsFolderAsync();
+        foreach (var m in Marketplaces.ToList())
+        {
+            if (_catalogs.ContainsKey(m.Name)) FillMarketplace(m); // read before the folder was known: regrouped now
+            await BrowseAsync(m);
+        }
+    }
+
+    /// <summary>The marketplace's plugins in the catalog view, read from omp once (Update catalog reads them again).</summary>
     internal async Task BrowseAsync(MarketplaceRowViewModel m)
     {
-        if (m.IsOpen)
-        {
-            m.IsOpen = false;
-            return;
-        }
+        if (m.IsOpen && m.Plugins.Count > 0 || m.IsBusy) return;
         m.IsOpen = true;
         if (_catalogs.ContainsKey(m.Name))
         {
@@ -792,6 +942,7 @@ public sealed partial class PluginsViewModel : ObservableObject
                 return;
             }
             _catalogs.Remove(m.Name);
+            _meta.Remove(m.Name);
             var d = await _owner.RunOmpCliAsync(["plugin", "discover", m.Name], CliWait);
             if (d.Ok && OmpPlugins.ParseDiscover(d.Stdout) is { } plugins) _catalogs[m.Name] = plugins;
             ApplyCatalogsToRows();
@@ -818,6 +969,7 @@ public sealed partial class PluginsViewModel : ObservableObject
             }
             Marketplaces.Remove(m);
             _catalogs.Remove(m.Name);
+            CatalogChanged();
             NotifyLists();
             MarketplacesFeedback.Notice = Loc.F("Removed the marketplace “{0}”.", m.Name);
         }

@@ -6,7 +6,10 @@ using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App.Controls;
+using Ombra.App.Localization;
 using Xunit;
+using Ombra.App.Services;
+using Ombra.ClientCore;
 
 namespace Ombra.Tests;
 
@@ -54,6 +57,56 @@ public sealed class PathLinksTests
         Assert.Null(PathLinks.Resolve(null, "src/app.ts")); // relative without a project: nothing
     }
 
+    [Theory]
+    [InlineData(@"\\server\share\missing.txt")]
+    [InlineData("//server/share/missing.txt")]
+    [InlineData(@"/\server/share/missing.txt")]
+    [InlineData(@"\/server/share/missing.txt")]
+    [InlineData(@"\\?\UNC\server\share\missing.txt")]
+    [InlineData(@"\\?\C:\work\missing.txt")]
+    [InlineData(@"\\.\C:\work\missing.txt")]
+    [InlineData(@"\??\UNC\server\share\missing.txt")]
+    [InlineData(@"\Device\Mup\server\share\missing.txt")]
+    [InlineData(@"\GLOBAL??\UNC\server\share\missing.txt")]
+    [InlineData(@"\GLOBALROOT\Device\Mup\server\share\missing.txt")]
+    [InlineData("file://server/share/missing.txt")]
+    [InlineData("FILE://server/share/missing.txt")]
+    [InlineData("file:////server/share/missing.txt")]
+    [InlineData("file:///\\\\server\\share\\missing.txt")]
+    [InlineData("file:///%5C%5Cserver/share/missing.txt")]
+    [InlineData("file:///%2Fserver/share/missing.txt")]
+    [InlineData("file:///safe/../%5C%5Cserver/share/missing.txt")]
+    [InlineData("%5c%5cserver/share/missing.txt")]
+    [InlineData("%2f%2fserver/share/missing.txt")]
+    [InlineData("`//server/share/missing.txt`")]
+    public void Network_and_device_references_are_rejected_before_any_file_probe(string path)
+    {
+        var root = TestProcesses.TempDir("pathlinks-network");
+        // Resolve is entirely lexical: rejection does not depend on the network path existing or responding.
+        Assert.Null(LocalFilePaths.Resolve(root, path));
+        Assert.Null(ProjectFiles.Resolve(root, path));
+        Assert.Null(PathLinks.Resolve(root, path));
+        Assert.False(SessionController.IsNewFile(root, path));
+        var error = Assert.Throws<IOException>(() => PathLinks.ReadHead(path, null));
+        Assert.Equal("Only local file paths can be previewed.", error.Message);
+    }
+
+    [Fact]
+    public void Local_absolute_relative_and_encoded_file_uris_still_resolve_but_network_roots_do_not()
+    {
+        var root = TestProcesses.TempDir("pathlinks-local");
+        var local = Path.Combine(root, "with space.txt");
+        File.WriteAllText(local, "local");
+        Assert.Equal(local, ProjectFiles.Resolve(root, "./with space.txt"));
+        Assert.Equal(local, ProjectFiles.Resolve(null, local));
+        Assert.Equal(local, ProjectFiles.Resolve(null, new Uri(local).AbsoluteUri));
+        Assert.True(LocalFilePaths.IsLocal(@"C:\work\app.cs"));
+        Assert.True(LocalFilePaths.IsLocal("C:/work/app.cs"));
+        Assert.Null(ProjectFiles.Resolve(@"\\server\share", "missing.txt"));
+        Assert.Null(ProjectFiles.Resolve("//server/share", "missing.txt"));
+        Assert.False(SessionController.IsNewFile(@"\\server\share", "missing.txt"));
+    }
+
     [Fact]
     public void The_preview_reads_the_head_or_the_lines_around_the_named_one_and_spots_binaries()
     {
@@ -70,6 +123,41 @@ public sealed class PathLinksTests
         var bin = Path.Combine(dir, "a.bin");
         File.WriteAllBytes(bin, [1, 0, 2]);
         Assert.True(PathLinks.ReadHead(bin, null).Binary);
+    }
+
+    [AvaloniaFact]
+    public async Task The_hover_preview_says_whats_left_out_and_the_thumbnail_size_in_the_apps_language()
+    {
+        var dir = TestProcesses.TempDir("pathlinks-peek");
+        var folder = Path.Combine(dir, "many");
+        Directory.CreateDirectory(folder);
+        for (var i = 0; i < 15; i++) File.WriteAllText(Path.Combine(folder, $"f{i:00}.txt"), "x");
+        var png = Path.Combine(dir, "logo.png");
+        using (var bmp = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize(40, 30)))
+        using (var f = File.Create(png)) bmp.Save(f, new Avalonia.Media.Imaging.PngBitmapEncoderOptions());
+
+        async Task<List<string>> Shown(PathTarget target, Func<List<string>, bool> done)
+        {
+            var peek = PathLinks.Preview(target, dir);
+            var w = new Window { Content = peek, Width = 500, Height = 400 };
+            w.Show();
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            List<string> texts;
+            while (!done(texts = [.. peek.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text ?? "")]) && DateTime.UtcNow < deadline)
+            {
+                Dispatcher.UIThread.RunJobs();
+                await Task.Delay(15);
+            }
+            w.Close();
+            return texts;
+        }
+
+        var more = Loc.F("… {0} more", 3);
+        var listing = await Shown(new PathTarget(folder, null, PathKind.Folder), t => t.Any(x => x.Contains('…')));
+        Assert.Contains(listing, x => x.EndsWith("\n" + more, StringComparison.Ordinal));
+        var size = " · " + Loc.F("{0}×{1} preview", 40, 30);
+        var image = await Shown(new PathTarget(png, null, PathKind.Image), t => t.Any(x => x.Contains('×')));
+        Assert.Contains(image, x => x.EndsWith(size, StringComparison.Ordinal));
     }
 
     [AvaloniaFact]
@@ -107,6 +195,12 @@ public sealed class PathLinksTests
             return PathLinks.Resolve(root, text);
         }
         public void OpenPath(PathTarget target) => Opened.Add(target);
+        public string? EditorName => null;
+        public void OpenInEditor(PathTarget target) { }
+        public void AddToMessage(PathTarget target) { }
+        public void Reveal(PathTarget target) { }
+        public void OpenTerminal(string folder) { }
+        public void Notify(string iconKey, string title, string message) { }
     }
 
     [AvaloniaFact]

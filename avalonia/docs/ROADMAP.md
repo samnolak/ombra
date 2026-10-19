@@ -14,11 +14,12 @@ K7 adds a native code editor; D1's server trust model remains open.
 ## Ground rules
 
 - **Agent runtime:** upstream omp (`can1357/oh-my-pi`) is the base for an Ombra-maintained fork, approved on
-  2026-10-15. Keep the runtime in a separate process with a versioned RPC contract; fix missing runtime contracts
-  at their source rather than accumulating client workarounds. Review upstream changes in integration branches,
+  2026-10-15. The owned source runs logical chat sessions in one app-managed host, not one CLI process per chat.
+  Keep its versioned multiplexed RPC contract; fix missing contracts at their source rather than accumulating
+  client workarounds. Review upstream changes in integration branches,
   run contract and end-to-end gates, then pin an immutable runtime artifact. No automatic upstream cutover and
   no patching installed user runtimes. Upstream PRs are useful, not a prerequisite for shipping our changes.
-  The currently shipped 18.8.0 pack remains unchanged until a fork artifact is built and verified.
+  The beta uses `ombra-engine-18.8.0-bun-1.4.2-v1`; published release readiness remains gated separately.
 - Our layers: **Client Integration Layer** (`Ombra.Rpc`: process, stdio, framing, correlation) →
   **Application Core** (`Ombra.ClientCore`: state, reducer, session control) → **ViewModels** → **Avalonia UI**,
   plus a **Platform Layer** (OS adapters) created only when the first real OS-specific implementation appears.
@@ -161,7 +162,7 @@ Several omp processes at once (background sessions, pool/LRU) · GUI flows for p
 (via an omp extension or future upstream RPC) · skills manager page · MCP OAuth manager · models.yml editor · git panel
 (stage/commit) · subagent hub · CLI operations panel · collab / live voice · harness updater · Claude/Codex
 session import · session tree navigation / branch · controlled omp upgrade to a release with `session_settled`
-and `set_event_filter` (removes the settle probe and the quadratic streaming cost) · opt-in model discovery and remote
+to remove the settle probe (`set_event_filter` is already enabled on pinned 18.8.0) · opt-in model discovery and remote
 catalog upstream ([`upstream/omp-discovery-opt-in.md`](upstream/omp-discovery-opt-in.md)): once omp ships it, its
 settings replace the provider-gate script and close the `catalog.stencil.so` limitation.
 

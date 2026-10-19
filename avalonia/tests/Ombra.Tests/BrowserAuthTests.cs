@@ -3,6 +3,7 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App.Controls;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore.Browser;
 
@@ -45,9 +46,9 @@ public sealed class BrowserAuthTests
         var card = Assert.IsType<BrowserDialogCardViewModel>(vm.Dialogs.Card);
         Assert.True(card.IsCredentials);
         var shown = Texts(panel).ToList();
-        Assert.Contains("studio.example.com wants you to sign in", shown);
-        Assert.Contains("Realm: Studio", shown);
-        Assert.DoesNotContain("That username or password didn't work", shown);
+        Assert.Contains(Loc.F("{0} wants you to sign in", "studio.example.com"), shown);
+        Assert.Contains(Loc.F("Realm: {0}", "Studio"), shown);
+        Assert.DoesNotContain(Loc.T("That username or password didn't work"), shown);
         Assert.False(answer.IsCompleted);
 
         card.UserName = "ada";
@@ -68,7 +69,7 @@ public sealed class BrowserAuthTests
         Dispatcher.UIThread.RunJobs();
 
         var card = Assert.IsType<BrowserDialogCardViewModel>(vm.Dialogs.Card);
-        Assert.Contains("That username or password didn't work", Texts(panel));
+        Assert.Contains(Loc.T("That username or password didn't work"), Texts(panel));
         Assert.Equal("ada", card.UserName);
         card.SecondaryCommand.Execute(null); // Cancel: the engine shows the server's 401 page
         Assert.Null(await answer.WaitAsync(TimeSpan.FromSeconds(5)));
@@ -83,8 +84,8 @@ public sealed class BrowserAuthTests
         var answer = Auth(vm.ActiveTab).RequestCredentialsAsync(request, CancellationToken.None);
         Dispatcher.UIThread.RunJobs();
 
-        Assert.Contains("intranet.local:8080 wants you to sign in", Texts(panel));
-        Assert.Contains("This site doesn't use a secure connection.", Texts(panel));
+        Assert.Contains(Loc.F("{0} wants you to sign in", "intranet.local:8080"), Texts(panel));
+        Assert.Contains(Loc.T("This site doesn't use a secure connection."), Texts(panel));
         vm.Dialogs.Card!.CancelCommand.Execute(null); // Esc
         Assert.Null(await answer.WaitAsync(TimeSpan.FromSeconds(5)));
         w.Close();
@@ -141,7 +142,7 @@ public sealed class BrowserAuthTests
         vm.SelectTabCommand.Execute(omp);
         Dispatcher.UIThread.RunJobs();
         var card = Assert.IsType<BrowserDialogCardViewModel>(vm.Dialogs.Card);
-        Assert.Contains("studio.example.com wants you to sign in", Texts(panel));
+        Assert.Contains(Loc.F("{0} wants you to sign in", "studio.example.com"), Texts(panel));
         card.SecondaryCommand.Execute(null);
         Assert.Null(await answer.WaitAsync(TimeSpan.FromSeconds(5)));
 

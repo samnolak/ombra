@@ -12,8 +12,16 @@
        digits into "×" and "->" into an arrow, so a hash, size or path the user or omp wrote ("0x1F", "1920x1080") read
        differently from what it is and from what Copy gives -->
   <Style Selector="Window">
+    <Setter Property="ctl:Motion.IsEnabled" Value="True" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
     <Setter Property="FontFeatures" Value="-calt" />
+  </Style>
+  <!-- Motion is limited to opacity and transforms; reduced motion zeroes both window-scoped tokens. -->
+  <Style Selector="Button.row-action, Button.session-action, Button.md-copy, StackPanel.user-meta">
+    <Setter Property="ctl:Motion.Kind" Value="FadeFast" />
+  </Style>
+  <Style Selector="ctl|Icon.chevron, ctl|Icon.tree-chevron">
+    <Setter Property="ctl:Motion.Kind" Value="Chevron" />
   </Style>
   <Style Selector="TextBlock.muted, SelectableTextBlock.muted">
     <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
@@ -244,6 +252,22 @@
     <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
   </Style>
+  <!-- A row of filter / tab chips, one of them chosen (the question card's tabs, the sidebar's status chips): 28 high,
+       regular weight on fill 1; the chosen one the inverse pill -->
+  <Style Selector="Button.chip.choice">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="FontWeight" Value="Normal" />
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="Height" Value="28" />
+  </Style>
+  <Style Selector="Button.chip.choice.current">
+    <Setter Property="Background" Value="{DynamicResource GuiInverse}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnInverse}" />
+  </Style>
+  <Style Selector="Button.chip.choice.current:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiInverseHover}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextOnInverse}" />
+  </Style>
   <Style Selector="Button.round">
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
   </Style>
@@ -369,6 +393,13 @@
     <Setter Property="CornerRadius" Value="10" />
     <Setter Property="Background" Value="{DynamicResource GuiAccent}" />
     <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextOnAccent}" />
+  </Style>
+  <!-- A resolved mark stays listed but is not sent: quiet, its pin neutral -->
+  <Style Selector="Border.attachment.comment-chip.resolved">
+    <Setter Property="Opacity" Value="0.6" />
+  </Style>
+  <Style Selector="Border.comment-chip.resolved Border.pin">
+    <Setter Property="Background" Value="{DynamicResource GuiTextTertiary}" />
   </Style>
   <!-- omp cannot run: a warning mark, a title that says what to do, one primary action -->
   <Style Selector="Border.recover-mark">
@@ -574,16 +605,9 @@
     <Setter Property="Cursor" Value="Hand" />
     <Setter Property="Template">
       <ControlTemplate>
-        <Border x:Name="Track" CornerRadius="10" Background="{DynamicResource GuiBorderStrong}">
-          <Border.Transitions>
-            <Transitions><BrushTransition Property="Background" Duration="0:0:0.12" /></Transitions>
-          </Border.Transitions>
+        <Border x:Name="Track" CornerRadius="10" Background="{DynamicResource GuiBorderStrong}" ctl:Motion.Kind="SwitchTrack">
           <Border x:Name="Knob" Width="16" Height="16" CornerRadius="8" Background="#FFFFFFFF" HorizontalAlignment="Left" Margin="2,2,18,2"
-                  BoxShadow="0 1 2 0 #40000000">
-            <Border.Transitions>
-              <Transitions><ThicknessTransition Property="Margin" Duration="0:0:0.12" Easing="CubicEaseOut" /></Transitions>
-            </Border.Transitions>
-          </Border>
+                  BoxShadow="0 1 2 0 #40000000" ctl:Motion.Kind="SwitchKnob" />
         </Border>
       </ControlTemplate>
     </Setter>
@@ -637,24 +661,33 @@
     <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
     <Setter Property="BoxShadow" Value="{DynamicResource GuiShadow}" />
   </Style>
-  <!-- Status badges (20 high; the soft status colours) -->
+  <!-- Status badges (20 high; the soft status colours). No vertical padding: the text is centred in the full 20 px
+       exactly as a 12 px text beside the badge is centred in its 20 px row, so both land on the same pixel row
+       (with padding 1 the badge's text sat 1–1.5 px above "task · in the background" beside it) -->
   <Style Selector="Border.status">
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
-    <Setter Property="Padding" Value="8,1" />
+    <Setter Property="Padding" Value="8,0" />
     <Setter Property="MinHeight" Value="20" />
     <Setter Property="VerticalAlignment" Value="Center" />
     <Setter Property="Background" Value="{DynamicResource GuiStatusNeutralSoft}" />
   </Style>
-  <!-- Text in the status colour on its own pale fill measures 2.8–3.9:1: badge text is primary, the dot carries the state -->
+  <!-- Text in the status colour on its own pale fill measures 2.8–3.9:1: badge text is primary, the dot carries the state.
+       Centred, its capitals sit in the badge's middle (Inter's line box is as far above the capitals as below the
+       baseline); a TextBlock stretched to the badge drew its text at the top, 2 px high -->
   <Style Selector="Border.status TextBlock">
     <Setter Property="FontSize" Value="12" />
     <Setter Property="FontWeight" Value="Medium" />
+    <Setter Property="VerticalAlignment" Value="Center" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
   </Style>
+  <!-- The dot on the middle of the lowercase letters (x-height), which carry the word in Latin and Cyrillic alike:
+       half a pixel under the badge's middle, the capitals' middle. Drawn there, not laid out: a margin moves it a
+       whole pixel at 100 % -->
   <Style Selector="Border.status Ellipse">
     <Setter Property="Width" Value="6" />
     <Setter Property="Height" Value="6" />
     <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="RenderTransform" Value="translate(0px, 0.5px)" />
     <Setter Property="Fill" Value="{DynamicResource GuiStatusNeutral}" />
   </Style>
   <Style Selector="Border.status.running Ellipse">
@@ -781,28 +814,44 @@
     <Setter Property="Padding" Value="12,1" />
     <Setter Property="MinHeight" Value="0" />
   </Style>
-  <!-- Splitters: the sheets' hairline (GuiChromeEdge), in a wider transparent strip to grab (Fluent's 6 px minimum had
-       drawn the whole strip, a grey bar between the conversation and a side pane) -->
+  <!-- Splitters: the sheets' hairline (GuiChromeEdge), centred in a 7 px transparent strip to grab that overhangs its
+       1 px grid slot by 3 px on each side (Fluent's 6 px minimum had drawn the whole strip, a grey bar between the
+       conversation and a side pane). Hovered or dragged, the hairline turns the focus colour, as the sidebar's grip;
+       a double-click restores the panel's default size (MainWindow.Splitters). -->
   <Style Selector="GridSplitter">
     <Setter Property="Background" Value="{DynamicResource GuiChromeEdge}" />
+    <Setter Property="ZIndex" Value="5" />
   </Style>
   <Style Selector="GridSplitter[ResizeDirection=Columns]">
+    <Setter Property="Width" Value="7" />
+    <Setter Property="Margin" Value="-3,0" />
     <Setter Property="Template">
       <ControlTemplate>
         <Border Background="Transparent">
-          <Border Width="1" HorizontalAlignment="Center" Background="{TemplateBinding Background}" />
+          <Border Name="PART_Line" Width="1" HorizontalAlignment="Center" Background="{TemplateBinding Background}" />
         </Border>
       </ControlTemplate>
     </Setter>
   </Style>
   <Style Selector="GridSplitter[ResizeDirection=Rows]">
+    <Setter Property="Height" Value="7" />
+    <Setter Property="Margin" Value="0,-3" />
     <Setter Property="Template">
       <ControlTemplate>
         <Border Background="Transparent">
-          <Border Height="1" VerticalAlignment="Center" Background="{TemplateBinding Background}" />
+          <Border Name="PART_Line" Height="1" VerticalAlignment="Center" Background="{TemplateBinding Background}" />
         </Border>
       </ControlTemplate>
     </Setter>
+  </Style>
+  <Style Selector="GridSplitter:pointerover /template/ Border#PART_Line, GridSplitter:pressed /template/ Border#PART_Line">
+    <Setter Property="Background" Value="{DynamicResource GuiFocus}" />
+  </Style>
+  <Style Selector="GridSplitter[ResizeDirection=Columns]:pointerover /template/ Border#PART_Line, GridSplitter[ResizeDirection=Columns]:pressed /template/ Border#PART_Line">
+    <Setter Property="Width" Value="2" />
+  </Style>
+  <Style Selector="GridSplitter[ResizeDirection=Rows]:pointerover /template/ Border#PART_Line, GridSplitter[ResizeDirection=Rows]:pressed /template/ Border#PART_Line">
+    <Setter Property="Height" Value="2" />
   </Style>
   <!-- ─────────────── Toolbar pills (the ChatGPT app's panel toolbars) ───────────────
        Related actions share one rounded pill (GuiToolbarPill, 32 high, full radius): back | forward · reload, a file's

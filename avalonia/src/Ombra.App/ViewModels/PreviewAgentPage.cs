@@ -39,6 +39,16 @@ internal sealed class PreviewAgentPage(MainViewModel main, PreviewTab tab) : IAg
 
     public IDisposable? BeginAction() => tab.AgentAction();
 
+    public IReadOnlyList<AgentDevicePreset> DevicePresets => PreviewViewModel.AgentDevicePresets;
+
+    // The pane's device mode (every tab's, as the device bar sets it); the user sees it in the bar and can change it.
+    public async Task<AgentDeviceState> SetDeviceAsync(AgentDeviceRequest? device, CancellationToken ct) =>
+        await Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            main.Preview.NoteAgentActivity();
+            return main.Preview.ApplyAgentDevice(device);
+        });
+
     public async Task ShowAsync(CancellationToken ct) =>
         await Dispatcher.UIThread.InvokeAsync(() =>
         {

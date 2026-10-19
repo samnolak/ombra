@@ -4,6 +4,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using Ombra.App.Localization;
 using Ombra.App.Services.Runtime;
 using Ombra.ClientCore;
 using Ombra.Rpc;
@@ -48,8 +49,8 @@ public sealed class RuntimeInstallerTests
         }
     }
 
-    /// <summary>Scripted bun: <c>install</c> lays out omp's CLI entry, <c>--version</c> prints <paramref name="version"/>.</summary>
-    internal sealed class FakeBun(int installExit = 0, string version = RuntimePack.OmpVersion)
+    /// <summary>Scripted Bun installs an untouched dependency CLI; the owned host self-check reports its protocol.</summary>
+    internal sealed class FakeBun(int installExit = 0, string version = RuntimePack.OmpVersion, Action<string>? afterInstall = null, int protocolVersion = 1)
     {
         public List<ProcessStartInfo> Calls { get; } = [];
 
@@ -60,15 +61,17 @@ public sealed class RuntimeInstallerTests
             if (args[0] == "install")
             {
                 if (installExit != 0) return Task.FromResult(new ProcessResult(installExit, "resolving…\nerror: IntegrityCheckFailed for \"left-pad\"\n"));
-                var cli = Path.Combine(psi.WorkingDirectory, RuntimePack.CliEntry);
+                var cli = Path.Combine(psi.WorkingDirectory, RuntimePack.HistoricalCliEntry);
                 Directory.CreateDirectory(Path.GetDirectoryName(cli)!);
-                File.WriteAllText(cli, "// omp");
+                File.WriteAllText(cli, "// unmodified npm dependency");
+                afterInstall?.Invoke(psi.WorkingDirectory);
                 Directory.CreateDirectory(psi.Environment["BUN_INSTALL_CACHE_DIR"]!);
                 return Task.FromResult(new ProcessResult(0, "installed 412 packages"));
             }
-            return Task.FromResult(new ProcessResult(0, version + "\n"));
+            return Task.FromResult(new ProcessResult(0, System.Text.Json.JsonSerializer.Serialize(new { engineProtocolVersion = protocolVersion, ompVersion = version }) + "\n"));
         }
     }
+
 
     internal static RuntimeInstaller Installer(string root, byte[] tarball, FakeBun bun, string? integrity = null, Registry? registry = null) =>
         new(new HttpClient(registry ?? new Registry(tarball)), root, Key, "https://registry.test",
@@ -100,23 +103,26 @@ public sealed class RuntimeInstallerTests
         Assert.Equal("#!/bin/sh\necho fake bun\n", File.ReadAllText(rt.Bun));
         if (!OperatingSystem.IsWindows()) Assert.True(File.GetUnixFileMode(rt.Bun).HasFlag(UnixFileMode.UserExecute));
         Assert.True(File.Exists(rt.Cli));
+        Assert.True(File.Exists(rt.Host));
+        Assert.Equal("// unmodified npm dependency", File.ReadAllText(Path.Combine(rt.Directory, "omp", RuntimePack.HistoricalCliEntry)));
         Assert.Equal(rt, installer.FindInstalled());
         Assert.Empty(Leftovers(root));
         Assert.False(File.Exists(Path.Combine(rt.Directory, "bun.tgz")));
         Assert.False(Directory.Exists(Path.Combine(rt.Directory, "cache")));
-        Assert.Contains("Installed", stages);
+        Assert.Contains(Loc.T("Installed"), stages);
 
-        // Pinned: frozen lockfile, no lifecycle scripts, a private cache, the pack's own files.
+        // Pinned: frozen lockfile, no lifecycle scripts, bounded network fan-out, a private cache, the pack's own files.
         var install = bun.Calls[0];
-        Assert.Equal(["install", "--frozen-lockfile", "--ignore-scripts", "--no-progress"], install.ArgumentList.ToArray());
         Assert.StartsWith(root, install.Environment["BUN_INSTALL_CACHE_DIR"]);
-        Assert.Equal(File.ReadAllText(RepoFile("runtime/packs/omp-18.8.0-bun-1.4.2/bun.lock")), File.ReadAllText(Path.Combine(rt.Directory, "omp", "bun.lock")));
-        // omp is checked in the staging folder, before it replaces anything.
+        Assert.Equal(File.ReadAllText(RepoFile("runtime/packs/" + RuntimePack.SourceDirectoryName + "/bun.lock")), File.ReadAllText(Path.Combine(rt.Directory, "omp", "bun.lock")));
+        // The actual owned host imports its dependencies in staging, before anything live is replaced.
         var check = bun.Calls[1].ArgumentList.ToArray();
-        Assert.Equal("--no-install", check[0]);
-        Assert.EndsWith(RuntimePack.CliEntry.Replace('/', Path.DirectorySeparatorChar), check[1]);
-        Assert.Contains(".staging-", check[1]);
-        Assert.Equal("--version", check[2]);
+        Assert.StartsWith("--config=", check[0]);
+        Assert.Equal("--no-env-file", check[1]);
+        Assert.Equal("--no-install", check[2]);
+        Assert.EndsWith(RuntimePack.HostEntry.Replace('/', Path.DirectorySeparatorChar), check[3]);
+        Assert.Contains(".staging-", check[3]);
+        Assert.Equal("--self-check", check[4]);
         // Regression (package E2E): running omp wrote Bun's transpiler cache to the user's ~/.bun. Every Bun the
         // installer starts keeps it in the pack folder being built.
         Assert.All(bun.Calls, c => Assert.Equal(InstalledRuntime.TranspilerCacheIn(Path.GetDirectoryName(c.WorkingDirectory)!),
@@ -130,7 +136,8 @@ public sealed class RuntimeInstallerTests
         var filled = rt.ApplyTo(new OmpRuntimeOptions { Profile = "work" });
         Assert.Equal("/r/bun/bun", filled.Command);
         // The opened project's bunfig.toml and .env never reach Bun (security audit F-1).
-        Assert.Equal(["--config=" + Path.Combine("/r", "omp", "bunfig.toml"), "--no-env-file", "--no-install", "/r/omp/cli.ts"], filled.PrefixArgs);
+        Assert.Equal(["--config=" + Path.Combine("/r", "omp", "bunfig.toml"), "--no-env-file", "--no-install", rt.Host], filled.PrefixArgs);
+        Assert.Equal(["--config=" + Path.Combine("/r", "omp", "bunfig.toml"), "--no-env-file", "--no-install", rt.Cli], filled.ManagementPrefixArgs);
         Assert.Equal("work", filled.Profile);
         // Bun's transpiler cache stays in the pack, not the user's ~/.bun; the user's own settings are kept.
         Assert.Equal(Path.Combine("/r", "transpiler-cache"), filled.Environment[InstalledRuntime.TranspilerCacheVariable]);
@@ -150,7 +157,7 @@ public sealed class RuntimeInstallerTests
         var bun = new FakeBun();
         var installer = Installer(root, Tarball(), bun, integrity: Integrity(Tarball("bin/other")));
         var e = await Assert.ThrowsAsync<InvalidDataException>(() => installer.InstallAsync(null, CancellationToken.None));
-        Assert.Contains("integrity", e.Message);
+        Assert.Contains(Loc.F("{0}@{1} does not match its pinned integrity.", "@oven/bun-" + Key, RuntimePack.BunVersion), e.Message);
         Assert.Empty(bun.Calls); // nothing from the unverified tarball was run
         Assert.Empty(Entries(root));
     }
@@ -174,6 +181,18 @@ public sealed class RuntimeInstallerTests
         var installer = Installer(root, Tarball(), new FakeBun(version: "18.3.0"));
         var e = await Assert.ThrowsAsync<InvalidDataException>(() => installer.InstallAsync(null, CancellationToken.None));
         Assert.Contains(RuntimePack.OmpVersion, e.Message);
+        Assert.Null(installer.FindInstalled());
+        Assert.Empty(Entries(root));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public async Task Engine_reporting_another_protocol_is_not_installed(int protocolVersion)
+    {
+        var root = TestProcesses.TempDir("rt-protocol");
+        var installer = Installer(root, Tarball(), new FakeBun(protocolVersion: protocolVersion));
+        await Assert.ThrowsAsync<InvalidDataException>(() => installer.InstallAsync(null, CancellationToken.None));
         Assert.Null(installer.FindInstalled());
         Assert.Empty(Entries(root));
     }
@@ -237,7 +256,7 @@ public sealed class RuntimeInstallerTests
         var tgz = Tarball();
         var installer = Trickling(root, tgz, () => new TrickleStream(tgz, 16, TimeSpan.Zero, stallAfter: 2), TimeSpan.FromMilliseconds(300));
         var e = await Assert.ThrowsAsync<TimeoutException>(() => installer.InstallAsync(null, CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(20));
-        Assert.Contains("stalled", e.Message);
+        Assert.Contains(Loc.F("The download stalled (no data for {0:0} s). Check the connection and try again.", 0.3), e.Message);
         Assert.Empty(Entries(root));
     }
 
@@ -280,7 +299,7 @@ public sealed class RuntimeInstallerTests
         {
             var bun = new FakeBun();
             var e = await Assert.ThrowsAsync<IOException>(() => Installer(root, Tarball(), bun).InstallAsync(null, CancellationToken.None));
-            Assert.Contains("Another installation", e.Message);
+            Assert.Contains(Loc.T("Another installation of the omp runtime is running; try again when it has finished."), e.Message);
             Assert.Empty(bun.Calls);
         }
         Assert.NotNull(await Installer(root, Tarball(), new FakeBun()).InstallAsync(null, CancellationToken.None)); // free again
@@ -297,6 +316,78 @@ public sealed class RuntimeInstallerTests
         Assert.Null(installer.FindInstalled());
         File.WriteAllText(Path.Combine(root, RuntimePack.Name, "installed.json"), "not json");
         Assert.Null(installer.FindInstalled());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not json")]
+    [InlineData("{\"pack\":\"someone-elses-pack\"}")]
+    public async Task Install_target_collision_is_rejected_without_changing_unowned_content(string? marker)
+    {
+        var root = TestProcesses.TempDir("rt-unowned-collision");
+        var installer = Installer(root, Tarball(), new FakeBun());
+        var nested = Path.Combine(installer.TargetDirectory, "personal", "nested");
+        Directory.CreateDirectory(nested);
+        var sentinel = Path.Combine(nested, "keep.bin");
+        byte[] original = [0, 1, 127, 255, 10];
+        File.WriteAllBytes(sentinel, original);
+        var markerPath = Path.Combine(installer.TargetDirectory, "installed.json");
+        if (marker is not null) File.WriteAllText(markerPath, marker);
+
+        var failure = await Record.ExceptionAsync(() => installer.InstallAsync(null, CancellationToken.None));
+
+        Assert.True(File.Exists(sentinel), "An unowned target collision must not remove its existing content.");
+        Assert.Equal(original, File.ReadAllBytes(sentinel));
+        if (marker is null) Assert.False(File.Exists(markerPath));
+        else Assert.Equal(marker, File.ReadAllText(markerPath));
+        Assert.IsAssignableFrom<IOException>(failure);
+        Assert.Empty(Leftovers(root));
+        Assert.Null(installer.FindInstalled());
+    }
+
+    [Fact]
+    public async Task Install_target_collision_reparse_point_is_rejected_even_with_valid_owned_marker()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Creating directory symlinks requires Windows privileges; Unix exercises the portable reparse guard.");
+        var tarball = Tarball();
+        var external = await Installer(TestProcesses.TempDir("rt-symlink-external"), tarball, new FakeBun())
+            .InstallAsync(null, CancellationToken.None);
+        var sentinel = Path.Combine(external.Directory, "keep.bin");
+        byte[] original = [0, 1, 127, 255, 10];
+        File.WriteAllBytes(sentinel, original);
+        var markerPath = Path.Combine(external.Directory, "installed.json");
+        var marker = File.ReadAllBytes(markerPath);
+        var installer = Installer(TestProcesses.TempDir("rt-symlink-collision"), tarball, new FakeBun());
+        Directory.CreateSymbolicLink(installer.TargetDirectory, external.Directory);
+
+        var failure = await Record.ExceptionAsync(() => installer.InstallAsync(null, CancellationToken.None));
+
+        Assert.True(File.Exists(sentinel), "The directory behind a target symlink must remain untouched.");
+        Assert.Equal(original, File.ReadAllBytes(sentinel));
+        Assert.Equal(marker, File.ReadAllBytes(markerPath));
+        Assert.True(File.GetAttributes(installer.TargetDirectory).HasFlag(FileAttributes.ReparsePoint),
+            "An installer must not replace an existing target symlink.");
+        Assert.Equal(external.Directory, new DirectoryInfo(installer.TargetDirectory).LinkTarget);
+        Assert.IsAssignableFrom<IOException>(failure);
+        Assert.Empty(Leftovers(installer.Root));
+    }
+
+    [Fact]
+    public async Task Install_target_owned_marker_allows_repair_of_an_incomplete_install()
+    {
+        var root = TestProcesses.TempDir("rt-owned-repair");
+        var tarball = Tarball();
+        var installer = Installer(root, tarball, new FakeBun());
+        var original = await installer.InstallAsync(null, CancellationToken.None);
+        File.Delete(original.Host);
+        Assert.Null(installer.FindInstalled());
+
+        var repaired = await installer.InstallAsync(null, CancellationToken.None);
+
+        Assert.Equal(original, repaired);
+        Assert.True(File.Exists(repaired.Host));
+        Assert.Equal(repaired, installer.FindInstalled());
+        Assert.Empty(Leftovers(root));
     }
 
     [Fact]
@@ -321,9 +412,9 @@ public sealed class RuntimeInstallerTests
         foreach (var name in RuntimePack.PackFiles)
         {
             using var reader = new StreamReader(RuntimePack.OpenPackFile(name));
-            Assert.Equal(File.ReadAllText(RepoFile("runtime/packs/omp-18.8.0-bun-1.4.2/" + name)), reader.ReadToEnd());
+            Assert.Equal(File.ReadAllText(RepoFile("runtime/packs/" + RuntimePack.SourceDirectoryName + "/" + name)), reader.ReadToEnd());
         }
-        Assert.Contains("\"@oh-my-pi/pi-coding-agent\": \"18.8.0\"", File.ReadAllText(RepoFile("runtime/packs/omp-18.8.0-bun-1.4.2/package.json")));
+        Assert.Contains("\"@oh-my-pi/pi-coding-agent\": \"18.8.0\"", File.ReadAllText(RepoFile("runtime/packs/" + RuntimePack.SourceDirectoryName + "/package.json")));
     }
 
     [Fact]

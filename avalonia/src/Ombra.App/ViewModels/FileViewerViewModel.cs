@@ -5,6 +5,7 @@ using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Ombra.App.Services;
+using Ombra.ClientCore;
 
 namespace Ombra.App.ViewModels;
 
@@ -51,12 +52,22 @@ public sealed partial class FileViewerViewModel : ObservableObject
     public bool IsMarkdown { get; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowCode), nameof(ShowMarkdown), nameof(MarkdownText), nameof(ShowImage), nameof(ShowState), nameof(IsLoading), nameof(IsMissing), nameof(CanShowHead), nameof(CanToggleSource))]
+    [NotifyPropertyChangedFor(nameof(ShowCode), nameof(ShowEditor), nameof(ShowPreview), nameof(ShowMarkdown), nameof(MarkdownText), nameof(ShowImage), nameof(ShowState), nameof(IsLoading), nameof(IsMissing), nameof(CanShowHead), nameof(CanToggleSource))]
     private ViewerState _state = ViewerState.Loading;
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(MarkdownText))]
     private string _text = "";
+    /// <summary>The canonical buffer for editable files, otherwise a read-only preview.</summary>
+    public string Text
+    {
+        get => Document?.Buffer.Text ?? _text;
+        private set
+        {
+            _text = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(MarkdownText));
+            OnPropertyChanged(nameof(PreviewText));
+        }
+    }
 
     /// <summary>What the Markdown view renders: the text of a Markdown file shown rendered, else nothing (rendering any
     /// other text as Markdown, even hidden, cost seconds for a large file).</summary>
@@ -85,7 +96,7 @@ public sealed partial class FileViewerViewModel : ObservableObject
 
     /// <summary>A Markdown file as its source instead of rendered.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowCode), nameof(ShowMarkdown), nameof(MarkdownText), nameof(SourceTip))]
+    [NotifyPropertyChangedFor(nameof(ShowCode), nameof(ShowEditor), nameof(ShowPreview), nameof(ShowMarkdown), nameof(MarkdownText), nameof(SourceTip))]
     private bool _showSource;
 
     /// <summary>Only the start of a large file was read.</summary>
@@ -96,6 +107,8 @@ public sealed partial class FileViewerViewModel : ObservableObject
     public bool IsLoading => State == ViewerState.Loading;
     public bool IsMissing => State == ViewerState.Missing;
     public bool ShowCode => State == ViewerState.Text && (!IsMarkdown || ShowSource);
+    public bool ShowEditor => ShowCode && Document is not null;
+    public bool ShowPreview => ShowCode && Document is null;
     public bool ShowMarkdown => State == ViewerState.Text && IsMarkdown && !ShowSource;
     public bool ShowImage => State == ViewerState.Image;
     public bool ShowState => State is ViewerState.Binary or ViewerState.TooLarge or ViewerState.Missing or ViewerState.Error;
@@ -141,6 +154,7 @@ public sealed partial class FileViewerViewModel : ObservableObject
     /// <summary>The viewer was closed or replaced: its image goes once the view no longer draws it.</summary>
     internal void Release()
     {
+        DetachDocument();
         var old = Image;
         Image = null;
         DisposeLater(old);
@@ -234,6 +248,7 @@ public sealed partial class FileViewerViewModel : ObservableObject
     /// <summary>Text has no NUL bytes (UTF-16 with a byte order mark aside) and few control characters.</summary>
     internal static bool IsBinary(ReadOnlySpan<byte> bytes)
     {
+        if (bytes.StartsWith<byte>([0, 0, 0xFE, 0xFF])) return false; // UTF-32 big endian BOM
         if (bytes.Length >= 2 && (bytes[0] == 0xFF && bytes[1] == 0xFE || bytes[0] == 0xFE && bytes[1] == 0xFF)) return false;
         var sample = bytes[..Math.Min(bytes.Length, 8192)];
         if (sample.IndexOf((byte)0) >= 0) return true;
@@ -267,7 +282,7 @@ public sealed partial class FileViewerViewModel : ObservableObject
             var line = lines[i].Contains('\t') ? lines[i].Replace("\t", "    ") : lines[i];
             if (line.Length > MaxLineChars)
             {
-                line = line[..MaxLineChars] + " …";
+                line = line[..GraphemeText.PrefixLength(line, MaxLineChars)] + " …";
                 cut = true;
             }
             if (i > 0) sb.Append('\n');

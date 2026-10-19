@@ -1,0 +1,27 @@
+Ombra native editor source dependencies
+
+AvaloniaEdit / AvaloniaEdit.TextMate
+https://github.com/AvaloniaUI/AvaloniaEdit
+Pinned commit be976eacf40ed3c6992ca3157773e8f1e7315eae
+MIT; Copyright (c) 2017 Eli Arbel. See AvaloniaEdit/LICENSE.
+Individual source files also preserve the MIT copyright notices of
+AlphaSierraPapa / the SharpDevelop Team and other upstream contributors.
+Ombra maintains the project integration and discontiguous MultiSelection extension.
+
+TextMateSharp / TextMateSharp.Grammars
+https://github.com/danipen/TextMateSharp
+Pinned commit e0db45be30278c0f3f80302c31f498c8f8f1c4f2
+MIT; Copyright (c) 2021 Daniel Peñalba. See TextMateSharp/LICENSE.md.
+Bundled grammar package.json files retain their publisher, repository and license
+metadata; syntax files retain original notices. Swift grammar MIT notices are in
+TextMateSharp/src/TextMateSharp.Grammars/Resources/Grammars/swift/LICENSE.md.
+
+Onigwrap 1.0.11 remains an upstream native/managed package dependency.
+Package repository commit dd8a1cbbe3190c18033b96f2922b95c1761ae793
+https://github.com/aikawayataro/Onigwrap
+MIT; Copyright (c) 2024 Aikawa Yataro. Bundled Oniguruma is BSD-2-Clause.
+Full upstream notices: Onigwrap-THIRD-PARTY-NOTICES.txt.
+
+Exact source import boundaries and local adaptations: editor-sources.json.
+Native dependencies and platform interaction gates must be exercised before release;
+vendoring source does not imply native validation has been performed.

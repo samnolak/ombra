@@ -6,6 +6,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.ClientCore;
@@ -132,8 +133,8 @@ public sealed class CustomProvidersTests
         var page = vm.CustomProviders;
         page.Servers = Servers(stub);
         await vm.OpenSettingsAtAsync("providers");
-        await Until(() => page.LocalServers.Count == 4 && page.LocalServers.All(r => !r.Checking && r.Status != "Checking…"), "local servers checked");
-        Assert.Equal(["Running · 2 models", "Not running", "Not running", "Not running"], page.LocalServers.Select(r => r.Status));
+        await Until(() => page.LocalServers.Count == 4 && page.LocalServers.All(r => !r.Checking && r.Status != Loc.T("Checking…")), "local servers checked");
+        Assert.Equal([Loc.T("Running · ") + Loc.F("{0} models", 2), Loc.T("Not running"), Loc.T("Not running"), Loc.T("Not running")], page.LocalServers.Select(r => r.Status));
         Assert.True(page.LocalServers[0].IsRunning);
         var work = Assert.Single(page.CustomProviders);
         Assert.False(work.IsEditable);
@@ -150,7 +151,7 @@ public sealed class CustomProvidersTests
         Assert.Equal(["work", "ollama"], config.Providers.Select(p => p.Id));
         Assert.True(config.Providers[1].SameAs(new ModelProviderEntry { Id = "ollama", BaseUrl = stub.Root, Api = ModelApis.Responses, NoAuth = true, Discovery = "ollama" }));
         Assert.StartsWith(UserModels, File.ReadAllText(Path.Combine(agent, "models.yml")));
-        Assert.Contains("Added Ollama.", page.Message);
+        Assert.Contains(Loc.F("Added {0}.", "Ollama"), page.Message);
         await Until(() => page.LocalServers[0].IsAdded && page.LocalServers[0].IsRunning, "listed as added");
         await WorkspaceFixture.Settle();
         Shot(w, "ui-providers-local");
@@ -186,18 +187,18 @@ public sealed class CustomProvidersTests
 
         page.BeginAddCommand.Execute(null);
         await page.SaveFormCommand.ExecuteAsync(null);
-        Assert.Contains("Give the provider a name", page.FormError);
+        Assert.Contains(Loc.T("Give the provider a name, such as My server."), page.FormError);
         page.FormName = "My Server";
-        Assert.Equal("omp will call it my-server.", page.FormIdNote);
+        Assert.Equal(Loc.F("omp will call it {0}.", "my-server"), page.FormIdNote);
         page.FormBaseUrl = stub.Root;
         page.FormApiKey = "sk-test-key";
         await page.TestCommand.ExecuteAsync(null);
         Assert.False(page.TestOk);
-        Assert.Contains($"Use {stub.Root}/v1 as the address", page.TestResult);
+        Assert.Contains(Loc.F("Nothing at {0}, but {1} answers with {2}. Use {1} as the address.", "\0", stub.Root + "/v1", "\0").Split('\0')[^1], page.TestResult);
         page.FormBaseUrl = stub.Root + "/v1";
         await page.TestCommand.ExecuteAsync(null);
         Assert.True(page.TestOk, page.TestResult);
-        Assert.Equal("Connected: 2 models (stub-small, stub-large).", page.TestResult);
+        Assert.Equal(Loc.F("Connected: {0} ({1}).", Loc.F("{0} models", 2), "stub-small, stub-large"), page.TestResult);
         Assert.Contains(("/v1/models", "Bearer sk-test-key"), stub.Requests);
         Assert.DoesNotContain("sk-test-key", page.TestResult);
         await WorkspaceFixture.Settle();
@@ -223,7 +224,7 @@ public sealed class CustomProvidersTests
         Assert.Equal(["work", "my-server"], page.CustomProviders.Select(p => p.Id));
         var mine = page.CustomProviders[1];
         Assert.True(mine.IsEditable);
-        Assert.Equal($"{stub.Root}/v1 · Chat Completions · models from the server", mine.Detail);
+        Assert.Equal($"{stub.Root}/v1 · Chat Completions · {Loc.T("models from the server")}", mine.Detail);
 
         // Edit: a listed model set, no key
         mine.EditCommand.Execute(null);
@@ -243,7 +244,7 @@ public sealed class CustomProvidersTests
         var broken = "providers:\n  my-server: [unclosed\n";
         File.WriteAllText(Path.Combine(agent, "models.yml"), broken);
         await page.LoadAsync();
-        Assert.Contains("not valid YAML (line", page.LoadError);
+        Assert.Contains(Loc.F("{0} is not valid YAML (line {1}): {2}", "\0", "\0", "\0").Split('\0')[1], page.LoadError);
         Assert.False(page.CanChange);
         Assert.Empty(page.CustomProviders);
         Assert.Equal(broken, File.ReadAllText(Path.Combine(agent, "models.yml")));
@@ -267,7 +268,7 @@ public sealed class CustomProvidersTests
         var page = vm.CustomProviders;
         page.Servers = [];
         await page.LoadAsync();
-        Assert.Contains("agent folder", page.LoadError);
+        Assert.Contains(Loc.T("Couldn't find omp's agent folder (omp config path did not answer), so models.yml can't be read here."), page.LoadError);
         Assert.False(page.CanChange);
         await vm.DisposeAsync();
     }

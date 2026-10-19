@@ -21,11 +21,11 @@ public sealed partial class StepGroupRowViewModel : RowViewModel
 
     private IReadOnlyList<RowViewModel> _span = [];
 
-    /// <summary>A group is keyed by its first step, whose key it takes (it has no item of its own).</summary>
+    /// <summary>The original first step supplies a stable identity, even if an older page extends the group before it.</summary>
     internal StepGroupRowViewModel(ToolRowViewModel first) : base(first.Model) => Leader = first;
 
     /// <summary>The first step: the group's line sits right before it.</summary>
-    internal ToolRowViewModel Leader { get; }
+    internal ToolRowViewModel Leader { get; private set; }
 
     /// <summary>The steps, in order.</summary>
     public IReadOnlyList<ToolRowViewModel> Steps { get; private set; } = [];
@@ -37,6 +37,7 @@ public sealed partial class StepGroupRowViewModel : RowViewModel
     {
         _span = span;
         Steps = [.. span.OfType<ToolRowViewModel>()];
+        Leader = Steps[0];
         var running = Steps.LastOrDefault(s => s.IsRunning);
         IsRunning = running is not null;
         Kind = running?.Kind ?? Steps[0].Kind;
@@ -113,26 +114,37 @@ internal static class StepGroups
         Close();
         if (existing.Count == 0 && wanted.Count == 0) return;
 
-        // Lines kept for the same first step (with their state), new ones before their first step, the others removed
+        // Reuse an overlapping group's line and expansion state when an older page supplies a new first step.
         var groupOf = new Dictionary<RowViewModel, StepGroupRowViewModel>(ReferenceEqualityComparer.Instance);
         var groups = new List<(StepGroupRowViewModel Group, List<RowViewModel> Span)>(wanted.Count);
         foreach (var span in wanted)
         {
             var leader = (ToolRowViewModel)span[0];
-            if (!existing.Remove(leader, out var group)) group = new StepGroupRowViewModel(leader);
+            if (!existing.Remove(leader, out var group))
+            {
+                foreach (var member in span)
+                    if (existing.Remove(member, out group)) break;
+                group ??= new StepGroupRowViewModel(leader);
+            }
             groups.Add((group, span));
             foreach (var row in span) groupOf[row] = group;
         }
         for (var i = rows.Count - 1; i >= start; i--)
             if (rows[i] is StepGroupRowViewModel g && existing.ContainsKey(g.Leader)) rows.RemoveAt(i);
         foreach (var (group, span) in groups)
-            if (IndexFromEnd(rows, group) < 0)
+        {
+            var current = IndexFromEnd(rows, group);
+            var at = IndexFromEnd(rows, span[0]);
+            if (current >= 0 && current == at - 1) continue;
+            if (current >= 0)
             {
-                // A group born inside a folded turn is folded with it
-                var at = IndexFromEnd(rows, span[0]);
-                group.IsTurnFolded = rows[at].IsTurnFolded;
-                rows.Insert(at, group);
+                rows.RemoveAt(current);
+                at = IndexFromEnd(rows, span[0]);
             }
+            // A group born inside a folded turn is folded with it.
+            group.IsTurnFolded = rows[at].IsTurnFolded;
+            rows.Insert(at, group);
+        }
 
         for (var i = start; i < rows.Count; i++)
         {

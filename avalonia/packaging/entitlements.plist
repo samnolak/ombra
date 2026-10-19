@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Hardened runtime exceptions for a Developer ID signature (tools/package/sign.sh). .NET generates code at run time
-     (JIT); the microphone is used for dictation only after the user starts it (NSMicrophoneUsageDescription in Info.plist). -->
+<!-- Hardened runtime exceptions for every macOS signing mode (tools/package/sign.sh). .NET generates code at run time
+     (JIT); retain the existing executable-memory exception until native dependencies are verified without it.
+     The microphone is used for dictation only after the user starts it (NSMicrophoneUsageDescription in Info.plist). -->
 <plist version="1.0">
 <dict>
   <key>com.apple.security.cs.allow-jit</key>

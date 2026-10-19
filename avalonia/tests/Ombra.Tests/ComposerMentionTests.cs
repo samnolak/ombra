@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.ClientCore;
@@ -118,7 +119,7 @@ public sealed class ComposerMentionTests
         Assert.False(vm.IsCommandMenuOpen);
         w.KeyTextInput(" @zzqqxx");
         await FileTestRepo.Until(() => vm.IsCommandMenuOpen && vm.ShowNoCommandMatch, "no match row");
-        Assert.Equal("No files match “zzqqxx”", vm.NoMatchText);
+        Assert.Equal(Loc.F("No files match “{0}”", "zzqqxx"), vm.NoMatchText);
         Assert.True(w.FindControl<Border>("CommandNoMatch")!.IsEffectivelyVisible);
 
         // The slash menu still works and says its own "no match"
@@ -126,7 +127,7 @@ public sealed class ComposerMentionTests
         w.KeyTextInput("/zzz");
         Dispatcher.UIThread.RunJobs();
         Assert.True(vm.ShowNoCommandMatch);
-        Assert.Equal("No matching commands", vm.NoMatchText);
+        Assert.Equal(Loc.T("No matching commands"), vm.NoMatchText);
         await vm.DisposeAsync();
         w.Close();
     }
@@ -171,6 +172,67 @@ public sealed class ComposerMentionTests
         await FileTestRepo.Until(() => vm.Phase == SessionPhase.Ready, "stopped by the next Esc");
         await vm.DisposeAsync();
         w.Close();
+    }
+
+    [Theory]
+    [InlineData("caf\u00e9", "cafe\u0301", "r\u00e9sum\u00e9", "re\u0301sume\u0301")]
+    [InlineData("cafe\u0301", "caf\u00e9", "re\u0301sume\u0301", "r\u00e9sum\u00e9")]
+    public void Mentions_match_canonical_names_and_nested_folder_prefixes_using_original_paths(
+        string folderQuery, string folder, string nameQuery, string name)
+    {
+        var original = $"{folder}/nested/{name}.txt";
+        var index = MainViewModel.BuildMentionIndex([original, $"{folder}/top.txt", $"{folder}/nested/deeper/other.txt"]);
+        Assert.Equal((original, false), Assert.Single(MainViewModel.SearchMentions(index, nameQuery, 10, CancellationToken.None)));
+        Assert.Equal(
+            [($"{folder}/nested", true), ($"{folder}/top.txt", false)],
+            MainViewModel.SearchMentions(index, folderQuery + "/", 10, CancellationToken.None));
+        Assert.Equal(
+            [($"{folder}/nested/deeper", true), (original, false)],
+            MainViewModel.SearchMentions(index, folderQuery + "/nested/", 10, CancellationToken.None));
+        Assert.Equal("@" + original, FilesViewModel.Mention(original));
+    }
+
+    [Fact]
+    public void Mentions_do_not_merge_distinct_original_spellings_and_accept_malformed_utf16()
+    {
+        string[] originals = ["caf\u00e9.txt", "cafe\u0301.txt"];
+        var index = MainViewModel.BuildMentionIndex(originals);
+        var hits = MainViewModel.SearchMentions(index, "caf\u00e9", 10, CancellationToken.None);
+        Assert.Equal(originals, hits.Select(h => h.Path));
+        const string malformed = "bad\uD800/file.txt";
+        index = MainViewModel.BuildMentionIndex([malformed]);
+        Assert.Equal((malformed, false),
+            Assert.Single(MainViewModel.SearchMentions(index, "bad\uD800/", 10, CancellationToken.None)));
+    }
+
+    [AvaloniaFact]
+    public async Task A_decomposed_filename_is_displayed_and_inserted_unchanged_from_a_composed_query()
+    {
+        var root = TestProcesses.TempDir("mention-nfd");
+        const string folder = "cafe\u0301";
+        const string filename = "re\u0301sume\u0301.txt";
+        Directory.CreateDirectory(Path.Combine(root, folder));
+        File.WriteAllText(Path.Combine(root, folder, filename), "decomposed filename");
+        var original = Directory.GetFiles(Path.Combine(root, folder)).Single();
+        var relative = Path.GetRelativePath(root, original).Replace(Path.DirectorySeparatorChar, '/');
+        var (w, vm, _) = await OpenAsync(root);
+        try
+        {
+            w.KeyTextInput("@caf\u00e9/");
+            await FileTestRepo.Until(() => vm.CommandSuggestions.Any(c => c.Label == Path.GetFileName(original)), "canonical folder listing");
+            Assert.Equal("@" + relative, vm.CommandSuggestions.Single().Insert);
+            w.KeyTextInput("r\u00e9sum\u00e9");
+            await FileTestRepo.Until(() => vm.CommandSuggestions.Count == 1 && vm.CommandSuggestions[0].Insert == "@" + relative,
+                "canonical filename match");
+            Assert.Equal(Path.GetFileName(original), vm.CommandSuggestions[0].Label);
+            Key(w, Avalonia.Input.Key.Tab, PhysicalKey.Tab);
+            Assert.Equal("@" + relative + " ", vm.ComposerText);
+        }
+        finally
+        {
+            await vm.DisposeAsync();
+            w.Close();
+        }
     }
 
     [Fact]

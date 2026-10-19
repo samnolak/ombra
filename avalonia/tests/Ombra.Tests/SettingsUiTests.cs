@@ -8,6 +8,7 @@ using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.ClientCore;
@@ -54,6 +55,21 @@ public sealed class SettingsUiTests
     }
 
     [AvaloniaFact]
+    public async Task Browser_environment_setting_restarts_the_shared_engine()
+    {
+        var (w, vm, session, store) = await OpenAsync();
+        await vm.OpenSettingsCommand.ExecuteAsync(null);
+        var pid = session.ProcessId;
+        vm.AgentUsesGuiBrowser = false;
+        await Until(() => session.ProcessId is not null && session.ProcessId != pid
+            && vm.Phase == SessionPhase.Ready && vm.SettingsMessage == Loc.T("Saved. omp restarted with the new settings."), "browser setting applied");
+        Assert.False(store.Load().AgentUsesGuiBrowser);
+        Assert.Equal("write", session.CurrentLaunch.ApprovalMode);
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
     public async Task Model_picker_lists_omps_models_and_switches()
     {
         var (w, vm, _, _) = await OpenAsync();
@@ -77,19 +93,21 @@ public sealed class SettingsUiTests
         var (w, vm, _, _) = await OpenAsync(scenario: "many-providers");
         var list = w.FindControl<ListBox>("ModelList")!;
         string Rows() => string.Join(" | ", vm.Models.Select(m => m.IsProvider ? $"[{m.Name}: {m.Detail}]" : $"{m.Name}: {m.Detail}"));
+        static string Models(int n) => n == 1 ? Loc.T("1 model") : Loc.F("{0} models", n);
+        static string Context(int k) => Loc.F("{0:N0}k context", k);
         void Key_(Key key) => list.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = key, Source = list.ContainerFromIndex(list.SelectedIndex) });
         w.FindControl<Button>("ModelButton")!.Command!.Execute(null);
 
         // The current model's provider is open (its rows without the provider's name), the others only headings
         await Until(() => vm.IsModelMenuOpen && vm.Models.Count == 5, "headings listed");
-        Assert.Equal("[fake: 2 models] | Fake Model: 128k context | Fake Vision: 32k context | [anthropic: 3 models] | [openai-codex: 1 model]", Rows());
+        Assert.Equal($"[fake: {Models(2)}] | Fake Model: {Context(128)} | Fake Vision: {Context(32)} | [anthropic: {Models(3)}] | [openai-codex: {Models(1)}]", Rows());
         Shot(w, "ui-model-picker-providers");
 
         // A heading opens in place, the menu stays open; its families still open to their versions
         vm.ChooseModelCommand.Execute(vm.Models.Single(m => m.Name == "anthropic"));
         Assert.True(vm.IsModelMenuOpen);
-        Assert.Equal("[fake: 2 models] | Fake Model: 128k context | Fake Vision: 32k context | [anthropic: 3 models] | "
-            + "Claude Opus: 2 versions · newest Claude Opus 5.5 | Claude Haiku 5.5: 200k context | [openai-codex: 1 model]", Rows());
+        Assert.Equal($"[fake: {Models(2)}] | Fake Model: {Context(128)} | Fake Vision: {Context(32)} | [anthropic: {Models(3)}] | "
+            + $"Claude Opus: {Loc.F("{0} versions", 2)} · {Loc.F("newest {0}", "Claude Opus 5.5")} | Claude Haiku 5.5: {Context(200)} | [openai-codex: {Models(1)}]", Rows());
 
         // ← on a row under a heading goes to the heading, ← there closes it, → opens it again
         await Until(() => list.ContainerFromIndex(4) is not null, "rows realized");
@@ -105,12 +123,12 @@ public sealed class SettingsUiTests
         vm.ChooseModelCommand.Execute(vm.Models.Single(m => m.Name == "fake"));
         var fake = vm.Models.Single(m => m.Name == "fake");
         Assert.True(fake.IsCurrent);
-        Assert.Equal("2 models · current Fake Model", fake.Detail);
+        Assert.Equal(Models(2) + " · " + Loc.F("current {0}", "Fake Model"), fake.Detail);
 
         // A search lists every match flat, each with its provider
         vm.ModelFilter = "luna";
         await Until(() => vm.Models.Count == 1, "filtered");
-        Assert.Equal("GPT-5.6-Luna: openai-codex · 272k context", Rows());
+        Assert.Equal($"GPT-5.6-Luna: openai-codex · {Context(272)}", Rows());
         await vm.DisposeAsync();
         w.Close();
     }
@@ -150,12 +168,12 @@ public sealed class SettingsUiTests
         await Until(() => vm.CurrentModel == ((ModelItemViewModel)list.Items[1]!).Key || !vm.IsModelMenuOpen, "chosen from the list");
         await Until(() => !vm.IsModelMenuOpen, "closed");
 
-        // Esc closes without a change and gives focus back to the model chip.
+        // Esc closes without a change and returns to the composer that opened it with a command.
         var before = vm.CurrentModel;
         w.FindControl<Button>("ModelButton")!.Command!.Execute(null);
         await Until(() => vm.IsModelMenuOpen && filter.IsFocused, "picker open a third time");
         filter.RaiseEvent(new KeyEventArgs { RoutedEvent = InputElement.KeyDownEvent, Key = Key.Escape });
-        await Until(() => !vm.IsModelMenuOpen && w.FindControl<Button>("ModelButton")!.IsFocused, "closed by Esc");
+        await Until(() => !vm.IsModelMenuOpen && w.FindControl<TextBox>("Composer")!.IsFocused, "closed by Esc");
         Assert.Equal(before, vm.CurrentModel);
         await vm.DisposeAsync();
         w.Close();
@@ -197,12 +215,18 @@ public sealed class SettingsUiTests
         await Until(() => vm.Phase == SessionPhase.Ready && vm.ThinkingOptions.Contains("max"), "levels fetched");
         Assert.Equal(["off", "low", "medium", "high", "xhigh", "max"], vm.ThinkingOptions);
         Assert.True(vm.ShowThinking); // although the model list says the model does not reason
+        var beforeThinkingChange = s.Snapshot();
         vm.SetThinkingCommand.Execute("max");
         await Until(() => s.Snapshot().ThinkingLevel == "max", "max reached omp");
+        vm.Apply(s.Snapshot());
+        vm.Apply(beforeThinkingChange);
+        Assert.Equal("max", vm.SelectedThinking);
 
         vm.OpenModelMenuCommand.Execute(null);
         await Until(() => vm.Models.Any(m => m.Key == "fake/vision"), "models listed");
-        vm.ChooseModelCommand.Execute(vm.Models.First(m => m.Key == "fake/vision"));
+        var beforeModelChange = s.Snapshot();
+        await vm.ChooseModelCommand.ExecuteAsync(vm.Models.Single(m => m.Kind == ModelRowKind.Model && m.Key == "fake/vision"));
+        vm.Apply(beforeModelChange);
         await Until(() => vm.CurrentModel == "fake/vision" && !vm.ShowThinking, "no selector for a model with only off");
         Assert.Equal(["off"], vm.ThinkingOptions);
         await vm.DisposeAsync();
@@ -248,7 +272,7 @@ public sealed class SettingsUiTests
     {
         var (w, vm, _, _) = await OpenAsync();
         await vm.OpenSettingsCommand.ExecuteAsync(null);
-        var back = w.GetVisualDescendants().OfType<Button>().First(b => AutomationProperties.GetName(b) == "Back to app" && b.IsEffectivelyVisible);
+        var back = w.GetVisualDescendants().OfType<Button>().First(b => AutomationProperties.GetName(b) == Loc.T("Back to app") && b.IsEffectivelyVisible);
         back.Focus();
         back.Command!.Execute(null);
         await Until(() => !vm.IsSettingsOpen && w.FindControl<TextBox>("Composer")!.IsFocused, "composer focused after Back to app", 5);
@@ -270,7 +294,7 @@ public sealed class SettingsUiTests
     public async Task Never_ask_needs_a_second_confirmation_and_is_saved()
     {
         var (w, vm, s, store) = await OpenAsync();
-        Assert.Equal("Accept edits", vm.ApprovalLabel);
+        Assert.Equal(Loc.T("Accept edits"), vm.ApprovalLabel);
         await vm.SetApprovalModeCommand.ExecuteAsync("yolo");
         Assert.True(vm.ConfirmYolo);
         Assert.Equal("write", s.Snapshot().ApprovalMode); // nothing changed yet
@@ -348,7 +372,7 @@ public sealed class SettingsUiTests
         Assert.Equal(("harness", "dark"), (store.Load().Profile, store.Load().Theme));
         Assert.NotEqual(pid, s.ProcessId);
         Assert.Equal(SessionPhase.Ready, vm.Phase);
-        Assert.Contains("restarted", vm.SettingsMessage);
+        Assert.Equal(Loc.T("Saved. omp restarted with the new settings."), vm.SettingsMessage);
         Shot(w, "ui-settings-dark");
         vm.SettingsTheme = "system";
         vm.CloseSettingsCommand.Execute(null);
@@ -371,15 +395,16 @@ public sealed class SettingsUiTests
         await Until(() => vm.LoginProviders.Count == 1 && vm.LoginProviders[0].IsAuthenticated, "signed-in provider listed");
         var p = vm.LoginProviders[0];
         // The trigger is a compact icon button named for screen readers, beside the "Signed in" chip
-        await Until(() => w.GetVisualDescendants().OfType<Button>().Any(b => AutomationProperties.GetName(b) == "Sign out of Fake Provider" && b.IsEffectivelyVisible), "sign-out icon shown");
-        var trigger = w.GetVisualDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Sign out of Fake Provider");
+        var signOut = Loc.F("Sign out of {0}", "Fake Provider");
+        await Until(() => w.GetVisualDescendants().OfType<Button>().Any(b => AutomationProperties.GetName(b) == signOut && b.IsEffectivelyVisible), "sign-out icon shown");
+        var trigger = w.GetVisualDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == signOut);
         Assert.IsType<Ombra.App.Controls.Icon>(trigger.Content);
-        Assert.Equal("Sign out of Fake Provider…", ToolTip.GetTip(trigger));
+        Assert.Equal(Loc.F("Sign out of {0}…", "Fake Provider"), ToolTip.GetTip(trigger));
         trigger.Command!.Execute(trigger.CommandParameter);
         await Until(() => p.IsSignOutOpen, "sign-out panel open");
         Assert.True(p.IsSignOutOpen);
         var account = Assert.Single(p.Accounts);
-        Assert.Equal(("me@example.com", "In use · oauth #1"), (account.Label, account.Detail));
+        Assert.Equal(("me@example.com", Loc.F("In use · {0}", "oauth #1")), (account.Label, account.Detail));
         Shot(w, "ui-providers-sign-out");
         vm.SettingsTheme = "dark";
         Shot(w, "ui-providers-sign-out-dark");
@@ -387,7 +412,7 @@ public sealed class SettingsUiTests
 
         await vm.SignOutCommand.ExecuteAsync(account);
         Assert.False(Assert.Single(vm.LoginProviders).IsAuthenticated);
-        Assert.Equal("Signed out of Fake Provider (me@example.com).", vm.ProvidersMessage);
+        Assert.Equal(Loc.F("Signed out of {0} ({1}).", "Fake Provider", "me@example.com"), vm.ProvidersMessage);
         Shot(w, "ui-providers-signed-out");
         await vm.DisposeAsync();
         w.Close();

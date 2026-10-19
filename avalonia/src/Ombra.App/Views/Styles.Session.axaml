@@ -5,6 +5,9 @@
         xmlns:ctl="using:Ombra.App.Controls"
         xmlns:vm="using:Ombra.App.ViewModels">
 
+  <Style Selector="ListBox.transcript">
+    <Setter Property="ctl:TurnCardGesture.IsEnabled" Value="True" />
+  </Style>
   <!-- ─────────────── Session menu (the title's flyout) ─────────────── -->
   <Style Selector="StackPanel.session-menu > Button.menu-item">
     <Setter Property="HorizontalAlignment" Value="Stretch" />
@@ -868,12 +871,11 @@
   <Style Selector="Grid.notice-line > Grid, Grid.notice-line > TextBlock.notice-text">
     <Setter Property="Margin" Value="12,0" />
   </Style>
-  <!-- "Jump to latest" (Codex): a 32 px circle on the chat's own fill with a hairline ring and a white ↓, centred over the
-       conversation's bottom, just above the message box -->
+  <!-- Jump to latest: a 32 px button, widened only for its new-activity dot. -->
   <Style Selector="Button#JumpToLatest">
-    <Setter Property="Width" Value="32" />
+    <Setter Property="MinWidth" Value="32" />
     <Setter Property="Height" Value="32" />
-    <Setter Property="Padding" Value="0" />
+    <Setter Property="Padding" Value="7,0" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="Background" Value="{DynamicResource GuiWindow}" />
@@ -882,6 +884,7 @@
     <Setter Property="BorderBrush" Value="{DynamicResource GuiCardBorder}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="ctl:Motion.Kind" Value="FadeBase" />
   </Style>
   <Style Selector="Button#JumpToLatest:pointerover /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource GuiChangeHead}" />
@@ -1112,6 +1115,9 @@
        between the rows, 16 px between the columns -->
   <Style Selector="Border.md-table-frame">
     <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="Border.md-row-hover.active">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1Hover}" />
   </Style>
   <Style Selector="Border.md-cell">
     <Setter Property="BorderBrush" Value="{DynamicResource GuiTableRule}" />

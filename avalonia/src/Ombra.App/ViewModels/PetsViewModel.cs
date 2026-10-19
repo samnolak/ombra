@@ -488,7 +488,14 @@ public sealed partial class PetsViewModel : ObservableObject
     [RelayCommand]
     private void SendChat()
     {
-        var text = ChatText.Trim();
+        var cleaned = PromptText.Clean(ChatText);
+        if (!ReferenceEquals(cleaned.Text, ChatText)) ChatText = cleaned.Text;
+        if (cleaned.Removed > 0)
+        {
+            ShowBubble(Loc.F("Removed invisible characters: {0}. Review the text and send again.", cleaned.Removed));
+            return;
+        }
+        var text = cleaned.Text.Trim();
         if (text.Length == 0) return;
         var queued = _host.IsRunning;
         if (!_host.SendFromPet(text))

@@ -1,369 +1,435 @@
-<!-- Settings → Plugins and skills: omp's plugin CLI, marketplaces, skills and skill sources (ViewModels/PluginsViewModel.cs). -->
+<!-- Settings → Plugins: omp's plugins, MCP servers and skills on tabs over one list; the catalog and an item's details
+     page take the list's place (ViewModels/PluginsHubViewModel.cs, PluginsViewModel.cs, ConnectorsViewModel.cs). -->
 <UserControl xmlns:loc="using:Ombra.App.Localization"
-        xmlns="https://github.com/avaloniaui"
+             xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Ombra.App.ViewModels"
              xmlns:ctl="using:Ombra.App.Controls"
              xmlns:settings="using:Ombra.App.Views.Settings"
              x:Class="Ombra.App.Views.Settings.PluginsSettings"
              x:DataType="vm:MainViewModel">
-  <Panel DataContext="{Binding Plugins}">
-    <StackPanel x:Name="PluginsPage" Spacing="16" x:DataType="vm:PluginsViewModel">
+  <Panel DataContext="{Binding PluginsHub}">
+    <StackPanel x:Name="PluginsPage" Spacing="16" x:DataType="vm:PluginsHubViewModel">
 
-      <!-- ── Installed plugins ── -->
-      <Border Classes="section-card">
-        <StackPanel Spacing="14">
-          <Grid ColumnDefinitions="*,Auto">
-            <StackPanel Spacing="4" Margin="0,0,16,0">
-              <TextBlock Classes="section" Text="{loc:T 'Plugins'}" />
-              <TextBlock Classes="muted" TextWrapping="Wrap"
-                         Text="{loc:T 'Plugins add skills, commands, tools, hooks and MCP servers to omp. Install one from npm, a git URL, a local folder or a marketplace.'}" />
+      <!-- ── Title, catalog and Add ── -->
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Spacing="4" Margin="0,0,16,0" VerticalAlignment="Center">
+          <TextBlock Classes="page-title" Text="{loc:T 'Plugins'}" />
+          <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'Manage plugins, skills and MCP'}" />
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <Button x:Name="BrowseCatalogButton" Classes="outline" Content="{loc:T 'Browse catalog'}" Command="{Binding OpenCatalogCommand}"
+                  AutomationProperties.Name="{loc:T 'Browse catalog'}" />
+          <Button x:Name="AddButton" Classes="accent" AutomationProperties.Name="{loc:T 'Add'}">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <TextBlock Text="{loc:T 'Add'}" VerticalAlignment="Center" />
+              <ctl:Icon Data="{StaticResource IconChevronDown}" Size="14" VerticalAlignment="Center" />
             </StackPanel>
-            <Button x:Name="RefreshPluginsButton" Grid.Column="1" Classes="icon" Command="{Binding RefreshCommand}" IsEnabled="{Binding !IsLoading}"
-                    VerticalAlignment="Top" ToolTip.Tip="{loc:T 'Refresh'}" AutomationProperties.Name="{loc:T 'Refresh plugins'}">
+            <Button.Flyout>
+              <Flyout Placement="BottomEdgeAlignedRight">
+                <StackPanel x:Name="AddMenu" Width="240" Spacing="2">
+                  <Button x:Name="AddPluginItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding AddPluginCommand}"
+                          AutomationProperties.Name="{loc:T 'Add a plugin'}">
+                    <Grid ColumnDefinitions="Auto,*">
+                      <ctl:Icon Data="{StaticResource IconPackage}" Size="16" Margin="0,0,10,0" />
+                      <TextBlock Grid.Column="1" Text="{loc:T 'Plugin…'}" VerticalAlignment="Center" />
+                    </Grid>
+                  </Button>
+                  <Button x:Name="AddMcpItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding AddMcpServerCommand}"
+                          AutomationProperties.Name="{loc:T 'Add an MCP server'}">
+                    <Grid ColumnDefinitions="Auto,*">
+                      <ctl:Icon Data="{StaticResource IconPlug}" Size="16" Margin="0,0,10,0" />
+                      <TextBlock Grid.Column="1" Text="{loc:T 'MCP server…'}" VerticalAlignment="Center" />
+                    </Grid>
+                  </Button>
+                  <Button x:Name="AddSkillItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding AddSkillCommand}"
+                          AutomationProperties.Name="{loc:T 'Add skills from a folder'}">
+                    <Grid ColumnDefinitions="Auto,*">
+                      <ctl:Icon Data="{StaticResource IconSkills}" Size="16" Margin="0,0,10,0" />
+                      <TextBlock Grid.Column="1" Text="{loc:T 'Skill folder…'}" VerticalAlignment="Center" />
+                    </Grid>
+                  </Button>
+                </StackPanel>
+              </Flyout>
+            </Button.Flyout>
+          </Button>
+        </StackPanel>
+      </Grid>
+
+      <!-- ══ The list ══ -->
+      <StackPanel x:Name="PluginsListView" Spacing="16" IsVisible="{Binding ShowList}">
+        <!-- Tabs with counts, search on the right -->
+        <Grid ColumnDefinitions="Auto,*">
+          <Border Classes="segmented" VerticalAlignment="Center">
+            <StackPanel Orientation="Horizontal" Spacing="2">
+              <Button x:Name="PluginsTab" Classes="segment" Classes.selected="{Binding IsPluginsTab}" Command="{Binding ShowTabCommand}" CommandParameter="plugins"
+                      AutomationProperties.Name="{loc:T 'Plugins'}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock Text="{loc:T 'Plugins'}" VerticalAlignment="Center" />
+                  <TextBlock Classes="plug-count" Text="{Binding PluginsCount}" />
+                </StackPanel>
+              </Button>
+              <Button x:Name="McpTab" Classes="segment" Classes.selected="{Binding IsMcpTab}" Command="{Binding ShowTabCommand}" CommandParameter="mcp"
+                      AutomationProperties.Name="MCP">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock Text="MCP" VerticalAlignment="Center" />
+                  <TextBlock Classes="plug-count" Text="{Binding McpCount}" />
+                </StackPanel>
+              </Button>
+              <Button x:Name="SkillsTab" Classes="segment" Classes.selected="{Binding IsSkillsTab}" Command="{Binding ShowTabCommand}" CommandParameter="skills"
+                      AutomationProperties.Name="{loc:T 'Skills'}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock Text="{loc:T 'Skills'}" VerticalAlignment="Center" />
+                  <TextBlock Classes="plug-count" Text="{Binding SkillsCount}" />
+                </StackPanel>
+              </Button>
+            </StackPanel>
+          </Border>
+          <Grid Grid.Column="1" ColumnDefinitions="*,Auto" Margin="12,0,0,0" MaxWidth="280" HorizontalAlignment="Right" VerticalAlignment="Center">
+            <TextBox x:Name="PluginsSearchBox" Classes="search" MinWidth="0" Text="{Binding Search}" PlaceholderText="{Binding SearchPlaceholder}"
+                     AutomationProperties.Name="{Binding SearchPlaceholder}">
+              <TextBox.InnerLeftContent>
+                <ctl:Icon Data="{StaticResource IconSearch}" Size="16" Margin="10,0,0,0" VerticalAlignment="Center" TextElement.Foreground="{DynamicResource GuiTextTertiary}" />
+              </TextBox.InnerLeftContent>
+            </TextBox>
+            <Button x:Name="RefreshPluginsButton" Grid.Column="1" Classes="icon" Margin="4,0,0,0" Command="{Binding RefreshAllCommand}" ToolTip.Tip="{loc:T 'Refresh'}"
+                    AutomationProperties.Name="{loc:T 'Refresh the lists'}">
               <ctl:Icon Data="{StaticResource IconReload}" Size="16" />
             </Button>
           </Grid>
+        </Grid>
 
-          <Grid ColumnDefinitions="*,Auto">
-            <TextBox x:Name="PluginSpecBox" Text="{Binding InstallSpec}" PlaceholderText="{loc:T 'npm package, git URL, local folder or name@marketplace'}"
-                     AutomationProperties.Name="{loc:T 'Plugin to install'}">
-              <TextBox.KeyBindings>
-                <KeyBinding Gesture="Enter" Command="{Binding InstallCommand}" />
-              </TextBox.KeyBindings>
-            </TextBox>
-            <Button x:Name="InstallPluginButton" Grid.Column="1" Classes="accent md" Content="{loc:T 'Install'}" Command="{Binding InstallCommand}"
-                    IsEnabled="{Binding !IsInstalling}" Margin="8,0,0,0" VerticalAlignment="Center" />
-          </Grid>
-          <TextBlock Classes="muted" TextWrapping="Wrap" IsVisible="{Binding IsInstalling}"
-                     Text="{loc:T 'Installing… omp downloads the plugin and its dependencies; this can take a minute.'}" />
-          <Border x:Name="InstallOutput" Classes="conn-inset" IsVisible="{Binding HasInstallOutput}">
-            <Grid ColumnDefinitions="Auto,*">
-              <Panel Margin="0,0,8,0" VerticalAlignment="Top">
-                <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" IsVisible="{Binding InstallFailed}" />
-                <ctl:Icon Classes="positive-mark" Data="{StaticResource IconCheck}" Size="16" IsVisible="{Binding !InstallFailed}" />
-              </Panel>
-              <SelectableTextBlock Grid.Column="1" Text="{Binding InstallOutput}" TextWrapping="Wrap" FontSize="13" />
-            </Grid>
-          </Border>
-
-          <settings:ConnectorsSettingsFeedback DataContext="{Binding PluginsFeedback}" />
-
-          <TextBlock Classes="muted" Text="{loc:T 'Loading plugins from omp…'}" IsVisible="{Binding ShowPluginsLoading}" />
-          <Border x:Name="PluginsLoadError" Classes="notice error" IsVisible="{Binding HasPluginsError}">
-            <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
-              <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
-              <StackPanel Grid.Column="1" Spacing="4">
-                <TextBlock Classes="error" Text="{Binding PluginsErrorTitle}" FontWeight="Medium" FontSize="13" TextWrapping="Wrap" />
-                <SelectableTextBlock Text="{Binding PluginsError}" TextWrapping="Wrap" FontSize="13" />
-              </StackPanel>
-              <Button Grid.Row="1" Grid.Column="1" Content="{loc:T 'Try again'}" Command="{Binding RefreshCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" />
-            </Grid>
-          </Border>
-          <StackPanel x:Name="PluginsEmpty" Spacing="6" IsVisible="{Binding ShowPluginsEmpty}" Margin="0,4">
-            <TextBlock Text="{loc:T 'No plugins installed'}" FontWeight="Medium" />
-            <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'Install one above, or add a marketplace below and pick from its catalog.'}" />
-          </StackPanel>
-
-          <ItemsControl x:Name="PluginList" ItemsSource="{Binding Plugins}" IsVisible="{Binding HasPlugins}">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="vm:PluginRowViewModel">
-                <StackPanel>
-                  <Border Classes="conn-sep" />
-                  <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto" Margin="0,14">
-                    <Border Classes="conn-tile">
-                      <ctl:Icon Data="{StaticResource IconPackage}" Size="18" />
-                    </Border>
-                    <StackPanel Grid.Column="1" Spacing="3" Margin="12,0,12,0">
-                      <StackPanel Orientation="Horizontal" Spacing="6">
-                        <TextBlock Classes="conn-name" Text="{Binding Name}" MaxWidth="200" ToolTip.Tip="{Binding Id}" />
-                        <Border Classes="conn-tag" IsVisible="{Binding HasVersion}"><TextBlock Text="{Binding Version}" /></Border>
-                        <Border Classes="conn-tag" ToolTip.Tip="{Binding SourceTip}"><TextBlock Text="{Binding SourceLabel}" MaxWidth="120" TextTrimming="CharacterEllipsis" /></Border>
-                        <Border Classes="conn-tag" IsVisible="{Binding IsProjectScope}"><TextBlock Text="{loc:T 'Project'}" /></Border>
-                      </StackPanel>
-                      <TextBlock Classes="muted" Text="{Binding Description}" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" IsVisible="{Binding HasDescription}" />
-                      <TextBlock Classes="tertiary" Text="{loc:T 'Hidden by this project’s own install of the plugin'}" IsVisible="{Binding IsShadowed}" />
-                      <Border Classes="status running" IsVisible="{Binding HasUpdate}" HorizontalAlignment="Left" Margin="0,4,0,0">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                          <Ellipse />
-                          <TextBlock Text="{Binding UpdateVersion, StringFormat='Update available: v{0}'}" VerticalAlignment="Center" />
-                        </StackPanel>
-                      </Border>
-                    </StackPanel>
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Top">
-                      <ToggleButton Classes="switch" IsChecked="{Binding IsEnabled}" IsEnabled="{Binding !IsBusy}" VerticalAlignment="Center"
-                                    ToolTip.Tip="{loc:T 'On: omp loads it'}" AutomationProperties.Name="{Binding Name, StringFormat='Use {0}'}" />
-                      <Button Classes="icon conn-more" ToolTip.Tip="{loc:T 'More'}" AutomationProperties.Name="{Binding Name, StringFormat='More for {0}'}">
-                        <ctl:Icon Data="{StaticResource IconMoreHorizontal}" Size="16" />
-                        <Button.Flyout>
-                          <Flyout Placement="BottomEdgeAlignedRight">
-                            <StackPanel Width="220" Spacing="2">
-                              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding UpgradeCommand}"
-                                      IsVisible="{Binding IsMarketplace}" IsEnabled="{Binding !IsBusy}" AutomationProperties.Name="{loc:T 'Upgrade'}">
-                                <Grid ColumnDefinitions="Auto,*">
-                                  <ctl:Icon Data="{StaticResource IconDownload}" Size="16" Margin="0,0,10,0" />
-                                  <TextBlock Grid.Column="1" Text="{loc:T 'Upgrade'}" VerticalAlignment="Center" />
-                                </Grid>
-                              </Button>
-                              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding AskUninstallCommand}"
-                                      IsEnabled="{Binding !IsBusy}" AutomationProperties.Name="{loc:T 'Uninstall'}">
-                                <Grid ColumnDefinitions="Auto,*">
-                                  <ctl:Icon Data="{StaticResource IconTrash}" Size="16" Margin="0,0,10,0" />
-                                  <TextBlock Grid.Column="1" Text="{loc:T 'Uninstall…'}" VerticalAlignment="Center" />
-                                </Grid>
-                              </Button>
-                            </StackPanel>
-                          </Flyout>
-                        </Button.Flyout>
-                      </Button>
-                    </StackPanel>
-                    <Border Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Classes="conn-inset" IsVisible="{Binding IsConfirmingUninstall}" Margin="12,10,0,0">
-                      <StackPanel Spacing="10">
-                        <TextBlock Text="{Binding UninstallQuestion}" TextWrapping="Wrap" FontSize="13" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                          <Button Content="{loc:T 'Uninstall'}" Command="{Binding UninstallCommand}" IsEnabled="{Binding !IsBusy}" AutomationProperties.Name="{Binding Name, StringFormat='Uninstall {0}'}" />
-                          <Button Classes="flat" Content="{loc:T 'Cancel'}" Command="{Binding CancelUninstallCommand}" />
-                        </StackPanel>
-                      </StackPanel>
-                    </Border>
+        <!-- ── Plugins tab ── -->
+        <StackPanel Spacing="12" IsVisible="{Binding IsPluginsTab}">
+          <StackPanel Spacing="12" DataContext="{Binding Plugins}" x:DataType="vm:PluginsViewModel">
+            <!-- Add → Plugin -->
+            <Border x:Name="InstallForm" Classes="conn-form" IsVisible="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).PluginsHub.IsInstallOpen}">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="ws-title" Text="{loc:T 'Install a plugin'}" />
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBox x:Name="PluginSpecBox" Classes="sm" Text="{Binding InstallSpec}" PlaceholderText="{loc:T 'npm package, git URL, local folder or name@marketplace'}"
+                           AutomationProperties.Name="{loc:T 'Plugin to install'}">
+                    <TextBox.KeyBindings>
+                      <KeyBinding Gesture="Enter" Command="{Binding InstallCommand}" />
+                    </TextBox.KeyBindings>
+                  </TextBox>
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="8,0,0,0" VerticalAlignment="Center">
+                    <Button x:Name="InstallPluginButton" Classes="accent" Content="{loc:T 'Install'}" Command="{Binding InstallCommand}" IsEnabled="{Binding !IsInstalling}" />
+                    <Button Classes="flat" Content="{loc:T 'Cancel'}" Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).PluginsHub.CloseInstallCommand}" />
+                  </StackPanel>
+                </Grid>
+                <TextBlock Classes="tertiary" TextWrapping="Wrap" IsVisible="{Binding !IsInstalling}"
+                           Text="{loc:T 'Or pick one in the catalog. Install plugins only from sources you trust: they can run code on this computer.'}" />
+                <TextBlock Classes="muted" TextWrapping="Wrap" IsVisible="{Binding IsInstalling}"
+                           Text="{loc:T 'Installing… omp downloads the plugin and its dependencies; this can take a minute.'}" />
+                <Border x:Name="InstallOutput" Classes="conn-inset" IsVisible="{Binding HasInstallOutput}">
+                  <Grid ColumnDefinitions="Auto,*">
+                    <Panel Margin="0,0,8,0" VerticalAlignment="Top">
+                      <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" IsVisible="{Binding InstallFailed}" />
+                      <ctl:Icon Classes="positive-mark" Data="{StaticResource IconCheck}" Size="16" IsVisible="{Binding !InstallFailed}" />
+                    </Panel>
+                    <SelectableTextBlock Grid.Column="1" Text="{Binding InstallOutput}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
                   </Grid>
-                </StackPanel>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-        </StackPanel>
-      </Border>
-
-      <!-- ── Marketplaces ── -->
-      <Border Classes="section-card">
-        <StackPanel Spacing="14">
-          <StackPanel Spacing="4">
-            <TextBlock Classes="section" Text="{loc:T 'Marketplaces'}" />
-            <TextBlock Classes="muted" TextWrapping="Wrap"
-                       Text="{loc:T 'Catalogs of plugins; Claude Code plugin marketplaces work too. Add one by GitHub owner/repo, git URL, catalog URL or local folder.'}" />
-          </StackPanel>
-          <Grid ColumnDefinitions="*,Auto">
-            <TextBox x:Name="MarketplaceSourceBox" Classes="sm" Text="{Binding MarketplaceSource}" PlaceholderText="anthropics/claude-plugins-official"
-                     AutomationProperties.Name="{loc:T 'Marketplace to add'}">
-              <TextBox.KeyBindings>
-                <KeyBinding Gesture="Enter" Command="{Binding AddMarketplaceCommand}" />
-              </TextBox.KeyBindings>
-            </TextBox>
-            <Button x:Name="AddMarketplaceButton" Grid.Column="1" Content="{loc:T 'Add marketplace'}" Command="{Binding AddMarketplaceCommand}"
-                    IsEnabled="{Binding !IsAddingMarketplace}" Margin="8,0,0,0" />
-          </Grid>
-          <TextBlock Classes="muted" Text="{loc:T 'Adding… omp fetches the catalog.'}" IsVisible="{Binding IsAddingMarketplace}" />
-          <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasMarketplaceFormError}">
-            <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
-            <SelectableTextBlock Grid.Column="1" x:Name="MarketplaceFormError" Classes="error" Text="{Binding MarketplaceFormError}" TextWrapping="Wrap" FontSize="13" />
-          </Grid>
-
-          <settings:ConnectorsSettingsFeedback DataContext="{Binding MarketplacesFeedback}" />
-
-          <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasMarketplacesError}">
-            <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
-            <SelectableTextBlock Grid.Column="1" x:Name="MarketplacesError" Classes="error" Text="{Binding MarketplacesError}" TextWrapping="Wrap" FontSize="13" />
-          </Grid>
-          <TextBlock x:Name="MarketplacesEmpty" Classes="muted" TextWrapping="Wrap" IsVisible="{Binding ShowMarketplacesEmpty}"
-                     Text="{loc:T 'No marketplaces yet. Anthropic’s official one is anthropics/claude-plugins-official.'}" />
-
-          <ItemsControl x:Name="MarketplaceList" ItemsSource="{Binding Marketplaces}" IsVisible="{Binding HasMarketplaces}">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="vm:MarketplaceRowViewModel">
-                <StackPanel>
-                  <Border Classes="conn-sep" />
-                  <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto" Margin="0,14">
-                    <Border Classes="conn-tile">
-                      <ctl:Icon Data="{StaticResource IconStore}" Size="18" />
-                    </Border>
-                    <StackPanel Grid.Column="1" Spacing="3" Margin="12,0,12,0" VerticalAlignment="Center">
-                      <TextBlock Classes="conn-name" Text="{Binding Name}" />
-                      <TextBlock Classes="conn-detail" Text="{Binding Source}" ToolTip.Tip="{Binding Source}" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
-                      <Button Content="{Binding BrowseLabel}" Command="{Binding BrowseCommand}" AutomationProperties.Name="{Binding Name, StringFormat='Browse {0}'}" />
-                      <Button Classes="icon conn-more" ToolTip.Tip="{loc:T 'More'}" AutomationProperties.Name="{Binding Name, StringFormat='More for {0}'}">
-                        <ctl:Icon Data="{StaticResource IconMoreHorizontal}" Size="16" />
-                        <Button.Flyout>
-                          <Flyout Placement="BottomEdgeAlignedRight">
-                            <StackPanel Width="220" Spacing="2">
-                              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding RefreshCommand}"
-                                      IsEnabled="{Binding !IsBusy}" AutomationProperties.Name="{loc:T 'Update catalog'}">
-                                <Grid ColumnDefinitions="Auto,*">
-                                  <ctl:Icon Data="{StaticResource IconReload}" Size="16" Margin="0,0,10,0" />
-                                  <TextBlock Grid.Column="1" Text="{loc:T 'Update catalog'}" VerticalAlignment="Center" />
-                                </Grid>
-                              </Button>
-                              <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Command="{Binding AskRemoveCommand}"
-                                      AutomationProperties.Name="{loc:T 'Remove'}">
-                                <Grid ColumnDefinitions="Auto,*">
-                                  <ctl:Icon Data="{StaticResource IconTrash}" Size="16" Margin="0,0,10,0" />
-                                  <TextBlock Grid.Column="1" Text="{loc:T 'Remove…'}" VerticalAlignment="Center" />
-                                </Grid>
-                              </Button>
-                            </StackPanel>
-                          </Flyout>
-                        </Button.Flyout>
-                      </Button>
-                    </StackPanel>
-                    <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Spacing="8" Margin="12,0,0,0">
-                      <Border Classes="conn-inset" IsVisible="{Binding IsConfirmingRemove}" Margin="0,10,0,0">
-                        <StackPanel Spacing="10">
-                          <TextBlock Text="{Binding RemoveQuestion}" TextWrapping="Wrap" FontSize="13" />
-                          <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="{loc:T 'Remove'}" Command="{Binding RemoveCommand}" IsEnabled="{Binding !IsBusy}" AutomationProperties.Name="{Binding Name, StringFormat='Remove {0}'}" />
-                            <Button Classes="flat" Content="{loc:T 'Cancel'}" Command="{Binding CancelRemoveCommand}" />
-                          </StackPanel>
-                        </StackPanel>
-                      </Border>
-                      <StackPanel Spacing="4" IsVisible="{Binding IsOpen}" Margin="0,10,0,0">
-                        <TextBlock Classes="muted" Text="{loc:T 'Reading the catalog…'}" IsVisible="{Binding IsBusy}" />
-                        <TextBlock Classes="muted" Text="{Binding Message}" TextWrapping="Wrap" IsVisible="{Binding HasMessage}" />
-                        <ItemsControl ItemsSource="{Binding Plugins}">
-                          <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="vm:MarketplacePluginRowViewModel">
-                              <Grid ColumnDefinitions="*,Auto" Margin="0,6">
-                                <StackPanel Spacing="2" Margin="0,0,12,0" VerticalAlignment="Center">
-                                  <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <TextBlock Classes="conn-name" Text="{Binding Name}" MaxWidth="220" />
-                                    <Border Classes="conn-tag" IsVisible="{Binding HasVersion}"><TextBlock Text="{Binding Version}" /></Border>
-                                  </StackPanel>
-                                  <TextBlock Classes="muted" Text="{Binding Description}" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" IsVisible="{Binding HasDescription}" />
-                                </StackPanel>
-                                <Button Grid.Column="1" Content="{loc:T 'Install'}" Command="{Binding InstallCommand}" IsVisible="{Binding CanInstall}" VerticalAlignment="Center"
-                                        AutomationProperties.Name="{Binding Id, StringFormat='Install {0}'}" />
-                                <Border Grid.Column="1" Classes="status done" IsVisible="{Binding IsInstalled}" VerticalAlignment="Center">
-                                  <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Ellipse />
-                                    <TextBlock Text="{loc:T 'Installed'}" VerticalAlignment="Center" />
-                                  </StackPanel>
-                                </Border>
-                                <Border Grid.Column="1" Classes="status running" IsVisible="{Binding IsBusy}" VerticalAlignment="Center">
-                                  <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <Ellipse />
-                                    <TextBlock Text="{loc:T 'Installing…'}" VerticalAlignment="Center" />
-                                  </StackPanel>
-                                </Border>
-                              </Grid>
-                            </DataTemplate>
-                          </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                      </StackPanel>
-                    </StackPanel>
-                  </Grid>
-                </StackPanel>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-
-          <Border Classes="conn-sep" IsVisible="{Binding HasSettings}" />
-          <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding HasSettings}">
-            <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
-              <TextBlock Text="{loc:T 'Plugin updates'}" FontWeight="Medium" />
-              <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'When omp starts: don’t check, tell you, or install them'}" />
-            </StackPanel>
-            <Border Grid.Column="1" Classes="segmented" VerticalAlignment="Center">
-              <StackPanel Orientation="Horizontal" Spacing="2">
-                <Button x:Name="AutoUpdateOff" Classes="segment" Classes.selected="{Binding AutoUpdateOff}" Content="{loc:T 'Off'}"
-                        Command="{Binding SetAutoUpdateCommand}" CommandParameter="off" AutomationProperties.Name="{loc:T 'Plugin updates: off'}" />
-                <Button x:Name="AutoUpdateNotify" Classes="segment" Classes.selected="{Binding AutoUpdateNotify}" Content="{loc:T 'Notify'}"
-                        Command="{Binding SetAutoUpdateCommand}" CommandParameter="notify" AutomationProperties.Name="{loc:T 'Plugin updates: notify'}" />
-                <Button x:Name="AutoUpdateAuto" Classes="segment" Classes.selected="{Binding AutoUpdateAuto}" Content="{loc:T 'Install'}"
-                        Command="{Binding SetAutoUpdateCommand}" CommandParameter="auto" AutomationProperties.Name="{loc:T 'Plugin updates: install'}" />
+                </Border>
               </StackPanel>
             </Border>
-          </Grid>
-        </StackPanel>
-      </Border>
 
-      <!-- ── Skills (the icon rail's Skills scrolls here: MainWindow.ScrollSettingsTo) ── -->
-      <Border x:Name="SkillsSection" Classes="section-card">
-        <StackPanel Spacing="14">
-          <StackPanel Spacing="4">
-            <TextBlock Classes="section" Text="{loc:T 'Skills'}" />
-            <TextBlock Classes="muted" TextWrapping="Wrap"
-                       Text="{loc:T 'Instructions omp loads when a task needs them. Use one directly with /skill:name, or turn one off so omp never offers it.'}" />
-          </StackPanel>
-          <settings:ConnectorsSettingsFeedback DataContext="{Binding SkillsFeedback}" />
-          <TextBlock x:Name="SkillsMessage" Classes="muted" Text="{Binding SkillsMessage}" TextWrapping="Wrap" IsVisible="{Binding HasSkillsMessage}" />
-          <ItemsControl x:Name="SkillList" ItemsSource="{Binding Skills}" IsVisible="{Binding HasSkills}">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="vm:SkillRowViewModel">
-                <StackPanel>
-                  <Border Classes="conn-sep" />
-                  <Grid ColumnDefinitions="*,Auto" Margin="0,12">
-                    <StackPanel Spacing="2" Margin="0,0,12,0" VerticalAlignment="Center">
-                      <TextBlock Classes="conn-name" Text="{Binding Name}" />
-                      <TextBlock Classes="muted" Text="{Binding Description}" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"
-                                 IsVisible="{Binding HasDescription}" ToolTip.Tip="{Binding Description}" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                      <Button Classes="flat" Content="{loc:T 'Use'}" Command="{Binding UseCommand}" IsEnabled="{Binding CanUse}"
-                              ToolTip.Tip="{Binding Command, StringFormat='Start a message with {0}'}" AutomationProperties.Name="{Binding Command, StringFormat='Use {0}'}" />
-                      <ToggleButton Classes="switch" IsChecked="{Binding IsEnabled}" IsEnabled="{Binding !IsBusy}" VerticalAlignment="Center"
-                                    AutomationProperties.Name="{Binding Name, StringFormat='Skill {0}'}" />
-                    </StackPanel>
-                  </Grid>
+            <settings:ConnectorsSettingsFeedback DataContext="{Binding PluginsFeedback}" />
+            <TextBlock Classes="muted" Text="{loc:T 'Loading plugins from omp…'}" IsVisible="{Binding ShowPluginsLoading}" />
+            <Border x:Name="PluginsLoadError" Classes="notice error" IsVisible="{Binding HasPluginsError}">
+              <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
+                <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
+                <StackPanel Grid.Column="1" Spacing="4">
+                  <TextBlock Classes="error" Text="{Binding PluginsErrorTitle}" FontWeight="Medium" FontSize="{DynamicResource GuiFontS}" TextWrapping="Wrap" />
+                  <SelectableTextBlock Text="{Binding PluginsError}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
                 </StackPanel>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-        </StackPanel>
-      </Border>
-
-      <!-- ── Where omp finds skills ── -->
-      <Border Classes="section-card">
-        <StackPanel Spacing="14">
-          <StackPanel Spacing="4">
-            <TextBlock Classes="section" Text="{loc:T 'Skill sources'}" />
-            <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'The folders omp searches for skills (each skill is a folder with a SKILL.md).'}" />
+                <Button Grid.Row="1" Grid.Column="1" Content="{loc:T 'Try again'}" Command="{Binding RefreshCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" />
+              </Grid>
+            </Border>
+            <Border x:Name="PluginsEmpty" Classes="plug-list" IsVisible="{Binding ShowPluginsEmpty}">
+              <StackPanel Spacing="4" Margin="20,14">
+                <TextBlock Classes="ws-title" Text="{loc:T 'No plugins yet'}" />
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'Plugins add skills, commands and MCP servers to omp. Find one in the catalog, or add one with Add → Plugin.'}" />
+              </StackPanel>
+            </Border>
           </StackPanel>
-          <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasSettingsError}">
-            <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
-            <SelectableTextBlock Grid.Column="1" x:Name="PluginsSettingsError" Classes="error" Text="{Binding SettingsError}" TextWrapping="Wrap" FontSize="13" />
-          </Grid>
-          <ItemsControl ItemsSource="{Binding SkillSources}" IsVisible="{Binding HasSettings}">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="vm:SkillSourceViewModel">
-                <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,14">
-                  <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
-                    <TextBlock Text="{Binding Title}" FontWeight="Medium" />
-                    <TextBlock Classes="muted" Text="{Binding Description}" TextWrapping="Wrap" />
-                  </StackPanel>
-                  <ToggleButton Grid.Column="1" Classes="switch" IsChecked="{Binding IsOn}" VerticalAlignment="Center" AutomationProperties.Name="{Binding Title}" />
-                </Grid>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-          <StackPanel Spacing="8" IsVisible="{Binding HasSettings}">
-            <StackPanel Spacing="2">
-              <TextBlock Text="{loc:T 'More folders'}" FontWeight="Medium" />
-              <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'Folders of your own that omp also searches'}" />
-            </StackPanel>
-            <ItemsControl ItemsSource="{Binding Directories}">
+
+          <Border Classes="plug-list" IsVisible="{Binding HasShownPlugins}">
+            <ItemsControl x:Name="PluginList" ItemsSource="{Binding ShownPlugins}">
               <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="vm:SkillDirectoryViewModel">
-                  <Grid ColumnDefinitions="*,Auto" Margin="0,2">
-                    <TextBlock Classes="conn-detail" Text="{Binding Path}" ToolTip.Tip="{Binding Path}" VerticalAlignment="Center" Foreground="{DynamicResource GuiTextPrimary}" />
-                    <Button Grid.Column="1" Classes="icon" Command="{Binding RemoveCommand}" ToolTip.Tip="{loc:T 'Remove'}" AutomationProperties.Name="{Binding Path, StringFormat='Remove {0}'}">
-                      <ctl:Icon Data="{StaticResource IconClose}" Size="16" />
-                    </Button>
-                  </Grid>
+                <DataTemplate x:DataType="vm:PluginRowViewModel">
+                  <StackPanel>
+                    <Border Classes="plug-sep" />
+                    <Grid Classes="plug-row" ColumnDefinitions="*,Auto,Auto,Auto">
+                      <Button Classes="plug-open" Command="{Binding $parent[ItemsControl].((vm:PluginsHubViewModel)DataContext).OpenPluginCommand}" CommandParameter="{Binding}"
+                              AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Details for {0}'}}">
+                        <Grid ColumnDefinitions="Auto,*">
+                          <Border Classes="conn-tile" VerticalAlignment="Center"><ctl:Icon Data="{StaticResource IconPackage}" Size="16" /></Border>
+                          <StackPanel Grid.Column="1" Spacing="2" Margin="12,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Classes="conn-name" Text="{Binding Name}" ToolTip.Tip="{Binding Id}" />
+                            <TextBlock Classes="plug-line" Text="{Binding Description}" IsVisible="{Binding HasDescription}" ToolTip.Tip="{Binding Description}" />
+                            <TextBlock Classes="plug-line" Text="{Binding SourceTip}" IsVisible="{Binding !HasDescription}" />
+                          </StackPanel>
+                        </Grid>
+                      </Button>
+                      <Panel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Classes="plug-scope" Text="{Binding ScopeLabel}" IsVisible="{Binding !NeedsTrust}" />
+                        <StackPanel Orientation="Horizontal" Spacing="6" Margin="12,0,14,0" IsVisible="{Binding NeedsTrust}">
+                          <ctl:Icon Classes="warning-mark" Data="{StaticResource IconShield}" Size="14" VerticalAlignment="Center" />
+                          <TextBlock Classes="muted" Text="{loc:T 'Requires folder trust'}" VerticalAlignment="Center" />
+                        </StackPanel>
+                      </Panel>
+                      <ToggleButton Grid.Column="2" Classes="switch" IsChecked="{Binding IsEnabled}" IsEnabled="{Binding !IsBusy}" VerticalAlignment="Center"
+                                    ToolTip.Tip="{loc:T 'On: omp loads it'}" AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Use {0}'}}" />
+                      <Button Grid.Column="3" Classes="icon" Margin="6,0,0,0" VerticalAlignment="Center"
+                              Command="{Binding $parent[ItemsControl].((vm:PluginsHubViewModel)DataContext).OpenPluginCommand}" CommandParameter="{Binding}"
+                              ToolTip.Tip="{loc:T 'Details'}" AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Open {0}'}}">
+                        <ctl:Icon Data="{StaticResource IconChevronRight}" Size="16" />
+                      </Button>
+                    </Grid>
+                  </StackPanel>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
-            <Grid ColumnDefinitions="*,Auto">
-              <TextBox x:Name="SkillFolderBox" Classes="sm" Text="{Binding NewDirectory}" PlaceholderText="~/my-skills" AutomationProperties.Name="{loc:T 'Folder to add'}">
-                <TextBox.KeyBindings>
-                  <KeyBinding Gesture="Enter" Command="{Binding AddDirectoryCommand}" />
-                </TextBox.KeyBindings>
-              </TextBox>
-              <Button Grid.Column="1" Content="{loc:T 'Add folder'}" Command="{Binding AddDirectoryCommand}" Margin="8,0,0,0" />
-            </Grid>
-          </StackPanel>
-          <settings:ConnectorsSettingsFeedback DataContext="{Binding SourcesFeedback}" />
+          </Border>
         </StackPanel>
-      </Border>
+
+        <!-- ── MCP tab ── -->
+        <StackPanel Spacing="12" IsVisible="{Binding IsMcpTab}">
+          <StackPanel Spacing="12" DataContext="{Binding Connectors}" x:DataType="vm:ConnectorsViewModel">
+            <settings:ConnectorsSettingsFeedback DataContext="{Binding Feedback}" />
+            <settings:McpServerForm />
+
+            <TextBlock x:Name="ConnectorsLoading" Classes="muted" Text="{loc:T 'Loading MCP servers from omp…'}" IsVisible="{Binding ShowLoading}" />
+            <Border x:Name="ConnectorsNotRunning" Classes="plug-list" IsVisible="{Binding ShowNotRunning}">
+              <StackPanel Spacing="10" Margin="20,14">
+                <TextBlock Classes="ws-title" Text="{loc:T 'omp isn’t running'}" />
+                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'MCP servers are read from omp and changed through it, so this list appears while omp runs.'}" />
+                <Button Content="{loc:T 'Start omp'}" Command="{Binding StartOmpCommand}" IsVisible="{Binding CanStartOmp}" HorizontalAlignment="Left" />
+              </StackPanel>
+            </Border>
+            <Border x:Name="ConnectorsLoadError" Classes="notice error" IsVisible="{Binding HasLoadError}">
+              <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
+                <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
+                <StackPanel Grid.Column="1" Spacing="4">
+                  <TextBlock Classes="error" Text="{loc:T 'omp couldn’t list the MCP servers'}" FontWeight="Medium" FontSize="{DynamicResource GuiFontS}" />
+                  <SelectableTextBlock Text="{Binding LoadError}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+                </StackPanel>
+                <Button Grid.Row="1" Grid.Column="1" Content="{loc:T 'Try again'}" Command="{Binding RefreshCommand}" HorizontalAlignment="Left" Margin="0,8,0,0" />
+              </Grid>
+            </Border>
+            <Border x:Name="ConnectorsEmpty" Classes="plug-list" IsVisible="{Binding ShowEmpty}">
+              <StackPanel Spacing="4" Margin="20,14">
+                <TextBlock Classes="ws-title" Text="{loc:T 'No MCP servers yet'}" />
+                <TextBlock Classes="muted" TextWrapping="Wrap"
+                           Text="{loc:T 'MCP servers give omp tools from other apps and services. Add one with Add → MCP server, or find one in the catalog.'}" />
+              </StackPanel>
+            </Border>
+
+            <!-- omp's prompts to sign in (mcp_auth_required): one per server -->
+            <ItemsControl x:Name="ConnectorSignInPrompts" ItemsSource="{Binding AuthPrompts}" IsVisible="{Binding HasAuthPrompts}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:McpAuthPromptViewModel">
+                  <Border Classes="notice warning">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                      <ctl:Icon Data="{StaticResource IconKey}" Size="16" VerticalAlignment="Center" Margin="0,0,10,0" />
+                      <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" Margin="12,0,0,0" VerticalAlignment="Center">
+                        <Button Classes="accent" Content="{Binding SignInLabel}" Command="{Binding SignInCommand}"
+                                AutomationProperties.Name="{Binding Server, StringFormat={loc:T 'Sign in to {0}'}}" />
+                        <Button Classes="flat" Content="{loc:T 'Dismiss'}" Command="{Binding DismissCommand}" />
+                      </StackPanel>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+
+          <Border Classes="plug-list" IsVisible="{Binding HasShownServers}">
+            <ItemsControl x:Name="ConnectorList" ItemsSource="{Binding ShownServers}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:McpServerRowViewModel">
+                  <StackPanel>
+                    <Border Classes="plug-sep" />
+                    <Grid Classes="plug-row" ColumnDefinitions="*,Auto,Auto,Auto,Auto">
+                      <Button Classes="plug-open" Command="{Binding $parent[ItemsControl].((vm:PluginsHubViewModel)DataContext).OpenServerCommand}" CommandParameter="{Binding}"
+                              AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Details for {0}'}}">
+                        <Grid ColumnDefinitions="Auto,*">
+                          <Border Classes="conn-tile" VerticalAlignment="Center">
+                            <Panel>
+                              <ctl:Icon Data="{StaticResource IconPlug}" Size="16" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !IsRemote}" />
+                              <ctl:Icon Data="{StaticResource IconGlobe}" Size="16" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding IsRemote}" />
+                            </Panel>
+                          </Border>
+                          <StackPanel Grid.Column="1" Spacing="2" Margin="12,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Classes="conn-name" Text="{Binding Name}" />
+                            <Border Classes="status" Classes.done="{Binding IsConnected}" Classes.failed="{Binding IsFailed}" Classes.running="{Binding IsWorking}"
+                                    Classes.stopped="{Binding HasNoTools}" HorizontalAlignment="Left" Background="Transparent" Padding="0">
+                              <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Ellipse />
+                                <TextBlock Text="{Binding StateText}" />
+                              </StackPanel>
+                            </Border>
+                          </StackPanel>
+                        </Grid>
+                      </Button>
+                      <!-- Sign-in state and the sign-in itself stay on the row -->
+                      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" Margin="12,0,0,0" VerticalAlignment="Center">
+                        <Border Classes="status" Classes.done="{Binding !NeedsSignIn}" Classes.stopped="{Binding NeedsSignIn}" IsVisible="{Binding HasAuth}"
+                                VerticalAlignment="Center" AutomationProperties.Name="{Binding AuthText}">
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Ellipse />
+                            <TextBlock Text="{Binding AuthText}" />
+                          </StackPanel>
+                        </Border>
+                        <Button Classes="accent" Content="{Binding SignInLabel}" Command="{Binding SignInCommand}" IsVisible="{Binding SuggestSignIn}"
+                                AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Sign in to {0}'}}" />
+                        <Button Content="{loc:T 'Cancel sign-in'}" Command="{Binding CancelSignInCommand}" IsVisible="{Binding IsSigningIn}"
+                                ToolTip.Tip="{loc:T 'Finish the sign-in in your browser. omp connects as soon as it’s done.'}"
+                                AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Cancel the sign-in to {0}'}}" />
+                      </StackPanel>
+                      <Panel Grid.Column="2" VerticalAlignment="Center">
+                        <TextBlock Classes="plug-scope" Text="{Binding ScopeLabel}" ToolTip.Tip="{Binding ScopeTip}" IsVisible="{Binding !NeedsTrust}" />
+                        <StackPanel Orientation="Horizontal" Spacing="6" Margin="12,0,14,0" IsVisible="{Binding NeedsTrust}">
+                          <ctl:Icon Classes="warning-mark" Data="{StaticResource IconShield}" Size="14" VerticalAlignment="Center" />
+                          <TextBlock Classes="muted" Text="{loc:T 'Requires folder trust'}" VerticalAlignment="Center" />
+                        </StackPanel>
+                      </Panel>
+                      <ToggleButton Grid.Column="3" Classes="switch" IsChecked="{Binding IsEnabled}" IsEnabled="{Binding CanToggle}" VerticalAlignment="Center"
+                                    ToolTip.Tip="{loc:T 'On: omp connects to it when it starts'}" AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Use {0}'}}" />
+                      <Button Grid.Column="4" Classes="icon" Margin="6,0,0,0" VerticalAlignment="Center"
+                              Command="{Binding $parent[ItemsControl].((vm:PluginsHubViewModel)DataContext).OpenServerCommand}" CommandParameter="{Binding}"
+                              ToolTip.Tip="{loc:T 'Details'}" AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Open {0}'}}">
+                        <ctl:Icon Data="{StaticResource IconChevronRight}" Size="16" />
+                      </Button>
+                    </Grid>
+                    <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasSignInError}" Margin="72,0,16,12">
+                      <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
+                      <SelectableTextBlock Grid.Column="1" Classes="error" Text="{Binding SignInError}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+                    </Grid>
+                  </StackPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Border>
+
+          <!-- Below the list: reconnect, what servers offer besides tools, and the project-file option -->
+          <StackPanel Spacing="12" DataContext="{Binding Connectors}" x:DataType="vm:ConnectorsViewModel">
+            <TextBlock x:Name="OtherMcpTools" Classes="tertiary" TextWrapping="Wrap" IsVisible="{Binding HasOtherTools}"
+                       Text="{Binding OtherTools, StringFormat={loc:T 'This chat also has MCP tools from servers set up for other apps (Claude Code, Cursor, VS Code…): {0}'}}" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button x:Name="ReconnectAllButton" Command="{Binding ReconnectAllCommand}" IsEnabled="{Binding CanChange}" IsVisible="{Binding ShowList}"
+                      ToolTip.Tip="{loc:T 'omp finds its MCP servers again and reconnects every one, without a restart'}" AutomationProperties.Name="{loc:T 'Reconnect all'}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <ctl:Icon Data="{StaticResource IconReload}" Size="16" VerticalAlignment="Center" />
+                  <TextBlock Text="{loc:T 'Reconnect all'}" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+              <Button x:Name="McpMoreButton" Classes="flat" Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).PluginsHub.ToggleMcpMoreCommand}"
+                      AutomationProperties.Name="{loc:T 'Resources, prompts and options'}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock Text="{loc:T 'Resources, prompts and options'}" VerticalAlignment="Center" />
+                  <ctl:Icon Data="{StaticResource IconChevronDown}" Size="14" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+            </StackPanel>
+            <settings:McpMoreSection IsVisible="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).PluginsHub.IsMcpMoreOpen}" />
+          </StackPanel>
+        </StackPanel>
+
+        <!-- ── Skills tab ── -->
+        <StackPanel Spacing="12" IsVisible="{Binding IsSkillsTab}">
+          <StackPanel Spacing="12" DataContext="{Binding Plugins}" x:DataType="vm:PluginsViewModel">
+            <settings:ConnectorsSettingsFeedback DataContext="{Binding SkillsFeedback}" />
+            <TextBlock x:Name="SkillsMessage" Classes="muted" Text="{Binding SkillsMessage}" TextWrapping="Wrap" IsVisible="{Binding HasSkillsMessage}" />
+          </StackPanel>
+          <Border Classes="plug-list" IsVisible="{Binding HasShownSkills}">
+            <ItemsControl x:Name="SkillList" ItemsSource="{Binding ShownSkills}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:SkillRowViewModel">
+                  <StackPanel>
+                    <Border Classes="plug-sep" />
+                    <Grid Classes="plug-row" ColumnDefinitions="*,Auto,Auto,Auto">
+                      <Button Classes="plug-open" Command="{Binding $parent[ItemsControl].((vm:PluginsHubViewModel)DataContext).OpenSkillCommand}" CommandParameter="{Binding}"
+                              AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Details for {0}'}}">
+                        <Grid ColumnDefinitions="Auto,*">
+                          <Border Classes="conn-tile" VerticalAlignment="Center"><ctl:Icon Data="{StaticResource IconSkills}" Size="16" /></Border>
+                          <StackPanel Grid.Column="1" Spacing="2" Margin="12,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Classes="conn-name" Text="{Binding Name}" />
+                            <TextBlock Classes="plug-line" Text="{Binding Description}" IsVisible="{Binding HasDescription}" ToolTip.Tip="{Binding Description}" />
+                            <TextBlock Classes="plug-line" Text="{Binding Command}" IsVisible="{Binding !HasDescription}" />
+                          </StackPanel>
+                        </Grid>
+                      </Button>
+                      <TextBlock Grid.Column="1" Classes="plug-scope" Text="{Binding ScopeLabel}" ToolTip.Tip="{Binding Folder}" />
+                      <ToggleButton Grid.Column="2" Classes="switch" IsChecked="{Binding IsEnabled}" IsEnabled="{Binding !IsBusy}" VerticalAlignment="Center"
+                                    ToolTip.Tip="{loc:T 'On: omp offers it'}" AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Skill {0}'}}" />
+                      <Button Grid.Column="3" Classes="icon" Margin="6,0,0,0" VerticalAlignment="Center"
+                              Command="{Binding $parent[ItemsControl].((vm:PluginsHubViewModel)DataContext).OpenSkillCommand}" CommandParameter="{Binding}"
+                              ToolTip.Tip="{loc:T 'Details'}" AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Open {0}'}}">
+                        <ctl:Icon Data="{StaticResource IconChevronRight}" Size="16" />
+                      </Button>
+                    </Grid>
+                  </StackPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </Border>
+          <Button x:Name="SkillSourcesButton" Classes="flat" HorizontalAlignment="Left" Command="{Binding ToggleSkillSourcesCommand}"
+                  AutomationProperties.Name="{loc:T 'Where omp finds skills'}">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <TextBlock Text="{loc:T 'Where omp finds skills'}" VerticalAlignment="Center" />
+              <ctl:Icon Data="{StaticResource IconChevronDown}" Size="14" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+          <Panel IsVisible="{Binding IsSkillSourcesOpen}"><settings:SkillSourcesSection DataContext="{Binding Plugins}" /></Panel>
+        </StackPanel>
+
+        <!-- Items omp left out of an untrusted project folder (any tab) -->
+        <Border x:Name="BlockedList" Classes="plug-list" IsVisible="{Binding HasShownBlocked}">
+          <ItemsControl ItemsSource="{Binding ShownBlocked}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:BlockedItemViewModel">
+                <StackPanel>
+                  <Border Classes="plug-sep" />
+                  <Grid Classes="plug-row" ColumnDefinitions="*,Auto,Auto">
+                    <Button Classes="plug-open" Command="{Binding $parent[ItemsControl].((vm:PluginsHubViewModel)DataContext).OpenBlockedCommand}" CommandParameter="{Binding}"
+                            AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Details for {0}'}}">
+                      <Grid ColumnDefinitions="Auto,*">
+                        <Border Classes="conn-tile" VerticalAlignment="Center"><ctl:Icon Data="{StaticResource IconFolder}" Size="16" /></Border>
+                        <StackPanel Grid.Column="1" Spacing="2" Margin="12,0,0,0" VerticalAlignment="Center">
+                          <TextBlock Classes="conn-name" Text="{Binding Name}" />
+                          <TextBlock Classes="plug-line" Text="{Binding Source}" IsVisible="{Binding HasSource}" />
+                        </StackPanel>
+                      </Grid>
+                    </Button>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="12,0,8,0" VerticalAlignment="Center">
+                      <ctl:Icon Classes="warning-mark" Data="{StaticResource IconShield}" Size="14" VerticalAlignment="Center" />
+                      <TextBlock Classes="muted" Text="{loc:T 'Requires folder trust'}" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <Button Grid.Column="2" Classes="icon" VerticalAlignment="Center"
+                            Command="{Binding $parent[ItemsControl].((vm:PluginsHubViewModel)DataContext).OpenBlockedCommand}" CommandParameter="{Binding}"
+                            ToolTip.Tip="{loc:T 'Details'}" AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Open {0}'}}">
+                      <ctl:Icon Data="{StaticResource IconChevronRight}" Size="16" />
+                    </Button>
+                  </Grid>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </Border>
+
+        <TextBlock x:Name="PluginsNoMatches" Classes="muted" IsVisible="{Binding ShowNoMatches}" Margin="4,0"
+                   Text="{Binding Search, StringFormat={loc:T 'Nothing matches “{0}”.'}}" />
+      </StackPanel>
+
+      <!-- ══ Catalog and details ══ -->
+      <settings:PluginsCatalog IsVisible="{Binding ShowCatalog}" />
+      <settings:PluginsDetails IsVisible="{Binding ShowDetails}" />
     </StackPanel>
   </Panel>
 </UserControl>

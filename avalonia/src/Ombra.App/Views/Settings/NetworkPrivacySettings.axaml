@@ -13,10 +13,10 @@
       <!-- Always on: providers the user has not added are off for omp -->
       <StackPanel Spacing="2">
         <TextBlock Classes="ws-title" Text="{loc:T 'Model providers'}" />
-        <SelectableTextBlock x:Name="PrivacyGate" Text="{Binding GateText}" TextWrapping="Wrap" FontSize="13" />
+        <SelectableTextBlock x:Name="PrivacyGate" Text="{Binding GateText}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
       </StackPanel>
       <Border Classes="ws-note warning" IsVisible="{Binding HasGateWarning}">
-        <TextBlock x:Name="PrivacyGateWarning" Text="{Binding GateWarning}" TextWrapping="Wrap" FontSize="13" />
+        <TextBlock x:Name="PrivacyGateWarning" Text="{Binding GateWarning}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
       </Border>
       <TextBlock x:Name="PrivacyLimitation" Classes="muted" TextWrapping="Wrap" Text="{x:Static vm:NetworkPrivacyViewModel.CatalogLimitation}" />
 
@@ -29,10 +29,10 @@
           <TextBlock Classes="muted" TextWrapping="Wrap"
                      Text="{loc:T 'omp and the tools it runs go through the app’s filter, which lets through only the providers you added, sign-in while you add one, and the addresses you allow. Not covered: programs that ignore proxy settings, and addresses on this computer or in private network ranges (10.x, 172.16–31.x, 192.168.x), which omp always reaches directly.'}" />
         </StackPanel>
-        <Button x:Name="PrivacyStrictToggle" Grid.Column="1" Classes="md" Classes.accent="{Binding !IsStrict}" Classes.flat="{Binding IsStrict}"
-                Content="{Binding StrictButtonLabel}" Command="{Binding ToggleStrictCommand}" VerticalAlignment="Center" />
+        <ToggleButton x:Name="PrivacyStrictToggle" Grid.Column="1" Classes="switch" IsChecked="{Binding IsStrict, Mode=OneWay}" Command="{Binding ToggleStrictCommand}"
+                      AutomationProperties.Name="{loc:T 'Strict network privacy'}" VerticalAlignment="Center" />
       </Grid>
-      <SelectableTextBlock x:Name="PrivacyStrictStatus" Text="{Binding StrictStatus}" TextWrapping="Wrap" FontSize="13" />
+      <SelectableTextBlock x:Name="PrivacyStrictStatus" Text="{Binding StrictStatus}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
 
       <StackPanel Spacing="10" IsVisible="{Binding IsStrict}">
         <!-- Added providers: API and sign-in addresses -->
@@ -45,9 +45,9 @@
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:PrivacyProviderRow">
               <StackPanel Spacing="1">
-                <TextBlock Text="{Binding Provider}" FontSize="13" FontWeight="SemiBold" />
-                <TextBlock Classes="tertiary" Text="{Binding Api, StringFormat='API: {0}'}" TextWrapping="Wrap" />
-                <TextBlock Classes="tertiary" Text="{Binding SignIn, StringFormat='Sign-in: {0}'}" TextWrapping="Wrap" IsVisible="{Binding HasSignIn}" />
+                <TextBlock Text="{Binding Provider}" FontSize="{DynamicResource GuiFontS}" FontWeight="Medium" />
+                <TextBlock Classes="tertiary" Text="{Binding Api, StringFormat={loc:T 'API: {0}'}}" TextWrapping="Wrap" />
+                <TextBlock Classes="tertiary" Text="{Binding SignIn, StringFormat={loc:T 'Sign-in: {0}'}}" TextWrapping="Wrap" IsVisible="{Binding HasSignIn}" />
               </StackPanel>
             </DataTemplate>
           </ItemsControl.ItemTemplate>
@@ -63,7 +63,7 @@
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="x:String">
-              <Button Classes="md flat" Content="{Binding StringFormat='{}{0}  ✕'}" CommandParameter="{Binding}"
+              <Button Classes="chip" Content="{Binding StringFormat='{}{0}  ✕'}" CommandParameter="{Binding}"
                       ToolTip.Tip="{loc:T 'No longer allow'}"
                       Command="{Binding $parent[ItemsControl].((vm:NetworkPrivacyViewModel)DataContext).RemoveHostCommand}" />
             </DataTemplate>
@@ -72,7 +72,7 @@
         <Grid ColumnDefinitions="*,Auto">
           <TextBox x:Name="PrivacyNewHost" Classes="sm" Text="{Binding NewHost}" PlaceholderText="{loc:T 'pypi.org or *.example.com'}"
                    AutomationProperties.Name="{loc:T 'Address to allow'}" Margin="0,0,8,0" />
-          <Button x:Name="PrivacyAddHost" Grid.Column="1" Classes="md" Content="{loc:T 'Allow'}" Command="{Binding AddHostCommand}" />
+          <Button x:Name="PrivacyAddHost" Grid.Column="1" Content="{loc:T 'Allow'}" Command="{Binding AddHostCommand}" />
         </Grid>
 
         <!-- Refused destinations, newest first -->
@@ -87,8 +87,8 @@
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:PrivacyBlockedRow">
                 <Grid ColumnDefinitions="*,Auto">
-                  <TextBlock Text="{Binding Detail}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                  <Button Grid.Column="1" Classes="md flat" Content="{loc:T 'Allow'}" CommandParameter="{Binding}"
+                  <TextBlock Text="{Binding Detail}" FontSize="{DynamicResource GuiFontS}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <Button Grid.Column="1" Classes="flat" Content="{loc:T 'Allow'}" CommandParameter="{Binding}"
                           Command="{Binding $parent[ItemsControl].((vm:NetworkPrivacyViewModel)DataContext).AllowBlockedCommand}" />
                 </Grid>
               </DataTemplate>
@@ -98,7 +98,7 @@
       </StackPanel>
 
       <Border x:Name="PrivacyMessage" Classes="ws-note" Classes.ok="{Binding !MessageIsError}" Classes.error="{Binding MessageIsError}" IsVisible="{Binding HasMessage}">
-        <TextBlock Text="{Binding Message}" TextWrapping="Wrap" FontSize="13" />
+        <TextBlock Text="{Binding Message}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
       </Border>
     </StackPanel>
   </Border>
