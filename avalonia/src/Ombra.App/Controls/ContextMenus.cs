@@ -261,10 +261,13 @@ public static class ContextMenus
         return row;
     }
 
+    /// <summary>A link the user opens from Ombra: with Nightly, a new tab of the Browser page
+    /// (<see cref="ViewModels.MainViewModel.OpenInBrowserPage"/>); otherwise the system's browser.</summary>
     public static void OpenLink(Control target, string url)
     {
-        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && TopLevel.GetTopLevel(target)?.Launcher is { } launcher)
-            _ = launcher.LaunchUriAsync(uri);
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || TopLevel.GetTopLevel(target) is not { } top) return;
+        if (top.DataContext is ViewModels.MainViewModel vm && vm.OpenInBrowserPage(uri)) return;
+        _ = top.Launcher.LaunchUriAsync(uri);
     }
 
     // ───────────── Window rules ─────────────

@@ -99,6 +99,8 @@ internal static partial class NightlyAcceptance
             var back = await Until(() => (content = ContentLuma(pane, UrlBarBand)) > 240, 10);
             Check("browser-window-cmd-w", back && Panes().Contains(pane) && window.IsVisible, $"url bar band luma={content:0}");
 
+            // Popups, links and keys for new windows stay in this window (NightlyAcceptance.Windows.cs).
+            await NewWindowChecks(pane);
             // Its dialogs, doorhangers and the system's save and open panels (NightlyAcceptance.Dialogs.cs).
             await DialogChecks(pane);
 
@@ -213,27 +215,10 @@ internal static partial class NightlyAcceptance
 
         /// <summary>The average luma (0–255) of <paramref name="region"/> (fractions of the pane; default
         /// <see cref="ContentMiddle"/>), from a shot of Ombra's window.</summary>
-        private unsafe double ContentLuma(NightlyPane pane, Rect? region = null)
+        private double ContentLuma(NightlyPane pane, Rect? region = null)
         {
-            var r = region ?? ContentMiddle;
-            var file = Shot("probe");
-            var s = window.RenderScaling;
-            var topLeft = pane.TranslatePoint(new Point(pane.Bounds.Width * r.X, pane.Bounds.Height * r.Y), window) ?? default;
-            int x0 = (int)Math.Round(topLeft.X * s), y0 = (int)Math.Round(topLeft.Y * s), w = (int)(pane.Bounds.Width * r.Width * s), h = (int)(pane.Bounds.Height * r.Height * s);
-            using var bitmap = new Avalonia.Media.Imaging.Bitmap(file);
-            var size = bitmap.PixelSize;
-            if (x0 < 0 || y0 < 0 || x0 + w > size.Width || y0 + h > size.Height) return -1;
-            var stride = size.Width * 4;
-            var pixels = new byte[stride * size.Height];
-            fixed (byte* buffer = pixels) bitmap.CopyPixels(new PixelRect(size), (nint)buffer, pixels.Length, stride);
-            long sum = 0;
-            for (var y = y0; y < y0 + h; y++)
-            for (var x = x0; x < x0 + w; x++)
-            {
-                var o = y * stride + x * 4;
-                sum += (pixels[o] + pixels[o + 1] + pixels[o + 2]) / 3;
-            }
-            return (double)sum / (w * h);
+            var (r, g, b) = ContentColor(pane, region ?? ContentMiddle);
+            return (r + g + b) / 3;
         }
 
         /// <summary>A point of the pane on screen (points, top-left origin, as CGWindowList reports windows).</summary>
@@ -299,8 +284,8 @@ internal static partial class NightlyAcceptance
         /// macOS key code in hex), <c>type TEXT</c>, <c>open URL</c> (a new tab of the window), <c>shot NAME</c> (the screen
         /// under the window, popups included), <c>wshot NAME</c> (the window alone), <c>state</c>, <c>windows</c> (Nightly's
         /// windows on screen), <c>sheet NAME</c> (the Browser page's sheet against the Chats page's, <see cref="SheetMatches"/>),
-        /// <c>position X Y</c> (the window's top-left on the desktop), <c>wait MS</c>, <c>quit</c>. Each is logged; <c>DONE n</c>
-        /// after each.
+        /// <c>newwindows</c> (<see cref="NewWindowChecks"/>), <c>position X Y</c> (the window's top-left on the desktop),
+        /// <c>wait MS</c>, <c>quit</c>. Each is logged; <c>DONE n</c> after each.
         /// </summary>
         private async Task Drive(string file)
         {
@@ -422,6 +407,10 @@ internal static partial class NightlyAcceptance
                     break;
                 case "swipe" when pane is not null: // swipe X Y left|right: a horizontal two-finger swipe at a pane point
                     Swipe(pane, new Point(D(1), D(2)), parts[3] == "left" ? -1 : 1);
+                    break;
+                case "newwindows" when pane is not null:
+                    // NewWindowChecks on their own (their PASS/FAIL lines in the log).
+                    await NewWindowChecks(pane);
                     break;
                 case "dialogs" when pane is not null:
                     // DialogChecks on their own (their PASS/FAIL lines in the log).

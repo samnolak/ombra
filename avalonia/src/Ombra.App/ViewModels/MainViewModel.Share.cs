@@ -52,6 +52,20 @@ public partial class MainViewModel
     /// </summary>
     public Action<Uri>? OpenInBrowserWindow { get; set; }
 
+    /// <summary>
+    /// A web link the user opens from Ombra (the conversation, a card, a menu, the preview's "Open in browser"): with
+    /// Nightly it is a new tab of the Browser page, which shows, instead of a window of the system's browser (which,
+    /// with Nightly as the default browser, was a Nightly window outside Ombra). False when the caller should hand the
+    /// link to the system: the built-in preview, or not http/https.
+    /// </summary>
+    internal bool OpenInBrowserPage(Uri uri)
+    {
+        if (OpenInBrowserWindow is not { } open || uri.Scheme is not ("http" or "https")) return false;
+        OpenBrowserPageCommand.Execute(null);
+        open(uri);
+        return true;
+    }
+
     /// <summary>Accepted links: the Browser page, each in a tab of its own (the first in the empty tab when there is one).</summary>
     internal void OpenSharedLinks(IReadOnlyList<string> urls)
     {

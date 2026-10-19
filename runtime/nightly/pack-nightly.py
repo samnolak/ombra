@@ -10,7 +10,12 @@ modes and extended attributes kept) and writes ``nightly-runtime.json`` next to
 this script: the archive's SHA-256 and size, the app's Version and BuildID
 (``Contents/Resources/application.ini``), the embed protocol it speaks
 (``kProtocolVersion`` in ``src/zen/embed/ZenEmbedHost.mm``) and the cdhash of
-its signed main executable. Ombra builds the manifest in, installs only an
+its signed main executable. Before signing, the copy gets a bundle identity of
+its own (``RUNTIME_BUNDLE_ID``) and claims no URL schemes or document types:
+it is Ombra's runtime, not the user's browser, so macOS never hands it a link
+meant for the default browser (with Nightly as the default browser, a link
+from any app came to the running runtime as a Nightly window outside Ombra).
+Ombra builds the manifest in, installs only an
 archive with that hash holding that version, and accepts on its embed and team
 channels only a Nightly process whose code directory hash is that cdhash.
 
@@ -26,6 +31,7 @@ import argparse
 import hashlib
 import json
 import os
+import plistlib
 import re
 import shutil
 import subprocess
@@ -36,6 +42,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 MANIFEST = HERE / "nightly-runtime.json"
 ENTITLEMENTS = HERE / "nightly.entitlements.plist"
+RUNTIME_BUNDLE_ID = "io.github.samnolak.ombra.nightly-runtime"
+# What would make macOS choose the runtime to open links and files.
+HANDLER_KEYS = ("CFBundleURLTypes", "CFBundleDocumentTypes")
 DESKTOP = Path(os.environ.get("NIGHTLY_DESKTOP", Path.home() / "Documents" / "ArcLike Browser" / "desktop"))
 DEFAULT_APP = DESKTOP / "engine" / "obj-aarch64-apple-darwin" / "dist" / "Nightly.app"
 
@@ -123,6 +132,28 @@ def materialize(app: Path) -> int:
     return replaced
 
 
+def make_runtime_identity(app: Path) -> None:
+    """The runtime's own bundle identifier and no URL scheme or document type: LaunchServices never routes the
+    default browser's links or files to it, nor offers it as a browser."""
+    path = app / "Contents" / "Info.plist"
+    with path.open("rb") as f:
+        info = plistlib.load(f)
+    info["CFBundleIdentifier"] = RUNTIME_BUNDLE_ID
+    for key in HANDLER_KEYS:
+        info.pop(key, None)
+    with path.open("wb") as f:
+        plistlib.dump(info, f, fmt=plistlib.FMT_XML)
+
+
+def runtime_identity_problem(app: Path) -> str | None:
+    with (app / "Contents" / "Info.plist").open("rb") as f:
+        info = plistlib.load(f)
+    if info.get("CFBundleIdentifier") != RUNTIME_BUNDLE_ID:
+        return f"bundle identifier {info.get('CFBundleIdentifier')}, expected {RUNTIME_BUNDLE_ID}"
+    claimed = [key for key in HANDLER_KEYS if key in info]
+    return f"claims {', '.join(claimed)}" if claimed else None
+
+
 def sign(app: Path) -> str:
     """Signs the bundle ad hoc with the hardened runtime; returns the main executable's cdhash (40 hex).
     Extended attributes (FinderInfo, quarantine, provenance from a mounted .dmg) are cleared first: codesign
@@ -153,6 +184,7 @@ def pack(args) -> None:
         staged.parent.mkdir()
         subprocess.run(["ditto", str(app), str(staged)], check=True)
         print(f"{materialize(staged)} links out of the bundle replaced by copies")
+        make_runtime_identity(staged)
         cdhash = sign(staged)
         if archive.exists():
             archive.unlink()
@@ -189,6 +221,8 @@ def check(args) -> None:
         subprocess.run(["ditto", "-x", "-k", str(package), tmp], check=True)
         app = Path(tmp) / "Nightly.app"
         subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+        if problem := runtime_identity_problem(app):
+            sys.exit(f"{package}: not the runtime's identity: {problem}")
         info = subprocess.run(["codesign", "-dvvv", str(app)], check=True, capture_output=True, text=True).stderr
         if f"\nCDHash={manifest.get('cdhash')}\n" not in f"\n{info}":
             sys.exit(f"{package}: the app's cdhash is not the manifest's {manifest.get('cdhash')}\n{info}")
