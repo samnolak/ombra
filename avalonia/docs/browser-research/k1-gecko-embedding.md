@@ -196,6 +196,15 @@ device mode is `Command` op 7, Ombra's appearance op 8):
   closed). `NightlySupervisor.Stop(requestQuit, grace)` waits `NightlyRuntime.QuitGrace` (8 s) and only then kills the
   tree and the helpers it left; a start meanwhile waits for the previous process (one profile, one process). App exit
   and the last pane closing both go this way; a crash or a refused handshake still kills at once.
+  Nightly is not marked for the app's reaper (`OMBRA_OWNER` is removed from its environment): `OwnedProcesses`'
+  SIGTERM at Ombra's quit ended it before this quit (exit 143, no `sessionstore-final-state-write-complete`), so every
+  restart restored only its last periodic save. When Ombra dies, Nightly quits by itself (peer exit) the same way.
+- **Session.** The runtime's user.js resumes the previous session as a standalone Nightly does
+  (`browser.startup.page` 3, `resume_from_crash` true): Zen's `ZenSessionManager` keeps only the pinned tabs (folders
+  survive, unpinned tabs and split views do not) unless startup.page is 3. Tabs, spaces, folders, split views, scroll
+  and form state come back into the Browser page's window after a quit, a Nightly crash and Ombra being killed; the
+  start selects Zen's empty tab with its URL bar, as standalone (`zen.workspaces.continue-where-left-off` false).
+  Acceptance: `SessionChecks` (`NightlyAcceptance.Session.cs`, drive command `session`).
 - **Dialog (120) / DialogReply (41) / DialogClosed (121), Download (122) / DownloadCancel (42).** The page's questions
   are Ombra's (`src/zen/embed/ZenEmbedDialogs.sys.mjs`): alert/confirm/prompt/beforeunload and HTTP sign-in through the
   embed window's `gBrowser.getTabDialogBox` (what `PromptParent` uses for tab-modal prompts); permissions through its
