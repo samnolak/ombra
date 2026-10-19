@@ -289,8 +289,9 @@ internal static partial class NightlyAcceptance
         /// macOS key code in hex), <c>type TEXT</c>, <c>open URL</c> (a new tab of the window), <c>shot NAME</c> (the screen
         /// under the window, popups included), <c>wshot NAME</c> (the window alone), <c>state</c>, <c>windows</c> (Nightly's
         /// windows on screen), <c>sheet NAME</c> (the Browser page's sheet against the Chats page's, <see cref="SheetMatches"/>),
-        /// <c>newwindows</c> (<see cref="NewWindowChecks"/>), <c>position X Y</c> (the window's top-left on the desktop),
-        /// <c>wait MS</c>, <c>quit</c>. Each is logged; <c>DONE n</c> after each.
+        /// <c>newwindows</c> (<see cref="NewWindowChecks"/>), <c>imeend [N]</c> (<see cref="CompositionEndedByNightly"/> N
+        /// times on the agent's pane: <c>preview</c> the K1 fixture first), <c>position X Y</c> (the window's top-left on the
+        /// desktop), <c>wait MS</c>, <c>quit</c>. Each is logged; <c>DONE n</c> after each.
         /// </summary>
         private async Task Drive(string file)
         {
@@ -443,6 +444,9 @@ internal static partial class NightlyAcceptance
                 case "dialogs" when pane is not null:
                     // DialogChecks on their own (their PASS/FAIL lines in the log).
                     await DialogChecks(pane);
+                    break;
+                case "imeend" when Shown() is { IsBrowserWindow: false } agentPane:
+                    await CompositionEndedByNightly(agentPane, parts.Length > 1 ? int.Parse(parts[1], CultureInfo.InvariantCulture) : 1);
                     break;
                 case "newtabs":
                     // NewTabChecks on their own (their PASS/FAIL lines in the log); the Browser page first shows here.

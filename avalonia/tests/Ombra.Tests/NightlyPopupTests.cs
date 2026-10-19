@@ -9,8 +9,8 @@ namespace Ombra.Tests;
 /// <c>ZenEmbedHost.mm</c>): the PopupChoice / MarkedText / Popup / PopupClosed / Cursor / TextRect layouts against the
 /// native structs, the popup JSON, and, with a real embed-capable Nightly (<c>OMBRA_TEST_NIGHTLY_APP</c>), a page's
 /// <c>&lt;select&gt;</c>, datalist autocomplete and context menu answered from Ombra, "Open link in new tab" and
-/// <c>window.open</c> adopted as panes, a composition and its commit, and the page's cursor. In the runtime tests' class,
-/// so the real runtime tests never run side by side.
+/// <c>window.open</c> adopted as panes, a composition and its commit, the input method's end of a composition Nightly
+/// ended itself, and the page's cursor. In the runtime tests' class, so the real runtime tests never run side by side.
 /// </summary>
 public sealed partial class NightlyRuntimeTests
 {
@@ -263,6 +263,85 @@ public sealed partial class NightlyRuntimeTests
             server.Stop();
             serial.Run(runtime.Dispose);
             foreach (var p in panes) p.Frames.Dispose();
+            try { Directory.Delete(profile, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>
+    /// Compositions Nightly ends itself while the input method still composes in Ombra (a click elsewhere in the page takes
+    /// the focus from the field: Nightly commits it), and one where no editor has the keyboard: the input method's empty end
+    /// afterwards, and an empty one with no composition at all, are nothing for Nightly (they crashed it in
+    /// <c>IMEInputHandler::DispatchCompositionCommitEvent</c>, MOZ_RELEASE_ASSERT(isSome())); the page keeps its text and
+    /// the field composes again, in the same runtime.
+    /// </summary>
+    [Fact]
+    public async Task AnEmptyCompositionWithoutOneInNightlyIsNothing()
+    {
+        var app = Environment.GetEnvironmentVariable("OMBRA_TEST_NIGHTLY_APP");
+        var root = Environment.GetEnvironmentVariable("OMBRA_TEST_NIGHTLY_PROFILE_ROOT");
+        Assert.SkipUnless(OperatingSystem.IsMacOS() && app is { Length: > 0 } && root is { Length: > 0 },
+            "set OMBRA_TEST_NIGHTLY_APP (an embed-capable Nightly.app) and OMBRA_TEST_NIGHTLY_PROFILE_ROOT");
+        Assert.Empty(NightlyProcesses(app!));
+        var profile = Path.Combine(root!, "ime-test-" + Guid.NewGuid().ToString("N")[..8]);
+        var serial = new Serial();
+        var options = new NightlyRuntimeOptions(NightlyMach.RealPath(Path.Combine(app!, "Contents", "MacOS", "nightly")), profile, null, null, null, AllowUnsignedPeer: true);
+        var runtime = new NightlyRuntime(options, serial.Post);
+        var pane = new AgentPane(runtime);
+        var (server, url) = ServeFixture(PopupFixture);
+        try
+        {
+            var token = serial.Run(() => runtime.Register(pane));
+            await Until(() => serial.Run(() => runtime.State == NightlyState.Running && pane.Window != 0 && pane.FrameCount > 0), "a window with frames", 90);
+            var window = pane.Window;
+            serial.Run(() => runtime.Send(NightlyProtocol.CommandMessage(window, NightlyProtocol.CommandOp.Navigate, url)!));
+            string Title() => serial.Run(() => pane.Location?.Title ?? "");
+            await Until(() => Title().StartsWith("K1 s=alpha", StringComparison.Ordinal), "the fixture", 30);
+            var framesAtLoad = serial.Run(() => pane.FrameCount);
+            await Until(() => serial.Run(() => pane.FrameCount > framesAtLoad), "the page painted", 10);
+            await Task.Delay(1000);
+            serial.Run(() => runtime.SetActive(window, true));
+            var pid = serial.Run(() => runtime.Pid);
+            void Send(byte[] m) => serial.Run(() => runtime.Send(m));
+            void Click(double x, double y)
+            {
+                Send(NightlyProtocol.MouseMessage(window, NightlyProtocol.MouseKind.Move, -1, 0, x, y, 0));
+                Send(NightlyProtocol.MouseMessage(window, NightlyProtocol.MouseKind.Down, 0, 1, x, y, 0));
+                Send(NightlyProtocol.MouseMessage(window, NightlyProtocol.MouseKind.Up, 0, 1, x, y, 0));
+            }
+            async Task EmptyEnd(string where)
+            {
+                Send(NightlyProtocol.MarkedTextMessage(window, "", 0, 0));
+                await Task.Delay(500);
+                Assert.True(serial.Run(() => runtime.Pid == pid && runtime.Starts == 1 && NightlyMach.IsAlive(pid)),
+                    $"Nightly crashed on the empty composition {where} (pid {pid}→{serial.Run(() => runtime.Pid)})");
+            }
+
+            Click(420, 136);
+            await Task.Delay(300);
+            await EmptyEnd("with none at all");
+            Send(NightlyProtocol.MarkedTextMessage(window, "かな", 2, 0));
+            await Until(() => Title().Contains(" ime=かな comp=かな ", StringComparison.Ordinal), "a composition", 10);
+            Click(100, 400); // the page's empty part: the field loses the focus
+            await Until(() => Title().Contains(" ime=かな comp=end:かな ", StringComparison.Ordinal), "the blur's commit", 10);
+            await EmptyEnd("after the blur's commit");
+            Send(NightlyProtocol.MarkedTextMessage(window, "の", 1, 0));
+            await EmptyEnd("where no editor has the keyboard");
+            Assert.Contains(" ime=かな comp=end:かな ", Title(), StringComparison.Ordinal);
+            Click(520, 136);
+            await Task.Delay(300);
+            Send(NightlyProtocol.MarkedTextMessage(window, "じ", 1, 0));
+            Send(NightlyProtocol.TextMessage(window, "字"));
+            await Until(() => Title().Contains(" ime=かな字 comp=end:字 ", StringComparison.Ordinal), "a composition after them", 10);
+            Assert.Equal(pid, serial.Run(() => runtime.Pid));
+
+            serial.Run(() => runtime.Unregister(token));
+            await Until(() => NightlyProcesses(app!).Count == 0, "no Nightly process left", 15);
+        }
+        finally
+        {
+            server.Stop();
+            serial.Run(runtime.Dispose);
+            pane.Frames.Dispose();
             try { Directory.Delete(profile, recursive: true); } catch (IOException) { }
         }
     }

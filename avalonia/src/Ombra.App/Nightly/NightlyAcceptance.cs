@@ -530,6 +530,7 @@ internal static partial class NightlyAcceptance
             Check("ime-pinyin-commit", await Until(() => Fixture.Contains(" ime=日本中文 comp=end:中文 ", StringComparison.Ordinal), 10), $"title='{Title}'");
             await Task.Delay(300);
             ScreenShot("l-ime-committed");
+            await CompositionEndedByNightly(pane, 1);
 
             // The pointer shape the page wants: the hand over cursor: pointer, the open hand over grab.
             var moves = new List<string>();
