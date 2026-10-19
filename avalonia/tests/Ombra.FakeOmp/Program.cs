@@ -1,7 +1,7 @@
 // Scripted shared engine speaking the root engine protocol and multiplexed omp RPC, for tests only.
 // Session scenarios belong in engine_open.arguments; no child process is created for a chat.
 // Scenarios: normal | nonterminal-end | bad-chunk | crash-before-ready | no-models | exit-on-request | garbage | out-of-order | duplicate | silent |
-//            big-messages | ignore-eof | stderr-flood | slow-stream | tool-flood | approval | approval-timeout | ask | no-prompt-ack | queue-stream[-N] | abort-hangs | approval-chain | reload-fails-once | markdown | markdown-stream | todo
+//            big-messages | ignore-eof | stderr-flood | slow-stream | tool-flood | approval | approval-timeout | ask | no-prompt-ack | queue-stream[-N] | queue-update[-N] | abort-hangs | approval-chain | reload-fails-once | markdown | markdown-stream | todo
 //            plan (each prompt moves a two-phase plan on; the third replaces it) | subagents (subagent frames, get_subagents, /jobs)
 //            recorder | recorder-fails (audio recorder stand-ins, not omp) | cli <args> (omp's CLI subcommands, see FAKE_OMP_CLI)
 using System.Collections.Concurrent;
@@ -421,6 +421,40 @@ if (scenario.StartsWith("history", StringComparison.Ordinal) && resumePath is nu
 var queue = new ConcurrentQueue<(string Text, bool Steering, JsonArray? Images)>();
 DateTime? lastQueuedAt = null;
 var queuedCount = 0;
+// "queue-update[-N]": queue-stream[-N] by an omp that reports its queue (18.4.4+): queue_update whenever the listed
+// chips change and get_state.queuedMessages, as omp's chip texts (queued-messages.ts queueChipText).
+var reportsQueue = scenario.StartsWith("queue-update", StringComparison.Ordinal);
+var queueScenario = reportsQueue ? "queue-stream" + scenario["queue-update".Length..] : scenario;
+var queueUpdateLock = new object();
+var lastQueueUpdate = "";
+// omp's chip: the text, an image without text "[Image]"
+static string QueueChip((string Text, bool Steering, JsonArray? Images) q) => q.Text.Length > 0 ? q.Text : q.Images is { Count: > 0 } ? "[Image]" : "";
+object QueuedMessages()
+{
+    var pending = queue.ToArray();
+    return new { steering = pending.Where(q => q.Steering).Select(QueueChip).ToArray(), followUp = pending.Where(q => !q.Steering).Select(QueueChip).ToArray() };
+}
+// Coalesced like omp's #emitQueueUpdateIfChanged: only a changed snapshot is sent.
+void EmitQueueUpdate()
+{
+    if (!reportsQueue) return;
+    lock (queueUpdateLock)
+    {
+        var snapshot = JsonSerializer.SerializeToNode(QueuedMessages())!.AsObject();
+        if (snapshot.ToJsonString() == lastQueueUpdate) return;
+        lastQueueUpdate = snapshot.ToJsonString();
+        snapshot.Insert(0, "type", "queue_update");
+        Emit(snapshot);
+    }
+}
+// omp's queue editing matcher (#findQueuedUserMessage): the text sent first, then the chip text.
+int FindQueued(IReadOnlyList<(string Text, bool Steering, JsonArray? Images)> pending, string text, Func<(string Text, bool Steering, JsonArray? Images), bool> eligible)
+{
+    for (var i = 0; i < pending.Count; i++) if (eligible(pending[i]) && pending[i].Text == text) return i;
+    if (!reportsQueue) return -1;
+    for (var i = 0; i < pending.Count; i++) if (eligible(pending[i]) && QueueChip(pending[i]) == text) return i;
+    return -1;
+}
 // "held-admission": a prompt containing HOLD is not admitted (an input hook still working) until an abort or
 // abort_and_prompt invalidates it; it is then answered cancelled, like omp's RpcUserInputGate.
 string? heldPromptId = null;
@@ -444,8 +478,8 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
     var aborted = false;
     // "queue-stream[-N]": the run lasts until the test's N queued messages are in (default 1; a fixed length ended it
     // before a loaded machine had typed them), then a second without a new one; 30 s at most.
-    var untilQueued = scenario.StartsWith("queue-stream", StringComparison.Ordinal);
-    var queuedWanted = scenario.StartsWith("queue-stream-", StringComparison.Ordinal) ? int.Parse(scenario["queue-stream-".Length..], System.Globalization.CultureInfo.InvariantCulture) : 1;
+    var untilQueued = queueScenario.StartsWith("queue-stream", StringComparison.Ordinal);
+    var queuedWanted = queueScenario.StartsWith("queue-stream-", StringComparison.Ordinal) ? int.Parse(queueScenario["queue-stream-".Length..], System.Globalization.CultureInfo.InvariantCulture) : 1;
     // "multi" (several chats at once): what the message asks for decides the turn — "CRASH" exits mid-reply
     var crash = scenario == "multi" && message.Contains("CRASH", StringComparison.Ordinal);
     for (var i = 0; untilQueued ? i < 1500 && (queuedCount < queuedWanted || lastQueuedAt is not { } q || DateTime.UtcNow - q < TimeSpan.FromSeconds(1)) : i < deltas; i++)
@@ -940,6 +974,8 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
     // Queued messages are delivered before the agent stops (unless the run was aborted: then they stay queued).
     while (!aborted && queue.TryDequeue(out var queued))
     {
+        // Like omp: the snapshot without it comes first (turn_end), then its user message.
+        EmitQueueUpdate();
         Emit(new { type = "message_start", message = UserMessage(queued.Text, queued.Images) });
         var reply = "followed: " + queued.Text;
         Emit(new { type = "message_start", message = new { role = "assistant", content = Array.Empty<object>() } });
@@ -1160,6 +1196,7 @@ await foreach (var cmd in session.Commands.ReadAllAsync(session.Stopping))
             stateCalls++;
             if (scenario == "todo-state-glitch" && stateCalls == 2) { Respond(id, type); break; }
             var stateData = JsonSerializer.SerializeToNode(new { model = new { provider = model.provider, id = model.id, name = model.id }, thinkingLevel = thinking, isStreaming = streaming, sessionId = Path.GetFileNameWithoutExtension(sessionFile), sessionFile, sessionName, messageCount = history.Count, queuedMessageCount = queue.Count, todoPhases, contextUsage = new { tokens = 1600, contextWindow = 128000, percent = contextPercent }, fastModeEnabled = fastMode, fastModeActive = fastMode, autoCompactionEnabled = autoCompaction, isCompacting = false })!.AsObject();
+            if (reportsQueue) stateData["queuedMessages"] = JsonSerializer.SerializeToNode(QueuedMessages());
             var reportedUsageLimit = usageLimitByModel?.ContainsKey(model.provider + "/" + model.id) == true
                 ? usageLimitByModel[model.provider + "/" + model.id] : usageLimitByModel?.ContainsKey(model.id) == true
                 ? usageLimitByModel[model.id] : usageLimit;
@@ -1319,11 +1356,13 @@ await foreach (var cmd in session.Commands.ReadAllAsync(session.Stopping))
             queue.Enqueue((cmd?["message"]?.GetValue<string>() ?? "", type == "steer", cmd?["images"]?.DeepClone() as JsonArray));
             lastQueuedAt = DateTime.UtcNow;
             Interlocked.Increment(ref queuedCount);
+            EmitQueueUpdate(); // omp reports its queue as the message lands in it, before the answer
             Respond(id, type, new { inputDisposition = "admitted", agentInvoked = true });
             // The runtime schedules idle drain for both follow_up and steer, including when the UI still
             // shows a just-finished command as Running. Only recovery scenarios deliberately hold the queue.
             if (!scenario.StartsWith("queue-recovery", StringComparison.Ordinal) && !streaming && queue.TryDequeue(out var idleInput))
             {
+                EmitQueueUpdate();
                 streaming = true;
                 run = new CancellationTokenSource();
                 var idleToken = run.Token;
@@ -1336,40 +1375,30 @@ await foreach (var cmd in session.Commands.ReadAllAsync(session.Stopping))
             break;
         case "remove_queued_message":
         {
-            // omp 18.4.4+: withdraws the first pending message with that text (steer and follow-up share one queue here)
-            var withdrawText = cmd?["message"]?.GetValue<string>() ?? "";
-            var stillQueued = new List<(string Text, bool Steering, JsonArray? Images)>();
-            var withdrawn = false;
-            JsonArray? withdrawnImages = null;
-            while (queue.TryDequeue(out var pending))
-            {
-                if (!withdrawn && pending.Text == withdrawText && pending.Steering == (cmd?["queue"]?.GetValue<string>() == "steering"))
-                {
-                    withdrawn = true;
-                    withdrawnImages = pending.Images;
-                }
-                else stillQueued.Add(pending);
-            }
-            foreach (var pending in stillQueued) queue.Enqueue(pending);
-            Respond(id, type, new { removed = withdrawn, images = withdrawnImages });
+            // omp 18.4.4+: withdraws the first pending message of that queue with that text (steer and follow-up share
+            // one list here)
+            var fromSteering = cmd?["queue"]?.GetValue<string>() == "steering";
+            var pendingList = new List<(string Text, bool Steering, JsonArray? Images)>();
+            while (queue.TryDequeue(out var pending)) pendingList.Add(pending);
+            var withdrawAt = FindQueued(pendingList, cmd?["message"]?.GetValue<string>() ?? "", p => p.Steering == fromSteering);
+            var withdrawnImages = withdrawAt < 0 ? null : pendingList[withdrawAt].Images;
+            if (withdrawAt >= 0) pendingList.RemoveAt(withdrawAt);
+            foreach (var pending in pendingList) queue.Enqueue(pending);
+            EmitQueueUpdate();
+            Respond(id, type, new { removed = withdrawAt >= 0, images = withdrawnImages });
             break;
         }
         case "promote_queued_message":
         {
             // The first follow-up with that text becomes a steer while omp streams; when idle it is delivered alone now.
-            var promoteText = cmd?["message"]?.GetValue<string>() ?? "";
-            var remaining = new List<(string Text, bool Steering, JsonArray? Images)>();
-            (string Text, bool Steering, JsonArray? Images)? promoted = null;
-            while (queue.TryDequeue(out var pending))
-            {
-                if (promoted is null && !pending.Steering && pending.Text == promoteText)
-                {
-                    promoted = pending;
-                    if (streaming) remaining.Add(pending with { Steering = true });
-                }
-                else remaining.Add(pending);
-            }
-            foreach (var pending in remaining) queue.Enqueue(pending);
+            var pendingList = new List<(string Text, bool Steering, JsonArray? Images)>();
+            while (queue.TryDequeue(out var pending)) pendingList.Add(pending);
+            var promoteAt = FindQueued(pendingList, cmd?["message"]?.GetValue<string>() ?? "", p => !p.Steering);
+            (string Text, bool Steering, JsonArray? Images)? promoted = promoteAt < 0 ? null : pendingList[promoteAt];
+            if (promoteAt >= 0 && streaming) pendingList[promoteAt] = pendingList[promoteAt] with { Steering = true };
+            else if (promoteAt >= 0) pendingList.RemoveAt(promoteAt);
+            foreach (var pending in pendingList) queue.Enqueue(pending);
+            EmitQueueUpdate();
             Respond(id, type, new { promoted = promoted is not null });
             if (promoted is { } now && !streaming)
             {
@@ -1732,7 +1761,7 @@ await foreach (var cmd in session.Commands.ReadAllAsync(session.Stopping))
                 "slow-stream" or "abort-hangs" => (100000, 20),
                 "multi" or "deferred-input" when msg.Contains("FOREVER", StringComparison.Ordinal) => (100000, 20),
                 "multi" or "deferred-input" when msg.Contains("LONG", StringComparison.Ordinal) => (longDeltas, 25),
-                _ when scenario.StartsWith("queue-stream", StringComparison.Ordinal) => (60, 20),
+                _ when queueScenario.StartsWith("queue-stream", StringComparison.Ordinal) => (60, 20),
                 "markdown" or "markdown-stream" or "session" or "showcase" or "explore" or "plan" or "subagents" or "tool-flood" => (0, 0),
                 _ => (50, 0),
             };
@@ -1795,6 +1824,7 @@ await foreach (var cmd in session.Commands.ReadAllAsync(session.Stopping))
         {
             var restored = new List<(string Text, bool Steering, JsonArray? Images)>();
             while (queue.TryDequeue(out var pending)) restored.Add(pending);
+            EmitQueueUpdate(); // omp empties its queue before it answers
             run?.Cancel();
             var imagesDropped = scenario == "queue-recovery-images-dropped";
             var truncated = scenario == "queue-recovery-truncated";

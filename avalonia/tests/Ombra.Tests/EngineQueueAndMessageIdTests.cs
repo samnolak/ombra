@@ -105,6 +105,45 @@ public sealed class EngineQueueAndMessageIdTests
     }
 
     [Fact]
+    public void An_image_sent_without_text_is_the_entry_omp_lists_as_image()
+    {
+        var s = new ConversationState();
+        s.SetPhase(SessionPhase.Running, T);
+        s.Apply(F("""{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"first"}]}}"""), T);
+        var local = s.Enqueue(QueueKind.FollowUp, "", [Image("shot.png")]);
+
+        // omp names it "[Image]" (queueChipText): that is the local entry, with its image, not a second chip
+        s.Apply(Queue([], ["[Image]"]), T);
+        var chip = Assert.Single(s.Snapshot().Queued);
+        Assert.Equal((local.Seq, ""), (chip.Seq, chip.Text));
+        Assert.Equal("shot.png", Assert.Single(chip.Images).Name);
+
+        // promoted by omp: the same chip follows
+        s.Apply(Queue(["[Image]"], []), T);
+        chip = Assert.Single(s.Snapshot().Queued);
+        Assert.Equal((local.Seq, QueueKind.Steer), (chip.Seq, chip.Kind));
+
+        // delivered: a snapshot still listing it does not bring it back as an "[Image]" chip
+        s.Apply(F("""{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":""},{"type":"image","mimeType":"image/png","data":"AQID"}]}}"""), T);
+        Assert.Empty(s.Snapshot().Queued);
+        s.Apply(Queue(["[Image]"], []), T);
+        Assert.Empty(s.Snapshot().Queued);
+        var delivered = s.Snapshot().Items.OfType<UserItem>().Last();
+        Assert.Equal("", delivered.Text);
+        Assert.Equal("shot.png", Assert.Single(delivered.Images).Name);
+
+        // Text typed as "[Image]" is matched as text; an "[Image]" queued elsewhere stays a chip of its own
+        s.Apply(Queue([], []), T);
+        var typed = s.Enqueue(QueueKind.FollowUp, "[Image]", []);
+        var image = s.Enqueue(QueueKind.FollowUp, "", [Image("b.png")]);
+        s.Apply(Queue([], ["[Image]", "[Image]", "[Image]"]), T);
+        var queued = s.Snapshot().Queued;
+        Assert.Equal(3, queued.Count);
+        Assert.Equal([typed.Seq, image.Seq], queued.Take(2).Select(q => q.Seq));
+        Assert.Equal(("[Image]", 0), (queued[2].Text, queued[2].Images.Count));
+    }
+
+    [Fact]
     public void An_expanded_delivery_echo_removes_only_the_chip_the_engine_dropped()
     {
         var s = new ConversationState();
