@@ -182,10 +182,7 @@ public partial class PreviewPanel : UserControl
         else _web?.GoForward();
     }
 
-    private void OnOpenExternallyRequested(Uri uri)
-    {
-        if (TopLevel.GetTopLevel(this)?.Launcher is { } launcher) _ = launcher.LaunchUriAsync(uri);
-    }
+    private void OnOpenExternallyRequested(Uri uri) => ContextMenus.OpenLink(this, uri.AbsoluteUri);
 
     /// <summary>Creates the web views for pending navigations once the panel is shown in a window.</summary>
     private void Realize()

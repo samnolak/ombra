@@ -787,8 +787,8 @@ public sealed class MarkdownView : ContentControl
         }
     }
 
-    /// <summary>A link the size of the surrounding text in the action color (the platform opens it; http/https only); its
-    /// context menu opens or copies it.</summary>
+    /// <summary>A link the size of the surrounding text in the action color (opened as <see cref="ContextMenus.OpenLink"/>
+    /// does; http/https only); its context menu opens or copies it.</summary>
     private static HyperlinkButton Link(string label, Uri uri) => new InlineLink
     {
         Content = new TextBlock { Text = label, TextDecorations = TextDecorations.Underline },
@@ -830,6 +830,12 @@ public sealed class MarkdownView : ContentControl
         {
             base.OnPointerPressed(e);
             if (e.GetCurrentPoint(this).Properties.IsRightButtonPressed) e.Handled = true;
+        }
+
+        // Not HyperlinkButton's launch: with Nightly the link opens in the Browser page, as the menu's "Open link" does.
+        protected override void OnClick()
+        {
+            if (NavigateUri is { } uri) ContextMenus.OpenLink(this, uri.AbsoluteUri);
         }
     }
 

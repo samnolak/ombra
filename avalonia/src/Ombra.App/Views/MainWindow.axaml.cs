@@ -637,7 +637,11 @@ public sealed partial class MainWindow : Window
             }, DispatcherPriority.Background);
             vm.Rows.CollectionChanged += (_, _) => UpdateEmptyLayout(vm);
             UpdateEmptyLayout(vm);
-            vm.OpenUrlRequested += url => _ = Launcher.LaunchUriAsync(new Uri(url));
+            vm.OpenUrlRequested += url =>
+            {
+                var uri = new Uri(url);
+                if (!vm.OpenInBrowserPage(uri)) _ = Launcher.LaunchUriAsync(uri);
+            };
             // "Restart now" is the user's own choice to quit (it refuses during a run), and the update script already
             // waits for this process: asking again could leave it waiting for a quit that comes much later.
             vm.QuitRequested += () => Dispatcher.UIThread.Post(QuitWithoutAsking);
