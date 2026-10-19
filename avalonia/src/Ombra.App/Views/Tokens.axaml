@@ -585,6 +585,12 @@
   <CornerRadius x:Key="GuiSheetClipRadius">11</CornerRadius>
   <!-- The chrome shows round the sheets on the right and at the bottom too (the band and the rail cover top and left) -->
   <Thickness x:Key="GuiFrameInset">0,0,8,8</Thickness>
+  <!-- A sheet's footer row (the Browser page's Nightly window: Zen's footer icon and its "+", measured on screen): its
+       centre this far above the sheet's bottom edge. The rail's bottom item (Settings) sits on the same line: the
+       rail's bottom padding below is this less half a rail item (36 / 2). LayoutAudit checks the pair. -->
+  <x:Double x:Key="GuiSheetFooterCentre">22</x:Double>
+  <!-- The icon rail: its items start under the band; its bottom item centred on GuiSheetFooterCentre -->
+  <Thickness x:Key="GuiRailPadding">0,52,0,4</Thickness>
   <!-- The title band's height: the header, the sidebar's top row, the right panel's tab strip (MainWindow.Chrome.cs) -->
   <x:Double x:Key="GuiChromeBand">44</x:Double>
   <!-- What starts under the band: the sheets (the sidebar's, the settings list's), the settings page, the Events panel -->

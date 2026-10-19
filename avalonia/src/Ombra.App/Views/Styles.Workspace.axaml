@@ -189,7 +189,7 @@
   <Style Selector="Border.rail">
     <Setter Property="Width" Value="52" />
     <Setter Property="Background" Value="Transparent" />
-    <Setter Property="Padding" Value="0,52,0,12" />
+    <Setter Property="Padding" Value="{DynamicResource GuiRailPadding}" />
   </Style>
   <Style Selector="Button.rail-item">
     <Setter Property="Width" Value="36" />

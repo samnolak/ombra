@@ -41,6 +41,7 @@ internal static class LayoutAudit
             if (c is Border frame) { CheckFrame(w, frame, found); CheckMirror(w, frame, found); if (frame.Classes.Contains("plug-list")) CheckListEdge(w, frame, found); }
         }
         CheckComposerGap(w, found);
+        CheckRailFooter(w, found);
         return found;
     }
 
@@ -345,6 +346,25 @@ internal static class LayoutAudit
         var gap = top - Box(w, last).Bottom;
         if (gap < 10)
             found.Add(new("gap", Name(last) + " ⟷ #ComposerBox", $"{gap:0.0} px between the card and the message box", Box(w, last).Union(Box(w, composer))));
+    }
+
+    /// <summary>
+    /// The rail's bottom item (Settings) shares a centreline with the sheet's footer row: GuiSheetFooterCentre above the
+    /// sheet's bottom edge, where the Browser page's Nightly window draws Zen's footer icon and "+" (the gear once sat
+    /// 8 px above them).
+    /// </summary>
+    private static void CheckRailFooter(Window w, List<Finding> found)
+    {
+        var named = w.GetVisualDescendants().OfType<Control>().Where(c => c.Name is "RailSettingsButton" or "SheetFrame").ToList();
+        if (named.FirstOrDefault(c => c.Name == "RailSettingsButton") is not { } gear || !Shown(gear)) return;
+        if (named.FirstOrDefault(c => c.Name == "SheetFrame") is not { } sheet || !Shown(sheet)) return;
+        if (!w.TryFindResource("GuiSheetFooterCentre", w.ActualThemeVariant, out var v) || v is not double centre) return;
+        var gb = Box(w, gear);
+        var want = Box(w, sheet).Bottom - centre;
+        var dy = gb.Y + gb.Height / 2 - want;
+        if (Math.Abs(dy) > 1)
+            found.Add(new("rail-footer", Name(gear), string.Create(CultureInfo.InvariantCulture,
+                $"centre {dy:+0.0;-0.0} px off the sheet's footer row ({centre:0.0} px above the sheet's bottom)"), gb));
     }
 
     public static string Report(string screen, IEnumerable<Finding> findings)
