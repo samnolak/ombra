@@ -113,6 +113,8 @@ public sealed partial class NightlyRuntimeTests
             var prefs = File.ReadAllText(Path.Combine(profile, "user.js"));
             Assert.Contains("user_pref(\"zen.updates.show-update-notification\", false);", prefs);
             Assert.Contains("user_pref(\"ui.systemUsesDarkTheme\", 0);", prefs);
+            Assert.Contains("user_pref(\"browser.link.open_newwindow\", 3);", prefs);
+            Assert.Contains("user_pref(\"browser.link.open_newwindow.restriction\", 0);", prefs);
             Assert.Contains("user_pref(\"browser.startup.page\", 3);", prefs);
             Assert.Contains("user_pref(\"browser.sessionstore.resume_from_crash\", true);", prefs);
 
@@ -127,8 +129,6 @@ public sealed partial class NightlyRuntimeTests
         }
     }
 
-    [Fact]
-    public void ReadsNightlysMessages()
     /// <summary>Nightly does not carry the app's owner mark: the reaper's SIGTERM at Ombra's quit (OwnedProcesses) would
     /// end it before it writes its session.</summary>
     [Fact]
@@ -160,6 +160,8 @@ public sealed partial class NightlyRuntimeTests
         }
     }
 
+    [Fact]
+    public void ReadsNightlysMessages()
     {
         var location = new byte[40 + 12];
         BinaryPrimitives.WriteInt32LittleEndian(location.AsSpan(20), NightlyProtocol.Location);
