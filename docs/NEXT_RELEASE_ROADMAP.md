@@ -38,7 +38,12 @@
 | Этап 8 (интеграционный рефакторинг) | сделано | — | Stage8 |
 | Git-провайдер как источник команды, запрос Merge, библиотека ресурсов | **вне релиза** (принцип владельца) | — | — |
 
-Открыто для релиза (подробно — RELEASE_GATES): окно-прогоны RC после упаковки релизного Nightly; Windows/Linux, DPAPI/libsecret, IME на настоящих раскладках, физический sleep/wake — вне релиза macOS; подпись Developer ID и нотаризация недоступны (решение владельца).
+Выпущено 2026-10-19: Ombra `v0.1.0-beta.1` (macOS arm64, Latest) и Nightly `nightly-1.23.2b-20261019095634` (архив рантайма + DMG); пин Nightly скачивается по `url`. Окно-прогоны RC закрыты (RcQa2), чистая установка опубликованной сборки проверена (BetaSmoke). Windows/Linux, DPAPI/libsecret, IME на настоящих раскладках, физический sleep/wake — вне релиза macOS; подпись Developer ID и нотаризация недоступны (решение владельца).
+
+### Отложено в следующее обновление (решение владельца 2026-10-19)
+
+- [ ] **Браузер: верхний ряд Zen наезжает на светофор Ombra.** Видно только на лаунчере с SDK 26 (`package.sh`, `vtool … 26.0`): светофор macOS 26 шире (зелёная кнопка до ~76pt), а встроенное окно Nightly безрамочное, поэтому `WindowButtonsSize()` = 0×0 и `.titlebar-buttonbox-container` под `zen-embedded` не резервирует места. Проверенный в живом окне фикс: `min-width: calc(40px - var(--zen-toolbox-padding))` для контейнера в `zen-browser-ui.css` + `@media -moz-pref("zen.embed.window-controls-hidden")` для полноэкранного режима (новый embed `Command` op 9 в `ZenEmbedHost.mm`, отправка из `NightlyRuntime` по `MainWindow.TrafficLightsShown`). Нужны пересборка Nightly, пакет, новый пин и релиз-ассет. Проверять только на лаунчере с SDK 26.
+- [ ] **Браузер: тост Zen «Update Complete!» при первом запуске встроенного рантайма.** `zen.welcome-screen.seen=true` уводит `ZenStartup` в ветку обновления. Фикс на стороне Ombra: `user_pref("zen.updates.show-update-notification", false)` в `NightlyRuntime.WriteUserPrefs`. Анимация обновления окна (`createWindowUpdateAnimation`, сравнение `zen.updates.last-build-id` с `appBuildID`) префом не отключается; на скриншотах не замечена.
 
 Ниже — история прогресса до RC; отметки там не переоценивались.
 
