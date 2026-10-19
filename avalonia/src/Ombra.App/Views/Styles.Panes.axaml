@@ -151,6 +151,13 @@
   <Style Selector="Border.task-card.running">
     <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
   </Style>
+  <!-- One rounded hover surface includes the message controls; only the summary toggles details. -->
+  <Style Selector="Border.subagent-card">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Border.subagent-card:pointerover">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+  </Style>
   <!-- The card's summary is a toggle: opens the task, its output and its conversation -->
   <Style Selector="ToggleButton.task-row">
     <Setter Property="Background" Value="Transparent" />
@@ -167,7 +174,7 @@
     <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
   </Style>
   <Style Selector="ToggleButton.task-row:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="Background" Value="Transparent" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
   </Style>
   <Style Selector="ToggleButton.task-row ctl|Icon.chevron">
