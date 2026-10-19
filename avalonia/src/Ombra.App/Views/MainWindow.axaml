@@ -2539,10 +2539,11 @@
 
     <!-- ── Browser (the rail's Browser, MainViewModel.Browser.cs): browsing of the user's own, apart from the agent's
          pane, in the conversation's and the sidebar's place (the rail stays). With Nightly: one whole Nightly browser
-         window of the same runtime (its own sidebar, tabs, spaces, URL bar, library and menus) as the page's sheet,
-         from the window's top (its top row level with the traffic lights, as in a Nightly window of its own) to the
-         frame inset, clipped to the sheet's corners with the sheet's edge drawn over it; MainWindow.BrowserWindow.cs
-         puts it in BrowserWindowHost. With the built-in preview (also while Nightly is not chosen yet or cannot run,
+         window of the same runtime (its own sidebar, tabs, spaces, URL bar, library and menus) as the page's sheet, the
+         rect every page's sheet has (under the band, which stays the chrome's title bar with the traffic lights, as on the
+         Team page), clipped to the sheet's corners (1 DIP inside them, under the edge: GuiSheetClipRadius) with the
+         sheet's edge drawn over it; MainWindow.BrowserWindow.cs puts it in BrowserWindowHost, 1 DIP out on every side,
+         so the window's frame is the sheet's rect. With the built-in preview (also while Nightly is not chosen yet or cannot run,
          with the consent and fallback strips): its own tabs in the band, the same cards, downloads and site
          permissions (Controls/PreviewPanel over a PreviewViewModel of its own). ── -->
     <Border x:Name="BrowserPage" Grid.Column="2" Classes="page browser-page" Classes.sidebar-hidden="{Binding !ShowSidebar}"
@@ -2553,8 +2554,12 @@
           <ctl:PreviewPanel x:Name="BrowserPanel" DataContext="{Binding Browser}" ShowTabStrip="True" />
         </Panel>
         <Panel x:Name="BrowserWindowPage" IsVisible="{Binding Browser.UseNightly}">
-          <Border x:Name="BrowserWindowHost" CornerRadius="{DynamicResource GuiSheetRadius}" ClipToBounds="True" />
-          <Border x:Name="BrowserWindowEdge" Classes="sheet-frame" Margin="0" Background="Transparent" IsHitTestVisible="False" />
+          <Border Height="{DynamicResource GuiChromeBand}" VerticalAlignment="Top" Background="Transparent"
+                  chrome:WindowDecorationProperties.ElementRole="TitleBar" />
+          <Border Margin="{DynamicResource GuiSheetMargin}">
+            <Border x:Name="BrowserWindowHost" Margin="1" CornerRadius="{DynamicResource GuiSheetClipRadius}" ClipToBounds="True" />
+          </Border>
+          <Border x:Name="BrowserWindowEdge" Classes="sheet-frame" Background="Transparent" IsHitTestVisible="False" />
         </Panel>
       </Panel>
     </Border>

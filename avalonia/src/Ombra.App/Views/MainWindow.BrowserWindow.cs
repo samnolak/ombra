@@ -52,7 +52,8 @@ public sealed partial class MainWindow
     private NightlyPane EnsureBrowserWindow(MainViewModel vm)
     {
         if (_browserWindow is { } existing) return existing;
-        var pane = new NightlyPane { IsBrowserWindow = true };
+        // The window is the sheet's rect: BrowserWindowHost (its clip) lies 1 DIP inside the sheet (MainWindow.axaml).
+        var pane = new NightlyPane { IsBrowserWindow = true, Margin = new Avalonia.Thickness(-1) };
         // Nightly cannot show the window (it cannot start, or gave up restarting): the built-in preview takes the page,
         // with the reason on its fallback strip (Try again brings the window back).
         pane.RuntimeUnusable += reason => Dispatcher.UIThread.Post(() => vm.Browser.ReportNightlyUnusable(reason));

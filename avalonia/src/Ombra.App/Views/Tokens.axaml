@@ -580,6 +580,9 @@
   <!-- The sheets under the chrome: the content area's four corners, the sidebar's (or the settings list's) left two -->
   <CornerRadius x:Key="GuiSheetRadius">12</CornerRadius>
   <CornerRadius x:Key="GuiSheetRadiusLeft">12,0,0,12</CornerRadius>
+  <!-- An embedded window's clip on a sheet (the Browser page's Nightly window): 1 DIP inside the sheet's edge, so the
+       clip's antialiased curve lies under the edge's hairline and never shows past it -->
+  <CornerRadius x:Key="GuiSheetClipRadius">11</CornerRadius>
   <!-- The chrome shows round the sheets on the right and at the bottom too (the band and the rail cover top and left) -->
   <Thickness x:Key="GuiFrameInset">0,0,8,8</Thickness>
   <!-- The title band's height: the header, the sidebar's top row, the right panel's tab strip (MainWindow.Chrome.cs) -->

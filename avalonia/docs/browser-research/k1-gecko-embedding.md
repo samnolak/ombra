@@ -259,6 +259,22 @@ device mode is `Command` op 7, Ombra's appearance op 8):
     `NightlyRuntime.DarkTheme`). Driven: started Light, a fixture page reported `prefers light`; Settings → Dark
     turned the sidebar, the page (`prefers dark`) and an open Share dialog dark within 2.5 s, and back.
   - Spaces switch with ⌥⌘←/→; Library opens as Zen's panel inside the window; Share as a subdialog.
+  - *A window lying over Ombra* (owner's screenshot, 2026-10-19). The pane spanned the window's top to the frame
+    inset, so its rounded corner started at the window's top, the traffic lights sat over Zen's row and Zen's dark
+    window background (`rgba(0,0,0,.4)` over macOS's window colour: `#121212`) read as another window; the light
+    theme's bottom corners showed a dark 1 px fringe past the hairline (the clip's antialiased curve). Now the window
+    is the page sheet's rect (`MainWindow.axaml` `BrowserWindowHost` under `GuiSheetMargin`, the band above it the
+    chrome's title bar as on the Team page), clipped 1 DIP inside the sheet (`GuiSheetClipRadius` 11, pane margin −1)
+    so the clip's curve lies under `BrowserWindowEdge`'s hairline. Zen: `.titlebar-buttonbox-container` is gone under
+    `zen-embedded` (the lights are never over the window), and with a space's default theme `#zen-browser-background`
+    / `#zen-toolbar-background` take `light-dark(#fff, #181818)` (Ombra's `GuiWindow`) instead of the translucent
+    macOS background. `Command` op 9 (window controls), `zen.embed.window-controls-hidden` and
+    `NightlyHost/NightlyRuntime.WindowControlsShown` are removed. Check `browser-window-sheet`
+    (`NightlyAcceptance.SheetMatches`, also the driver's `sheet NAME`): the pane is `SheetFrame`'s rect within 1 px,
+    `Matches`, the lights' frames end above the sheet, and round all four corners every device pixel on the edge's
+    outer half or outside it equals the Chats page's shot at the same size within 24/255. Driven (dev Nightly, plain
+    and SDK 26 launchers): dark, light, a page loaded, 1000×700, Ombra sidebar hidden, Zen sidebar collapsed, the
+    window on the second display and back — all PASS, worst corner delta 3 (before: 46 in light).
 
   Acceptance (Release Ombra, pinned package `1.23.2b-20261019095634`, cdhash `7949beed…8926`, en and ru): 96 PASS
   each, 0 FAIL, RESULT PASS, no Nightly process left. `NightlyShortcutMonitorTests` + `NightlyRuntimeTests` (with the

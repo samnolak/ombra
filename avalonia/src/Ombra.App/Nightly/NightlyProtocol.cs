@@ -36,9 +36,8 @@ internal static class NightlyProtocol
     public enum MouseKind { Down = 1, Up = 2, Move = 3, Exit = 4 }
 
     /// <summary>Device (protocol 4): JSON of the emulated device (<see cref="DeviceMessage"/>), empty to end the device mode.
-    /// Theme (protocol 4): Ombra's appearance for the whole runtime (<see cref="ThemeMessage"/>).
-    /// WindowControls: whether Ombra's traffic lights show, for the whole runtime (<see cref="WindowControlsMessage"/>).</summary>
-    public enum CommandOp : uint { Navigate = 1, Reload = 2, Back = 3, Forward = 4, Stop = 5, Close = 6, Device = 7, Theme = 8, WindowControls = 9 }
+    /// Theme (protocol 4): Ombra's appearance for the whole runtime (<see cref="ThemeMessage"/>).</summary>
+    public enum CommandOp : uint { Navigate = 1, Reload = 2, Back = 3, Forward = 4, Stop = 5, Close = 6, Device = 7, Theme = 8 }
 
     /// <summary>
     /// A device the page in a window emulates (desktop <c>zen-embed.js</c> ZenEmbedDevice). <paramref name="Mobile"/>: a
@@ -247,10 +246,6 @@ internal static class NightlyProtocol
     /// <summary>Ombra's appearance, which the whole runtime follows (Nightly's <c>ui.systemUsesDarkTheme</c>: Zen's chrome
     /// and the pages' <c>prefers-color-scheme</c>); not tied to a window.</summary>
     public static byte[] ThemeMessage(bool dark) => CommandMessage(0, CommandOp.Theme, dark ? "dark" : "light")!;
-
-    /// <summary>Whether Ombra's traffic lights show over the embedded windows (hidden in full screen): Zen's top row keeps
-    /// their place free while they show (Nightly's <c>zen.embed.window-controls-hidden</c>); not tied to a window.</summary>
-    public static byte[] WindowControlsMessage(bool shown) => CommandMessage(0, CommandOp.WindowControls, shown ? "shown" : "hidden")!;
 
     internal static string DeviceJson(Device d)
     {

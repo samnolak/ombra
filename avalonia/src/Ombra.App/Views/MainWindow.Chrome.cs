@@ -53,7 +53,6 @@ public sealed partial class MainWindow
     private void FitChrome()
     {
         TrafficLightsShown = IsExtendedIntoWindowDecorations && WindowDecorationMargin.Top > 0 && WindowState != WindowState.FullScreen;
-        if (OperatingSystem.IsMacOS()) Nightly.NightlyHost.WindowControlsShown = TrafficLightsShown;
         PlaceTrafficLights();
     }
 
