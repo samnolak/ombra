@@ -28,8 +28,8 @@ import type { InteractiveModeContext } from "../modes/types";
 import { AgentRegistry } from "../registry/agent-registry";
 import type { AgentSessionEvent } from "../session/agent-session";
 import type { SessionEntry } from "../session/session-entries";
-import { mintSessionId } from "../session/session-manager";
-import { FileSessionStorage } from "../session/session-storage";
+import { mintSessionId, SessionManager } from "../session/session-manager";
+import { SessionLeaseAuthority } from "../session/session-storage";
 import { shouldDisableReasoning, toReasoningEffort } from "@oh-my-pi/pi-tui/thinking";
 import { emitSubagentFrame } from "../utils/event-bus";
 import { GuestLifecycleEmitter } from "../extensibility/extensions/lifecycle-mirror";
@@ -180,11 +180,11 @@ export class CollabGuestLink {
 	readonly #replicaId = mintSessionId();
 	/**
 	 * The replica's ownership lease, held from the first snapshot write until
-	 * the guest has left. Opening and reloading the replica never claims it, so
-	 * without this an idle guest would leave its live replica unowned (and
-	 * collectable by `omp gc`).
+	 * the guest has left. Replica managers explicitly borrow this authority,
+	 * keeping the same OS lease across snapshot reloads without letting an
+	 * independent manager write the replica.
 	 */
-	#replicaLease: (() => void) | undefined;
+	#replicaLease: SessionLeaseAuthority | undefined;
 	/** Previous session file to restore on leave; null = previous session was unsaved. */
 	#returnSessionFile: string | null = null;
 	/** Frames apply strictly in arrival order through this chain. */
@@ -477,11 +477,10 @@ export class CollabGuestLink {
 			...pending.header,
 			id: this.#replicaId,
 			parentSession: pending.header.id,
-			providerPromptCacheKey: pending.header.providerPromptCacheKey ?? pending.header.id,
+			providerPromptCacheKey: SessionManager.getInheritedProviderPromptCacheKey(pending.header),
 		};
 		const lines = [header, ...pending.entries].map(entry => JSON.stringify(entry)).join("\n");
-		const storage = new FileSessionStorage();
-		this.#replicaLease ??= storage.claimSession(this.#replicaId, replicaPath) ?? undefined;
+		this.#replicaLease ??= SessionLeaseAuthority.acquire(this.#replicaId, replicaPath) ?? undefined;
 		if (!this.#replicaLease)
 			throw new Error(`Session replica is busy in another live writer: ${replicaPath}`);
 		// Published atomically: `omp gc` reads the replica's header to find its
@@ -498,7 +497,11 @@ export class CollabGuestLink {
 
 		// Resume through AgentSession without adopting the host's cwd. The replica
 		// keeps its model: #applyHostState mirrors the host's, which runs inference.
-		const switched = await this.#ctx.session.switchSession(replicaPath, { preserveLocalCwd: true, keepModel: true });
+		const switched = await this.#ctx.session.switchSession(replicaPath, {
+			preserveLocalCwd: true,
+			keepModel: true,
+			writerLease: this.#replicaLease,
+		});
 		if (switched === false) {
 			throw new Error("Collab replica activation was cancelled");
 		}
@@ -915,7 +918,7 @@ export class CollabGuestLink {
 		try {
 			if (this.#replicaActivated) await this.#resumeLocalSession();
 		} finally {
-			this.#replicaLease?.();
+			this.#replicaLease?.release();
 			this.#replicaLease = undefined;
 		}
 		if (this.#ctx.collabGuest !== this) return false;

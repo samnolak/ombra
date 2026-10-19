@@ -1,0 +1,236 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Igor Shulga <igo.shulga@macbook-lf73jk0j09.t-oblako.ru>
+Date: Mon, 19 Oct 2026 21:42:08 +0300
+Subject: [PATCH] embedded cli boundary
+
+What: Preserve the repository-owned embedded cli boundary.
+Why: Ombra embeds multiple concurrent sessions and renders native host features.
+Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
+
+diff --git a/src/cli.ts b/src/cli.ts
+old mode 100755
+new mode 100644
+index d2ab7c15dd54cfef83487e3848f0e54a416622ed..819ef82c36be6f423e5f4328f58e3a54d6d95e22
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -84,6 +84,7 @@ const PREPAINT_SAFE_FLAGS: Record<string, true> = {
+ 	"--no-extensions": true,
+ 	"--no-skills": true,
+ 	"--no-rules": true,
++	"--untrusted-project": true,
+ 	"--no-tools": true,
+ 	"--no-lsp": true,
+ 	"--no-title": true,
+diff --git a/src/cli/args.ts b/src/cli/args.ts
+index 680353f709ca48dc3eb27bf28e9396e273a7eebf..04e21fe992659f68ea56151a2c7e917338f7954d 100644
+--- a/src/cli/args.ts
++++ b/src/cli/args.ts
+@@ -87,6 +87,11 @@ export interface Args {
+ 	noSkills?: boolean;
+ 	skills?: string[];
+ 	noRules?: boolean;
++	/**
++	 * The cwd is not trusted: no project settings, MCP servers, custom tools, TS commands, extensions, hooks or
++	 * plugins (the user's own still load), and implies --no-lsp.
++	 */
++	untrustedProject?: boolean;
+ 	noTitle?: boolean;
+ 	/** RPC modes only: run extensions without a UI; `rpc-ui` tool UI remains enabled. */
+ 	noUi?: boolean;
+@@ -231,7 +236,7 @@ function consumeBuiltInStringValue(flag: string, args: string[], valueIndex: num
+ 	return { value, index: valueIndex };
+ }
+ 
+-export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { type: "boolean" | "string" }>): Args {
++export function parseArgs(inputArgs: readonly string[], extensionFlags?: Map<string, { type: "boolean" | "string" }>): Args {
+ 	// Work on a copy: the `--option=value` handling below splices the value
+ 	// into the array, and callers reuse the same argv (the post-extension
+ 	// reparse in `runRootCommand` parses it a second time). Mutating the input
+@@ -377,6 +382,11 @@ export function parseArgs(inputArgs: string[], extensionFlags?: Map<string, { ty
+ 			result.noSkills = true;
+ 		} else if (arg === "--no-rules") {
+ 			result.noRules = true;
++		} else if (arg === "--untrusted-project") {
++			// Nothing from the folder runs; the user's own extensions, hooks and commands still do.
++			// Every language server goes: they run project build scripts.
++			result.untrustedProject = true;
++			result.noLsp = true;
+ 		} else if (arg === "--no-title") {
+ 			result.noTitle = true;
+ 		} else if (arg === "--no-ui") {
+diff --git a/src/cli/extension-flags.ts b/src/cli/extension-flags.ts
+index 997b0db970041806ec87ceae468d1c7fb3bed45d..8bb917413f4acd327bc07bf283e5d8b0a34b5276 100644
+--- a/src/cli/extension-flags.ts
++++ b/src/cli/extension-flags.ts
+@@ -33,7 +33,7 @@ export interface ExtensionFlagSink {
+  * reparse always runs so `--tools` can be validated against their registered
+  * tools even when no extension registered CLI flags.
+  */
+-export function applyExtensionFlags(runner: ExtensionFlagSink | undefined, rawArgs: string[]): Args | null {
++export function applyExtensionFlags(runner: ExtensionFlagSink | undefined, rawArgs: readonly string[]): Args | null {
+ 	if (!runner) return null;
+ 	const parsed = parseArgs(rawArgs, runner.getFlags());
+ 	// `parseArgs` records extension flag values in `unknownFlags`.
+diff --git a/src/cli/flag-tables.ts b/src/cli/flag-tables.ts
+index d3c9bdd2de935cf1cf22874ff3acb7dba164fdf4..ae8716df35c9c35cb5484869fad31a338e15d60a 100644
+--- a/src/cli/flag-tables.ts
++++ b/src/cli/flag-tables.ts
+@@ -327,6 +327,7 @@ export const VALUELESS_FLAGS: ReadonlySet<string> = new Set([
+ 	"--no-extensions",
+ 	"--no-skills",
+ 	"--no-rules",
++	"--untrusted-project",
+ 	"--no-title",
+ 	"--no-ui",
+ 	"--auto-approve",
+diff --git a/src/cli/gc-cli.ts b/src/cli/gc-cli.ts
+index 2f65650670a2a9ffbab5fbd0295196611f15e174..e9ae4eac98fd7bdf2de8b6808ee440b1e6429200 100644
+--- a/src/cli/gc-cli.ts
++++ b/src/cli/gc-cli.ts
+@@ -1857,14 +1857,32 @@ async function runArchiveGc(
+ 
+ 	const archivedSessionIds: string[] = [];
+ 	const archivedSessions: SessionInfo[] = [];
++	const storage = new FileSessionStorage();
+ 	for (const candidate of candidates) {
++		let release: (() => void) | null = null;
++		const nestedReleases: (() => void)[] = [];
+ 		try {
++			// An old mtime (including SIGSTOP) is not evidence that a writer died.
++			// Hold the canonical lifetime lease through compression and unlink.
++			release = storage.claimSession(candidate.session.id, candidate.session.path);
++			if (!release) {
++				result.skippedActive += 1;
++				continue;
++			}
++			for (const nested of await listNestedSessionsReadOnly(sessionArtifactsPath(candidate.session.path))) {
++				const nestedRelease = storage.claimSession(nested.id, nested.path);
++				if (!nestedRelease) throw new Error(`Nested session is busy in another live writer: ${nested.path}`);
++				nestedReleases.push(nestedRelease);
++			}
+ 			await moveSessionWithArtifacts(candidate);
+ 			result.archived += 1;
+ 			archivedSessionIds.push(candidate.session.id);
+ 			archivedSessions.push(candidate.session);
+ 		} catch (error) {
+ 			result.errors.push(`${candidate.session.path}: ${errorMessage(error)}`);
++		} finally {
++			for (const nestedRelease of nestedReleases) nestedRelease();
++			release?.();
+ 		}
+ 	}
+ 
+diff --git a/src/main.ts b/src/main.ts
+index c071445eb8dd4f050f8f27985275f674dc073e71..941f55a9b674f9df28035aa92fef96ae4ddf6d4b 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -65,7 +65,7 @@ import { Settings, settings } from "./config/settings";
+ import { initializeWithSettings } from "./discovery";
+ import {
+ 	clearPluginRootsAndCaches,
+-	injectPluginDirRoots,
++	preloadLaunchPluginRoots,
+ 	preloadPluginRoots,
+ 	resolveActiveProjectRegistryPath,
+ } from "./discovery/helpers";
+@@ -147,6 +147,7 @@ import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "./plan-mode/settings";
+ 
+ import { cfgAdvisorEnabled } from "./advisor/settings";
+ import { cfgToolsApprovalMode } from "./tools/settings";
++import { cfgMcpEnableProjectConfig } from "./mcp/settings";
+ import {
+ 	cfgAutocompleteMaxVisible,
+ 	cfgAutoResume,
+@@ -1745,6 +1746,9 @@ export async function buildSessionOptions(
+ 			options.disableExtensionDiscovery = true;
+ 		}
+ 	}
++	if (parsed.untrustedProject) {
++		options.disableProjectCustomTools = true;
++	}
+ 
+ 	return options;
+ }
+@@ -1831,16 +1835,7 @@ export async function runRootCommand(
+ 		// RPC owns stdin. Claim its singleton stream before plugin/extension discovery can load an in-process consumer.
+ 		const rpcInput = mode === "rpc" || mode === "rpc-ui" ? claimRpcInput() : undefined;
+ 
+-		// Kick off plugin-root preload in parallel with the remaining startup work.
+-		// Awaited later (before extension/skill discovery in createAgentSession needs it).
+ 		const home = os.homedir();
+-		const pluginPreloadPromise =
+-			parsedArgs.pluginDirs && parsedArgs.pluginDirs.length > 0
+-				? logger.time("injectPluginDirRoots", injectPluginDirRoots, home, parsedArgs.pluginDirs, getProjectDir())
+-				: logger.time("preloadPluginRoots", preloadPluginRoots, home, getProjectDir());
+-		// Mark the promise as handled so a synchronous failure does not surface as an unhandled-rejection
+-		// warning before we reach the await site below.
+-		pluginPreloadPromise.catch(() => {});
+ 
+ 		// Trusted files load as exact module paths, never as package roots whose
+ 		// sibling hooks/tools/commands/MCP content could be discovered implicitly.
+@@ -1904,8 +1899,22 @@ export async function runRootCommand(
+ 		// main config file during auth discovery.
+ 		const settingsPromise = deps.settings
+ 			? Promise.resolve(deps.settings)
+-			: logger.time("settings:init", Settings.init, { cwd, configFiles: parsedArgs.config });
++			: logger.time("settings:init", Settings.init, {
++					cwd,
++					configFiles: parsedArgs.config,
++					ignoreProjectSettings: parsedArgs.untrustedProject,
++				});
+ 		settingsPromise.catch(() => {});
++		// Plugin-root preload overlaps the remaining startup work; awaited before extension/skill discovery in
++		// createAgentSession needs it. It runs under the launch settings, so an untrusted folder's
++		// (`--untrusted-project`) project plugin registry never reaches the process-wide roots LSP/DAP read.
++		const preloadCwd = getProjectDir();
++		const pluginPreloadPromise = settingsPromise.then(launchSettings =>
++			logger.time("preloadPluginRoots", preloadLaunchPluginRoots, launchSettings, home, preloadCwd, parsedArgs.pluginDirs),
++		);
++		// Mark the promise as handled so a failure does not surface as an unhandled-rejection
++		// warning before we reach the await site below.
++		pluginPreloadPromise.catch(() => {});
+ 		const authStoragePromise = logger.time("discoverAuthStorage", async () =>
+ 			(deps.discoverAuthStorage ?? discoverAuthStorage)(undefined, { settings: await settingsPromise }),
+ 		);
+@@ -1923,6 +1932,8 @@ export async function runRootCommand(
+ 		const settingsInstance = await settingsPromise;
+ 		// Process-lifetime: broker/account-policy edits reconfigure the shared credential store.
+ 		createAuthStorageSettingsSync(settingsInstance, authStorage);
++		// An untrusted folder's MCP servers never start; the user's own still do.
++		if (parsedArgs.untrustedProject) cfgMcpEnableProjectConfig.override(settingsInstance, false);
+ 		if (parsedArgs.approvalMode) {
+ 			// Runtime override (not persisted): every `tools.approvalMode` read downstream
+ 			// sees this value. The wrapper still honours --auto-approve / --yolo on top of it.
+@@ -2274,6 +2285,8 @@ export async function runRootCommand(
+ 		sessionOptions.authStorage = authStorage;
+ 		sessionOptions.modelRegistry = modelRegistry;
+ 		sessionOptions.hasUI = isInteractive || mode === "rpc-ui";
++		// RPC hosts answer MCP forms through `extension_ui_request { method: "elicit" }`.
++		sessionOptions.mcpElicitation = mode === "rpc" || mode === "rpc-ui";
+ 		sessionOptions.allowSessionModelFallback = isInteractive;
+ 		sessionOptions.settingsApproval = isInteractive;
+ 		sessionOptions.tuiTranscript = isInteractive;
+@@ -2639,12 +2652,23 @@ export async function runRootCommand(
+ 			if (mode === "rpc" || mode === "rpc-ui") {
+ 				// Branch-only protocol runner: keep RPC host code out of normal interactive startup.
+ 				const runRpcMode: RunRpcMode = (await import("./modes/rpc/rpc-mode")).runRpcMode;
++				if (parsedArgs.untrustedProject) {
++					// Branch-only like the runner above: the inventory walks every discovery source.
++					const [{ collectUntrustedProjectItems }, { setUntrustedProjectReport }] = await Promise.all([
++						import("./config/untrusted-project"),
++						import("./session/untrusted-project-report"),
++					]);
++					const cwd = session.sessionManager.getCwd();
++					const items = await collectUntrustedProjectItems(cwd, settingsInstance.getAgentDir(), settingsInstance);
++					setUntrustedProjectReport(session, { items });
++				}
+ 				stopStartupWatchdog();
+ 				logger.endTiming();
+ 				await runRpcMode(session, {
+ 					setToolUIContext: mode === "rpc-ui" ? setToolUIContext : undefined,
+ 					headless: parsedArgs.noUi === true,
+ 					subagentEventBus,
++					mcpManager,
+ 					input: rpcInput,
+ 				});
+ 			} else if (isInteractive) {

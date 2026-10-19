@@ -1,0 +1,4641 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ombra engine maintainers <engine@ombra.local>
+Date: Sat, 1 Jan 2000 00:00:00 +0000
+Subject: [PATCH] shared RPC host protocol integration
+
+What: Wire the feature modules into the shared RPC dispatcher, state and generated schema.
+Why: Host features share transport and command definitions, which must remain coherent.
+Upstream-Status: Ombra-only integration.
+
+diff --git a/src/modes/rpc/rpc-client.ts b/src/modes/rpc/rpc-client.ts
+index 991c920a2f68ff7cdc4a1e41292bd39020b52828..402496748532475a5f19a585742cbf458c3fa56f 100644
+--- a/src/modes/rpc/rpc-client.ts
++++ b/src/modes/rpc/rpc-client.ts
+@@ -18,6 +18,7 @@ import type { CacheWarmingMode } from "../../session/cache-warmer";
+ import type { SessionEntry, SessionTreeNode } from "../../session/session-entries";
+ import { MAX_RPC_FRAME_BYTES, MAX_RPC_REASSEMBLED_BYTES, RpcFrameDecoder, type RpcProtocolVersion } from "./rpc-frame";
+ import type { RpcGoalOp, RpcGoalResult } from "./rpc-goal";
++import type { RpcPlanModeOp, RpcPlanModeResult } from "./rpc-plan";
+ import {
+ 	RPC_MESSAGES_PAGE_BUSY_ERROR,
+ 	RPC_MESSAGES_PAGE_STALE_ERROR,
+@@ -39,6 +40,8 @@ import type {
+ 	RpcHostToolDefinition,
+ 	RpcHostToolResult,
+ 	RpcHostToolUpdate,
++	RpcJobOutputResult,
++	RpcJobSnapshot,
+ 	RpcLiveFrame,
+ 	RpcOpenSessionResult,
+ 	RpcPromptResultFrame,
+@@ -839,6 +842,26 @@ export class RpcClient {
+ 		return this.#getData(response);
+ 	}
+ 
++	/**
++	 * Read or change plan mode. A proposed plan arrives as `review` (here, in `get_state`
++	 * and in `plan_mode_updated` frames); `approve` exits plan mode and starts executing it,
++	 * `reject` keeps planning and sends `feedback` as the next turn. Both name the review's
++	 * `revision` and are refused while a turn runs.
++	 */
++	async planMode(
++		op: RpcPlanModeOp,
++		options?: { planFilePath?: string; feedback?: string; revision?: string },
++	): Promise<RpcPlanModeResult> {
++		const response = await this.#send({
++			type: "plan_mode",
++			op,
++			planFilePath: options?.planFilePath,
++			feedback: options?.feedback,
++			revision: options?.revision,
++		});
++		return this.#getData(response);
++	}
++
+ 	/**
+ 	 * Start a GPT live voice session bound to this session; resolves once it is connected
+ 	 * and recording. `instructions` replaces the bundled live prompt (Handlebars:
+@@ -920,6 +943,24 @@ export class RpcClient {
+ 		this.#getData(await this.#send({ type: "steer_subagent", subagentId, message }));
+ 	}
+ 
++	/** List this session's background jobs: running ones, then recent settled ones. */
++	async getJobs(): Promise<RpcJobSnapshot[]> {
++		const response = await this.#send({ type: "get_jobs" });
++		return this.#getData<{ jobs: RpcJobSnapshot[] }>(response).jobs;
++	}
++
++	/** Cancel one running background job; `false` when it is unknown or already settled. */
++	async cancelJob(jobId: string): Promise<boolean> {
++		const response = await this.#send({ type: "cancel_job", jobId });
++		return this.#getData<{ cancelled: boolean }>(response).cancelled;
++	}
++
++	/** Read a bounded slice of a background job's output from a byte cursor (the tail when omitted). */
++	async getJobOutput(jobId: string, options?: { fromByte?: number; maxBytes?: number }): Promise<RpcJobOutputResult> {
++		const response = await this.#send({ type: "get_job_output", jobId, ...options });
++		return this.#getData<RpcJobOutputResult>(response);
++	}
++
+ 	/**
+ 	 * Set model by provider and ID.
+ 	 */
+@@ -1138,6 +1179,17 @@ export class RpcClient {
+ 		return this.#getData(response);
+ 	}
+ 
++	/**
++	 * Move the session's leaf in place, in the same session file (the TUI's /tree and Esc Esc rewind, without a
++	 * summary): a user message rewinds past itself, any other entry becomes the leaf. The abandoned path stays in
++	 * the file as a sibling branch. Refused with `session_busy` while the session works.
++	 * @returns Object with `text` and `images` from the rewound user message, and `cancelled` if an extension cancelled
++	 */
++	async navigateTree(targetId: string): Promise<{ text?: string; images?: ImageContent[]; cancelled: boolean }> {
++		const response = await this.#send({ type: "navigate_tree", targetId });
++		return this.#getData(response);
++	}
++
+ 	/**
+ 	 * Get messages available for branching.
+ 	 */
+diff --git a/src/modes/rpc/rpc-frame.ts b/src/modes/rpc/rpc-frame.ts
+index aacb7e0d3ca756db58a6c1212eb910c9df54cf2a..af65e3a2d294d976f4c822c4d0da1aaadd7da09a 100644
+--- a/src/modes/rpc/rpc-frame.ts
++++ b/src/modes/rpc/rpc-frame.ts
+@@ -138,7 +138,8 @@ function jsonSnapshot(value: unknown): unknown {
+ }
+ 
+ function encodedMessageSnapshot(encoded: string): { message: unknown } | undefined {
+-	const frame = JSON.parse(encoded);
++	let frame = JSON.parse(encoded);
++	if (isRecord(frame) && frame.type === "engine_session_frame" && isRecord(frame.frame)) frame = frame.frame;
+ 	return isRecord(frame) && frame.type === "message_end" && Object.hasOwn(frame, "message")
+ 		? { message: frame.message }
+ 		: undefined;
+@@ -276,6 +277,9 @@ function compactTerminalFrame(
+ 
+ function overflowFrame(frame: object): object {
+ 	if (!isRecord(frame)) return { type: "rpc_frame_error", error: "RPC frame exceeded the transport limit" };
++	if (frame.type === "engine_session_frame" && typeof frame.sessionKey === "string" && isRecord(frame.frame)) {
++		return { type: "engine_session_frame", sessionKey: frame.sessionKey, frame: overflowFrame(frame.frame) };
++	}
+ 	if (frame.type === "response") {
+ 		return {
+ 			id: typeof frame.id === "string" ? shrinkString(frame.id, METADATA_STRING_CAP) : undefined,
+@@ -327,9 +331,17 @@ export function encodeRpcFrame(frame: object, streamedMessageCount = 0, streamed
+ 	return encodeRpcFrameFromJson(frame, serializeFrame(frame), streamedMessageCount, streamedMessages);
+ }
+ 
++interface RpcMessageHistory {
++	messages: unknown[];
++	bytes: number;
++	tracking: boolean;
++}
++
+ /** Stateful encoder that tracks which messages a client has already received. */
+ export class RpcFrameEncoder {
+-	#streamedMessages: unknown[] = [];
++	#streamedMessages: RpcMessageHistory = { messages: [], bytes: 0, tracking: true };
++	#sessionMessages = new Map<string, RpcMessageHistory>();
++	#trackedMessageBytes = 0;
+ 	#protocolVersion: RpcProtocolVersion = 1;
+ 	#chunkCounter = 0;
+ 
+@@ -353,12 +365,35 @@ export class RpcFrameEncoder {
+ 	 * returned iterable MUST be fully consumed exactly once.
+ 	 */
+ 	encodeFrames(frame: object): Iterable<string> {
+-		if (isRecord(frame) && frame.type === "agent_start") this.#streamedMessages = [];
++		let logicalFrame = frame;
++		let sessionKey: string | undefined;
++		if (isRecord(frame) && frame.type === "engine_session_frame" && typeof frame.sessionKey === "string" && isRecord(frame.frame)) {
++			sessionKey = frame.sessionKey;
++			logicalFrame = frame.frame;
++		}
++		let history = sessionKey ? this.#sessionMessages.get(sessionKey) : this.#streamedMessages;
++		if (!history) {
++			history = { messages: [], bytes: 0, tracking: true };
++			this.#sessionMessages.set(sessionKey!, history);
++		}
++		if (isRecord(logicalFrame) && logicalFrame.type === "agent_start") {
++			this.#trackedMessageBytes -= history.bytes;
++			history.messages = [];
++			history.bytes = 0;
++			history.tracking = true;
++		}
++		if (isRecord(frame) && frame.type === "engine_session_closed" && typeof frame.sessionKey === "string") {
++			const closed = this.#sessionMessages.get(frame.sessionKey);
++			if (closed) this.#trackedMessageBytes -= closed.bytes;
++			this.#sessionMessages.delete(frame.sessionKey);
++		}
+ 		const json = serializeFrame(frame);
+ 		let frames: Iterable<string>;
+ 		let singleFrame: string | undefined;
+ 		if (this.#protocolVersion === 2 && serializedFrameBytes(json) > MAX_RPC_FRAME_BYTES) {
+-			const compacted = compactTerminalFrame(frame, this.#streamedMessages.length, this.#streamedMessages);
++			const terminal = compactTerminalFrame(logicalFrame, history.messages.length, history.messages);
++			const compacted = terminal === logicalFrame ? frame : sessionKey
++				? { ...frame, frame: terminal } : terminal;
+ 			// Reuse the original serialization when compaction was a no-op.
+ 			const compactedJson = compacted === frame ? json : JSON.stringify(compacted);
+ 			if (serializedFrameBytes(compactedJson) > MAX_RPC_FRAME_BYTES) {
+@@ -368,19 +403,31 @@ export class RpcFrameEncoder {
+ 				frames = [singleFrame];
+ 			}
+ 		} else {
+-			singleFrame = encodeRpcFrameFromJson(frame, json, this.#streamedMessages.length, this.#streamedMessages);
++			singleFrame = encodeRpcFrameFromJson(frame, json, history.messages.length, history.messages);
+ 			frames = [singleFrame];
+ 		}
+-		if (!isRecord(frame)) return frames;
+-		if (frame.type === "message_end") {
+-			const snapshot =
+-				this.#protocolVersion === 2 && Object.hasOwn(frame, "message")
+-					? (encodedMessageSnapshot(json) ?? { message: jsonSnapshot(frame.message) })
+-					: singleFrame !== undefined
+-						? encodedMessageSnapshot(singleFrame)
+-						: undefined;
+-			if (snapshot) this.#streamedMessages.push(snapshot.message);
+-		} else if (frame.type === "agent_end" && frame.willContinue !== true) this.#streamedMessages = [];
++		if (!isRecord(logicalFrame)) return frames;
++		if (logicalFrame.type === "message_end" && history.tracking) {
++			// Bound retained compaction snapshots across all logical sessions. A
++			// truncated prefix is still safe: terminal compaction compares it.
++			const bytes = Buffer.byteLength(json);
++			if (bytes <= MAX_RPC_REASSEMBLED_BYTES - this.#trackedMessageBytes) {
++				const snapshot =
++					this.#protocolVersion === 2 && Object.hasOwn(logicalFrame, "message")
++						? encodedMessageSnapshot(json)
++						: singleFrame !== undefined ? encodedMessageSnapshot(singleFrame) : undefined;
++				if (snapshot) {
++					history.messages.push(snapshot.message);
++					history.bytes += bytes;
++					this.#trackedMessageBytes += bytes;
++				}
++			} else history.tracking = false;
++		} else if (logicalFrame.type === "agent_end" && logicalFrame.willContinue !== true) {
++			this.#trackedMessageBytes -= history.bytes;
++			history.messages = [];
++			history.bytes = 0;
++			history.tracking = true;
++		}
+ 		return frames;
+ 	}
+ 
+diff --git a/src/modes/rpc/rpc-mode.ts b/src/modes/rpc/rpc-mode.ts
+index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8deb035a05 100644
+--- a/src/modes/rpc/rpc-mode.ts
++++ b/src/modes/rpc/rpc-mode.ts
+@@ -19,8 +19,12 @@ import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
+ import type { ImageContent } from "@oh-my-pi/pi-ai";
+ import { toolWireSchema } from "@oh-my-pi/pi-ai/utils/schema";
+ import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
+-import { $env, isRecord, logger, Snowflake, toError } from "@oh-my-pi/pi-utils";
++import { $env, isRecord, logger, Snowflake } from "@oh-my-pi/pi-utils";
+ import { clearPluginRootsAndCaches, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
++import { SessionLeaseHeldError } from "../../session/session-lease-error";
++import { SessionModelUnavailableError } from "../../session/session-model-error";
++import { readSessionHeaderId } from "../../session/session-loader";
++import { isSessionLeaseFree, readSessionLeaseHolder } from "../../session/session-storage";
+ import {
+ 	type ExtensionAskDialogQuestion,
+ 	type ExtensionAskDialogResult,
+@@ -53,6 +57,7 @@ import type { RestoredQueuedMessage } from "../../session/agent-session-types";
+ import { CACHE_WARMING_MODES } from "../../session/cache-warmer";
+ import { findMostRecentNonEmptySession } from "../../session/session-listing";
+ import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/messages";
++import { getUntrustedProjectReport } from "../../session/untrusted-project-report";
+ import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins";
+ import { buildAvailableSlashCommands } from "../../slash-commands/available-commands";
+ import { listLogoutAccounts, logoutCredential } from "../../slash-commands/helpers/logout";
+@@ -72,19 +77,25 @@ import { isRpcHostUriResult, RpcHostUriBridge } from "./host-uris";
+ import { MAX_RPC_FRAME_BYTES, MAX_RPC_REASSEMBLED_BYTES, RpcFrameEncoder } from "./rpc-frame";
+ import { claimRpcInput, readRpcInputFrames } from "./rpc-input";
+ import { pageRpcMessages, RPC_MESSAGES_PAGE_BUSY_ERROR, RpcMessagesPageError } from "./rpc-messages";
++import { pageRpcMessagesBackward } from "./rpc-messages-backward";
+ import { RpcBtwController } from "./rpc-btw";
++import { RpcMcpController, RpcMcpError } from "./rpc-mcp";
++import type { MCPManager } from "../../mcp/manager";
+ import { RpcGoalController } from "./rpc-goal";
++import { RpcPlanController, RpcPlanModeError } from "./rpc-plan";
+ import { RpcLiveBridge, type RpcLiveSessionFactory } from "./rpc-live";
+ import { RpcOutputWriter } from "./rpc-output";
++import { RpcEditorBridge } from "./rpc-editor";
+ import {
+ 	RpcExtensionUserMessageTracker,
+ 	RpcPromptResults,
+ 	type RpcPromptTicket,
+-	watchAndReportPromptResult,
++	watchRpcInputAdmission,
+ } from "./rpc-prompt-results";
+ import { RpcSessionEventForwarder } from "./rpc-session-events";
+ import { isRpcSessionSettled, RpcSessionSettleWatcher, watchedScheduledTurnProbe } from "./rpc-session-settle";
+ import { RpcSubagentRegistry, readRpcSubagentTranscript, resolveOwnedLiveSubagent } from "./rpc-subagents";
++import { cancelRpcJob, listRpcJobs, readRpcJobOutput } from "./rpc-jobs";
+ import type {
+ 	RpcAbortAndRestoreQueueResult,
+ 	RpcCommand,
+@@ -99,9 +110,11 @@ import type {
+ 	RpcHostUriCancelRequest,
+ 	RpcHostUriRequest,
+ 	RpcHostUriResult,
++	RpcInputAck,
+ 	RpcOpenSessionResult,
+ 	RpcRemoveQueuedMessageResult,
+ 	RpcResponse,
++	RpcSessionLeaseLostFrame,
+ 	RpcSessionState,
+ 	RpcSubagentSubscriptionLevel,
+ } from "./rpc-types";
+@@ -228,7 +241,7 @@ type RpcOutput = (
+ 
+ export type RpcSessionChangeCommand = Extract<
+ 	RpcCommand,
+-	{ type: "new_session" } | { type: "switch_session" } | { type: "branch" } | { type: "fork" }
++	{ type: "new_session" } | { type: "switch_session" } | { type: "branch" } | { type: "fork" } | { type: "navigate_tree" }
+ >;
+ 
+ export type RpcQueueModeCommand = Extract<
+@@ -240,12 +253,16 @@ export type RpcSessionChangeResult =
+ 	| { type: "new_session"; data: { cancelled: boolean } }
+ 	| { type: "switch_session"; data: { cancelled: boolean } }
+ 	| { type: "branch"; data: { text: string; cancelled: boolean } }
+-	| { type: "fork"; data: { cancelled: boolean } };
++	| { type: "fork"; data: { cancelled: boolean } }
++	| { type: "navigate_tree"; data: { text?: string; images?: ImageContent[]; cancelled: boolean } };
+ 
+-export type RpcSessionChangeSession = Pick<AgentSession, "newSession" | "switchSession" | "branch" | "fork">;
++export type RpcSessionChangeSession = Pick<
++	AgentSession,
++	"newSession" | "switchSession" | "branch" | "fork" | "navigateTree" | "isBusyForSnapshot" | "sessionManager"
++>;
+ 
+ export type RpcSkillCommandSession = Pick<AgentSession, "promptCustomMessage" | "skills" | "skillsSettings">;
+-export type RpcSkillCommandResult = { agentInvoked: true };
++export type RpcSkillCommandResult = RpcInputAck;
+ 
+ export interface RpcSkillInvocation extends SkillPromptInput {
+ 	skill: Skill;
+@@ -269,9 +286,8 @@ export function resolveRpcSkillInvocation(session: RpcSkillCommandSession, text:
+ /**
+  * Slow half of a skill invocation: builds the skill prompt message (file I/O)
+  * and dispatches it through the full prompt pipeline (usage preflight,
+- * compaction checks, provider calls). Resolves once the turn is scheduled.
+- * Must not run on the RPC serial queue's response path — register it with
+- * watchAndReportPromptResult and answer the command once it is admitted.
++ * compaction checks, provider calls). Its promise covers the full turn;
++ * onPromptAdmitted reports queue insertion or actual idle dispatch separately.
+  */
+ export async function runRpcSkillCommand(
+ 	session: RpcSkillCommandSession,
+@@ -295,13 +311,8 @@ export async function runRpcSkillCommand(
+ }
+ 
+ /**
+- * Skill branch of the `prompt` command: resolves the invocation cheaply, then
+- * registers the slow dispatch with watchAndReportPromptResult and awaits
+- * admission (or completion, for a message that settles without ever being
+- * admitted) before answering. The caller still does not wait for the full
+- * dispatch pipeline — building the skill prompt and running it (usage
+- * preflight, compaction, provider calls) can outlast any client's prompt
+- * timeout under provider stress; only queue admission gates the response.
++ * Skill branch of the `prompt` command: prepare the skill input, then observe
++ * queue insertion or idle dispatch independently from full-turn completion.
+  *
+  * @returns `null` for a non-skill message, `"cancelled"` when `isCurrent`
+  *   reports the submission was invalidated while the skill file was read.
+@@ -319,31 +330,24 @@ export async function dispatchRpcSkillPrompt(input: {
+ }): Promise<RpcSkillCommandResult | "cancelled" | null> {
+ 	const invocation = resolveRpcSkillInvocation(input.session, input.message);
+ 	if (!invocation) return null;
+-	// buildSkillPromptMessage is cheap file I/O and covers the failure the old
+-	// synchronous path reported immediately (a removed or unreadable SKILL.md);
+-	// keep that error contract by awaiting it before answering. The expensive
+-	// promptCustomMessage pipeline (usage preflight, compaction, provider
+-	// calls) is what moves behind the acknowledgement.
++	// File preparation must finish before admission, including its normal I/O errors.
+ 	const built = await buildSkillPromptMessage(invocation.skill, invocation, "user");
+ 	if (input.isCurrent && !input.isCurrent()) return "cancelled";
+-	// A failure before admission still resolves this wait (without rejecting this
+-	// call) — reportPromptResult already routed it to onError and a failed prompt_result.
+-	await watchAndReportPromptResult({
+-		ticket: input.ticket,
+-		startPrompt: onPromptAdmitted =>
+-			runRpcSkillCommand(
++	return watchRpcInputAdmission({
++		startInput: async onPromptAdmitted => {
++			await runRpcSkillCommand(
+ 				input.session,
+ 				invocation,
+ 				input.streamingBehavior ?? "steer",
+ 				built,
+ 				onPromptAdmitted,
+ 				input.images,
+-			),
+-		results: input.results,
+-		onError: input.onError,
++			);
++			return "cancelled";
++		},
++		report: { ticket: input.ticket, results: input.results, onError: input.onError },
+ 		extensionUserMessageTracker: input.extensionUserMessageTracker,
+ 	});
+-	return { agentInvoked: true };
+ }
+ 
+ export async function tryRunRpcSkillCommand(
+@@ -354,8 +358,18 @@ export async function tryRunRpcSkillCommand(
+ ): Promise<RpcSkillCommandResult | false> {
+ 	const invocation = resolveRpcSkillInvocation(session, text);
+ 	if (!invocation) return false;
+-	await runRpcSkillCommand(session, invocation, streamingBehavior, undefined, undefined, images);
+-	return { agentInvoked: true };
++	let admitted = false;
++	await runRpcSkillCommand(
++		session,
++		invocation,
++		streamingBehavior,
++		undefined,
++		() => {
++			admitted = true;
++		},
++		images,
++	);
++	return { inputDisposition: admitted ? "admitted" : "cancelled", agentInvoked: admitted };
+ }
+ 
+ /**
+@@ -422,6 +436,14 @@ const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>([
+ 	"predict_word",
+ 	"live_start",
+ 	"btw_cancel",
++	"editor_document",
++	"editor_trust",
++	"editor_edit_result",
++	// Sign-in waits on the user's browser for minutes; cancel must overtake it. Reconnects wait on servers.
++	"get_mcp_servers",
++	"mcp_login",
++	"mcp_login_cancel",
++	"mcp_reconnect",
+ ]);
+ 
+ /**
+@@ -450,8 +472,13 @@ const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>([
+  *   Errors from `handleCommand` on a command dispatched inline propagate; the
+  *   caller is expected to wrap them.
+  */
+-export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps): Promise<void> | undefined {
+-	if (dispatchRpcControlFrame(parsed, deps)) return undefined;
++export function dispatchRpcInputFrame(
++	parsed: unknown, deps: RpcInputFrameDeps, processed?: () => void,
++): Promise<void> | undefined {
++	if (dispatchRpcControlFrame(parsed, deps)) {
++		processed?.();
++		return undefined;
++	}
+ 	// Regular RPC command. The transport contract states each remaining frame
+ 	// is an {@link RpcCommand}; `handleCommand`'s `default` arm surfaces
+ 	// unknown discriminants as an error response, so we do not shape-check
+@@ -471,6 +498,7 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
+ 	if (
+ 		BACKGROUND_COMMANDS.has(command.type) ||
+ 		command.type === "prompt" ||
++		command.type === "abort_and_prompt" ||
+ 		command.type === "steer" ||
+ 		command.type === "follow_up" ||
+ 		command.type === "steer_subagent"
+@@ -480,7 +508,11 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
+ 				deps.output(await deps.handleCommand(command));
+ 			} catch (err: unknown) {
+ 				const message = err instanceof Error ? err.message : String(err);
+-				deps.output(deps.errorResponse(command.id, command.type, message));
++				deps.output(err instanceof SessionModelUnavailableError || err instanceof SessionLeaseHeldError
++					? { type: "response", id: command.id, command: command.type, success: false, error: message, code: err.code, data: err.data }
++					: deps.errorResponse(command.id, command.type, message));
++			} finally {
++				processed?.();
+ 			}
+ 		})();
+ 		deps.trackBackgroundTask?.(task);
+@@ -488,7 +520,8 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
+ 	}
+ 
+ 	return (async () => {
+-		deps.output(await deps.handleCommand(command));
++		try { deps.output(await deps.handleCommand(command)); }
++		finally { processed?.(); }
+ 	})();
+ }
+ 
+@@ -572,6 +605,7 @@ export class RpcInputDispatcher {
+ 	readonly #afterSerialCommand: (() => Promise<void>) | undefined;
+ 	readonly #acceptInput: ((command: RpcCommand) => void) | undefined;
+ 
++	#closed = false;
+ 	constructor(options: {
+ 		deps: RpcInputFrameDeps;
+ 		afterSerialCommand?: () => Promise<void>;
+@@ -583,22 +617,29 @@ export class RpcInputDispatcher {
+ 	}
+ 
+ 	/** Accept a parsed input frame without blocking the stdin reader. */
+-	dispatch(parsed: unknown): void {
++	dispatch(parsed: unknown, processed?: () => void): void {
++		let completed = false;
++		const complete = processed ? () => {
++			if (completed) return;
++			completed = true;
++			processed();
++		} : undefined;
++		if (this.#closed) { complete?.(); return; }
+ 		try {
+-			if (dispatchRpcControlFrame(parsed, this.#deps)) return;
++			if (dispatchRpcControlFrame(parsed, this.#deps)) { complete?.(); return; }
+ 			const command = parsed as RpcCommand;
+ 			this.#acceptInput?.(command);
+ 			// Bash and predict_word retain their immediate side channel. Prompts,
+ 			// steers, follow-ups and steer_subagent start through the serial tail, but
+ 			// dispatchRpcInputFrame backgrounds their admission.
+ 			if (BACKGROUND_COMMANDS.has(command.type)) {
+-				dispatchRpcInputFrame(command, this.#deps);
++				dispatchRpcInputFrame(command, this.#deps, complete);
+ 				return;
+ 			}
+ 
+ 			const task = this.#tail.then(
+-				() => this.#dispatchSerialCommand(command),
+-				() => this.#dispatchSerialCommand(command),
++				() => this.#dispatchSerialCommand(command, complete),
++				() => this.#dispatchSerialCommand(command, complete),
+ 			);
+ 			this.#tail = task.catch(() => {});
+ 			this.#tasks.add(task);
+@@ -608,9 +649,15 @@ export class RpcInputDispatcher {
+ 		} catch (err: unknown) {
+ 			const message = err instanceof Error ? err.message : String(err);
+ 			this.#deps.output(this.#deps.errorResponse(undefined, "parse", `Failed to parse command: ${message}`));
++			complete?.();
+ 		}
+ 	}
+ 
++	/** Prevent queued commands from starting while this logical session is closing. */
++	stop(): void {
++		this.#closed = true;
++	}
++
+ 	/** Await every accepted serial command, including commands queued before EOF. */
+ 	async drain(): Promise<void> {
+ 		while (this.#tasks.size > 0) {
+@@ -618,13 +665,17 @@ export class RpcInputDispatcher {
+ 		}
+ 	}
+ 
+-	async #dispatchSerialCommand(command: RpcCommand): Promise<void> {
++	async #dispatchSerialCommand(command: RpcCommand, processed?: () => void): Promise<void> {
++		if (this.#closed) { processed?.(); return; }
+ 		try {
+-			const awaited = dispatchRpcInputFrame(command, this.#deps);
++			const awaited = dispatchRpcInputFrame(command, this.#deps, processed);
+ 			if (awaited) await awaited;
+ 		} catch (err: unknown) {
+ 			const message = err instanceof Error ? err.message : String(err);
+-			this.#deps.output(this.#deps.errorResponse(command.id, command.type, message));
++			this.#deps.output(err instanceof SessionModelUnavailableError || err instanceof SessionLeaseHeldError
++				? { type: "response", id: command.id, command: command.type, success: false, error: message, code: err.code, data: err.data }
++				: this.#deps.errorResponse(command.id, command.type, message));
++			processed?.();
+ 		} finally {
+ 			await this.#afterSerialCommand?.();
+ 		}
+@@ -873,9 +924,17 @@ export async function handleRpcSessionChange(
+ 		}
+ 
+ 		case "switch_session": {
++			// Another window or a terminal writes the target: refuse, so the client shows it read-only.
++			const targetId = await readSessionHeaderId(command.sessionPath);
++			if (targetId && targetId !== session.sessionManager.getSessionId() && !isSessionLeaseFree(targetId))
++				throw new SessionLeaseHeldError(targetId, readSessionLeaseHolder(targetId));
+ 			const options = requestedModel ? { model: requestedModel } : undefined;
+ 			const cancelled = !(await session.switchSession(command.sessionPath, options));
+-			if (!cancelled) subagentRegistry?.clear();
++			if (!cancelled) {
++				subagentRegistry?.clear();
++				// Held from now on, as an open of a restored chat is.
++				session.sessionManager.claimWriterLease();
++			}
+ 			return { type: "switch_session", data: { cancelled } };
+ 		}
+ 
+@@ -892,6 +951,15 @@ export async function handleRpcSessionChange(
+ 			if (!cancelled) subagentRegistry?.clear();
+ 			return { type: "fork", data: { cancelled } };
+ 		}
++
++		case "navigate_tree": {
++			// The TUI's /tree and Esc Esc rewind, without a summary: the leaf moves in the same file and the
++			// abandoned path stays there as a sibling branch. A user message rewinds past itself, its text and images back.
++			// Same session, same subagents: nothing to reset. Refused once work started during the awaits before it.
++			if (session.isBusyForSnapshot) throw new SessionBusyError("rewind the session");
++			const result = await session.navigateTree(command.targetId, { summarize: false });
++			return { type: "navigate_tree", data: { text: result.editorText, images: result.editorImages, cancelled: result.cancelled } };
++		}
+ 	}
+ 	throw new Error("Unsupported RPC session change command");
+ }
+@@ -1054,9 +1122,22 @@ export function requestRpcSelect(
+ 			title,
+ 			options: labels,
+ 			...(optionDetails ? { optionDetails } : {}),
++			...(dialogOptions?.approval ? { approval: dialogOptions.approval } : {}),
+ 			timeout: dialogOptions?.timeout,
+ 		},
+-		response => parseValueDialogResponse(response, dialogOptions),
++		response => {
++			const value = parseValueDialogResponse(response, dialogOptions);
++			// Structured approval: a Deny may carry the user's reason for the agent.
++			if (
++				value === "Deny" &&
++				dialogOptions?.approval &&
++				"reason" in response &&
++				typeof response.reason === "string" &&
++				response.reason.trim()
++			)
++				dialogOptions.onApprovalDenied?.(response.reason);
++			return value;
++		},
+ 	);
+ }
+ 
+@@ -1314,7 +1395,9 @@ export function registerRpcPersistenceSurface(
+ 	});
+ 	const unsubscribeNotices = session.sessionManager.onPersistenceNotice(notice => {
+ 		const message = formatPersistenceNotice(notice);
+-		output({ type: "notice", level: "warning", message, source: "session-persistence" });
++		output({ type: "notice", level: "warning", message, source: "session-persistence",
++			reason: notice.reason, previousSessionFile: notice.from, sessionFile: notice.to,
++			sessionId: session.sessionManager.getSessionId() });
+ 		process.stderr.write(`${message}\n`);
+ 	});
+ 	return () => {
+@@ -1333,42 +1416,41 @@ export interface RpcModeOptions {
+ 	input?: ReadableStream<Uint8Array>;
+ 	/** Builds `live_start` sessions; defaults to the real {@link LiveSessionController}. */
+ 	createLiveSession?: RpcLiveSessionFactory;
++	/** The session's MCP manager: connector state, sign-in, reconnect and form elicitation over RPC. */
++	mcpManager?: MCPManager;
++}
++
++export interface RpcSessionRuntime {
++	/** Accept an already parsed command or side-channel frame. */
++	dispatch(frame: unknown, processed?: () => void): void;
++	/** Abort and dispose only this logical session; idempotent. */
++	close(): Promise<void>;
++	readonly closed: Promise<void>;
++}
++
++export interface RpcSessionRuntimeOptions extends Omit<RpcModeOptions, "input"> {
++	output: RpcOutput;
++	/** Transport overhead reserved by the multiplexing envelope. */
++	envelopeBytes?: number;
++	/** Shared hosts negotiate once on the root transport. */
++	protocolVersion?: 1 | 2;
++	/** Publish side-channel dispatch before extension session_start hooks await UI. */
++	onRuntime?: (runtime: RpcSessionRuntime) => void;
+ }
+ 
+ /**
+- * Run in RPC mode.
+- * Listens for JSON commands on stdin, outputs events and responses on stdout.
++ * Bind the complete RPC dispatcher to one SDK session. The caller owns the
++ * transport and process; no stdin, stdout, environment or process exit here.
+  */
+-export async function runRpcMode(session: AgentSession, options: RpcModeOptions = {}): Promise<never> {
+-	const { setToolUIContext, headless = false, subagentEventBus, input = claimRpcInput(), createLiveSession } = options;
+-	// Signal to RPC clients that the server is ready to accept commands
+-	// Suppress terminal notifications: they write \x07 (BEL) or OSC sequences directly to
+-	// process.stdout with no newline, which the reader merges with the next JSON line and
+-	// breaks JSON.parse. In RPC mode stdout is the JSON protocol channel — nothing else
+-	// may write there.
+-	process.env.PI_NOTIFICATIONS = "off";
+-
++export async function createRpcSessionRuntime(
++	session: AgentSession,
++	options: RpcSessionRuntimeOptions,
++): Promise<RpcSessionRuntime> {
++	const { setToolUIContext, headless = false, subagentEventBus, createLiveSession } = options;
+ 	const frameEncoder = new RpcFrameEncoder();
+-	// Bun on Windows writes a piped process.stdout with a blocking WriteFile on the
+-	// JS thread and never reports backpressure, so a client that stops reading
+-	// stdout froze the whole worker, stdin reader included. An fd write stream
+-	// writes from the threadpool and reports backpressure, letting the writer spool.
+-	const stdout = process.platform === "win32" ? fs.createWriteStream("", { fd: 1, autoClose: false }) : process.stdout;
+-	const outputWriter = new RpcOutputWriter(stdout, failure => {
+-		logger.error("RPC output delivery failed", { error: String(failure) });
+-		void session.dispose().finally(() => process.exit(1));
+-	});
+-	outputWriter.write(
+-		frameEncoder.encodeFrames({
+-			type: "ready",
+-			protocolVersion: 1,
+-			supportedProtocolVersions: [1, 2],
+-			maxFrameBytes: MAX_RPC_FRAME_BYTES,
+-			maxReassembledFrameBytes: MAX_RPC_REASSEMBLED_BYTES,
+-		}),
+-	);
+-	const output = (obj: RpcResponse | RpcExtensionUIRequest | object) => {
+-		outputWriter.write(frameEncoder.encodeFrames(obj));
++	frameEncoder.setProtocolVersion(options.protocolVersion ?? 1);
++	const output: RpcOutput = obj => {
++		options.output(obj);
+ 		if (isRecord(obj) && obj.type === "response" && obj.command === "negotiate_protocol" && obj.success === true)
+ 			frameEncoder.setProtocolVersion(2);
+ 	};
+@@ -1394,6 +1476,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 	const btw = new RpcBtwController(session, output);
+ 	// A continuation abandoned while waiting leaves nothing to end the activity stretch: re-check settlement.
+ 	const goalController = new RpcGoalController(session, () => void settleWatcher.check());
++	// Plan mode: transitions and the proposed plan go straight to `output` as `plan_mode_updated`.
++	const planController = new RpcPlanController(session, frame => output(frame));
+ 	// A scheduled or held goal turn will start a turn: every settle report treats it as busy,
+ 	// and any report of "not settled" for that reason is later closed by `session_settled`.
+ 	const goalTurnScheduled = watchedScheduledTurnProbe(
+@@ -1407,9 +1491,14 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 	const pendingExtensionRequests = new RpcPendingExtensionRequests();
+ 	const hostToolBridge = new RpcHostToolBridge(output);
+ 	const hostUriBridge = new RpcHostUriBridge(output);
++	const editorBridge = new RpcEditorBridge(session.sessionManager.getCwd(), output);
++	const lifetime = new AbortController();
+ 	// Live frames go straight to `output`, so `set_event_filter` (session events only) never drops them.
+ 	const liveBridge = new RpcLiveBridge(session, output, createLiveSession);
+ 	const subagentRegistry = subagentEventBus ? new RpcSubagentRegistry(subagentEventBus, output) : undefined;
++	const mcp = new RpcMcpController(session, options.mcpManager, output, (request, fallback, parse) =>
++		requestRpcDialog(pendingExtensionRequests, output, { signal: lifetime.signal }, fallback, request, parse),
++	);
+ 
+ 	// Shutdown request flag (wrapped in object to allow mutation with const)
+ 	const shutdownState = { requested: false };
+@@ -1621,120 +1710,82 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 	const onPromptError = (id: string | undefined, command: string) => (promptError: Error) =>
+ 		output(error(id, command, promptError.message));
+ 
+-	// Set up extensions with RPC-based UI context
+-	await initializeExtensions(session, {
+-		mode: "rpc",
+-		// Extension-initiated session changes get the same goal quiesce/reattach as the commands below.
+-		wrapSessionChange: async <T extends { cancelled: boolean }>(
+-			change: () => Promise<T>,
+-			{ detachesRun }: { detachesRun: boolean },
+-		): Promise<T> => {
+-			await btw.close();
+-			await goalController.beginSessionChange();
+-			let result: T | undefined;
+-			try {
+-				result = await change();
+-				return result;
+-			} finally {
+-				// Reattaches only if the session actually changed, then re-checks settlement.
+-				// A change that throws may already have detached the run: count it as detached.
+-				await goalController.endSessionChange({ detachedRun: detachesRun && result?.cancelled !== true });
+-				if (result && !result.cancelled) {
+-					// As for the host's new/switch commands: a detached run never yields, so
+-					// close the prompts it was answering. Branch and navigation leave a live
+-					// run streaming to its normal yield.
+-					if (detachesRun) promptResults.abortOpen();
+-					void settleWatcher.check();
+-				}
+-			}
+-		},
+-		reportSendError: (action, err) => {
+-			output(error(undefined, action, err.message));
+-		},
+-		reportRuntimeError: err => {
+-			output({ type: "extension_error", extensionPath: err.extensionPath, event: err.event, error: err.error });
+-		},
+-		onShutdown: () => {
+-			shutdownState.requested = true;
+-		},
+-		trackAgentInvokingMessage: task => {
+-			extensionUserMessageTracker.trackAgentMessageTask(task);
+-		},
+-		// Headless hosts get the extension runner's no-op UI: hasUI=false, dialogs resolve to defaults.
+-		uiContext: headless ? undefined : rpcUiContext,
+-	});
+ 
+ 	// Output all agent events as JSON; prompt results follow the frame that settled them.
+-	session.subscribe(event => {
++	const unsubscribeSession = session.subscribe(event => {
+ 		sessionEvents.forward(event);
+ 		// Before the prompt-result and settle reports: a goal continuation decided at this
+ 		// agent_end is scheduled (and reported as pending) before either reads settlement.
+ 		goalController.observe(event);
++		planController.observe(event);
+ 		promptResults.observe(event);
+ 		settleWatcher.observe(event);
+ 	});
+-	await goalController.reconcile();
+-	await goalController.settled();
+ 
+ 	// Discriminates a store failure from any other dispose rejection below.
+ 	let persistenceFailure: Error | undefined;
+-	registerRpcPersistenceSurface(
++	const unsubscribePersistence = registerRpcPersistenceSurface(
+ 		session,
+ 		frame => output(frame),
+ 		error => {
+ 			persistenceFailure = error;
+ 		},
+ 	);
++	// "Open here" in another window or a terminal: say who asked, then end this logical
++	// session. Closing aborts the run and releases the writer lease after the last write.
++	const unsubscribeTakeover = session.sessionManager.onLeaseTakeover(requester => {
++		// "Open here" is the user's own choice in the other window: a reply in progress here is stopped, and said so.
++		output({ type: "session_lease_lost", holder: requester ?? null, interrupted: session.isStreaming } satisfies RpcSessionLeaseLostFrame);
++		void close().catch(() => {});
++	});
+ 
+-	/**
+-	 * Dispose the session, then end the process. A store failure still latched
+-	 * at dispose makes `dispose()` reject, and the `notice` frame it emits is
+-	 * queued on the asynchronous `outputWriter`: drain that writer before exiting
+-	 * or the client never learns the failure (review 3983906393). The durability
+-	 * loss is mirrored on stderr and the exit code is nonzero. A dispose
+-	 * rejection with no latched store failure still surfaces to the caller.
+-	 */
+-	const disposeAndExit = async (): Promise<never> => {
+-		try {
+-			// The process ends regardless; report an unsaved side answer instead of skipping dispose.
+-			await btw.close().catch(btwError => {
+-				const message = toError(btwError).message;
+-				logger.error(message);
+-				output({ type: "notice", level: "error", message, source: "btw-history" });
+-			});
+-			// Close the realtime call (microphone, socket) before the session it delegates into.
+-			await liveBridge.stop();
+-			await session.dispose();
+-		} catch (error) {
+-			if (!persistenceFailure || error !== persistenceFailure) throw error;
+-			// The notice frame this failure queued must reach the client before the
+-			// process ends (review 3983906393).
+-			await outputWriter.close();
+-			try {
+-				if (!process.stderr.write(`${formatPersistenceDurabilityFailure(persistenceFailure.message)}\n`)) {
+-					const { promise, resolve } = Promise.withResolvers<void>();
+-					// A closed stream never emits `drain`; resolve on error/close too
+-					// so an undeliverable mirror cannot strand the exit.
+-					const settle = (): void => {
+-						process.stderr.off("drain", settle);
+-						process.stderr.off("error", settle);
+-						process.stderr.off("close", settle);
+-						resolve();
+-					};
+-					process.stderr.on("drain", settle);
+-					process.stderr.on("error", settle);
+-					process.stderr.on("close", settle);
+-					await promise;
++	const closed = Promise.withResolvers<void>();
++	// The transport may attach its observer after initialization; never leak an
++	// unhandled rejection if a session closes during startup.
++	void closed.promise.catch(() => {});
++	let closing: Promise<void> | undefined;
++	const close = (): Promise<void> => {
++		if (closing) return closing;
++		closing = (async () => {
++			inputDispatcher.stop();
++			lifetime.abort(new Error("RPC session closed"));
++			mcp.close();
++			pendingExtensionRequests.rejectAll("RPC session closed before extension UI response completed");
++			hostToolBridge.close("RPC session closed before host tool execution completed");
++			hostUriBridge.clear("RPC session closed before host URI request completed");
++			editorBridge.close();
++			goalController.stopForHostAbort();
++			session.clearQueue({ forInterrupt: true });
++			session.abortBash();
++			const failures: unknown[] = [];
++			const attempt = async (work: () => Promise<unknown>): Promise<void> => {
++				try { await work(); } catch (error) { failures.push(error); }
++			};
++			await attempt(() => session.abort({ reason: USER_INTERRUPT_LABEL }));
++			await attempt(() => liveBridge.stop());
++			await attempt(async () => {
++				try { await btw.close(); }
++				catch (error) {
++					const message = error instanceof Error ? error.message : String(error);
++					output({ type: "notice", level: "error", message, source: "btw-history" });
++					throw error;
+ 				}
+-			} catch {
+-				// A mirror that cannot be written must not cost the exit code.
+-			}
+-			process.exit(1);
+-		}
+-		// A failure that already reported and then recovered still leaves its notice
+-		// queued here, so the success path drains the same queue before it exits.
+-		await outputWriter.close();
+-		process.exit(0);
++			});
++			await inputDispatcher.drain();
++			await shutdownCoordinator.drain();
++			subagentRegistry?.dispose();
++			await attempt(() => session.dispose());
++			unsubscribeSession();
++			unsubscribePersistence();
++			unsubscribeTakeover();
++			extensionUserMessageTracker.dispose();
++			if (persistenceFailure) {
++				process.stderr.write(`${formatPersistenceDurabilityFailure(persistenceFailure.message)}\n`);
++			}
++			if (failures.length) throw new AggregateError(failures, "RPC session disposal failed");
++		})();
++		void closing.then(closed.resolve, closed.reject);
++		return closing;
+ 	};
+ 
+ 	const getAvailableCommands = async () => buildAvailableSlashCommands(session);
+@@ -1755,107 +1806,100 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 
+ 	const inputGate = new RpcUserInputGate();
+ 	type OrderedUserInput = Extract<RpcCommand, { type: "prompt" | "steer" | "follow_up" | "abort_and_prompt" }>;
+-	type OrderedInputOutcome = "local" | "cancelled" | "admitted" | "builtin-agent";
+ 	const dispatchOrderedUserInput = (
+ 		command: OrderedUserInput,
+ 		ticket: RpcPromptTicket | undefined,
+-	): Promise<OrderedInputOutcome> =>
+-		inputGate.enqueue(async () => {
+-			const sessionId = session.sessionId;
+-			const isCurrent = () =>
+-				inputGate.isCurrent(command) && !shutdownState.requested && session.sessionId === sessionId;
+-			if (!isCurrent()) return "cancelled";
+-			let text = command.message;
+-			let images = command.images;
+-			const runner = session.extensionRunner;
+-			if (runner?.hasHandlers("input")) {
+-				const result = await runner.emitInput(text, images, "rpc");
+-				if (!isCurrent()) return "cancelled";
+-				if (result.handled) return "local";
+-				if (result.text !== undefined) text = result.text;
+-				if (result.images !== undefined) images = result.images;
+-			}
+-			if (!isCurrent()) return "cancelled";
+-			if (!text.trim() && !images?.length) return "local";
+-			if (command.type === "steer") {
+-				await session.steer(text, images);
+-				return "admitted";
+-			}
+-			if (command.type === "follow_up") {
+-				await session.followUp(text, images);
+-				return "admitted";
+-			}
+-			if (command.type === "prompt") {
+-				if (!ticket) return "cancelled";
+-				const skillResult = await dispatchRpcSkillPrompt({
+-					ticket,
+-					session,
+-					message: text,
+-					streamingBehavior: command.streamingBehavior,
+-					results: promptResults,
+-					onError: onPromptError(command.id, "prompt"),
+-					extensionUserMessageTracker,
+-					images,
+-					isCurrent,
+-				});
+-				if (skillResult === "cancelled") return "cancelled";
+-				if (skillResult) return "admitted";
+-				const builtinResult = await executeAcpBuiltinSlashCommand(text, {
+-					session,
+-					sessionManager: session.sessionManager,
+-					settings: session.settings,
+-					cwd: session.sessionManager.getCwd(),
+-					output: commandOutput => output({ type: "command_output", text: commandOutput }),
+-					refreshCommands: emitAvailableCommandsUpdate,
+-					reloadPlugins: reloadPluginState,
+-					runCommandInBackground: task => shutdownCoordinator.track(task()),
+-					notifyTitleChanged: async () => {
+-						output({ type: "session_info_update", title: session.sessionName, sessionId: session.sessionId });
+-					},
+-					notifyConfigChanged: async () => {
+-						output({ type: "config_update", model: session.model, thinkingLevel: session.thinkingLevel });
+-					},
+-				});
+-				if (!isCurrent()) return "cancelled";
+-				if (builtinResult !== false) {
+-					if (!("prompt" in builtinResult)) {
+-						if (builtinResult.agentInvoked === true && ticket) {
+-							void session.waitForIdle().then(
+-								() => promptResults.settle(ticket),
+-								(idleError: unknown) =>
+-									promptResults.fail(
+-										ticket,
+-										idleError instanceof Error ? idleError.message : String(idleError),
+-									),
++	): Promise<RpcInputAck> =>
++		inputGate.enqueue(() =>
++			watchRpcInputAdmission({
++				extensionUserMessageTracker,
++				report: ticket
++					? { ticket, results: promptResults, onError: onPromptError(command.id, command.type) }
++					: undefined,
++				startInput: async onPromptAdmitted => {
++					const sessionId = session.sessionId;
++					const isCurrent = () =>
++						inputGate.isCurrent(command) && !shutdownState.requested && session.sessionId === sessionId;
++					if (!isCurrent()) return "cancelled";
++					let text = command.message;
++					let images = command.images;
++					const runner = session.extensionRunner;
++					if (runner?.hasHandlers("input")) {
++						const result = await runner.emitInput(text, images, "rpc");
++						if (!isCurrent()) return "cancelled";
++						if (result.handled) return "local";
++						if (result.text !== undefined) text = result.text;
++						if (result.images !== undefined) images = result.images;
++					}
++					if (!isCurrent()) return "cancelled";
++					if (!text.trim() && !images?.length) return "local";
++					if (command.type === "steer") {
++						await session.steer(text, images, { onPromptAdmitted });
++						return "cancelled";
++					}
++					if (command.type === "follow_up") {
++						await session.followUp(text, images, { onPromptAdmitted });
++						return "cancelled";
++					}
++					if (command.type === "prompt") {
++						const invocation = resolveRpcSkillInvocation(session, text);
++						if (invocation) {
++							const built = await buildSkillPromptMessage(invocation.skill, invocation, "user");
++							if (!isCurrent()) return "cancelled";
++							await runRpcSkillCommand(
++								session, invocation, command.streamingBehavior ?? "steer", built, onPromptAdmitted, images,
+ 							);
+-							return "builtin-agent";
++							return "cancelled";
++						}
++						const builtinResult = await executeAcpBuiltinSlashCommand(text, {
++							session,
++							sessionManager: session.sessionManager,
++							settings: session.settings,
++							cwd: session.sessionManager.getCwd(),
++							output: commandOutput => output({ type: "command_output", text: commandOutput }),
++							refreshCommands: emitAvailableCommandsUpdate,
++							reloadPlugins: reloadPluginState,
++							runCommandInBackground: task => shutdownCoordinator.track(task()),
++							notifyTitleChanged: async () => {
++								output({ type: "session_info_update", title: session.sessionName, sessionId: session.sessionId });
++							},
++							notifyConfigChanged: async () => {
++								output({ type: "config_update", model: session.model, thinkingLevel: session.thinkingLevel });
++							},
++						});
++						if (!isCurrent()) return "cancelled";
++						if (builtinResult !== false) {
++							if (!("prompt" in builtinResult)) {
++								if (builtinResult.agentInvoked === true) {
++									onPromptAdmitted("local");
++									await session.waitForIdle();
++									return "local";
++								}
++								return "local";
++							}
++							text = builtinResult.prompt;
+ 						}
+-						return "local";
+ 					}
+-					text = builtinResult.prompt;
+-				}
+-			}
+-			if (!isCurrent() || !ticket) return "cancelled";
+-			await watchAndReportPromptResult({
+-				ticket,
+-				startPrompt: onPromptAdmitted =>
+-					session.prompt(text, {
++					if (!isCurrent() || !ticket) return "cancelled";
++					const invoked = await session.prompt(text, {
+ 						images,
+ 						...(command.type === "prompt" ? { streamingBehavior: command.streamingBehavior } : {}),
+ 						onPromptAdmitted,
+-					}),
+-				results: promptResults,
+-				onError: onPromptError(command.id, command.type),
+-				extensionUserMessageTracker,
+-			});
+-			return "admitted";
+-		});
++					});
++					return invoked ? "cancelled" : "local";
++				},
++			}),
++		);
+ 
+ 	// Handle a single command
+ 	const handleCommand = async (command: RpcCommand): Promise<RpcResponse> => {
+ 		const id = command.id;
+ 
+ 		switch (command.type) {
++			case "editor_document":
++			case "editor_trust":
++			case "editor_edit_result":
++				return success(id, command.type, await editorBridge.handle(command));
+ 			case "negotiate_protocol": {
+ 				if (command.protocolVersion !== 2)
+ 					return error(id, "negotiate_protocol", `Unsupported RPC protocol version: ${command.protocolVersion}`);
+@@ -1873,17 +1917,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 				try {
+ 					// Ack after admission, including hooks and skill image preparation, so a
+ 					// queue edit sent after this response finds the message.
+-					const outcome = await dispatchOrderedUserInput(command, ticket);
+-					if (outcome === "local") {
+-						promptResults.discard(ticket);
+-						return success(id, "prompt", { agentInvoked: false });
+-					}
+-					if (outcome === "builtin-agent") return success(id, "prompt", { agentInvoked: true });
+-					if (outcome === "cancelled") {
+-						promptResults.settle(ticket);
+-						return success(id, "prompt");
+-					}
+-					return success(id, "prompt");
++					return success(id, "prompt", await dispatchOrderedUserInput(command, ticket));
+ 				} catch (promptSetupError) {
+ 					promptResults.discard(ticket);
+ 					throw promptSetupError;
+@@ -1892,8 +1926,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 
+ 			case "steer":
+ 			case "follow_up": {
+-				await dispatchOrderedUserInput(command, undefined);
+-				return success(id, command.type);
++				return success(id, command.type, await dispatchOrderedUserInput(command, undefined));
+ 			}
+ 
+ 			case "remove_queued_message": {
+@@ -1906,7 +1939,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 				return fitRemoveQueuedMessageResponse(
+ 					id,
+ 					session.takeQueuedMessage(command.message, command.queue),
+-					frameEncoder.maxResponseBytes,
++					frameEncoder.maxResponseBytes - (options.envelopeBytes ?? 0),
+ 				);
+ 			}
+ 
+@@ -1930,36 +1963,39 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 				const restored = session.clearQueue({ forInterrupt: true });
+ 				goalController.stopForHostAbort();
+ 				await session.abort({ reason: USER_INTERRUPT_LABEL });
+-				return fitAbortAndRestoreQueueResponse(id, restored, frameEncoder.maxResponseBytes);
++				return fitAbortAndRestoreQueueResponse(
++					id, restored, frameEncoder.maxResponseBytes - (options.envelopeBytes ?? 0),
++				);
+ 			}
+ 
+ 			case "abort_and_prompt": {
+ 				goalController.stopForHostAbort();
+-				await session.abort({ reason: USER_INTERRUPT_LABEL });
+-				const ticket = promptResults.begin(id);
+-				void dispatchOrderedUserInput(command, ticket).then(
+-					outcome => {
+-						if (outcome === "cancelled") promptResults.settle(ticket);
+-						else if (outcome === "local") promptResults.completeLocal(ticket);
+-					},
+-					(cause: unknown) => {
+-						// Already acknowledged: owe the late same-id error and a failed prompt_result.
+-						const promptError = cause instanceof Error ? cause : new Error(String(cause));
+-						onPromptError(id, "abort_and_prompt")(promptError);
+-						promptResults.fail(ticket, promptError.message);
+-					},
+-				);
+-				return success(id, "abort_and_prompt");
++				// Queued input follows the new prompt. abort() resumes a still-queued steer (and the
++				// follow-ups behind it) as it settles, and that run would refuse this prompt as busy:
++				// hold the queued-message drain until the prompt is admitted. A prompt that is not
++				// admitted re-arms the drain on the way out, as after a plain abort.
++				return session.runModeExitTeardown(async () => {
++					await session.abort({ reason: USER_INTERRUPT_LABEL });
++					const ticket = promptResults.begin(id);
++					try {
++						return success(id, "abort_and_prompt", await dispatchOrderedUserInput(command, ticket));
++					} catch (promptSetupError) {
++						promptResults.discard(ticket);
++						throw promptSetupError;
++					}
++				});
+ 			}
+ 
+ 			case "new_session":
+ 			case "switch_session":
+ 			case "branch":
+-			case "fork": {
++			case "fork":
++			case "navigate_tree": {
+ 				// Fast refusal before the goal controller voids a waiting continuation;
+-				// fork() repeats the check after each of its own awaits.
+-				if (command.type === "fork" && session.isBusyForSnapshot) {
+-					return error(id, "fork", new SessionBusyError("fork the session").message, "session_busy");
++				// fork() repeats the check after each of its own awaits, navigate_tree before it moves the leaf.
++				if ((command.type === "fork" || command.type === "navigate_tree") && session.isBusyForSnapshot) {
++					const action = command.type === "fork" ? "fork the session" : "rewind the session";
++					return error(id, command.type, new SessionBusyError(action).message, "session_busy");
+ 				}
+ 				const requestedModel =
+ 					command.type === "switch_session" ? await resolveRequestedRpcModel(session, command) : undefined;
+@@ -1974,9 +2010,13 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 					if (err instanceof SessionBusyError) return error(id, command.type, err.message, "session_busy");
+ 					throw err;
+ 				} finally {
+-					// Branch and fork switch files in-process without detaching a run (fork requires idle).
++					// Branch, fork and tree navigation change the transcript in-process without detaching a run.
+ 					await goalController.endSessionChange({
+-						detachedRun: command.type !== "branch" && command.type !== "fork" && result?.data.cancelled !== true,
++						detachedRun:
++							command.type !== "branch" &&
++							command.type !== "fork" &&
++							command.type !== "navigate_tree" &&
++							result?.data.cancelled !== true,
+ 					});
+ 					// Respond only once this change's reattach (and any queued ahead of it) has run.
+ 					await goalController.settled();
+@@ -1984,9 +2024,11 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 				if (!result.data.cancelled) {
+ 					inputGate.commitSessionChange(command);
+ 					// `branch` leaves a live run streaming to its normal yield; new/switch detach it.
+-					if (command.type !== "branch" && command.type !== "fork") promptResults.abortOpen();
++					if (command.type !== "branch" && command.type !== "fork" && command.type !== "navigate_tree")
++						promptResults.abortOpen();
+ 					// The detached run publishes no terminal agent_end to settle on.
+ 					void settleWatcher.check();
++					await planController.reconcile();
+ 					await emitAvailableCommandsUpdate();
+ 				}
+ 				return success(id, result.type, result.data);
+@@ -2013,6 +2055,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 					// reopens a transcript with the same id.
+ 					if (session.sessionFile !== fileBeforeOpen) promptResults.abortOpen();
+ 					void settleWatcher.check();
++					await planController.reconcile();
+ 					await emitAvailableCommandsUpdate();
+ 				}
+ 				return success(id, "open_session", result);
+@@ -2023,8 +2066,10 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 			// =================================================================
+ 
+ 			case "get_state": {
+-				// A goal exit triggered by the last turn restores tools asynchronously; report after it.
++				// A goal exit triggered by the last turn restores tools asynchronously, and a proposed
++				// plan opens its review after the turn stops; report after both.
+ 				await goalController.settled();
++				await planController.settled();
+ 				const queuedMessages = session.getQueuedMessages();
+ 				const state: RpcSessionState = {
+ 					model: session.model,
+@@ -2065,6 +2110,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 					})),
+ 					contextUsage: session.getContextUsage(),
+ 					goal: session.getGoalModeState() ?? null,
++					planMode: planController.snapshot,
++					untrustedProject: getUntrustedProjectReport(session),
+ 				};
+ 				return success(id, "get_state", state);
+ 			}
+@@ -2100,6 +2147,15 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 				}
+ 			}
+ 
++			case "plan_mode": {
++				try {
++					return success(id, "plan_mode", await planController.handle(command));
++				} catch (planError) {
++					if (planError instanceof RpcPlanModeError) return error(id, "plan_mode", planError.message, planError.code);
++					return error(id, "plan_mode", planError instanceof Error ? planError.message : String(planError));
++				}
++			}
++
+ 			case "set_ask_dialog": {
+ 				rpcUiContext.askDialogEnabled = command.enabled === true;
+ 				return success(id, "set_ask_dialog", { enabled: rpcUiContext.askDialogEnabled });
+@@ -2263,6 +2319,40 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 				return failure ? error(id, "steer_subagent", failure) : success(id, "steer_subagent");
+ 			}
+ 
++			// =================================================================
++			// Background jobs
++			// =================================================================
++
++			case "get_jobs": {
++				try {
++					return success(id, "get_jobs", { jobs: listRpcJobs(session) });
++				} catch (err) {
++					return error(id, "get_jobs", err instanceof Error ? err.message : String(err));
++				}
++			}
++
++			case "cancel_job": {
++				if (typeof command.jobId !== "string" || command.jobId.length === 0) {
++					return error(id, "cancel_job", "`jobId` must be a non-empty string.");
++				}
++				try {
++					return success(id, "cancel_job", { cancelled: cancelRpcJob(session, command.jobId) });
++				} catch (err) {
++					return error(id, "cancel_job", err instanceof Error ? err.message : String(err));
++				}
++			}
++
++			case "get_job_output": {
++				if (typeof command.jobId !== "string" || command.jobId.length === 0) {
++					return error(id, "get_job_output", "`jobId` must be a non-empty string.");
++				}
++				try {
++					return success(id, "get_job_output", readRpcJobOutput(session, command));
++				} catch (err) {
++					return error(id, "get_job_output", err instanceof Error ? err.message : String(err));
++				}
++			}
++
+ 			// =================================================================
+ 			// Model
+ 			// =================================================================
+@@ -2446,6 +2536,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 			}
+ 
+ 			case "get_messages_page": {
++				if (command.direction !== undefined && command.direction !== "forward" && command.direction !== "backward")
++					return error(id, "get_messages_page", "Unsupported RPC message page direction");
+ 				if (session.isStreaming || session.isCompacting)
+ 					return error(id, "get_messages_page", RPC_MESSAGES_PAGE_BUSY_ERROR, "session_busy");
+ 				const messages = session.messages;
+@@ -2453,7 +2545,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 					return success(
+ 						id,
+ 						"get_messages_page",
+-						pageRpcMessages(
++						(command.direction === "backward" ? pageRpcMessagesBackward : pageRpcMessages)(
+ 							messages,
+ 							{
+ 								sessionId: session.sessionId,
+@@ -2501,6 +2593,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 				let authEmitted = false;
+ 				try {
+ 					await session.modelRegistry.authStorage.oauth.login(command.providerId, {
++						signal: lifetime.signal,
+ 						onAuth: info => {
+ 							authEmitted = true;
+ 							output({
+@@ -2577,6 +2670,35 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 				return success(id, "logout", { remainingSource });
+ 			}
+ 
++			// =================================================================
++			// MCP connectors
++			// =================================================================
++
++			case "get_mcp_servers":
++				return success(id, "get_mcp_servers", { servers: mcp.servers() });
++
++			case "mcp_login":
++			case "mcp_login_cancel":
++			case "mcp_reconnect": {
++				if (command.type !== "mcp_reconnect" && typeof command.serverName !== "string")
++					return error(id, command.type, "serverName must be a string");
++				try {
++					if (command.type === "mcp_login") return success(id, "mcp_login", await mcp.login(command.serverName));
++					if (command.type === "mcp_login_cancel")
++						return success(id, "mcp_login_cancel", { cancelled: mcp.cancelLogin(command.serverName) });
++					if (command.serverName !== undefined && typeof command.serverName !== "string")
++						return error(id, command.type, "serverName must be a string");
++					return success(id, "mcp_reconnect", { servers: await mcp.reconnect(command.serverName) });
++				} catch (err: unknown) {
++					return error(
++						id,
++						command.type,
++						err instanceof Error ? err.message : String(err),
++						err instanceof RpcMcpError ? err.code : undefined,
++					);
++				}
++			}
++
+ 			// =================================================================
+ 			// Side questions (/btw)
+ 			// =================================================================
+@@ -2638,25 +2760,21 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 		}
+ 	};
+ 
+-	// Deferred shutdown (pi.shutdown() from an extension) must not kill the
+-	// process while a background-dispatched bash still owes the client its
+-	// response frame. The coordinator drains tracked tasks before exiting and
+-	// re-checks the request as each task settles.
++	// Do not await close from the serial command that requested it: close drains
++	// that queue. The lifecycle promise reports its completion to the transport.
+ 	const shutdownCoordinator = new RpcShutdownCoordinator({
+ 		isShutdownRequested: () => shutdownState.requested,
+-		performShutdown: async () => {
+-			// Route through the idempotent session.dispose() so the browser
+-			// reaper (releaseTabsForOwner) and other bounded teardown run before
+-			// the process exits. dispose() also emits `session_shutdown`, so we
+-			// must NOT emit it separately here or the event fires twice. Skipping
+-			// dispose left OMP-owned Chromium alive after RPC shutdown (#5643).
+-			await disposeAndExit();
+-		},
++		performShutdown: async () => { void close().catch(() => {}); },
+ 	});
+ 
+ 	const dispatchFrameDeps: RpcInputFrameDeps = {
+ 		handleCommand,
+-		output,
++		output: frame => {
++			output(frame);
++			if (isRecord(frame) && frame.type === "response" && (frame.command === "prompt" || frame.command === "abort_and_prompt")) {
++				promptResults.acknowledge(typeof frame.id === "string" ? frame.id : undefined);
++			}
++		},
+ 		errorResponse: error,
+ 		trackBackgroundTask: task => shutdownCoordinator.track(task),
+ 		pendingExtensionRequests,
+@@ -2670,33 +2788,103 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 		afterSerialCommand: () => shutdownCoordinator.checkShutdownRequested(),
+ 		acceptInput: command => inputGate.accept(command),
+ 	});
++	const runtime: RpcSessionRuntime = {
++		dispatch: (frame, processed) => inputDispatcher.dispatch(frame, processed),
++		close,
++		closed: closed.promise,
++	};
++	options.onRuntime?.(runtime);
++	// Set up extensions with RPC-based UI context
++	await initializeExtensions(session, {
++		mode: "rpc",
++		// Extension-initiated session changes get the same goal quiesce/reattach as the commands below.
++		wrapSessionChange: async <T extends { cancelled: boolean }>(
++			change: () => Promise<T>,
++			{ detachesRun }: { detachesRun: boolean },
++		): Promise<T> => {
++			await btw.close();
++			await goalController.beginSessionChange();
++			let result: T | undefined;
++			try {
++				result = await change();
++				return result;
++			} finally {
++				// Reattaches only if the session actually changed, then re-checks settlement.
++				// A change that throws may already have detached the run: count it as detached.
++				await goalController.endSessionChange({ detachedRun: detachesRun && result?.cancelled !== true });
++				if (result && !result.cancelled) {
++					// As for the host's new/switch commands: a detached run never yields, so
++					// close the prompts it was answering. Branch and navigation leave a live
++					// run streaming to its normal yield.
++					if (detachesRun) promptResults.abortOpen();
++					void settleWatcher.check();
++					// Not awaited: the change may run inside a plan transition this reattach queues behind.
++					void planController.reconcile();
++				}
++			}
++		},
++		reportSendError: (action, err) => {
++			output(error(undefined, action, err.message));
++		},
++		reportRuntimeError: err => {
++			output({ type: "extension_error", extensionPath: err.extensionPath, event: err.event, error: err.error });
++		},
++		onShutdown: () => {
++			shutdownState.requested = true;
++		},
++		trackAgentInvokingMessage: (task, admission) => {
++			extensionUserMessageTracker.trackAgentMessageTask(task, admission);
++		},
++		// Headless hosts get the extension runner's no-op UI: hasUI=false, dialogs resolve to defaults.
++		uiContext: headless ? undefined : rpcUiContext,
++	});
++	await goalController.reconcile();
++	await goalController.settled();
++	await planController.reconcile();
+ 
+-	// Keep the stdin reader moving: side-channel frames dispatch immediately,
+-	// ordinary commands serialize through inputDispatcher, and bash remains
+-	// background-dispatched so abort_bash can overtake it. Frames are read
+-	// line-by-line by readRpcInputFrames so a single malformed line is reported
+-	// as an error frame and the loop keeps running instead of throwing out of
+-	// the reader and killing the whole process (issue #5194).
++	output({
++		type: "ready",
++		protocolVersion: options.protocolVersion ?? 1,
++		supportedProtocolVersions: [1, 2],
++		maxFrameBytes: MAX_RPC_FRAME_BYTES,
++		maxReassembledFrameBytes: MAX_RPC_REASSEMBLED_BYTES,
++	});
++	await shutdownCoordinator.checkShutdownRequested();
++	return runtime;
++}
++
++/** Standalone CLI adapter; GUI chats use createRpcSessionRuntime instead. */
++export async function runRpcMode(session: AgentSession, options: RpcModeOptions = {}): Promise<never> {
++	process.env.PI_NOTIFICATIONS = "off";
++	const encoder = new RpcFrameEncoder();
++	const stdout = process.platform === "win32" ? fs.createWriteStream("", { fd: 1, autoClose: false }) : process.stdout;
++	const writer = new RpcOutputWriter(stdout, failure => {
++		logger.error("RPC output delivery failed", { error: String(failure) });
++		void session.dispose().finally(() => process.exit(1));
++	});
++	const runtime = await createRpcSessionRuntime(session, {
++		...options,
++		output: frame => {
++			writer.write(encoder.encodeFrames(frame));
++			if (isRecord(frame) && frame.type === "response" && frame.command === "negotiate_protocol" && frame.success === true)
++				encoder.setProtocolVersion(2);
++		},
++	});
++	void runtime.closed.then(
++		async () => { await writer.close(); process.exit(0); },
++		async () => { await writer.close(); process.exit(1); },
++	);
+ 	await readRpcInputFrames(
+-		input ?? Bun.stdin.stream(),
+-		parsed => inputDispatcher.dispatch(parsed),
+-		message => output(error(undefined, "parse", message)),
++		options.input ?? claimRpcInput() ?? Bun.stdin.stream(),
++		frame => runtime.dispatch(frame),
++		message => writer.write(encoder.encodeFrames({ type: "response", command: "parse", success: false, error: message })),
+ 	);
+-
+-	// stdin closed — RPC client is gone. Fail pending side-channel requests
+-	// first so active/queued commands can settle, then drain accepted work.
+-	pendingExtensionRequests.rejectAll("RPC client disconnected before extension UI response completed");
+-	hostToolBridge.close("RPC client disconnected before host tool execution completed");
+-	hostUriBridge.clear("RPC client disconnected before host URI request completed");
+-	await liveBridge.stop();
+-	await inputDispatcher.drain();
+-	await shutdownCoordinator.drain();
+-	subagentRegistry?.dispose();
+-	// Dispose the main session before exiting so the browser reaper and other
+-	// bounded teardown run on the stdin-EOF path too (#5643). Idempotent: a
+-	// prior pi.shutdown() through the coordinator makes this await settle
+-	// immediately. Returned rather than awaited: `runRpcMode` is typed
+-	// `Promise<never>`, and only returning the `Promise<never>` keeps this end
+-	// point unreachable for the compiler.
+-	return disposeAndExit();
++	try {
++		await runtime.close();
++		await writer.close();
++		process.exit(0);
++	} catch {
++		await writer.close().catch(() => {});
++		process.exit(1);
++	}
+ }
+diff --git a/src/modes/rpc/rpc-output.ts b/src/modes/rpc/rpc-output.ts
+index 9a19dbbbb51533ebb903ed1fa40e212cfa43f6b1..0e5233fe1bd23c23a7bf037a03540bcf752fc867 100644
+--- a/src/modes/rpc/rpc-output.ts
++++ b/src/modes/rpc/rpc-output.ts
+@@ -22,10 +22,12 @@ export class RpcOutputWriter {
+ 	#failure: Error | undefined;
+ 	#closing = false;
+ 	#completion: { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void } | undefined;
++	#bufferedBytes = 0;
+ 
+ 	constructor(
+ 		private readonly sink: Writable,
+ 		private readonly onFailure: (error: Error) => void,
++		private readonly maxBufferedBytes = 128 * 1024 * 1024,
+ 	) {
+ 		sink.on("drain", this.#onDrain);
+ 		sink.on("error", this.#onError);
+@@ -37,6 +39,11 @@ export class RpcOutputWriter {
+ 		if (this.#failure || this.#closing) return;
+ 		try {
+ 			for (const line of frames) {
++				const bytes = Buffer.byteLength(line);
++				if (bytes > this.maxBufferedBytes - this.#bufferedBytes) {
++					throw new Error(`RPC output backlog exceeded ${this.maxBufferedBytes} bytes`);
++				}
++				this.#bufferedBytes += bytes;
+ 				if (this.#blocked || this.#pumping || this.#spool) this.#append(line);
+ 				else this.#write(line);
+ 			}
+@@ -62,6 +69,7 @@ export class RpcOutputWriter {
+ 		this.#pendingWrites++;
+ 		this.#blocked = !this.sink.write(bytes, error => {
+ 			this.#pendingWrites--;
++			this.#bufferedBytes -= typeof bytes === "string" ? Buffer.byteLength(bytes) : bytes.byteLength;
+ 			if (error) this.#fail(error);
+ 			else this.#settle();
+ 		});
+@@ -81,6 +89,12 @@ export class RpcOutputWriter {
+ 			}
+ 		}
+ 		const spool = this.#spool;
++		// Bound the physical spool as well as outstanding bytes. Once its written
++		// extent is drained it is removed; a persistently slow reader cannot grow
++		// an indefinitely long file by consuming just less than producers emit.
++		if (Buffer.byteLength(line) > this.maxBufferedBytes - spool.written) {
++			throw new Error(`RPC output spool exceeded ${this.maxBufferedBytes} bytes`);
++		}
+ 		const bytes = Buffer.from(line);
+ 		let offset = 0;
+ 		// Event callbacks cannot await a disk write without retaining an unbounded queue.
+diff --git a/src/modes/rpc/rpc-session-events.test.ts b/src/modes/rpc/rpc-session-events.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..6bf736683ee28c93ec5e01862f7cd5a366f2b1bc
+--- /dev/null
++++ b/src/modes/rpc/rpc-session-events.test.ts
+@@ -0,0 +1,40 @@
++import { describe, expect, test } from "bun:test";
++import type { AssistantMessage } from "@oh-my-pi/pi-ai";
++import { RpcSessionEventForwarder } from "./rpc-session-events";
++import type { RpcProjectedSessionEventFrame } from "./rpc-types";
++
++function message(narration: boolean): AssistantMessage {
++	return {
++		role: "assistant", content: [{ type: "thinking", thinking: "Checking now.", narration }],
++		api: "anthropic-messages", provider: "anthropic", model: "test",
++		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
++			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
++		stopReason: "stop", timestamp: 1,
++	};
++}
++
++describe("RPC narration projection", () => {
++	for (const narration of [false, true]) {
++		test(`delta thinking_end preserves narration=${narration} without cumulative snapshots`, () => {
++			const frames: RpcProjectedSessionEventFrame[] = [];
++			const forwarder = new RpcSessionEventForwarder(frame => frames.push(frame));
++			forwarder.setFilter(null, "delta");
++			const partial = message(narration);
++			forwarder.forward({ type: "message_update", message: partial,
++				assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "Checking now.", partial } });
++			expect(frames).toHaveLength(1);
++			expect(frames[0]).toEqual({ type: "message_update", messageId: "msg-1", message: { role: "assistant" },
++				assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "Checking now.",
++					...(narration ? { narration: true } : {}) } });
++		});
++	}
++
++	test("full updates retain the original provider content", () => {
++		const frames: RpcProjectedSessionEventFrame[] = [];
++		const forwarder = new RpcSessionEventForwarder(frame => frames.push(frame));
++		const partial = message(true);
++		forwarder.forward({ type: "message_update", message: partial,
++			assistantMessageEvent: { type: "thinking_end", contentIndex: 0, content: "Checking now.", partial } });
++		expect(frames[0]).toMatchObject({ message: partial, assistantMessageEvent: { partial } });
++	});
++});
+diff --git a/src/modes/rpc/rpc-session-events.ts b/src/modes/rpc/rpc-session-events.ts
+index 4bffa58191d0de52500033f621977dff3f3e2f83..fac4f0b658f0c69b9f22c0d3b051e0b56640c858 100644
+--- a/src/modes/rpc/rpc-session-events.ts
++++ b/src/modes/rpc/rpc-session-events.ts
+@@ -14,6 +14,11 @@ import type {
+ /** Drops the accumulated snapshot a streaming event carries; `done` and `error` have none. */
+ function withoutPartial(event: AssistantMessageEvent): RpcDeltaMessageUpdateFrame["assistantMessageEvent"] {
+ 	if (!("partial" in event)) return event;
++	if (event.type === "thinking_end") {
++		const { partial, ...increment } = event;
++		const content = partial.content[event.contentIndex];
++		return content?.type === "thinking" && content.narration ? { ...increment, narration: true } : increment;
++	}
+ 	const { partial: _partial, ...increment } = event;
+ 	return increment;
+ }
+diff --git a/src/modes/rpc/rpc-types.ts b/src/modes/rpc/rpc-types.ts
+index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec4dc6ed86 100644
+--- a/src/modes/rpc/rpc-types.ts
++++ b/src/modes/rpc/rpc-types.ts
+@@ -14,16 +14,23 @@ import type { RestoredQueuedMessage } from "../../session/agent-session-types";
+ import type { CacheWarmingMode } from "../../session/cache-warmer";
+ import type { FileEntry, SessionEntry, SessionTreeNode } from "../../session/session-entries";
+ import type { UsageLimitState } from "../../session/usage-limit";
++import type { UntrustedProjectReport } from "../../session/untrusted-project-report";
+ import type { AvailableSlashCommandSource } from "../../slash-commands/available-commands";
++import type { ToolApprovalRequest } from "../../tools/approval";
++import type { SessionLeaseHolder } from "../../session/session-storage";
+ import type { AgentProgress } from "@oh-my-pi/pi-tui/tools/task";
+ import type { SubagentEventPayload, SubagentLifecyclePayload, SubagentProgressPayload } from "../../task";
+ import type { TodoPhase } from "@oh-my-pi/pi-tui/tools/todo";
+ import type { LogoutAccount } from "@oh-my-pi/pi-tui/overlays/logout-account-selector";
+ import type { LivePhase } from "@oh-my-pi/pi-tui/apps/live-visualizer";
+ import type { RpcMessagesPage } from "./rpc-messages";
++import type { BackwardMessagesPage } from "./rpc-messages-backward";
+ import type { GoalModeState } from "../../goals/state";
+ import type { RpcGoalOp, RpcGoalResult } from "./rpc-goal";
++import type { RpcPlanModeOp, RpcPlanModeResult } from "./rpc-plan";
+ import type { BtwHistoryRecord } from "../../session/btw-history";
++import type { EditorCommand } from "./rpc-editor";
++import type { MCPElicitationField, MCPElicitationValue } from "../../mcp/elicitation";
+ 
+ // ============================================================================
+ // RPC Commands (stdin)
+@@ -35,6 +42,7 @@ export type RpcMessageUpdates = "full" | "delta";
+ export type RpcCommand =
+ 	// Protocol
+ 	| { id?: string; type: "negotiate_protocol"; protocolVersion: number }
++	| EditorCommand
+ 
+ 	// Prompting
+ 	| { id?: string; type: "prompt"; message: string; images?: ImageContent[]; streamingBehavior?: "steer" | "followUp" }
+@@ -59,6 +67,7 @@ export type RpcCommand =
+ 			objective?: string;
+ 			token_budget?: number;
+ 	  }
++	| { id?: string; type: "plan_mode"; op: RpcPlanModeOp; planFilePath?: string; feedback?: string; revision?: string }
+ 	| { id?: string; type: "set_ask_dialog"; enabled: boolean }
+ 	| { id?: string; type: "get_available_commands" }
+ 	| { id?: string; type: "get_entries"; since?: string }
+@@ -72,6 +81,10 @@ export type RpcCommand =
+ 	| { id?: string; type: "get_subagent_messages"; subagentId?: string; sessionFile?: string; fromByte?: number }
+ 	| { id?: string; type: "cancel_subagent"; subagentId: string }
+ 	| { id?: string; type: "steer_subagent"; subagentId: string; message: string }
++	// Background jobs (async bash commands, async tasks) this session owns
++	| { id?: string; type: "get_jobs" }
++	| { id?: string; type: "cancel_job"; jobId: string }
++	| { id?: string; type: "get_job_output"; jobId: string; fromByte?: number; maxBytes?: number }
+ 	// Live voice (GPT live bound to this session)
+ 	| { id?: string; type: "live_start"; voice?: string; instructions?: string }
+ 	| { id?: string; type: "live_stop" }
+@@ -113,6 +126,7 @@ export type RpcCommand =
+ 	| { id?: string; type: "switch_session"; sessionPath: string; provider?: string; modelId?: string }
+ 	| { id?: string; type: "branch"; entryId: string }
+ 	| { id?: string; type: "fork"; entryId?: string }
++	| { id?: string; type: "navigate_tree"; targetId: string }
+ 	| { id?: string; type: "get_branch_messages" }
+ 	| { id?: string; type: "get_last_assistant_text" }
+ 	| { id?: string; type: "set_session_name"; name: string }
+@@ -120,7 +134,7 @@ export type RpcCommand =
+ 
+ 	// Messages
+ 	| { id?: string; type: "get_messages" }
+-	| { id?: string; type: "get_messages_page"; cursor?: string; limit?: number }
++	| { id?: string; type: "get_messages_page"; cursor?: string; limit?: number; direction?: "forward" | "backward" }
+ 
+ 	// Login
+ 	| { id?: string; type: "get_login_providers" }
+@@ -142,7 +156,13 @@ export type RpcCommand =
+ 	// Side questions (/btw); answers stream as `btw_delta` / `btw_record` frames
+ 	| { id?: string; type: "btw"; question: string; recordId?: string }
+ 	| { id?: string; type: "btw_cancel"; recordId?: string }
+-	| { id?: string; type: "get_btw_history" };
++	| { id?: string; type: "get_btw_history" }
++
++	// MCP connectors: state, OAuth sign-in (the URL arrives as `open_url` with `mcpServer`), reconnect
++	| { id?: string; type: "get_mcp_servers" }
++	| { id?: string; type: "mcp_login"; serverName: string }
++	| { id?: string; type: "mcp_login_cancel"; serverName: string }
++	| { id?: string; type: "mcp_reconnect"; serverName?: string };
+ 
+ // ============================================================================
+ // RPC State
+@@ -194,6 +214,13 @@ export interface RpcSessionState {
+ 	contextUsage?: ContextUsage;
+ 	/** Current goal-mode state; `null` when the session has no goal. */
+ 	goal: GoalModeState | null;
++	/** Plan mode and the proposed plan awaiting the host's approval (`plan_mode` command, `plan_mode_updated` frame). */
++	planMode: RpcPlanModeResult;
++	/**
++	 * Opened with `--untrusted-project`: what the folder would have contributed and the flag kept
++	 * from running (computed once at session creation, paths only). `null` for every other session.
++	 */
++	untrustedProject: UntrustedProjectReport | null;
+ }
+ 
+ export interface RpcAvailableSlashCommand {
+@@ -363,10 +390,67 @@ export interface RpcSubagentMessagesResult {
+ 	messages: AgentMessage[];
+ }
+ 
++/** One background job as `get_jobs` lists it. */
++export interface RpcJobSnapshot {
++	id: string;
++	type: "bash" | "task" | "eval";
++	status: "running" | "completed" | "failed" | "cancelled";
++	/** Display label; a command cut to 120 characters. */
++	label: string;
++	/** Full command line of a job that runs a process. */
++	command?: string;
++	/** Epoch ms. */
++	startTime: number;
++	/** Epoch ms the job settled. */
++	endTime?: number;
++	/** Exit status of a settled command. */
++	exitCode?: number;
++	/** Registry id of the subagent an async task job runs. */
++	agentId?: string;
++	/** Bytes the job has streamed so far (0 for jobs that never stream). */
++	outputBytes: number;
++	/** Epoch ms of its latest output. */
++	lastOutputAt?: number;
++	/** Running, quiet for a while, and its last line looks like a prompt. */
++	waitingForInput: boolean;
++}
++
++/** One bounded `get_job_output` read. */
++export interface RpcJobOutputResult {
++	jobId: string;
++	status: RpcJobSnapshot["status"];
++	waitingForInput: boolean;
++	/** Offset of `text`'s first byte. */
++	fromByte: number;
++	/** Pass as the next `fromByte` to read incrementally. */
++	nextByte: number;
++	/** Bytes the job has streamed so far. */
++	totalBytes: number;
++	/** Oldest byte the job still keeps. */
++	startByte: number;
++	/** Requested bytes no longer kept (older than `startByte`). */
++	skippedBytes: number;
++	/** `fromByte` was past the end; this read is the tail. */
++	reset: boolean;
++	/** The job does not stream: `text` is its latest text and replaces what was read before. */
++	snapshot: boolean;
++	text: string;
++}
++
+ // ============================================================================
+ // RPC Responses (stdout)
+ // ============================================================================
+ 
++/** Outcome of the original RPC input, independent of extension-created messages or full-turn completion. */
++export type RpcInputDisposition = "admitted" | "local" | "cancelled";
++
++export interface RpcInputAck {
++	/** Whether the original input was queued/dispatched, consumed locally, or cancelled. */
++	inputDisposition: RpcInputDisposition;
++	/** Any causal agent work, including extension sends after a locally consumed input. */
++	agentInvoked: boolean;
++}
++
+ // Success responses with data
+ export type RpcResponse =
+ 	// Protocol
+@@ -377,11 +461,14 @@ export type RpcResponse =
+ 			success: true;
+ 			data: { protocolVersion: 2 };
+ 	  }
++	| { id?: string; type: "response"; command: "editor_document"; success: true; data: { version: number; result: unknown; positionEncoding: "utf-16" } }
++	| { id?: string; type: "response"; command: "editor_trust"; success: true; data: { trusted: boolean } }
++	| { id?: string; type: "response"; command: "editor_edit_result"; success: true; data: object }
+ 
+ 	// Prompting (async - events follow)
+-	| { id?: string; type: "response"; command: "prompt"; success: true; data?: { agentInvoked: boolean } }
+-	| { id?: string; type: "response"; command: "steer"; success: true }
+-	| { id?: string; type: "response"; command: "follow_up"; success: true }
++	| { id?: string; type: "response"; command: "prompt"; success: true; data: RpcInputAck }
++	| { id?: string; type: "response"; command: "steer"; success: true; data: RpcInputAck }
++	| { id?: string; type: "response"; command: "follow_up"; success: true; data: RpcInputAck }
+ 	| {
+ 			id?: string;
+ 			type: "response";
+@@ -391,7 +478,7 @@ export type RpcResponse =
+ 	  }
+ 	| { id?: string; type: "response"; command: "promote_queued_message"; success: true; data: { promoted: boolean } }
+ 	| { id?: string; type: "response"; command: "abort"; success: true }
+-	| { id?: string; type: "response"; command: "abort_and_prompt"; success: true }
++	| { id?: string; type: "response"; command: "abort_and_prompt"; success: true; data: RpcInputAck }
+ 	| {
+ 			id?: string;
+ 			type: "response";
+@@ -413,6 +500,7 @@ export type RpcResponse =
+ 	  }
+ 	| { id?: string; type: "response"; command: "set_slow_mode"; success: true; data: { enabled: boolean } }
+ 	| { id?: string; type: "response"; command: "goal"; success: true; data: RpcGoalResult }
++	| { id?: string; type: "response"; command: "plan_mode"; success: true; data: RpcPlanModeResult }
+ 	| { id?: string; type: "response"; command: "set_ask_dialog"; success: true; data: { enabled: boolean } }
+ 	| {
+ 			id?: string;
+@@ -474,6 +562,9 @@ export type RpcResponse =
+ 			data: { cancelled: boolean };
+ 	  }
+ 	| { id?: string; type: "response"; command: "steer_subagent"; success: true }
++	| { id?: string; type: "response"; command: "get_jobs"; success: true; data: { jobs: RpcJobSnapshot[] } }
++	| { id?: string; type: "response"; command: "cancel_job"; success: true; data: { cancelled: boolean } }
++	| { id?: string; type: "response"; command: "get_job_output"; success: true; data: RpcJobOutputResult }
+ 
+ 	// Model
+ 	| {
+@@ -541,6 +632,13 @@ export type RpcResponse =
+ 	| { id?: string; type: "response"; command: "switch_session"; success: true; data: { cancelled: boolean } }
+ 	| { id?: string; type: "response"; command: "branch"; success: true; data: { text: string; cancelled: boolean } }
+ 	| { id?: string; type: "response"; command: "fork"; success: true; data: { cancelled: boolean } }
++	| {
++			id?: string;
++			type: "response";
++			command: "navigate_tree";
++			success: true;
++			data: { text?: string; images?: ImageContent[]; cancelled: boolean };
++	  }
+ 	| {
+ 			id?: string;
+ 			type: "response";
+@@ -564,7 +662,7 @@ export type RpcResponse =
+ 
+ 	// Messages
+ 	| { id?: string; type: "response"; command: "get_messages"; success: true; data: { messages: AgentMessage[] } }
+-	| { id?: string; type: "response"; command: "get_messages_page"; success: true; data: RpcMessagesPage }
++	| { id?: string; type: "response"; command: "get_messages_page"; success: true; data: RpcMessagesPage | BackwardMessagesPage }
+ 
+ 	// Login
+ 	| {
+@@ -599,8 +697,15 @@ export type RpcResponse =
+ 			data: { records: readonly BtwHistoryRecord[] };
+ 	  }
+ 
+-	// Error response (any command can fail); `code` is an optional machine-readable reason.
+-	| { id?: string; type: "response"; command: string; success: false; error: string; code?: string };
++	// MCP connectors
++	| { id?: string; type: "response"; command: "get_mcp_servers"; success: true; data: { servers: RpcMcpServerInfo[] } }
++	| { id?: string; type: "response"; command: "mcp_login"; success: true; data: RpcMcpServerInfo }
++	| { id?: string; type: "response"; command: "mcp_login_cancel"; success: true; data: { cancelled: boolean } }
++	| { id?: string; type: "response"; command: "mcp_reconnect"; success: true; data: { servers: RpcMcpServerInfo[] } }
++
++	// Error response (any command can fail); saved-model recovery carries structured identity.
++	| { id?: string; type: "response"; command: string; success: false; error: string; code?: string;
++			data?: { provider: string; modelId: string; selector: string } };
+ 
+ // ============================================================================
+ // Side question (/btw) frames (stdout)
+@@ -650,7 +755,10 @@ export type RpcMessageEventType = "message_start" | "message_update" | "message_
+  */
+ export type RpcMessageEventFrame = Extract<AgentSessionEvent, { type: RpcMessageEventType }> & { messageId: string };
+ 
+-type WithoutPartial<T> = T extends unknown ? Omit<T, "partial"> : never;
++/** Keep the answer/reasoning distinction when the content snapshot is omitted. */
++type WithoutPartial<T> = T extends { type: "thinking_end" }
++	? Omit<T, "partial"> & { narration?: boolean }
++	: T extends unknown ? Omit<T, "partial"> : never;
+ 
+ /** Raw-protocol opt-in projection; terminal subtype fields are preserved. */
+ export type RpcDeltaMessageUpdateFrame = Omit<
+@@ -699,6 +807,8 @@ export type RpcExtensionUIRequest =
+ 			title: string;
+ 			options: string[];
+ 			optionDetails?: RpcExtensionUISelectOptionDetail[];
++			/** Tool approval (options are always Approve/Deny): the typed request to render instead of the title. */
++			approval?: ToolApprovalRequest;
+ 			timeout?: number;
+ 	  }
+ 	| { type: "extension_ui_request"; id: string; method: "confirm"; title: string; message: string; timeout?: number }
+@@ -763,6 +873,21 @@ export type RpcExtensionUIRequest =
+ 			 */
+ 			launchUrl?: string;
+ 			instructions?: string;
++			/** Set when the URL belongs to `mcp_login` for this server: the user asked for it. */
++			mcpServer?: string;
++	  }
++	/**
++	 * An MCP server asks the user for a form (`elicitation/create`). `fields`
++	 * are normalized; the answer is validated against them before the server
++	 * sees it. Hosts must show `serverName` and offer Decline.
++	 */
++	| {
++			type: "extension_ui_request";
++			id: string;
++			method: "elicit";
++			serverName: string;
++			message: string;
++			fields: MCPElicitationField[];
+ 	  };
+ 
+ // ============================================================================
+@@ -867,13 +992,59 @@ export interface RpcHostUriResult {
+ 	error?: string;
+ }
+ 
++// ============================================================================
++// MCP connectors (stdout)
++// ============================================================================
++
++/**
++ * A connector's sign-in state. `none`: no OMP-managed OAuth (stdio, static
++ * headers, open servers). `signed_out`: OAuth is required and no credential
++ * works. `expired`: a credential exists (or did this session) but the server
++ * refuses it and refresh could not renew it.
++ */
++export type RpcMcpAuthState = "none" | "signed_in" | "signed_out" | "expired";
++
++/** One MCP server of the session as `get_mcp_servers` reports it. Never carries credentials. */
++export interface RpcMcpServerInfo {
++	name: string;
++	transport: "stdio" | "http" | "sse";
++	/** Where the config came from (`user`, `project`, `native`), when known. */
++	scope?: "user" | "project" | "native";
++	status: "connected" | "connecting" | "disconnected" | "failed";
++	/** Tools of this server registered in the session (0 while connected is worth a warning). */
++	toolCount: number;
++	/** The last connection failure, until the server connects again. */
++	error?: string;
++	auth: RpcMcpAuthState;
++}
++
++/**
++ * A connector needs the user to sign in (again). Emitted once per episode
++ * (startup refusal, a tool-level OAuth challenge, a refused credential on
++ * reconnect). Nothing is opened: the host offers `mcp_login` to the user.
++ */
++export interface RpcMcpAuthRequiredFrame {
++	type: "mcp_auth_required";
++	serverName: string;
++	reason: "signed_out" | "expired";
++}
++
++/** Another window or terminal took this session: the run is aborted and the logical session closes. */
++export interface RpcSessionLeaseLostFrame {
++	type: "session_lease_lost";
++	holder: SessionLeaseHolder | null;
++	/** A reply was in progress and is stopped. */
++	interrupted: boolean;
++}
++
+ // ============================================================================
+ // Extension UI Commands (stdin)
+ // ============================================================================
+ 
+ /** Response to an extension UI request */
+ export type RpcExtensionUIResponse =
+-	| { type: "extension_ui_response"; id: string; value: string }
++	/** `reason`: why the user chose "Deny" on a structured `approval` select; the agent reads it in the tool result. */
++	| { type: "extension_ui_response"; id: string; value: string; reason?: string }
+ 	| { type: "extension_ui_response"; id: string; confirmed: boolean }
+ 	| { type: "extension_ui_response"; id: string; cancelled: true; timedOut?: boolean }
+ 	/** Answers to an `ask` request, one per question in request order. */
+@@ -881,6 +1052,13 @@ export type RpcExtensionUIResponse =
+ 			type: "extension_ui_response";
+ 			id: string;
+ 			answers: Array<{ id: string; selectedOptions: string[]; customInput?: string }>;
++	  }
++	/** Answer to an `elicit` form: `accept` carries the field values; dismissing sends `cancelled` instead. */
++	| {
++			type: "extension_ui_response";
++			id: string;
++			action: "accept" | "decline";
++			content?: Record<string, MCPElicitationValue>;
+ 	  };
+ 
+ // ============================================================================
+diff --git a/src/modes/rpc/wire/commands.ts b/src/modes/rpc/wire/commands.ts
+index 580eb02ec33a6dc1de5f78b4cfe5525f9654d0b5..361ff3a4918bcae428cb6bf82e14c1c41e6e4087 100644
+--- a/src/modes/rpc/wire/commands.ts
++++ b/src/modes/rpc/wire/commands.ts
+@@ -38,6 +38,29 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+ 		params: { protocolVersion: "number.integer" },
+ 		result: { protocolVersion: "number.integer" },
+ 	},
++	{
++		name: "editor_document",
++		doc: "K7 v1 canonical editor overlay and UTF-16 language requests; never starts a server without explicit trust.",
++		params: {
++			action: "'open' | 'change' | 'save' | 'close' | 'request'",
++			uri: "string", version: "number.integer", "text?": "string", "languageId?": "string",
++			"baseHash?": "string", "dirty?": "boolean", "conflict?": "boolean",
++			"method?": "'completion' | 'hover' | 'definition' | 'rename' | 'diagnostics'",
++			"position?": "EditorPosition", "newName?": "string",
++		},
++		result: { version: "number.integer", result: "unknown", positionEncoding: "'utf-16'" },
++	},
++	{
++		name: "editor_trust",
++		doc: "Explicitly grant or revoke trust for this project's current language-server configuration.",
++		params: { trusted: "boolean" }, result: { trusted: "boolean" },
++	},
++	{
++		name: "editor_edit_result",
++		doc: "Acknowledge a revision/hash-checked edit applied to the canonical GUI buffer, without saving.",
++		params: { requestId: "string", success: "boolean", "error?": "string", "document?": "EditorDocumentSnapshot" },
++		result: {},
++	},
+ 	{
+ 		name: "prompt",
+ 		doc: "Submit a prompt; acknowledged once admitted, completed by its `prompt_result`.",
+@@ -45,8 +68,8 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+ 		result: "PromptAck",
+ 		completion: "prompt_result",
+ 	},
+-	{ name: "steer", doc: "Queue a steering message.", params: { message: "string", "images?": IMAGES } },
+-	{ name: "follow_up", doc: "Queue a follow-up message.", params: { message: "string", "images?": IMAGES } },
++	{ name: "steer", doc: "Queue a steering message.", params: { message: "string", "images?": IMAGES }, result: "DeferredInputAck" },
++	{ name: "follow_up", doc: "Queue a follow-up message.", params: { message: "string", "images?": IMAGES }, result: "DeferredInputAck" },
+ 	{
+ 		name: "remove_queued_message",
+ 		doc: "Remove one pending queued message by its queue-chip text.",
+@@ -64,6 +87,7 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+ 		name: "abort_and_prompt",
+ 		doc: "Abort the current run and submit a prompt; completed by its `prompt_result`.",
+ 		params: { message: "string", "images?": IMAGES },
++		result: "PromptAck",
+ 		completion: "prompt_result",
+ 	},
+ 	{
+@@ -104,6 +128,12 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+ 		params: { op: "GoalOp", "objective?": "string", "token_budget?": "number.integer" },
+ 		result: "GoalResult",
+ 	},
++	{
++		name: "plan_mode",
++		doc: "Read or change plan mode: enter/exit, and approve or reject (with feedback) the proposed plan, as the interactive `/plan` review does. Approve/reject name the review's `revision` (else `plan_review_stale`) and are refused while a turn runs (`session_busy`).",
++		params: { op: "PlanModeOp", "planFilePath?": "string", "feedback?": "string", "revision?": "string" },
++		result: "PlanModeResult",
++	},
+ 	{
+ 		name: "set_ask_dialog",
+ 		doc: "Opt in to `ask` UI requests; returns the applied setting.",
+@@ -184,6 +214,25 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+ 		doc: "Send a message to a running subagent as its user.",
+ 		params: { subagentId: "string", message: "string" },
+ 	},
++	{
++		name: "get_jobs",
++		doc: "List this session's background jobs: running ones in start order, then recent settled ones, newest first.",
++		result: { jobs: "JobSnapshot[]" },
++		unwrap: "jobs",
++	},
++	{
++		name: "cancel_job",
++		doc: "Cancel one running background job; false when it is unknown or already settled.",
++		params: { jobId: "string" },
++		result: { cancelled: "boolean" },
++		unwrap: "cancelled",
++	},
++	{
++		name: "get_job_output",
++		doc: "Read a bounded slice of a background job's output from a byte cursor; the tail when `fromByte` is omitted.",
++		params: { jobId: "string", "fromByte?": "number.integer", "maxBytes?": "number.integer" },
++		result: "JobOutput",
++	},
+ 	{
+ 		name: "live_start",
+ 		doc: "Start a live voice session bound to this session; returns the voice in use.",
+@@ -274,6 +323,12 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+ 		params: { "entryId?": "string" },
+ 		result: "CancellationResult",
+ 	},
++	{
++		name: "navigate_tree",
++		doc: "Move the leaf in place, in the same session file (the TUI's /tree and Esc Esc rewind, no summary): a user message rewinds past itself and its text and images come back; the abandoned path stays as a sibling branch. Refused with `session_busy` while the session works.",
++		params: { targetId: "string" },
++		result: "NavigateTreeResult",
++	},
+ 	{
+ 		name: "get_branch_messages",
+ 		doc: "List user messages that can be branched from.",
+@@ -304,7 +359,7 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+ 	{
+ 		name: "get_messages_page",
+ 		doc: "One stable page of messages.",
+-		params: { "cursor?": "string", "limit?": "number.integer" },
++		params: { "cursor?": "string", "limit?": "number.integer", "direction?": "'forward' | 'backward'" },
+ 		result: "MessagesPage",
+ 	},
+ 
+@@ -371,4 +426,33 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+ 		result: { records: "BtwHistoryRecord[]" },
+ 		unwrap: "records",
+ 	},
++
++	{
++		name: "get_mcp_servers",
++		doc: "The session's MCP servers: connection, tool count, sign-in state.",
++		result: { servers: "McpServerInfo[]" },
++		unwrap: "servers",
++	},
++	{
++		name: "mcp_login",
++		doc: "Sign in to an MCP server with OAuth; the authorization URL arrives as `open_url` with `mcpServer`. Cancelled: code `mcp_login_cancelled`.",
++		params: { serverName: "string" },
++		result: "McpServerInfo",
++		timeoutMs: 600_000,
++	},
++	{
++		name: "mcp_login_cancel",
++		doc: "Cancel a running `mcp_login` for the server.",
++		params: { serverName: "string" },
++		result: { cancelled: "boolean" },
++		unwrap: "cancelled",
++	},
++	{
++		name: "mcp_reconnect",
++		doc: "Reconnect one server from its config, or without a name rediscover and reconnect them all.",
++		params: { "serverName?": "string" },
++		result: { servers: "McpServerInfo[]" },
++		unwrap: "servers",
++		timeoutMs: 120_000,
++	},
+ ];
+diff --git a/src/modes/rpc/wire/frames.ts b/src/modes/rpc/wire/frames.ts
+index 96675b5b4834b17bf4bc8c9d465d5418dcea60f3..2dfcba7decdc59b88f5c7d41b71be8eb3d8f6229 100644
+--- a/src/modes/rpc/wire/frames.ts
++++ b/src/modes/rpc/wire/frames.ts
+@@ -8,6 +8,14 @@ const JSON_OBJECT = "Record<string, unknown>";
+ const UI = "'extension_ui_request'";
+ 
+ export const frameDefs = {
++	EditorDocumentSnapshot: {
++		uri: "string", version: "number.integer", text: "string", languageId: "string",
++		baseHash: "string", dirty: "boolean", "conflict?": "boolean",
++	},
++	EditorApplyEditEvent: {
++		type: "'editor_apply_edit'", requestId: "string", uri: "string",
++		expectedRevision: "number.integer", expectedHash: "string", text: "string",
++	},
+ 	ReadyEvent: doc(
+ 		{
+ 			type: "'ready'",
+@@ -111,6 +119,32 @@ export const frameDefs = {
+ 		{ type: "'btw_record'", record: "BtwHistoryRecord" },
+ 		"Full side-question record on every lifecycle change (started, complete, cancelled, error); the last one per id wins.",
+ 	),
++	PlanModeUpdatedEvent: doc(
++		{ type: "'plan_mode_updated'", state: "PlanModeState | null", review: "PlanReview | null" },
++		"Plan mode changed: entered, exited, a plan proposed for review (with its document), approved or rejected.",
++	),
++	McpAuthRequiredEvent: doc(
++		{ type: "'mcp_auth_required'", serverName: "string", reason: "'signed_out' | 'expired'" },
++		"A connector needs the user to sign in (again); nothing was opened. Offer `mcp_login`.",
++	),
++	SessionLeaseHolder: doc(
++		{
++			id: doc("string", "The holder process's lease identity (random per process)."),
++			kind: doc("string", "`ombra` for the desktop app's engine, `omp` for the terminal and CLI."),
++			pid: "number.integer",
++			"label?": "string",
++			since: doc("string", "When it took the lease (ISO 8601)."),
++		},
++		"Who holds (or asked for) a session's writer lease, as that process published itself.",
++	),
++	SessionLeaseLostEvent: doc(
++		{
++			type: "'session_lease_lost'",
++			holder: "SessionLeaseHolder | null",
++			interrupted: doc("boolean", "A reply was in progress: it is stopped, not finished."),
++		},
++		"Another window or terminal asked to write this session (`holder`, null when unknown): the run is aborted and the logical session closes after its last write. Show the chat read-only with an action to take it back.",
++	),
+ 	CommandOutputEvent: doc({ type: "'command_output'", text: "string" }, "Output of a builtin slash command."),
+ 	SessionInfoUpdateEvent: doc(
+ 		{ type: "'session_info_update'", "title?": "string", sessionId: "string" },
+@@ -139,6 +173,27 @@ export const frameDefs = {
+ 		},
+ 		"One question of an `ask` request; hosts always offer free text besides `options`.",
+ 	),
++	ToolApprovalRisk: "'read' | 'write' | 'exec'",
++	ToolApprovalScope: "'once' | 'session' | 'always'",
++	ToolApprovalRequest: doc(
++		{
++			tool: "string",
++			"toolCallId?": "string",
++			risk: doc("ToolApprovalRisk", "Capability tier of this call."),
++			"reason?": doc("string", "The tool's own reason for asking."),
++			"origin?": doc("'mcp'", "A tool of an MCP server."),
++			"server?": doc("string", "With `origin`: the MCP server's name."),
++			details: doc("string[]", "The tool's argument summary lines, bounded as in the text prompt."),
++			"command?": doc("string", "`bash` only: the complete command; absent when longer than 65536 characters."),
++			"cwd?": doc("string", "`bash` only: the folder the call runs in, as given (relative to the session's folder)."),
++			"safetyChecks?": doc("string[]", "Provider safety checks only a person may confirm."),
++			scopes: doc(
++				"ToolApprovalScope[]",
++				"Scopes a host may keep an approval for; only `once` with safety checks or when the tool or the user's policy insists on asking every time.",
++			),
++		},
++		"Typed tool approval: render it instead of parsing the select `title`.",
++	),
+ 	SelectUiRequest: {
+ 		type: UI,
+ 		id: "string",
+@@ -146,6 +201,10 @@ export const frameDefs = {
+ 		title: "string",
+ 		options: "string[]",
+ 		"optionDetails?": "SelectOptionDetail[]",
++		"approval?": doc(
++			"ToolApprovalRequest",
++			"Set on tool approvals (options Approve/Deny); a `Deny` answer may carry `reason`.",
++		),
+ 		"timeout?": "number.integer",
+ 	},
+ 	ConfirmUiRequest: {
+@@ -211,9 +270,14 @@ export const frameDefs = {
+ 		url: "string",
+ 		"launchUrl?": doc("string", "Short loopback redirect to `url`; the truncation-safe copy target."),
+ 		"instructions?": "string",
++		"mcpServer?": doc("string", "Set when the URL belongs to the host's `mcp_login` for this server."),
+ 	},
++	ElicitUiRequest: doc(
++		{ type: UI, id: "string", method: "'elicit'", serverName: "string", message: "string", fields: "ElicitationField[]" },
++		"An MCP server asks the user for a form; show `serverName` and offer Decline. Answers are validated against `fields`.",
++	),
+ 	ExtensionUiRequest: doc(
+-		"SelectUiRequest | ConfirmUiRequest | InputUiRequest | EditorUiRequest | AskUiRequest | CancelUiRequest | NotifyUiRequest | SetStatusUiRequest | SetWidgetUiRequest | SetTitleUiRequest | SetEditorTextUiRequest | OpenUrlUiRequest",
++		"SelectUiRequest | ConfirmUiRequest | InputUiRequest | EditorUiRequest | AskUiRequest | CancelUiRequest | NotifyUiRequest | SetStatusUiRequest | SetWidgetUiRequest | SetTitleUiRequest | SetEditorTextUiRequest | OpenUrlUiRequest | ElicitUiRequest",
+ 		"Extension UI request, discriminated by `method`.",
+ 	),
+ 	AskAnswer: doc(
+@@ -221,7 +285,12 @@ export const frameDefs = {
+ 		"Answer to one `ask` question: exact option labels, plus optional free text.",
+ 	),
+ 	ValueUiResponse: doc(
+-		{ type: "'extension_ui_response'", id: "string", value: "string" },
++		{
++			type: "'extension_ui_response'",
++			id: "string",
++			value: "string",
++			"reason?": doc("string", "With `Deny` on an `approval` select: why, for the agent's failed tool result."),
++		},
+ 		"Answers a `select`, `input`, or `editor` request.",
+ 	),
+ 	ConfirmUiResponse: doc(
+@@ -236,8 +305,17 @@ export const frameDefs = {
+ 		{ type: "'extension_ui_response'", id: "string", answers: "AskAnswer[]" },
+ 		"Answers an `ask` request: one `AskAnswer` per question, in question order.",
+ 	),
++	ElicitUiResponse: doc(
++		{
++			type: "'extension_ui_response'",
++			id: "string",
++			action: "'accept' | 'decline'",
++			"content?": doc("Record<string, string | number | boolean | string[]>", "Field values by name; required with `accept`."),
++		},
++		"Answers an `elicit` form; dismissing it sends `CancelUiResponse` instead.",
++	),
+ 	ExtensionUiResponse: doc(
+-		"ValueUiResponse | ConfirmUiResponse | CancelUiResponse | AnswersUiResponse",
++		"ValueUiResponse | ConfirmUiResponse | CancelUiResponse | AnswersUiResponse | ElicitUiResponse",
+ 		"Host reply to an extension UI request; variants share `type` and differ by their payload key.",
+ 	),
+ 
+diff --git a/src/modes/rpc/wire/index.ts b/src/modes/rpc/wire/index.ts
+index b00c3930004891e0eebd85b5e9d160e1989ea5d0..469edb4a0b9084d66c885b5abc725cc01d847d0b 100644
+--- a/src/modes/rpc/wire/index.ts
++++ b/src/modes/rpc/wire/index.ts
+@@ -63,6 +63,7 @@ const notificationDefs = {
+ 	RpcNotification: doc(
+ 		[
+ 			"ReadyEvent",
++			"EditorApplyEditEvent",
+ 			"PromptResultEvent",
+ 			"SessionSettledEvent",
+ 			"ExtensionError",
+@@ -77,6 +78,9 @@ const notificationDefs = {
+ 			"LiveEndEvent",
+ 			"BtwDeltaEvent",
+ 			"BtwRecordEvent",
++			"PlanModeUpdatedEvent",
++			"McpAuthRequiredEvent",
++			"SessionLeaseLostEvent",
+ 			"CommandOutputEvent",
+ 			"SessionInfoUpdateEvent",
+ 			"ConfigUpdateEvent",
+diff --git a/src/modes/rpc/wire/rpc-wire.generated.ts b/src/modes/rpc/wire/rpc-wire.generated.ts
+index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..e3bd6dfaf64df2a0b0527dd12bfce6c6ecdce24e 100644
+--- a/src/modes/rpc/wire/rpc-wire.generated.ts
++++ b/src/modes/rpc/wire/rpc-wire.generated.ts
+@@ -368,6 +368,11 @@ export interface ModelInfo {
+ 	compat?: Record<string, unknown>;
+ }
+ 
++export interface EditorPosition {
++	line: number;
++	character: number;
++}
++
+ export type QueueMode = "all" | "one-at-a-time";
+ 
+ export type InterruptMode = "immediate" | "wait";
+@@ -457,6 +462,30 @@ export interface GoalResult {
+ 	state: GoalModeState | null;
+ }
+ 
++export type PlanModeOp = "get" | "enter" | "exit" | "approve" | "reject";
++
++/** Session plan mode: the agent drafts `planFilePath` read-only until a plan is approved. */
++export interface PlanModeState {
++	enabled: boolean;
++	planFilePath: string;
++	workflow?: "parallel" | "iterative";
++	reentry?: boolean;
++}
++
++/** A plan the agent proposed (`xd://propose`) that waits for `plan_mode` approve or reject naming its `revision`; `content` is the Markdown approval executes. */
++export interface PlanReview {
++	revision: string;
++	planFilePath: string;
++	title: string;
++	content: string;
++}
++
++/** Outcome of every `plan_mode` op; `state` is null when plan mode is off, `review` when no plan waits. */
++export interface PlanModeResult {
++	state: PlanModeState | null;
++	review: PlanReview | null;
++}
++
+ /** Where `/slow` lives: persisted config shared by every session, or this session's flex tier. */
+ export type SlowModeScope = "session" | "global";
+ 
+@@ -518,6 +547,8 @@ export interface SessionState {
+ 	contextUsage?: ContextUsage;
+ 	/** Current goal mode; null when the session has no goal. */
+ 	goal?: GoalModeState | null;
++	/** Plan mode and the proposed plan awaiting approval. */
++	planMode?: PlanModeResult;
+ }
+ 
+ export interface BashResult {
+@@ -612,6 +643,12 @@ export interface BranchResult {
+ 	cancelled: boolean;
+ }
+ 
++export interface NavigateTreeResult {
++	cancelled: boolean;
++	text?: string;
++	images?: ImageContent[];
++}
++
+ export interface TokenUsage {
+ 	input: number;
+ 	output: number;
+@@ -648,6 +685,11 @@ export interface MessagesPage {
+ 	totalMessages: number;
+ 	/** Opaque cursor for the next page; absent on the last page. */
+ 	nextCursor?: string;
++	direction?: "backward";
++	startOffset?: number;
++	endOffset?: number;
++	sessionId?: string;
++	snapshotId?: string;
+ }
+ 
+ export interface SlashCommandInput {
+@@ -709,6 +751,54 @@ export interface SubagentMessages {
+ 	messages: AgentMessage[];
+ }
+ 
++export type JobType = "bash" | "task" | "eval";
++
++export type JobStatus = "running" | "completed" | "failed" | "cancelled";
++
++/** One background job this session owns. */
++export interface JobSnapshot {
++	id: string;
++	type: JobType;
++	status: JobStatus;
++	/** Display label; a command cut to 120 characters. */
++	label: string;
++	startTime: number;
++	/** Bytes the job has streamed so far (0 for jobs that never stream). */
++	outputBytes: number;
++	/** Running, quiet for a while, and its last line looks like a prompt. */
++	waitingForInput: boolean;
++	/** Full command line of a job that runs a process. */
++	command?: string;
++	endTime?: number;
++	/** Exit status of a settled command. */
++	exitCode?: number;
++	/** Registry id of the subagent an async task job runs. */
++	agentId?: string;
++	lastOutputAt?: number;
++}
++
++/** Bounded read of a background job's output. */
++export interface JobOutput {
++	jobId: string;
++	status: JobStatus;
++	waitingForInput: boolean;
++	/** Offset of `text`'s first byte. */
++	fromByte: number;
++	/** Pass as the next `fromByte` to read incrementally. */
++	nextByte: number;
++	/** Bytes the job has streamed so far. */
++	totalBytes: number;
++	/** Oldest byte the job still keeps. */
++	startByte: number;
++	/** Requested bytes no longer kept (older than `startByte`). */
++	skippedBytes: number;
++	/** `fromByte` was past the end; this read is the tail. */
++	reset: boolean;
++	/** The job does not stream: `text` is its latest text and replaces earlier reads. */
++	snapshot: boolean;
++	text: string;
++}
++
+ /** Side-question turn lifecycle; `interrupted` marks a turn whose process died while it ran. */
+ export type BtwStatus = "running" | "complete" | "cancelled" | "error" | "interrupted";
+ 
+@@ -752,13 +842,59 @@ export interface LogoutAccount {
+ 	active: boolean;
+ }
+ 
++/** Connector sign-in: no OMP-managed OAuth, a working credential, none that works, or one the server now refuses. */
++export type McpAuthState = "none" | "signed_in" | "signed_out" | "expired";
++
++/** One MCP server of the session. Never carries credentials. */
++export interface McpServerInfo {
++	name: string;
++	transport: "stdio" | "http" | "sse";
++	status: "connected" | "connecting" | "disconnected" | "failed";
++	/** Tools of this server in the session; 0 while connected deserves a warning. */
++	toolCount: number;
++	auth: McpAuthState;
++	scope?: "user" | "project" | "native";
++	/** Last connection failure (URL queries removed) until the server connects again. */
++	error?: string;
++}
++
++export interface ElicitationOption {
++	value: string;
++	label: string;
++}
++
++/** One field of an MCP form, normalized from the server's JSON Schema; limits apply to its kind. */
++export interface ElicitationField {
++	name: string;
++	title: string;
++	required: boolean;
++	kind: "text" | "number" | "integer" | "boolean" | "select" | "multiselect";
++	description?: string;
++	format?: "email" | "uri" | "date" | "date-time";
++	minLength?: number;
++	maxLength?: number;
++	minimum?: number;
++	maximum?: number;
++	/** For `select` and `multiselect`. */
++	options?: ElicitationOption[];
++	minItems?: number;
++	maxItems?: number;
++	default?: string | number | boolean | string[];
++}
++
+ export interface HandoffResult {
+ 	savedPath?: string;
+ }
+ 
+-/** `agentInvoked: false` means the prompt completed locally and no `prompt_result` follows. */
++/** inputDisposition describes the original input; agentInvoked includes causal extension work. No prompt_result follows when agentInvoked is false. */
+ export interface PromptAck {
+-	agentInvoked?: boolean;
++	inputDisposition: "admitted" | "local" | "cancelled";
++	agentInvoked: boolean;
++}
++
++export interface DeferredInputAck {
++	inputDisposition: "admitted" | "local" | "cancelled";
++	agentInvoked: boolean;
+ }
+ 
+ export type AutoCompactionReason = "threshold" | "overflow" | "idle" | "incomplete";
+@@ -999,6 +1135,25 @@ export interface QueueUpdateEvent {
+ /** A session event, discriminated by `type`; `set_event_filter` selects which are sent. */
+ export type RpcAgentEvent = AgentStartEvent | AgentEndEvent | TurnStartEvent | TurnEndEvent | MessageStartEvent | MessageUpdateEvent | MessageEndEvent | ToolExecutionStartEvent | ToolExecutionUpdateEvent | ToolStreamUpdateEvent | ToolExecutionEndEvent | AutoCompactionStartEvent | AutoCompactionEndEvent | AutoRetryStartEvent | AutoRetryEndEvent | CacheWarmingStartEvent | CacheWarmingEndEvent | RetryFallbackAppliedEvent | RetryFallbackSucceededEvent | ModelChangedEvent | ConfigWarningsChangedEvent | AdvisorCostChangedEvent | AdvisorYieldedEvent | TtsrTriggeredEvent | TodoReminderEvent | TodoAutoClearEvent | IrcMessageEvent | NoticeEvent | ThinkingLevelChangedEvent | GoalUpdatedEvent | QueueUpdateEvent;
+ 
++export interface EditorDocumentSnapshot {
++	uri: string;
++	version: number;
++	text: string;
++	languageId: string;
++	baseHash: string;
++	dirty: boolean;
++	conflict?: boolean;
++}
++
++export interface EditorApplyEditEvent {
++	type: "editor_apply_edit";
++	requestId: string;
++	uri: string;
++	expectedRevision: number;
++	expectedHash: string;
++	text: string;
++}
++
+ /** First frame after startup; transport fields are absent on servers without protocol v2. */
+ export interface ReadyEvent {
+ 	type: "ready";
+@@ -1144,6 +1299,40 @@ export interface BtwRecordEvent {
+ 	record: BtwHistoryRecord;
+ }
+ 
++/** Plan mode changed: entered, exited, a plan proposed for review (with its document), approved or rejected. */
++export interface PlanModeUpdatedEvent {
++	type: "plan_mode_updated";
++	state: PlanModeState | null;
++	review: PlanReview | null;
++}
++
++/** A connector needs the user to sign in (again); nothing was opened. Offer `mcp_login`. */
++export interface McpAuthRequiredEvent {
++	type: "mcp_auth_required";
++	serverName: string;
++	reason: "signed_out" | "expired";
++}
++
++/** Who holds (or asked for) a session's writer lease, as that process published itself. */
++export interface SessionLeaseHolder {
++	/** The holder process's lease identity (random per process). */
++	id: string;
++	/** `ombra` for the desktop app's engine, `omp` for the terminal and CLI. */
++	kind: string;
++	pid: number;
++	/** When it took the lease (ISO 8601). */
++	since: string;
++	label?: string;
++}
++
++/** Another window or terminal asked to write this session (`holder`, null when unknown): the run is aborted and the logical session closes after its last write. Show the chat read-only with an action to take it back. */
++export interface SessionLeaseLostEvent {
++	type: "session_lease_lost";
++	holder: SessionLeaseHolder | null;
++	/** A reply was in progress: it is stopped, not finished. */
++	interrupted: boolean;
++}
++
+ /** Output of a builtin slash command. */
+ export interface CommandOutputEvent {
+ 	type: "command_output";
+@@ -1195,6 +1384,34 @@ export interface AskQuestion {
+ 	recommended?: number;
+ }
+ 
++export type ToolApprovalRisk = "read" | "write" | "exec";
++
++export type ToolApprovalScope = "once" | "session" | "always";
++
++/** Typed tool approval: render it instead of parsing the select `title`. */
++export interface ToolApprovalRequest {
++	tool: string;
++	/** Capability tier of this call. */
++	risk: ToolApprovalRisk;
++	/** The tool's argument summary lines, bounded as in the text prompt. */
++	details: string[];
++	/** Scopes a host may keep an approval for; only `once` with safety checks or when the tool or the user's policy insists on asking every time. */
++	scopes: ToolApprovalScope[];
++	toolCallId?: string;
++	/** The tool's own reason for asking. */
++	reason?: string;
++	/** A tool of an MCP server. */
++	origin?: "mcp";
++	/** With `origin`: the MCP server's name. */
++	server?: string;
++	/** `bash` only: the complete command; absent when longer than 65536 characters. */
++	command?: string;
++	/** `bash` only: the folder the call runs in, as given (relative to the session's folder). */
++	cwd?: string;
++	/** Provider safety checks only a person may confirm. */
++	safetyChecks?: string[];
++}
++
+ export interface SelectUiRequest {
+ 	type: "extension_ui_request";
+ 	id: string;
+@@ -1202,6 +1419,8 @@ export interface SelectUiRequest {
+ 	title: string;
+ 	options: string[];
+ 	optionDetails?: SelectOptionDetail[];
++	/** Set on tool approvals (options Approve/Deny); a `Deny` answer may carry `reason`. */
++	approval?: ToolApprovalRequest;
+ 	timeout?: number;
+ }
+ 
+@@ -1296,10 +1515,22 @@ export interface OpenUrlUiRequest {
+ 	/** Short loopback redirect to `url`; the truncation-safe copy target. */
+ 	launchUrl?: string;
+ 	instructions?: string;
++	/** Set when the URL belongs to the host's `mcp_login` for this server. */
++	mcpServer?: string;
++}
++
++/** An MCP server asks the user for a form; show `serverName` and offer Decline. Answers are validated against `fields`. */
++export interface ElicitUiRequest {
++	type: "extension_ui_request";
++	id: string;
++	method: "elicit";
++	serverName: string;
++	message: string;
++	fields: ElicitationField[];
+ }
+ 
+ /** Extension UI request, discriminated by `method`. */
+-export type ExtensionUiRequest = SelectUiRequest | ConfirmUiRequest | InputUiRequest | EditorUiRequest | AskUiRequest | CancelUiRequest | NotifyUiRequest | SetStatusUiRequest | SetWidgetUiRequest | SetTitleUiRequest | SetEditorTextUiRequest | OpenUrlUiRequest;
++export type ExtensionUiRequest = SelectUiRequest | ConfirmUiRequest | InputUiRequest | EditorUiRequest | AskUiRequest | CancelUiRequest | NotifyUiRequest | SetStatusUiRequest | SetWidgetUiRequest | SetTitleUiRequest | SetEditorTextUiRequest | OpenUrlUiRequest | ElicitUiRequest;
+ 
+ /** Answer to one `ask` question: exact option labels, plus optional free text. */
+ export interface AskAnswer {
+@@ -1313,6 +1544,8 @@ export interface ValueUiResponse {
+ 	type: "extension_ui_response";
+ 	id: string;
+ 	value: string;
++	/** With `Deny` on an `approval` select: why, for the agent's failed tool result. */
++	reason?: string;
+ }
+ 
+ /** Answers a `confirm` request. */
+@@ -1337,8 +1570,17 @@ export interface AnswersUiResponse {
+ 	answers: AskAnswer[];
+ }
+ 
++/** Answers an `elicit` form; dismissing it sends `CancelUiResponse` instead. */
++export interface ElicitUiResponse {
++	type: "extension_ui_response";
++	id: string;
++	action: "accept" | "decline";
++	/** Field values by name; required with `accept`. */
++	content?: Record<string, string | number | boolean | string[]>;
++}
++
+ /** Host reply to an extension UI request; variants share `type` and differ by their payload key. */
+-export type ExtensionUiResponse = ValueUiResponse | ConfirmUiResponse | CancelUiResponse | AnswersUiResponse;
++export type ExtensionUiResponse = ValueUiResponse | ConfirmUiResponse | CancelUiResponse | AnswersUiResponse | ElicitUiResponse;
+ 
+ export interface HostToolCallRequest {
+ 	type: "host_tool_call";
+@@ -1449,7 +1691,7 @@ export interface HostUriSchemeDefinition {
+ }
+ 
+ /** Unsolicited outbound frame (everything except responses and host tool/URI requests), discriminated by `type`. */
+-export type RpcNotification = ReadyEvent | PromptResultEvent | SessionSettledEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | LivePhaseEvent | LiveLevelsEvent | LiveTranscriptEvent | LiveEndEvent | BtwDeltaEvent | BtwRecordEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | RpcFrameErrorEvent | RpcAgentEvent;
++export type RpcNotification = ReadyEvent | EditorApplyEditEvent | PromptResultEvent | SessionSettledEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | LivePhaseEvent | LiveLevelsEvent | LiveTranscriptEvent | LiveEndEvent | BtwDeltaEvent | BtwRecordEvent | PlanModeUpdatedEvent | McpAuthRequiredEvent | SessionLeaseLostEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | RpcFrameErrorEvent | RpcAgentEvent;
+ 
+ /** Any frame the server writes to stdout (after reassembling `rpc_chunk` sequences), discriminated by `type`. */
+ export type RpcServerFrame = RpcResponse | RpcHostRequest | RpcNotification;
+@@ -1462,6 +1704,43 @@ export interface NegotiateProtocolResult {
+ 	protocolVersion: number;
+ }
+ 
++export interface EditorDocumentParams {
++	action: "open" | "change" | "save" | "close" | "request";
++	uri: string;
++	version: number;
++	text?: string;
++	languageId?: string;
++	baseHash?: string;
++	dirty?: boolean;
++	conflict?: boolean;
++	method?: "completion" | "hover" | "definition" | "rename" | "diagnostics";
++	position?: EditorPosition;
++	newName?: string;
++}
++
++export interface EditorDocumentResult {
++	version: number;
++	result: unknown;
++	positionEncoding: "utf-16";
++}
++
++export interface EditorTrustParams {
++	trusted: boolean;
++}
++
++export interface EditorTrustResult {
++	trusted: boolean;
++}
++
++export interface EditorEditResultParams {
++	requestId: string;
++	success: boolean;
++	error?: string;
++	document?: EditorDocumentSnapshot;
++}
++
++export type EditorEditResultResult = Record<string, unknown>;
++
+ export interface PromptParams {
+ 	message: string;
+ 	/** Images attached to the message. */
+@@ -1524,6 +1803,13 @@ export interface GoalParams {
+ 	token_budget?: number;
+ }
+ 
++export interface PlanModeParams {
++	op: PlanModeOp;
++	planFilePath?: string;
++	feedback?: string;
++	revision?: string;
++}
++
+ export interface SetAskDialogParams {
+ 	enabled: boolean;
+ }
+@@ -1605,6 +1891,24 @@ export interface SteerSubagentParams {
+ 	message: string;
+ }
+ 
++export interface GetJobsResult {
++	jobs: JobSnapshot[];
++}
++
++export interface CancelJobParams {
++	jobId: string;
++}
++
++export interface CancelJobResult {
++	cancelled: boolean;
++}
++
++export interface GetJobOutputParams {
++	jobId: string;
++	fromByte?: number;
++	maxBytes?: number;
++}
++
+ export interface LiveStartParams {
+ 	voice?: string;
+ 	instructions?: string;
+@@ -1697,6 +2001,10 @@ export interface ForkParams {
+ 	entryId?: string;
+ }
+ 
++export interface NavigateTreeParams {
++	targetId: string;
++}
++
+ export interface GetBranchMessagesResult {
+ 	messages: BranchMessage[];
+ }
+@@ -1720,6 +2028,7 @@ export interface GetMessagesResult {
+ export interface GetMessagesPageParams {
+ 	cursor?: string;
+ 	limit?: number;
++	direction?: "forward" | "backward";
+ }
+ 
+ export interface GetLoginProvidersResult {
+@@ -1788,16 +2097,43 @@ export interface GetBtwHistoryResult {
+ 	records: BtwHistoryRecord[];
+ }
+ 
++export interface GetMcpServersResult {
++	servers: McpServerInfo[];
++}
++
++export interface McpLoginParams {
++	serverName: string;
++}
++
++export interface McpLoginCancelParams {
++	serverName: string;
++}
++
++export interface McpLoginCancelResult {
++	cancelled: boolean;
++}
++
++export interface McpReconnectParams {
++	serverName?: string;
++}
++
++export interface McpReconnectResult {
++	servers: McpServerInfo[];
++}
++
+ /** Every RPC command's parameters and successful response `data`. */
+ export interface RpcWireCommands {
+ 	negotiate_protocol: { params: NegotiateProtocolParams; result: NegotiateProtocolResult };
++	editor_document: { params: EditorDocumentParams; result: EditorDocumentResult };
++	editor_trust: { params: EditorTrustParams; result: EditorTrustResult };
++	editor_edit_result: { params: EditorEditResultParams; result: EditorEditResultResult };
+ 	prompt: { params: PromptParams; result: PromptAck };
+-	steer: { params: SteerParams; result: undefined };
+-	follow_up: { params: FollowUpParams; result: undefined };
++	steer: { params: SteerParams; result: DeferredInputAck };
++	follow_up: { params: FollowUpParams; result: DeferredInputAck };
+ 	remove_queued_message: { params: RemoveQueuedMessageParams; result: RemoveQueuedMessageResult };
+ 	promote_queued_message: { params: PromoteQueuedMessageParams; result: PromoteQueuedMessageResult };
+ 	abort: { params: undefined; result: undefined };
+-	abort_and_prompt: { params: AbortAndPromptParams; result: undefined };
++	abort_and_prompt: { params: AbortAndPromptParams; result: PromptAck };
+ 	abort_and_restore_queue: { params: undefined; result: AbortAndRestoreQueueResult };
+ 	new_session: { params: NewSessionParams; result: CancellationResult };
+ 	open_session: { params: OpenSessionParams; result: OpenSessionResult };
+@@ -1805,6 +2141,7 @@ export interface RpcWireCommands {
+ 	set_fast_mode: { params: SetFastModeParams; result: FastModeResult };
+ 	set_slow_mode: { params: SetSlowModeParams; result: SetSlowModeResult };
+ 	goal: { params: GoalParams; result: GoalResult };
++	plan_mode: { params: PlanModeParams; result: PlanModeResult };
+ 	set_ask_dialog: { params: SetAskDialogParams; result: SetAskDialogResult };
+ 	get_available_commands: { params: undefined; result: GetAvailableCommandsResult };
+ 	get_entries: { params: GetEntriesParams; result: SessionEntries };
+@@ -1818,6 +2155,9 @@ export interface RpcWireCommands {
+ 	get_subagent_messages: { params: GetSubagentMessagesParams; result: SubagentMessages };
+ 	cancel_subagent: { params: CancelSubagentParams; result: CancelSubagentResult };
+ 	steer_subagent: { params: SteerSubagentParams; result: undefined };
++	get_jobs: { params: undefined; result: GetJobsResult };
++	cancel_job: { params: CancelJobParams; result: CancelJobResult };
++	get_job_output: { params: GetJobOutputParams; result: JobOutput };
+ 	live_start: { params: LiveStartParams; result: LiveStartResult };
+ 	live_stop: { params: undefined; result: undefined };
+ 	live_mute: { params: LiveMuteParams; result: LiveMuteResult };
+@@ -1842,6 +2182,7 @@ export interface RpcWireCommands {
+ 	switch_session: { params: SwitchSessionParams; result: CancellationResult };
+ 	branch: { params: BranchParams; result: BranchResult };
+ 	fork: { params: ForkParams; result: CancellationResult };
++	navigate_tree: { params: NavigateTreeParams; result: NavigateTreeResult };
+ 	get_branch_messages: { params: undefined; result: GetBranchMessagesResult };
+ 	get_last_assistant_text: { params: undefined; result: GetLastAssistantTextResult };
+ 	set_session_name: { params: SetSessionNameParams; result: undefined };
+@@ -1857,4 +2198,8 @@ export interface RpcWireCommands {
+ 	btw: { params: BtwParams; result: BtwResult };
+ 	btw_cancel: { params: BtwCancelParams; result: BtwCancelResult };
+ 	get_btw_history: { params: undefined; result: GetBtwHistoryResult };
++	get_mcp_servers: { params: undefined; result: GetMcpServersResult };
++	mcp_login: { params: McpLoginParams; result: McpServerInfo };
++	mcp_login_cancel: { params: McpLoginCancelParams; result: McpLoginCancelResult };
++	mcp_reconnect: { params: McpReconnectParams; result: McpReconnectResult };
+ }
+diff --git a/src/modes/rpc/wire/rpc-wire.schema.json b/src/modes/rpc/wire/rpc-wire.schema.json
+index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f833ef7d20 100644
+--- a/src/modes/rpc/wire/rpc-wire.schema.json
++++ b/src/modes/rpc/wire/rpc-wire.schema.json
+@@ -20,6 +20,39 @@
+ 				"completion": null,
+ 				"clientOmit": []
+ 			},
++			{
++				"name": "editor_document",
++				"doc": "K7 v1 canonical editor overlay and UTF-16 language requests; never starts a server without explicit trust.",
++				"params": "EditorDocumentParams",
++				"result": "EditorDocumentResult",
++				"nullable": false,
++				"unwrap": null,
++				"timeoutMs": null,
++				"completion": null,
++				"clientOmit": []
++			},
++			{
++				"name": "editor_trust",
++				"doc": "Explicitly grant or revoke trust for this project's current language-server configuration.",
++				"params": "EditorTrustParams",
++				"result": "EditorTrustResult",
++				"nullable": false,
++				"unwrap": null,
++				"timeoutMs": null,
++				"completion": null,
++				"clientOmit": []
++			},
++			{
++				"name": "editor_edit_result",
++				"doc": "Acknowledge a revision/hash-checked edit applied to the canonical GUI buffer, without saving.",
++				"params": "EditorEditResultParams",
++				"result": "EditorEditResultResult",
++				"nullable": false,
++				"unwrap": null,
++				"timeoutMs": null,
++				"completion": null,
++				"clientOmit": []
++			},
+ 			{
+ 				"name": "prompt",
+ 				"doc": "Submit a prompt; acknowledged once admitted, completed by its `prompt_result`.",
+@@ -35,7 +68,7 @@
+ 				"name": "steer",
+ 				"doc": "Queue a steering message.",
+ 				"params": "SteerParams",
+-				"result": null,
++				"result": "DeferredInputAck",
+ 				"nullable": false,
+ 				"unwrap": null,
+ 				"timeoutMs": null,
+@@ -46,7 +79,7 @@
+ 				"name": "follow_up",
+ 				"doc": "Queue a follow-up message.",
+ 				"params": "FollowUpParams",
+-				"result": null,
++				"result": "DeferredInputAck",
+ 				"nullable": false,
+ 				"unwrap": null,
+ 				"timeoutMs": null,
+@@ -90,7 +123,7 @@
+ 				"name": "abort_and_prompt",
+ 				"doc": "Abort the current run and submit a prompt; completed by its `prompt_result`.",
+ 				"params": "AbortAndPromptParams",
+-				"result": null,
++				"result": "PromptAck",
+ 				"nullable": false,
+ 				"unwrap": null,
+ 				"timeoutMs": null,
+@@ -174,6 +207,17 @@
+ 				"completion": null,
+ 				"clientOmit": []
+ 			},
++			{
++				"name": "plan_mode",
++				"doc": "Read or change plan mode: enter/exit, and approve or reject (with feedback) the proposed plan, as the interactive `/plan` review does. Approve/reject name the review's `revision` (else `plan_review_stale`) and are refused while a turn runs (`session_busy`).",
++				"params": "PlanModeParams",
++				"result": "PlanModeResult",
++				"nullable": false,
++				"unwrap": null,
++				"timeoutMs": null,
++				"completion": null,
++				"clientOmit": []
++			},
+ 			{
+ 				"name": "set_ask_dialog",
+ 				"doc": "Opt in to `ask` UI requests; returns the applied setting.",
+@@ -319,6 +363,39 @@
+ 				"completion": null,
+ 				"clientOmit": []
+ 			},
++			{
++				"name": "get_jobs",
++				"doc": "List this session's background jobs: running ones in start order, then recent settled ones, newest first.",
++				"params": null,
++				"result": "GetJobsResult",
++				"nullable": false,
++				"unwrap": "jobs",
++				"timeoutMs": null,
++				"completion": null,
++				"clientOmit": []
++			},
++			{
++				"name": "cancel_job",
++				"doc": "Cancel one running background job; false when it is unknown or already settled.",
++				"params": "CancelJobParams",
++				"result": "CancelJobResult",
++				"nullable": false,
++				"unwrap": "cancelled",
++				"timeoutMs": null,
++				"completion": null,
++				"clientOmit": []
++			},
++			{
++				"name": "get_job_output",
++				"doc": "Read a bounded slice of a background job's output from a byte cursor; the tail when `fromByte` is omitted.",
++				"params": "GetJobOutputParams",
++				"result": "JobOutput",
++				"nullable": false,
++				"unwrap": null,
++				"timeoutMs": null,
++				"completion": null,
++				"clientOmit": []
++			},
+ 			{
+ 				"name": "live_start",
+ 				"doc": "Start a live voice session bound to this session; returns the voice in use.",
+@@ -583,6 +660,17 @@
+ 				"completion": null,
+ 				"clientOmit": []
+ 			},
++			{
++				"name": "navigate_tree",
++				"doc": "Move the leaf in place, in the same session file (the TUI's /tree and Esc Esc rewind, no summary): a user message rewinds past itself and its text and images come back; the abandoned path stays as a sibling branch. Refused with `session_busy` while the session works.",
++				"params": "NavigateTreeParams",
++				"result": "NavigateTreeResult",
++				"nullable": false,
++				"unwrap": null,
++				"timeoutMs": null,
++				"completion": null,
++				"clientOmit": []
++			},
+ 			{
+ 				"name": "get_branch_messages",
+ 				"doc": "List user messages that can be branched from.",
+@@ -747,6 +835,50 @@
+ 				"timeoutMs": null,
+ 				"completion": null,
+ 				"clientOmit": []
++			},
++			{
++				"name": "get_mcp_servers",
++				"doc": "The session's MCP servers: connection, tool count, sign-in state.",
++				"params": null,
++				"result": "GetMcpServersResult",
++				"nullable": false,
++				"unwrap": "servers",
++				"timeoutMs": null,
++				"completion": null,
++				"clientOmit": []
++			},
++			{
++				"name": "mcp_login",
++				"doc": "Sign in to an MCP server with OAuth; the authorization URL arrives as `open_url` with `mcpServer`. Cancelled: code `mcp_login_cancelled`.",
++				"params": "McpLoginParams",
++				"result": "McpServerInfo",
++				"nullable": false,
++				"unwrap": null,
++				"timeoutMs": 600000,
++				"completion": null,
++				"clientOmit": []
++			},
++			{
++				"name": "mcp_login_cancel",
++				"doc": "Cancel a running `mcp_login` for the server.",
++				"params": "McpLoginCancelParams",
++				"result": "McpLoginCancelResult",
++				"nullable": false,
++				"unwrap": "cancelled",
++				"timeoutMs": null,
++				"completion": null,
++				"clientOmit": []
++			},
++			{
++				"name": "mcp_reconnect",
++				"doc": "Reconnect one server from its config, or without a name rediscover and reconnect them all.",
++				"params": "McpReconnectParams",
++				"result": "McpReconnectResult",
++				"nullable": false,
++				"unwrap": "servers",
++				"timeoutMs": 120000,
++				"completion": null,
++				"clientOmit": []
+ 			}
+ 		]
+ 	},
+@@ -2148,6 +2280,21 @@
+ 			],
+ 			"description": "Model descriptor: the client-relevant subset of the server's model record."
+ 		},
++		"EditorPosition": {
++			"type": "object",
++			"properties": {
++				"line": {
++					"type": "integer"
++				},
++				"character": {
++					"type": "integer"
++				}
++			},
++			"required": [
++				"line",
++				"character"
++			]
++		},
+ 		"QueueMode": {
+ 			"enum": [
+ 				"all",
+@@ -2468,6 +2615,96 @@
+ 			],
+ 			"description": "Outcome of every `goal` op; both fields are null when the session has no goal."
+ 		},
++		"PlanModeOp": {
++			"enum": [
++				"get",
++				"enter",
++				"exit",
++				"approve",
++				"reject"
++			],
++			"type": "string"
++		},
++		"PlanModeState": {
++			"type": "object",
++			"properties": {
++				"enabled": {
++					"type": "boolean"
++				},
++				"planFilePath": {
++					"type": "string"
++				},
++				"workflow": {
++					"enum": [
++						"parallel",
++						"iterative"
++					],
++					"type": "string"
++				},
++				"reentry": {
++					"type": "boolean"
++				}
++			},
++			"required": [
++				"enabled",
++				"planFilePath"
++			],
++			"description": "Session plan mode: the agent drafts `planFilePath` read-only until a plan is approved."
++		},
++		"PlanReview": {
++			"type": "object",
++			"properties": {
++				"revision": {
++					"type": "string"
++				},
++				"planFilePath": {
++					"type": "string"
++				},
++				"title": {
++					"type": "string"
++				},
++				"content": {
++					"type": "string"
++				}
++			},
++			"required": [
++				"revision",
++				"planFilePath",
++				"title",
++				"content"
++			],
++			"description": "A plan the agent proposed (`xd://propose`) that waits for `plan_mode` approve or reject naming its `revision`; `content` is the Markdown approval executes."
++		},
++		"PlanModeResult": {
++			"type": "object",
++			"properties": {
++				"state": {
++					"anyOf": [
++						{
++							"$ref": "#/$defs/PlanModeState"
++						},
++						{
++							"type": "null"
++						}
++					]
++				},
++				"review": {
++					"anyOf": [
++						{
++							"$ref": "#/$defs/PlanReview"
++						},
++						{
++							"type": "null"
++						}
++					]
++				}
++			},
++			"required": [
++				"state",
++				"review"
++			],
++			"description": "Outcome of every `plan_mode` op; `state` is null when plan mode is off, `review` when no plan waits."
++		},
+ 		"SlowModeScope": {
+ 			"enum": [
+ 				"session",
+@@ -2671,6 +2908,14 @@
+ 					],
+ 					"description": "Current goal mode; null when the session has no goal.",
+ 					"default": null
++				},
++				"planMode": {
++					"$ref": "#/$defs/PlanModeResult",
++					"description": "Plan mode and the proposed plan awaiting approval.",
++					"default": {
++						"state": null,
++						"review": null
++					}
+ 				}
+ 			},
+ 			"required": [
+@@ -2958,6 +3203,26 @@
+ 				"cancelled"
+ 			]
+ 		},
++		"NavigateTreeResult": {
++			"type": "object",
++			"properties": {
++				"cancelled": {
++					"type": "boolean"
++				},
++				"text": {
++					"type": "string"
++				},
++				"images": {
++					"type": "array",
++					"items": {
++						"$ref": "#/$defs/ImageContent"
++					}
++				}
++			},
++			"required": [
++				"cancelled"
++			]
++		},
+ 		"TokenUsage": {
+ 			"type": "object",
+ 			"properties": {
+@@ -3082,6 +3347,21 @@
+ 				"nextCursor": {
+ 					"type": "string",
+ 					"description": "Opaque cursor for the next page; absent on the last page."
++				},
++				"direction": {
++					"const": "backward"
++				},
++				"startOffset": {
++					"type": "integer"
++				},
++				"endOffset": {
++					"type": "integer"
++				},
++				"sessionId": {
++					"type": "string"
++				},
++				"snapshotId": {
++					"type": "string"
+ 				}
+ 			},
+ 			"required": [
+@@ -3297,65 +3577,198 @@
+ 			],
+ 			"description": "Incremental subagent transcript read."
+ 		},
+-		"BtwStatus": {
++		"JobType": {
++			"enum": [
++				"bash",
++				"task",
++				"eval"
++			],
++			"type": "string"
++		},
++		"JobStatus": {
+ 			"enum": [
+ 				"running",
+-				"complete",
+-				"cancelled",
+-				"error",
+-				"interrupted"
++				"completed",
++				"failed",
++				"cancelled"
+ 			],
+-			"type": "string",
+-			"description": "Side-question turn lifecycle; `interrupted` marks a turn whose process died while it ran."
++			"type": "string"
+ 		},
+-		"BtwHistoryTurn": {
++		"JobSnapshot": {
+ 			"type": "object",
+ 			"properties": {
+-				"question": {
++				"id": {
+ 					"type": "string"
+ 				},
+-				"answer": {
+-					"type": "string"
++				"type": {
++					"$ref": "#/$defs/JobType"
+ 				},
+ 				"status": {
+-					"$ref": "#/$defs/BtwStatus"
++					"$ref": "#/$defs/JobStatus"
+ 				},
+-				"createdAt": {
++				"label": {
++					"type": "string",
++					"description": "Display label; a command cut to 120 characters."
++				},
++				"startTime": {
+ 					"type": "integer"
+ 				},
+-				"updatedAt": {
++				"outputBytes": {
++					"type": "integer",
++					"description": "Bytes the job has streamed so far (0 for jobs that never stream)."
++				},
++				"waitingForInput": {
++					"type": "boolean",
++					"description": "Running, quiet for a while, and its last line looks like a prompt."
++				},
++				"command": {
++					"type": "string",
++					"description": "Full command line of a job that runs a process."
++				},
++				"endTime": {
+ 					"type": "integer"
+ 				},
+-				"error": {
+-					"type": "string"
++				"exitCode": {
++					"type": "integer",
++					"description": "Exit status of a settled command."
++				},
++				"agentId": {
++					"type": "string",
++					"description": "Registry id of the subagent an async task job runs."
++				},
++				"lastOutputAt": {
++					"type": "integer"
+ 				}
+ 			},
+ 			"required": [
+-				"question",
+-				"answer",
++				"id",
++				"type",
+ 				"status",
+-				"createdAt",
+-				"updatedAt"
++				"label",
++				"startTime",
++				"outputBytes",
++				"waitingForInput"
+ 			],
+-			"description": "One question and its answer within a side-question topic."
++			"description": "One background job this session owns."
+ 		},
+-		"BtwHistoryRecord": {
++		"JobOutput": {
+ 			"type": "object",
+ 			"properties": {
+-				"question": {
+-					"type": "string"
+-				},
+-				"answer": {
++				"jobId": {
+ 					"type": "string"
+ 				},
+ 				"status": {
+-					"$ref": "#/$defs/BtwStatus"
+-				},
+-				"createdAt": {
+-					"type": "integer"
++					"$ref": "#/$defs/JobStatus"
+ 				},
+-				"updatedAt": {
+-					"type": "integer"
++				"waitingForInput": {
++					"type": "boolean"
++				},
++				"fromByte": {
++					"type": "integer",
++					"description": "Offset of `text`'s first byte."
++				},
++				"nextByte": {
++					"type": "integer",
++					"description": "Pass as the next `fromByte` to read incrementally."
++				},
++				"totalBytes": {
++					"type": "integer",
++					"description": "Bytes the job has streamed so far."
++				},
++				"startByte": {
++					"type": "integer",
++					"description": "Oldest byte the job still keeps."
++				},
++				"skippedBytes": {
++					"type": "integer",
++					"description": "Requested bytes no longer kept (older than `startByte`)."
++				},
++				"reset": {
++					"type": "boolean",
++					"description": "`fromByte` was past the end; this read is the tail."
++				},
++				"snapshot": {
++					"type": "boolean",
++					"description": "The job does not stream: `text` is its latest text and replaces earlier reads."
++				},
++				"text": {
++					"type": "string"
++				}
++			},
++			"required": [
++				"jobId",
++				"status",
++				"waitingForInput",
++				"fromByte",
++				"nextByte",
++				"totalBytes",
++				"startByte",
++				"skippedBytes",
++				"reset",
++				"snapshot",
++				"text"
++			],
++			"description": "Bounded read of a background job's output."
++		},
++		"BtwStatus": {
++			"enum": [
++				"running",
++				"complete",
++				"cancelled",
++				"error",
++				"interrupted"
++			],
++			"type": "string",
++			"description": "Side-question turn lifecycle; `interrupted` marks a turn whose process died while it ran."
++		},
++		"BtwHistoryTurn": {
++			"type": "object",
++			"properties": {
++				"question": {
++					"type": "string"
++				},
++				"answer": {
++					"type": "string"
++				},
++				"status": {
++					"$ref": "#/$defs/BtwStatus"
++				},
++				"createdAt": {
++					"type": "integer"
++				},
++				"updatedAt": {
++					"type": "integer"
++				},
++				"error": {
++					"type": "string"
++				}
++			},
++			"required": [
++				"question",
++				"answer",
++				"status",
++				"createdAt",
++				"updatedAt"
++			],
++			"description": "One question and its answer within a side-question topic."
++		},
++		"BtwHistoryRecord": {
++			"type": "object",
++			"properties": {
++				"question": {
++					"type": "string"
++				},
++				"answer": {
++					"type": "string"
++				},
++				"status": {
++					"$ref": "#/$defs/BtwStatus"
++				},
++				"createdAt": {
++					"type": "integer"
++				},
++				"updatedAt": {
++					"type": "integer"
+ 				},
+ 				"id": {
+ 					"type": "string"
+@@ -3450,6 +3863,171 @@
+ 			],
+ 			"description": "A stored credential `logout` can remove; `active` marks credentials the session may be using."
+ 		},
++		"McpAuthState": {
++			"enum": [
++				"none",
++				"signed_in",
++				"signed_out",
++				"expired"
++			],
++			"type": "string",
++			"description": "Connector sign-in: no OMP-managed OAuth, a working credential, none that works, or one the server now refuses."
++		},
++		"McpServerInfo": {
++			"type": "object",
++			"properties": {
++				"name": {
++					"type": "string"
++				},
++				"transport": {
++					"enum": [
++						"stdio",
++						"http",
++						"sse"
++					],
++					"type": "string"
++				},
++				"status": {
++					"enum": [
++						"connected",
++						"connecting",
++						"disconnected",
++						"failed"
++					],
++					"type": "string"
++				},
++				"toolCount": {
++					"type": "integer",
++					"description": "Tools of this server in the session; 0 while connected deserves a warning."
++				},
++				"auth": {
++					"$ref": "#/$defs/McpAuthState"
++				},
++				"scope": {
++					"enum": [
++						"user",
++						"project",
++						"native"
++					],
++					"type": "string"
++				},
++				"error": {
++					"type": "string",
++					"description": "Last connection failure (URL queries removed) until the server connects again."
++				}
++			},
++			"required": [
++				"name",
++				"transport",
++				"status",
++				"toolCount",
++				"auth"
++			],
++			"description": "One MCP server of the session. Never carries credentials."
++		},
++		"ElicitationOption": {
++			"type": "object",
++			"properties": {
++				"value": {
++					"type": "string"
++				},
++				"label": {
++					"type": "string"
++				}
++			},
++			"required": [
++				"value",
++				"label"
++			]
++		},
++		"ElicitationField": {
++			"type": "object",
++			"properties": {
++				"name": {
++					"type": "string"
++				},
++				"title": {
++					"type": "string"
++				},
++				"required": {
++					"type": "boolean"
++				},
++				"kind": {
++					"enum": [
++						"text",
++						"number",
++						"integer",
++						"boolean",
++						"select",
++						"multiselect"
++					],
++					"type": "string"
++				},
++				"description": {
++					"type": "string"
++				},
++				"format": {
++					"enum": [
++						"email",
++						"uri",
++						"date",
++						"date-time"
++					],
++					"type": "string"
++				},
++				"minLength": {
++					"type": "integer"
++				},
++				"maxLength": {
++					"type": "integer"
++				},
++				"minimum": {
++					"type": "number"
++				},
++				"maximum": {
++					"type": "number"
++				},
++				"options": {
++					"type": "array",
++					"items": {
++						"$ref": "#/$defs/ElicitationOption"
++					},
++					"description": "For `select` and `multiselect`."
++				},
++				"minItems": {
++					"type": "integer"
++				},
++				"maxItems": {
++					"type": "integer"
++				},
++				"default": {
++					"anyOf": [
++						{
++							"type": "string"
++						},
++						{
++							"type": "number"
++						},
++						{
++							"type": "boolean"
++						},
++						{
++							"type": "array",
++							"items": {
++								"type": "string"
++							}
++						}
++					]
++				}
++			},
++			"required": [
++				"name",
++				"title",
++				"required",
++				"kind"
++			],
++			"description": "One field of an MCP form, normalized from the server's JSON Schema; limits apply to its kind."
++		},
+ 		"HandoffResult": {
+ 			"type": "object",
+ 			"properties": {
+@@ -3461,11 +4039,43 @@
+ 		"PromptAck": {
+ 			"type": "object",
+ 			"properties": {
++				"inputDisposition": {
++					"enum": [
++						"admitted",
++						"local",
++						"cancelled"
++					],
++					"type": "string"
++				},
+ 				"agentInvoked": {
+ 					"type": "boolean"
+ 				}
+ 			},
+-			"description": "`agentInvoked: false` means the prompt completed locally and no `prompt_result` follows."
++			"required": [
++				"inputDisposition",
++				"agentInvoked"
++			],
++			"description": "inputDisposition describes the original input; agentInvoked includes causal extension work. No prompt_result follows when agentInvoked is false."
++		},
++		"DeferredInputAck": {
++			"type": "object",
++			"properties": {
++				"inputDisposition": {
++					"enum": [
++						"admitted",
++						"local",
++						"cancelled"
++					],
++					"type": "string"
++				},
++				"agentInvoked": {
++					"type": "boolean"
++				}
++			},
++			"required": [
++				"inputDisposition",
++				"agentInvoked"
++			]
+ 		},
+ 		"AutoCompactionReason": {
+ 			"enum": [
+@@ -4289,6 +4899,71 @@
+ 			],
+ 			"description": "A session event, discriminated by `type`; `set_event_filter` selects which are sent."
+ 		},
++		"EditorDocumentSnapshot": {
++			"type": "object",
++			"properties": {
++				"uri": {
++					"type": "string"
++				},
++				"version": {
++					"type": "integer"
++				},
++				"text": {
++					"type": "string"
++				},
++				"languageId": {
++					"type": "string"
++				},
++				"baseHash": {
++					"type": "string"
++				},
++				"dirty": {
++					"type": "boolean"
++				},
++				"conflict": {
++					"type": "boolean"
++				}
++			},
++			"required": [
++				"uri",
++				"version",
++				"text",
++				"languageId",
++				"baseHash",
++				"dirty"
++			]
++		},
++		"EditorApplyEditEvent": {
++			"type": "object",
++			"properties": {
++				"type": {
++					"const": "editor_apply_edit"
++				},
++				"requestId": {
++					"type": "string"
++				},
++				"uri": {
++					"type": "string"
++				},
++				"expectedRevision": {
++					"type": "integer"
++				},
++				"expectedHash": {
++					"type": "string"
++				},
++				"text": {
++					"type": "string"
++				}
++			},
++			"required": [
++				"type",
++				"requestId",
++				"uri",
++				"expectedRevision",
++				"expectedHash",
++				"text"
++			]
++		},
+ 		"ReadyEvent": {
+ 			"type": "object",
+ 			"properties": {
+@@ -4722,6 +5397,122 @@
+ 			],
+ 			"description": "Full side-question record on every lifecycle change (started, complete, cancelled, error); the last one per id wins."
+ 		},
++		"PlanModeUpdatedEvent": {
++			"type": "object",
++			"properties": {
++				"type": {
++					"const": "plan_mode_updated"
++				},
++				"state": {
++					"anyOf": [
++						{
++							"$ref": "#/$defs/PlanModeState"
++						},
++						{
++							"type": "null"
++						}
++					]
++				},
++				"review": {
++					"anyOf": [
++						{
++							"$ref": "#/$defs/PlanReview"
++						},
++						{
++							"type": "null"
++						}
++					]
++				}
++			},
++			"required": [
++				"type",
++				"state",
++				"review"
++			],
++			"description": "Plan mode changed: entered, exited, a plan proposed for review (with its document), approved or rejected."
++		},
++		"McpAuthRequiredEvent": {
++			"type": "object",
++			"properties": {
++				"type": {
++					"const": "mcp_auth_required"
++				},
++				"serverName": {
++					"type": "string"
++				},
++				"reason": {
++					"enum": [
++						"signed_out",
++						"expired"
++					],
++					"type": "string"
++				}
++			},
++			"required": [
++				"type",
++				"serverName",
++				"reason"
++			],
++			"description": "A connector needs the user to sign in (again); nothing was opened. Offer `mcp_login`."
++		},
++		"SessionLeaseHolder": {
++			"type": "object",
++			"properties": {
++				"id": {
++					"type": "string",
++					"description": "The holder process's lease identity (random per process)."
++				},
++				"kind": {
++					"type": "string",
++					"description": "`ombra` for the desktop app's engine, `omp` for the terminal and CLI."
++				},
++				"pid": {
++					"type": "integer"
++				},
++				"since": {
++					"type": "string",
++					"description": "When it took the lease (ISO 8601)."
++				},
++				"label": {
++					"type": "string"
++				}
++			},
++			"required": [
++				"id",
++				"kind",
++				"pid",
++				"since"
++			],
++			"description": "Who holds (or asked for) a session's writer lease, as that process published itself."
++		},
++		"SessionLeaseLostEvent": {
++			"type": "object",
++			"properties": {
++				"type": {
++					"const": "session_lease_lost"
++				},
++				"holder": {
++					"anyOf": [
++						{
++							"$ref": "#/$defs/SessionLeaseHolder"
++						},
++						{
++							"type": "null"
++						}
++					]
++				},
++				"interrupted": {
++					"type": "boolean",
++					"description": "A reply was in progress: it is stopped, not finished."
++				}
++			},
++			"required": [
++				"type",
++				"holder",
++				"interrupted"
++			],
++			"description": "Another window or terminal asked to write this session (`holder`, null when unknown): the run is aborted and the logical session closes after its last write. Show the chat read-only with an action to take it back."
++		},
+ 		"CommandOutputEvent": {
+ 			"type": "object",
+ 			"properties": {
+@@ -4862,6 +5653,85 @@
+ 			],
+ 			"description": "One question of an `ask` request; hosts always offer free text besides `options`."
+ 		},
++		"ToolApprovalRisk": {
++			"enum": [
++				"read",
++				"write",
++				"exec"
++			],
++			"type": "string"
++		},
++		"ToolApprovalScope": {
++			"enum": [
++				"once",
++				"session",
++				"always"
++			],
++			"type": "string"
++		},
++		"ToolApprovalRequest": {
++			"type": "object",
++			"properties": {
++				"tool": {
++					"type": "string"
++				},
++				"risk": {
++					"$ref": "#/$defs/ToolApprovalRisk",
++					"description": "Capability tier of this call."
++				},
++				"details": {
++					"type": "array",
++					"items": {
++						"type": "string"
++					},
++					"description": "The tool's argument summary lines, bounded as in the text prompt."
++				},
++				"scopes": {
++					"type": "array",
++					"items": {
++						"$ref": "#/$defs/ToolApprovalScope"
++					},
++					"description": "Scopes a host may keep an approval for; only `once` with safety checks or when the tool or the user's policy insists on asking every time."
++				},
++				"toolCallId": {
++					"type": "string"
++				},
++				"reason": {
++					"type": "string",
++					"description": "The tool's own reason for asking."
++				},
++				"origin": {
++					"const": "mcp",
++					"description": "A tool of an MCP server."
++				},
++				"server": {
++					"type": "string",
++					"description": "With `origin`: the MCP server's name."
++				},
++				"command": {
++					"type": "string",
++					"description": "`bash` only: the complete command; absent when longer than 65536 characters."
++				},
++				"cwd": {
++					"type": "string",
++					"description": "`bash` only: the folder the call runs in, as given (relative to the session's folder)."
++				},
++				"safetyChecks": {
++					"type": "array",
++					"items": {
++						"type": "string"
++					},
++					"description": "Provider safety checks only a person may confirm."
++				}
++			},
++			"required": [
++				"tool",
++				"risk",
++				"details",
++				"scopes"
++			],
++			"description": "Typed tool approval: render it instead of parsing the select `title`."
++		},
+ 		"SelectUiRequest": {
+ 			"type": "object",
+ 			"properties": {
+@@ -4889,6 +5759,10 @@
+ 						"$ref": "#/$defs/SelectOptionDetail"
+ 					}
+ 				},
++				"approval": {
++					"$ref": "#/$defs/ToolApprovalRequest",
++					"description": "Set on tool approvals (options Approve/Deny); a `Deny` answer may carry `reason`."
++				},
+ 				"timeout": {
+ 					"type": "integer"
+ 				}
+@@ -5192,16 +6066,55 @@
+ 					"type": "string",
+ 					"description": "Short loopback redirect to `url`; the truncation-safe copy target."
+ 				},
+-				"instructions": {
++				"instructions": {
++					"type": "string"
++				},
++				"mcpServer": {
++					"type": "string",
++					"description": "Set when the URL belongs to the host's `mcp_login` for this server."
++				}
++			},
++			"required": [
++				"type",
++				"id",
++				"method",
++				"url"
++			]
++		},
++		"ElicitUiRequest": {
++			"type": "object",
++			"properties": {
++				"type": {
++					"const": "extension_ui_request"
++				},
++				"id": {
++					"type": "string"
++				},
++				"method": {
++					"const": "elicit"
++				},
++				"serverName": {
++					"type": "string"
++				},
++				"message": {
+ 					"type": "string"
++				},
++				"fields": {
++					"type": "array",
++					"items": {
++						"$ref": "#/$defs/ElicitationField"
++					}
+ 				}
+ 			},
+ 			"required": [
+ 				"type",
+ 				"id",
+ 				"method",
+-				"url"
+-			]
++				"serverName",
++				"message",
++				"fields"
++			],
++			"description": "An MCP server asks the user for a form; show `serverName` and offer Decline. Answers are validated against `fields`."
+ 		},
+ 		"ExtensionUiRequest": {
+ 			"anyOf": [
+@@ -5240,6 +6153,9 @@
+ 				},
+ 				{
+ 					"$ref": "#/$defs/OpenUrlUiRequest"
++				},
++				{
++					"$ref": "#/$defs/ElicitUiRequest"
+ 				}
+ 			],
+ 			"description": "Extension UI request, discriminated by `method`."
+@@ -5277,6 +6193,10 @@
+ 				},
+ 				"value": {
+ 					"type": "string"
++				},
++				"reason": {
++					"type": "string",
++					"description": "With `Deny` on an `approval` select: why, for the agent's failed tool result."
+ 				}
+ 			},
+ 			"required": [
+@@ -5352,6 +6272,54 @@
+ 			],
+ 			"description": "Answers an `ask` request: one `AskAnswer` per question, in question order."
+ 		},
++		"ElicitUiResponse": {
++			"type": "object",
++			"properties": {
++				"type": {
++					"const": "extension_ui_response"
++				},
++				"id": {
++					"type": "string"
++				},
++				"action": {
++					"enum": [
++						"accept",
++						"decline"
++					],
++					"type": "string"
++				},
++				"content": {
++					"type": "object",
++					"properties": {},
++					"additionalProperties": {
++						"anyOf": [
++							{
++								"type": "string"
++							},
++							{
++								"type": "number"
++							},
++							{
++								"type": "boolean"
++							},
++							{
++								"type": "array",
++								"items": {
++									"type": "string"
++								}
++							}
++						]
++					},
++					"description": "Field values by name; required with `accept`."
++				}
++			},
++			"required": [
++				"type",
++				"id",
++				"action"
++			],
++			"description": "Answers an `elicit` form; dismissing it sends `CancelUiResponse` instead."
++		},
+ 		"ExtensionUiResponse": {
+ 			"anyOf": [
+ 				{
+@@ -5365,6 +6333,9 @@
+ 				},
+ 				{
+ 					"$ref": "#/$defs/AnswersUiResponse"
++				},
++				{
++					"$ref": "#/$defs/ElicitUiResponse"
+ 				}
+ 			],
+ 			"description": "Host reply to an extension UI request; variants share `type` and differ by their payload key."
+@@ -5717,6 +6688,9 @@
+ 				{
+ 					"$ref": "#/$defs/ReadyEvent"
+ 				},
++				{
++					"$ref": "#/$defs/EditorApplyEditEvent"
++				},
+ 				{
+ 					"$ref": "#/$defs/PromptResultEvent"
+ 				},
+@@ -5759,6 +6733,15 @@
+ 				{
+ 					"$ref": "#/$defs/BtwRecordEvent"
+ 				},
++				{
++					"$ref": "#/$defs/PlanModeUpdatedEvent"
++				},
++				{
++					"$ref": "#/$defs/McpAuthRequiredEvent"
++				},
++				{
++					"$ref": "#/$defs/SessionLeaseLostEvent"
++				},
+ 				{
+ 					"$ref": "#/$defs/CommandOutputEvent"
+ 				},
+@@ -5813,6 +6796,127 @@
+ 				"protocolVersion"
+ 			]
+ 		},
++		"EditorDocumentParams": {
++			"type": "object",
++			"properties": {
++				"action": {
++					"enum": [
++						"open",
++						"change",
++						"save",
++						"close",
++						"request"
++					],
++					"type": "string"
++				},
++				"uri": {
++					"type": "string"
++				},
++				"version": {
++					"type": "integer"
++				},
++				"text": {
++					"type": "string"
++				},
++				"languageId": {
++					"type": "string"
++				},
++				"baseHash": {
++					"type": "string"
++				},
++				"dirty": {
++					"type": "boolean"
++				},
++				"conflict": {
++					"type": "boolean"
++				},
++				"method": {
++					"enum": [
++						"completion",
++						"hover",
++						"definition",
++						"rename",
++						"diagnostics"
++					],
++					"type": "string"
++				},
++				"position": {
++					"$ref": "#/$defs/EditorPosition"
++				},
++				"newName": {
++					"type": "string"
++				}
++			},
++			"required": [
++				"action",
++				"uri",
++				"version"
++			]
++		},
++		"EditorDocumentResult": {
++			"type": "object",
++			"properties": {
++				"version": {
++					"type": "integer"
++				},
++				"result": {},
++				"positionEncoding": {
++					"const": "utf-16"
++				}
++			},
++			"required": [
++				"version",
++				"result",
++				"positionEncoding"
++			]
++		},
++		"EditorTrustParams": {
++			"type": "object",
++			"properties": {
++				"trusted": {
++					"type": "boolean"
++				}
++			},
++			"required": [
++				"trusted"
++			]
++		},
++		"EditorTrustResult": {
++			"type": "object",
++			"properties": {
++				"trusted": {
++					"type": "boolean"
++				}
++			},
++			"required": [
++				"trusted"
++			]
++		},
++		"EditorEditResultParams": {
++			"type": "object",
++			"properties": {
++				"requestId": {
++					"type": "string"
++				},
++				"success": {
++					"type": "boolean"
++				},
++				"error": {
++					"type": "string"
++				},
++				"document": {
++					"$ref": "#/$defs/EditorDocumentSnapshot"
++				}
++			},
++			"required": [
++				"requestId",
++				"success"
++			]
++		},
++		"EditorEditResultResult": {
++			"type": "object",
++			"properties": {}
++		},
+ 		"PromptParams": {
+ 			"type": "object",
+ 			"properties": {
+@@ -5989,6 +7093,26 @@
+ 				"op"
+ 			]
+ 		},
++		"PlanModeParams": {
++			"type": "object",
++			"properties": {
++				"op": {
++					"$ref": "#/$defs/PlanModeOp"
++				},
++				"planFilePath": {
++					"type": "string"
++				},
++				"feedback": {
++					"type": "string"
++				},
++				"revision": {
++					"type": "string"
++				}
++			},
++			"required": [
++				"op"
++			]
++		},
+ 		"SetAskDialogParams": {
+ 			"type": "object",
+ 			"properties": {
+@@ -6252,6 +7376,59 @@
+ 				"message"
+ 			]
+ 		},
++		"GetJobsResult": {
++			"type": "object",
++			"properties": {
++				"jobs": {
++					"type": "array",
++					"items": {
++						"$ref": "#/$defs/JobSnapshot"
++					}
++				}
++			},
++			"required": [
++				"jobs"
++			]
++		},
++		"CancelJobParams": {
++			"type": "object",
++			"properties": {
++				"jobId": {
++					"type": "string"
++				}
++			},
++			"required": [
++				"jobId"
++			]
++		},
++		"CancelJobResult": {
++			"type": "object",
++			"properties": {
++				"cancelled": {
++					"type": "boolean"
++				}
++			},
++			"required": [
++				"cancelled"
++			]
++		},
++		"GetJobOutputParams": {
++			"type": "object",
++			"properties": {
++				"jobId": {
++					"type": "string"
++				},
++				"fromByte": {
++					"type": "integer"
++				},
++				"maxBytes": {
++					"type": "integer"
++				}
++			},
++			"required": [
++				"jobId"
++			]
++		},
+ 		"LiveStartParams": {
+ 			"type": "object",
+ 			"properties": {
+@@ -6498,6 +7675,17 @@
+ 				}
+ 			}
+ 		},
++		"NavigateTreeParams": {
++			"type": "object",
++			"properties": {
++				"targetId": {
++					"type": "string"
++				}
++			},
++			"required": [
++				"targetId"
++			]
++		},
+ 		"GetBranchMessagesResult": {
+ 			"type": "object",
+ 			"properties": {
+@@ -6571,6 +7759,13 @@
+ 				},
+ 				"limit": {
+ 					"type": "integer"
++				},
++				"direction": {
++					"enum": [
++						"forward",
++						"backward"
++					],
++					"type": "string"
+ 				}
+ 			}
+ 		},
+@@ -6771,6 +7966,75 @@
+ 			"required": [
+ 				"records"
+ 			]
++		},
++		"GetMcpServersResult": {
++			"type": "object",
++			"properties": {
++				"servers": {
++					"type": "array",
++					"items": {
++						"$ref": "#/$defs/McpServerInfo"
++					}
++				}
++			},
++			"required": [
++				"servers"
++			]
++		},
++		"McpLoginParams": {
++			"type": "object",
++			"properties": {
++				"serverName": {
++					"type": "string"
++				}
++			},
++			"required": [
++				"serverName"
++			]
++		},
++		"McpLoginCancelParams": {
++			"type": "object",
++			"properties": {
++				"serverName": {
++					"type": "string"
++				}
++			},
++			"required": [
++				"serverName"
++			]
++		},
++		"McpLoginCancelResult": {
++			"type": "object",
++			"properties": {
++				"cancelled": {
++					"type": "boolean"
++				}
++			},
++			"required": [
++				"cancelled"
++			]
++		},
++		"McpReconnectParams": {
++			"type": "object",
++			"properties": {
++				"serverName": {
++					"type": "string"
++				}
++			}
++		},
++		"McpReconnectResult": {
++			"type": "object",
++			"properties": {
++				"servers": {
++					"type": "array",
++					"items": {
++						"$ref": "#/$defs/McpServerInfo"
++					}
++				}
++			},
++			"required": [
++				"servers"
++			]
+ 		}
+ 	}
+ }
+diff --git a/src/modes/rpc/wire/state.ts b/src/modes/rpc/wire/state.ts
+index 77da31b87e0f9252a480f260f995948a7f866fc1..48b06fb2fe0a84b6856de9386ead3eb14542cd1a 100644
+--- a/src/modes/rpc/wire/state.ts
++++ b/src/modes/rpc/wire/state.ts
+@@ -10,6 +10,7 @@ import { absentAs, doc, type WireDefs } from "./dsl";
+ const JSON_OBJECT = "Record<string, unknown>";
+ 
+ export const stateDefs = {
++	EditorPosition: { line: "number.integer", character: "number.integer" },
+ 	QueueMode: "'all' | 'one-at-a-time'",
+ 	InterruptMode: "'immediate' | 'wait'",
+ 	StreamingBehavior: "'steer' | 'followUp'",
+@@ -75,6 +76,19 @@ export const stateDefs = {
+ 		{ goal: "Goal | null", state: "GoalModeState | null" },
+ 		"Outcome of every `goal` op; both fields are null when the session has no goal.",
+ 	),
++	PlanModeOp: "'get' | 'enter' | 'exit' | 'approve' | 'reject'",
++	PlanModeState: doc(
++		{ enabled: "boolean", planFilePath: "string", "workflow?": "'parallel' | 'iterative'", "reentry?": "boolean" },
++		"Session plan mode: the agent drafts `planFilePath` read-only until a plan is approved.",
++	),
++	PlanReview: doc(
++		{ revision: "string", planFilePath: "string", title: "string", content: "string" },
++		"A plan the agent proposed (`xd://propose`) that waits for `plan_mode` approve or reject naming its `revision`; `content` is the Markdown approval executes.",
++	),
++	PlanModeResult: doc(
++		{ state: "PlanModeState | null", review: "PlanReview | null" },
++		"Outcome of every `plan_mode` op; `state` is null when plan mode is off, `review` when no plan waits.",
++	),
+ 	SlowModeScope: doc(
+ 		"'session' | 'global'",
+ 		"Where `/slow` lives: persisted config shared by every session, or this session's flex tier.",
+@@ -143,6 +157,10 @@ export const stateDefs = {
+ 		dumpTools: absentAs("ToolDescriptor[]", []),
+ 		"contextUsage?": "ContextUsage",
+ 		goal: absentAs(doc("GoalModeState | null", "Current goal mode; null when the session has no goal."), null),
++		planMode: absentAs(
++			doc("PlanModeResult", "Plan mode and the proposed plan awaiting approval."),
++			{ state: null, review: null },
++		),
+ 	},
+ 
+ 	BashResult: {
+@@ -208,6 +226,7 @@ export const stateDefs = {
+ 	),
+ 	BranchMessage: { entryId: "string", text: "string" },
+ 	BranchResult: { text: "string", cancelled: "boolean" },
++	NavigateTreeResult: { "text?": "string", "images?": "ImageContent[]", cancelled: "boolean" },
+ 	TokenUsage: {
+ 		input: "number.integer",
+ 		output: "number.integer",
+@@ -236,6 +255,11 @@ export const stateDefs = {
+ 		messages: "AgentMessage[]",
+ 		totalMessages: "number.integer",
+ 		"nextCursor?": doc("string", "Opaque cursor for the next page; absent on the last page."),
++		"direction?": "'backward'",
++		"startOffset?": "number.integer",
++		"endOffset?": "number.integer",
++		"sessionId?": "string",
++		"snapshotId?": "string",
+ 	},
+ 	SlashCommandInput: { "hint?": "string" },
+ 	SlashSubcommand: { name: "string", "description?": "string", "usage?": "string" },
+@@ -277,6 +301,41 @@ export const stateDefs = {
+ 		},
+ 		"Incremental subagent transcript read.",
+ 	),
++	JobType: "'bash' | 'task' | 'eval'",
++	JobStatus: "'running' | 'completed' | 'failed' | 'cancelled'",
++	JobSnapshot: doc(
++		{
++			id: "string",
++			type: "JobType",
++			status: "JobStatus",
++			label: doc("string", "Display label; a command cut to 120 characters."),
++			"command?": doc("string", "Full command line of a job that runs a process."),
++			startTime: "number.integer",
++			"endTime?": "number.integer",
++			"exitCode?": doc("number.integer", "Exit status of a settled command."),
++			"agentId?": doc("string", "Registry id of the subagent an async task job runs."),
++			outputBytes: doc("number.integer", "Bytes the job has streamed so far (0 for jobs that never stream)."),
++			"lastOutputAt?": "number.integer",
++			waitingForInput: doc("boolean", "Running, quiet for a while, and its last line looks like a prompt."),
++		},
++		"One background job this session owns.",
++	),
++	JobOutput: doc(
++		{
++			jobId: "string",
++			status: "JobStatus",
++			waitingForInput: "boolean",
++			fromByte: doc("number.integer", "Offset of `text`'s first byte."),
++			nextByte: doc("number.integer", "Pass as the next `fromByte` to read incrementally."),
++			totalBytes: doc("number.integer", "Bytes the job has streamed so far."),
++			startByte: doc("number.integer", "Oldest byte the job still keeps."),
++			skippedBytes: doc("number.integer", "Requested bytes no longer kept (older than `startByte`)."),
++			reset: doc("boolean", "`fromByte` was past the end; this read is the tail."),
++			snapshot: doc("boolean", "The job does not stream: `text` is its latest text and replaces earlier reads."),
++			text: "string",
++		},
++		"Bounded read of a background job's output.",
++	),
+ 	BtwStatus: doc(
+ 		"'running' | 'complete' | 'cancelled' | 'error' | 'interrupted'",
+ 		"Side-question turn lifecycle; `interrupted` marks a turn whose process died while it ran.",
+@@ -318,9 +377,49 @@ export const stateDefs = {
+ 		},
+ 		"A stored credential `logout` can remove; `active` marks credentials the session may be using.",
+ 	),
++	McpAuthState: doc(
++		"'none' | 'signed_in' | 'signed_out' | 'expired'",
++		"Connector sign-in: no OMP-managed OAuth, a working credential, none that works, or one the server now refuses.",
++	),
++	McpServerInfo: doc(
++		{
++			name: "string",
++			transport: "'stdio' | 'http' | 'sse'",
++			"scope?": "'user' | 'project' | 'native'",
++			status: "'connected' | 'connecting' | 'disconnected' | 'failed'",
++			toolCount: doc("number.integer", "Tools of this server in the session; 0 while connected deserves a warning."),
++			"error?": doc("string", "Last connection failure (URL queries removed) until the server connects again."),
++			auth: "McpAuthState",
++		},
++		"One MCP server of the session. Never carries credentials.",
++	),
++	ElicitationOption: { value: "string", label: "string" },
++	ElicitationField: doc(
++		{
++			name: "string",
++			title: "string",
++			"description?": "string",
++			required: "boolean",
++			kind: "'text' | 'number' | 'integer' | 'boolean' | 'select' | 'multiselect'",
++			"format?": "'email' | 'uri' | 'date' | 'date-time'",
++			"minLength?": "number.integer",
++			"maxLength?": "number.integer",
++			"minimum?": "number",
++			"maximum?": "number",
++			"options?": doc("ElicitationOption[]", "For `select` and `multiselect`."),
++			"minItems?": "number.integer",
++			"maxItems?": "number.integer",
++			"default?": "string | number | boolean | string[]",
++		},
++		"One field of an MCP form, normalized from the server's JSON Schema; limits apply to its kind.",
++	),
+ 	HandoffResult: { "savedPath?": "string" },
+ 	PromptAck: doc(
+-		{ "agentInvoked?": "boolean" },
+-		"`agentInvoked: false` means the prompt completed locally and no `prompt_result` follows.",
++		{ inputDisposition: "'admitted' | 'local' | 'cancelled'", agentInvoked: "boolean" },
++		"inputDisposition describes the original input; agentInvoked includes causal extension work. No prompt_result follows when agentInvoked is false.",
+ 	),
++	DeferredInputAck: {
++		inputDisposition: "'admitted' | 'local' | 'cancelled'",
++		agentInvoked: "boolean",
++	},
+ } satisfies WireDefs;

@@ -33,7 +33,7 @@ describe("typed approval requests", () => {
 		const connection = { name: "docs" } as ConstructorParameters<typeof MCPTool>[0];
 		const tool = new MCPTool(connection, { name: "lookup", inputSchema: { type: "object", properties: {} } });
 		const request = buildToolApprovalRequest(tool, { query: "leases" }, { risk: "write" });
-		expect(request).toMatchObject({ origin: "mcp", server: "docs", details: ['Arguments: {"query":"leases"}'] });
+		expect(request).toMatchObject({ origin: "mcp", server: "docs", details: ['Arguments:\n{\n  "query": "leases"\n}'] });
 		expect(formatApprovalPrompt(tool, { query: "leases" })).toContain("Origin: MCP server tool (docs)");
 		const long = buildToolApprovalRequest(tool, { query: "x".repeat(5000) }, { risk: "write" });
 		expect(long.details[0]!.length).toBeLessThan(2100);

@@ -1,12 +1,14 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { applyTextEditsToString, applyWorkspaceEdit } from "../../lsp/edits";
 import { applyEditorContent, assertEditorProjectTrusted, canonicalEditorUri, closeEditorDocument, editorDocument, registerEditorDocument, requireEditorProjectTrust, setEditorProjectTrust } from "../../lsp/editor-documents";
 import type { EditorDocumentSnapshot } from "../../lsp/editor-documents";
-import { writeFileWithFallback } from "../../tools/file-write-fallback";
+import { addFileDeleteFallback, addFileWriteFallback, deleteFileWithFallback, writeFileWithFallback } from "../../tools/file-write-fallback";
+import { createLspWritethrough } from "../../lsp/writethrough";
 import { applyAstPreview } from "../../edit/ast-preview";
 import { RpcEditorBridge } from "./rpc-editor";
 import { notifySaved, sendNotification, syncContent } from "../../lsp/client";
@@ -186,6 +188,107 @@ describe("K7 canonical document coordination", () => {
 		expect(() => canonicalEditorUri(loop)).toThrow();
 		// ENOTDIR must not be mistaken for a valid absent leaf.
 		expect(() => canonicalEditorUri(path.join(file, "child.ts"))).toThrow();
+	});
+
+	test("an empty overlay registry does not preflight disk metadata", async () => {
+		const denied = Object.assign(new Error("metadata denied"), { code: "EACCES" });
+		const canonicalize = spyOn(realpathSync, "native").mockImplementation(() => { throw denied; });
+		try {
+			await writeFileWithFallback(file, "disk only");
+			expect(await Bun.file(file).text()).toBe("disk only");
+			await deleteFileWithFallback(file);
+			expect(canonicalize).not.toHaveBeenCalled();
+		} finally { canonicalize.mockRestore(); }
+	});
+
+	test("an unresolved path still fails closed while any overlay is registered", async () => {
+		attach(true);
+		const other = path.join(directory, "opaque.ts");
+		await Bun.write(other, "original");
+		const denied = Object.assign(new Error("metadata denied"), { code: "EACCES" });
+		const canonicalize = spyOn(realpathSync, "native").mockImplementation(() => { throw denied; });
+		let brokerCalled = false;
+		const disposeWrite = addFileWriteFallback(async () => { brokerCalled = true; return true; });
+		const disposeDelete = addFileDeleteFallback(async () => { brokerCalled = true; return true; });
+		try {
+			await expect(writeFileWithFallback(other, "replacement")).rejects.toBe(denied);
+			await expect(deleteFileWithFallback(other)).rejects.toBe(denied);
+			expect(brokerCalled).toBe(false);
+			expect(await Bun.file(other).text()).toBe("original");
+		} finally {
+			disposeWrite();
+			disposeDelete();
+			canonicalize.mockRestore();
+		}
+		expect(editorDocument(file)?.text).toBe(snapshot.text);
+	});
+
+	test.skipIf(process.platform === "win32" || process.getuid?.() === 0)("brokered batches survive an unreadable destination without overlays", async () => {
+		const target = await fs.realpath(file);
+		const brokered: string[] = [];
+		const dispose = addFileWriteFallback(async request => {
+			brokered.push(request.dst);
+			await fs.chmod(request.dst, 0o600);
+			await Bun.write(request.dst, request.content);
+			await fs.chmod(request.dst, 0o000);
+			return true;
+		});
+		await fs.chmod(target, 0o000);
+		try {
+			const write = createLspWritethrough(directory, { enableFormat: false, enableDiagnostics: false });
+			const id = `editor-broker-${directory}`;
+			await write(target, "brokered", undefined, undefined, { id, flush: false });
+			const sibling = path.join(directory, "sibling.ts");
+			await write(sibling, "sibling", undefined, undefined, { id, flush: true });
+			expect(brokered).toEqual([target]);
+			expect(await Bun.file(sibling).text()).toBe("sibling");
+		} finally {
+			dispose();
+			await fs.chmod(target, 0o600);
+		}
+		expect(await Bun.file(target).text()).toBe("brokered");
+	});
+
+	test.skipIf(process.platform === "win32" || process.getuid?.() === 0)("brokered deletes preserve unresolved metadata without overlays", async () => {
+		const opaque = path.join(await fs.realpath(directory), "opaque");
+		await fs.mkdir(opaque);
+		const victim = path.join(opaque, "buried.ts");
+		await Bun.write(victim, "original");
+		const seen: { dst: string; confirmedFile: boolean }[] = [];
+		const dispose = addFileDeleteFallback(async request => {
+			seen.push({ dst: request.dst, confirmedFile: request.confirmedFile });
+			await fs.chmod(opaque, 0o700);
+			await fs.unlink(request.dst);
+			return true;
+		});
+		await fs.chmod(opaque, 0o000);
+		try {
+			await deleteFileWithFallback(victim);
+			expect(seen).toEqual([{ dst: victim, confirmedFile: false }]);
+			expect(await Bun.file(victim).exists()).toBe(false);
+		} finally {
+			dispose();
+			await fs.chmod(opaque, 0o700);
+		}
+	});
+
+	test.skipIf(process.platform === "win32" || process.getuid?.() === 0)("dangling writes keep their filesystem denial and never reach a broker", async () => {
+		const locked = path.join(directory, "locked");
+		await fs.mkdir(locked);
+		const dangling = path.join(locked, "dangling");
+		await fs.symlink(path.join(locked, "missing"), dangling);
+		let called = false;
+		const dispose = addFileWriteFallback(async () => { called = true; return true; });
+		await fs.chmod(locked, 0o500);
+		try {
+			await expect(writeFileWithFallback(dangling, "payload")).rejects.toMatchObject({
+				code: expect.stringMatching(/^(EACCES|EPERM)$/),
+			});
+			expect(called).toBe(false);
+		} finally {
+			dispose();
+			await fs.chmod(locked, 0o700);
+		}
 	});
 
 	test("LSP forwarding requires current trust and physical project containment", async () => {

@@ -451,7 +451,7 @@ public sealed class RuntimeInstallerTests
             using var reader = new StreamReader(RuntimePack.OpenPackFile(name));
             Assert.Equal(File.ReadAllText(RepoFile("runtime/packs/" + RuntimePack.SourceDirectoryName + "/" + name)), reader.ReadToEnd());
         }
-        Assert.Contains("\"@oh-my-pi/pi-coding-agent\": \"18.8.0\"", File.ReadAllText(RepoFile("runtime/packs/" + RuntimePack.SourceDirectoryName + "/package.json")));
+        Assert.Contains("\"@oh-my-pi/pi-coding-agent\": \"18.12.2\"", File.ReadAllText(RepoFile("runtime/packs/" + RuntimePack.SourceDirectoryName + "/package.json")));
     }
 
     [Fact]

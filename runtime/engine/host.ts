@@ -3,6 +3,7 @@ import { Console } from "node:console";
 import { Writable } from "node:stream";
 import type { RpcSessionRuntime } from "./coding-agent/src/modes/rpc/rpc-mode";
 import { requireEditorProjectTrust } from "./coding-agent/src/lsp/editor-documents";
+import { version as ompVersion } from "./coding-agent/package.json";
 
 // One immutable process profile/environment for the whole host. Establish it
 // before importing SDK modules, whose environment/profile caches are shared.
@@ -46,7 +47,7 @@ const [{ createEngineSession, initEngineProcessSettings }, { createRpcSessionRun
 if (selfCheck) {
 	const sent = Promise.withResolvers<void>();
 	protocolOutput.write(
-		`${JSON.stringify({ engineProtocolVersion: 1, ompVersion: "18.8.0" })}\n`,
+		`${JSON.stringify({ engineProtocolVersion: 1, ompVersion })}\n`,
 		error => error ? sent.reject(error) : sent.resolve(),
 	);
 	await sent.promise;

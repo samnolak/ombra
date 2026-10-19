@@ -1,0 +1,485 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Igor Shulga <igo.shulga@macbook-lf73jk0j09.t-oblako.ru>
+Date: Mon, 19 Oct 2026 21:42:08 +0300
+Subject: [PATCH] tool policy and deferred devices
+
+What: Preserve the repository-owned tool policy and deferred devices.
+Why: Ombra embeds multiple concurrent sessions and renders native host features.
+Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
+
+diff --git a/src/autoresearch/tools/run-experiment.ts b/src/autoresearch/tools/run-experiment.ts
+index 787de13009f6d1b0207652d2bf8644883f95d11e..fb80ece241dab655566cdf0e5fb2c938240b232d 100644
+--- a/src/autoresearch/tools/run-experiment.ts
++++ b/src/autoresearch/tools/run-experiment.ts
+@@ -254,7 +254,7 @@ export function createRunExperimentTool(
+  */
+ async function resolveHarnessExecLine(): Promise<string> {
+ 	if (process.platform !== "win32") return DEFAULT_HARNESS_COMMAND;
+-	const { shell } = (await Settings.init()).getShellConfig();
++	const { shell } = (await Settings.forSession()).getShellConfig();
+ 	if (!procmgr.isPosixShell(shell)) return DEFAULT_HARNESS_COMMAND;
+ 	return `${quotePosixArgument(shell)} ${HARNESS_FILENAME}`;
+ }
+diff --git a/src/tools/ask.ts b/src/tools/ask.ts
+index 396af4b808ea8a527d47e01f47fcb283174699e8..a06b579e4b91be90473f82307b621f046c580528 100644
+--- a/src/tools/ask.ts
++++ b/src/tools/ask.ts
+@@ -136,8 +136,9 @@ const RECOMMENDED_SUFFIX = " (Recommended)";
+ // the deadline but never invoke `onTimeout`). Cancels beyond it are user Esc.
+ const TIMEOUT_DETECTION_TOLERANCE_MS = 1_000;
+ 
++/** The TUI's theme is never initialized in RPC hosts (the engine host): the plain mark stands in for its symbol. */
+ function getDoneOptionLabel(): string {
+-	return `${theme.status.success} Done selecting`;
++	return `${theme?.status?.success ?? "✔"} Done selecting`;
+ }
+ 
+ /** Add "(Recommended)" suffix to the option at the given index if not already present */
+diff --git a/src/tools/ast-edit.ts b/src/tools/ast-edit.ts
+index 121040b3c324abeed8dcb8c088eaba4aacf21ffb..6d7234a5d73f4cd3f9af65e217bbe59a37e68297 100644
+--- a/src/tools/ast-edit.ts
++++ b/src/tools/ast-edit.ts
+@@ -15,6 +15,9 @@ import { getEditStore } from "../edit/store";
+ import { normalizeToLF } from "../edit/normalize";
+ import { InternalUrlRouter, sessionResolveContext } from "../internal-urls";
+ import { InternalUrlFilesystem } from "../internal-urls/url-filesystem";
++import { applyEditorContent, assertEditorWritable, editorDocument } from "../lsp/editor-documents";
++import { applyAstPreview } from "../edit/ast-preview";
++import { writeFileWithFallback } from "./file-write-fallback";
+ import { formatHashlineHeader } from "@oh-my-pi/pi-tui/tools/hashline-format";
+ 
+ import astEditDescription from "../prompts/tools/ast-edit.md" with { type: "text" };
+@@ -445,11 +448,43 @@ export class AstEditTool implements AgentTool<typeof astEditSchema, AstEditToolD
+ 						const applyContext = sessionResolveContext(this.session);
+ 						const applyResult = await runAstEditOnce(multiTargets, resolvedSearchPath, globFilter, {
+ 							rewrites: normalizedRewrites,
+-							dryRun: false,
++							dryRun: true,
+ 							maxFiles,
+ 							failOnParseError: false,
+ 							filesystem: new InternalUrlFilesystem({ context: applyContext, tier }).shellFilesystem(),
+ 						});
++						const changes = new Map<string, AstReplaceChange[]>();
++						for (const change of applyResult.changes) {
++							const list = changes.get(change.path) ?? [];
++							list.push(change);
++							changes.set(change.path, list);
++						}
++						const prepared = [];
++						for (const changedFile of applyResult.fileChanges) {
++							const replacements = changes.get(changedFile.path) ?? [];
++							if (replacements.length !== changedFile.count) throw new ToolError("Native AST preview is incomplete; no files were changed");
++							const filePath = await resultSnapshotPath(formatPath(changedFile.path), this.session.cwd, applyContext);
++							if (!filePath) throw new ToolError("AST target has no writable backing file");
++							const document = assertEditorWritable(filePath);
++							const original = Buffer.from(await Bun.file(filePath).bytes());
++							const updated = applyAstPreview(original, replacements);
++							let text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(updated);
++							if (document) {
++								const before = new TextDecoder("utf-8", { fatal: true }).decode(original);
++								if (before !== document.text) throw new ToolError("AST disk preimage differs from the canonical editor buffer");
++								if (original[0] === 0xef && original[1] === 0xbb && original[2] === 0xbf) text = text.slice(1);
++							}
++							prepared.push({ filePath, original, text, document });
++						}
++						// Preflight all disk preimages before any UI callback or disk mutation.
++						for (const change of prepared) {
++							assertEditorWritable(change.filePath, change.document?.version, change.document?.baseHash);
++							if (!Buffer.from(await Bun.file(change.filePath).bytes()).equals(change.original)) throw new ToolError("AST preview became stale; no files were changed");
++						}
++						for (const change of prepared) if (change.document) await applyEditorContent(change.filePath, change.text, change.document);
++						for (const change of prepared) if (!change.document) await writeFileWithFallback(change.filePath, change.text);
++						for (const change of prepared) this.session.bumpFileMutationVersion?.(change.filePath);
++						applyResult.applied = true;
+ 						const { errors: cappedApplyParseErrors, total: applyParseErrorsTotal } = capParseErrors(
+ 							applyResult.parseErrors,
+ 						);
+@@ -476,7 +511,7 @@ export class AstEditTool implements AgentTool<typeof astEditSchema, AstEditToolD
+ 								const appliedPath = await resultSnapshotPath(relativePath, this.session.cwd, applyContext);
+ 								if (appliedPath === undefined) continue;
+ 								try {
+-									const fullText = normalizeToLF(await Bun.file(appliedPath).text());
++									const fullText = normalizeToLF(editorDocument(appliedPath)?.text ?? await Bun.file(appliedPath).text());
+ 									const freshTag = snapshotStore.recordSnapshot(appliedPath, fullText);
+ 									freshTagLines.push(formatHashlineHeader(relativePath, freshTag));
+ 								} catch {
+@@ -523,7 +558,8 @@ export class AstEditTool implements AgentTool<typeof astEditSchema, AstEditToolD
+ 						}
+ 						const appliedReplacementPlural = applyResult.totalReplacements !== 1 ? "s" : "";
+ 						const appliedFilePlural = applyResult.filesTouched !== 1 ? "s" : "";
+-						const appliedText = `Applied ${applyResult.totalReplacements} replacement${appliedReplacementPlural} in ${applyResult.filesTouched} file${appliedFilePlural}.`;
++						const unsaved = prepared.some(change => editorDocument(change.filePath)?.dirty);
++						const appliedText = `Applied ${applyResult.totalReplacements} replacement${appliedReplacementPlural} in ${applyResult.filesTouched} file${appliedFilePlural}.${unsaved ? " Open editor buffers are unsaved; Undo is available." : ""}`;
+ 						const text = freshTagLines.length > 0 ? `${appliedText}\n${freshTagLines.join("\n")}` : appliedText;
+ 						return toolResult(appliedDetails).text(text).done();
+ 					},
+diff --git a/src/tools/bash-interactive.ts b/src/tools/bash-interactive.ts
+index ecbe68a246c1fa5df205d60a190b4ace277697e1..3eac9effe0dfb9807483acf701c126e4fc73c2d9 100644
+--- a/src/tools/bash-interactive.ts
++++ b/src/tools/bash-interactive.ts
+@@ -28,7 +28,7 @@ export async function runInteractiveBashPty(
+ 		artifactId?: string;
+ 	},
+ ): Promise<BashInteractiveResult> {
+-	const settings = await Settings.init();
++	const settings = await Settings.forSession();
+ 	// Load the xterm Terminal ctor here (async boundary) — the ui.custom factory below is sync.
+ 	const XtermTerminal = await loadXtermTerminal();
+ 	const { shell: resolvedShell, env: shellEnv } = settings.getShellConfig();
+diff --git a/src/tools/bash.ts b/src/tools/bash.ts
+index 0949714ef075cc59e20f8266b1633754c52396ee..c1cd64a51ea0ba2011a7b11f9f97e3826bd2dacb 100644
+--- a/src/tools/bash.ts
++++ b/src/tools/bash.ts
+@@ -16,7 +16,7 @@ import type {
+ 	ToolTier,
+ } from "@oh-my-pi/pi-agent-core";
+ import type { ImageContent } from "@oh-my-pi/pi-ai";
+-import { isEnoent, logger, prompt } from "@oh-my-pi/pi-utils";
++import { isEnoent, isRecord, logger, prompt } from "@oh-my-pi/pi-utils";
+ import { isPosixShell } from "@oh-my-pi/pi-utils/procmgr";
+ import { raceJobSettlement, resolveAutoBackgroundWaitMs } from "../async";
+ import type { Settings } from "../config/settings";
+@@ -545,8 +545,11 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 			};
+ 		}
+ 		const criticalCommand = command !== "" && CRITICAL_BASH_PATTERNS.some(pattern => pattern.test(command));
++		// Critical commands ask even in yolo (`policy` survives yolo, a bare override does not): like Codex's
++		// workspace-write sandbox and Claude Code's deny-first rules, autonomy never extends to wiping absolute
++		// paths or the host. Measured by runtime/harness-bench task `safety`.
+ 		if (!compoundSegments && criticalCommand) {
+-			return { tier: "exec", override: true, reason: "Critical pattern detected" };
++			return { tier: "exec", override: true, policy: "prompt", reason: "Critical pattern detected" };
+ 		}
+ 		if (compoundSegments) {
+ 			let promptRule: BashApprovalPatternRule | undefined = patternRule;
+@@ -575,7 +578,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 			for (const segment of compoundSegments) {
+ 				const literalCommand = segment.argv.join(" ");
+ 				if (criticalCommand || CRITICAL_BASH_PATTERNS.some(pattern => pattern.test(literalCommand))) {
+-					return { tier: "exec", override: true, reason: "Critical pattern detected" };
++					return { tier: "exec", override: true, policy: "prompt", reason: "Critical pattern detected" };
+ 				}
+ 			}
+ 			// Unmatched segments retain the standalone tool-policy and mode fallback.
+@@ -593,9 +596,12 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 		return "exec";
+ 	};
+ 	readonly formatApprovalDetails = (args: unknown): string[] => {
+-		const rawCommand = (args as Partial<BashToolInput>).command;
+-		const command = typeof rawCommand === "string" ? rawCommand : "(missing)";
+-		return [`Command: ${truncateForPrompt(command)}`];
++		const input: Record<string, unknown> = isRecord(args) ? args : {};
++		const command = typeof input.command === "string" ? input.command : "(missing)";
++		const lines = [`Command: ${truncateForPrompt(command)}`];
++		// The folder decides which scripts, Makefiles and build files the command runs.
++		if (typeof input.cwd === "string" && input.cwd.trim()) lines.push(`Cwd: ${truncateForPrompt(input.cwd)}`);
++		return lines;
+ 	};
+ 	readonly label = "Bash";
+ 	readonly loadMode = "essential";
+@@ -838,6 +844,8 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 		approvalTier: ToolTier;
+ 		/** Session the call started in; its shell, even if the session changes before the job runs. */
+ 		sessionId: string | undefined;
++		/** Resource-owner-prefixed shell key captured with the session before the call awaits. */
++		sessionKey: string | undefined;
+ 	}): ManagedBashJobHandle {
+ 		const manager = this.session.asyncJobManager;
+ 		if (!manager) {
+@@ -857,7 +865,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 		const jobId = manager.register(
+ 			"bash",
+ 			label,
+-			async ({ jobId, signal: runSignal, reportProgress }) => {
++			async ({ jobId, signal: runSignal, reportProgress, appendOutput }) => {
+ 				// Records the job's progress and shows it on the call's card: plain output
+ 				// while the call still waits on it, the job frame (`details.async`) once
+ 				// backgrounded, so the card keeps filling and settles with the job.
+@@ -877,12 +885,10 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 				try {
+ 					const result = await executeBash(options.command, {
+ 						cwd: options.commandCwd,
+-						// A call that starts in the foreground runs in the session's
+-						// persistent shell, like the direct path, so its variables,
+-						// functions, and options reach the next call even after it is
+-						// backgrounded. A job that starts in the background gets its own
+-						// shell, so it never holds the session's.
+-						sessionKey: options.foreground ? options.sessionId : `${options.sessionId ?? ""}:async:${jobId}`,
++						// Foreground calls share their owning session's persistent shell,
++						// even after backgrounding. Explicit background jobs use a private
++						// shell; both keys retain the embedded resource owner for isolation.
++						sessionKey: options.foreground ? options.sessionKey : `${options.sessionKey ?? ""}:async:${jobId}`,
+ 						isSessionCurrent: () => (this.session.getSessionId?.() ?? undefined) === options.sessionId,
+ 						timeout: options.timeoutMs ?? 0,
+ 						signal: runSignal,
+@@ -891,6 +897,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 						filesystem: this.#urlFilesystem(runSignal, options.approvalTier).shellFilesystem(),
+ 						artifactPath,
+ 						artifactId,
++						onChunk: appendOutput,
+ 						onPreview: text => {
+ 							void report(text, { output: text, async: { state: "running", jobId, type: "bash" } });
+ 						},
+@@ -979,6 +986,9 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 		// The session this call belongs to, captured before any await: a session
+ 		// change while the call waits must not move it into the new session's shell.
+ 		const sessionId = this.session.getSessionId?.() ?? undefined;
++		const sessionKey = this.session.getEvalKernelOwnerId
++			? `${this.session.getEvalKernelOwnerId()}\n${sessionId ?? ""}`
++			: sessionId;
+ 
+ 		// Extract a leading `cd <path> && ...` into cwd when the model ignores the
+ 		// cwd parameter. The scanner captures only a single path token and defers
+@@ -1164,6 +1174,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 				foreground: false,
+ 				approvalTier,
+ 				sessionId,
++				sessionKey,
+ 			});
+ 			return this.#buildBackgroundStartResult(job.jobId, "", timeoutSec, {
+ 				requestedTimeoutSec,
+@@ -1205,6 +1216,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 				foreground: !startBackgrounded,
+ 				approvalTier,
+ 				sessionId,
++				sessionKey,
+ 			});
+ 			if (startBackgrounded) {
+ 				return this.#buildBackgroundStartResult(job.jobId, "", timeoutSec, {
+@@ -1569,7 +1581,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 				// command here so the unset prefix is not applied twice.
+ 				await executeBash(command, {
+ 					cwd: commandCwd,
+-					sessionKey: sessionId,
++					sessionKey,
+ 					isSessionCurrent: () => (this.session.getSessionId?.() ?? undefined) === sessionId,
+ 					timeout: timeoutMs ?? 0,
+ 					signal,
+diff --git a/src/tools/file-write-fallback.ts b/src/tools/file-write-fallback.ts
+index 3e270325b6e0892606132e70ccab0c0c64757c0f..b8e77290680bb4c63819d9218e24ed714e14f0d1 100644
+--- a/src/tools/file-write-fallback.ts
++++ b/src/tools/file-write-fallback.ts
+@@ -56,10 +56,10 @@
+  * - Removing a DIRECTORY is never the intent: the delete seam refuses to divert a
+  *   target it can confirm is one, and reports `confirmedFile: false` when the
+  *   target's metadata is behind the same boundary and the check cannot be resolved.
+- * - The `lsp` tool's own writes: applying a workspace edit or a code action
+- *   (`lsp/edits.ts`), and the Biome formatter, which writes the buffer and then
+- *   shells out to `biome format --write` (`lsp/clients/biome-client.ts`) — a
+- *   subprocess write no in-process seam can reach anyway.
++ * - The `lsp` tool's own writes when applying a workspace edit or a code action
++ *   (`lsp/edits.ts`). Biome formatting is in-memory (`--stdin-file-path`); its
++ *   caller is responsible for committing the returned content through the
++ *   appropriate editor or disk write path.
+  *
+  * ## Diverting
+  *
+@@ -67,9 +67,11 @@
+  * case where Bun hides such a denial behind an `ENOENT` (see
+  * {@link classifyWriteFailure}). Every other error rethrows untouched.
+  *
+- * With no handler registered this module is inert: the primitive runs exactly as
+- * it did before, a failure rethrows from the same place, and no extra syscalls
+- * are performed.
++ * With no editor documents open, overlay lookup does not inspect disk metadata.
++ * With no handler registered either, the primitive runs exactly as it did before,
++ * a failure rethrows from the same place, and no extra syscalls are performed.
++ * When any editor document is open, overlay guards still require canonical
++ * identity and fail closed if it cannot be established.
+  *
+  * ## The path a handler is given
+  *
+@@ -132,6 +134,7 @@ import { isEnoent, isFsError, logger } from "@oh-my-pi/pi-utils";
+ import type { BunFile } from "bun";
+ import type { ExtensionContext } from "../extensibility/extensions/types";
+ import { resolveSyscallTarget } from "./path-utils";
++import { applyEditorContent, assertNoEditorResourceMutation } from "../lsp/editor-documents";
+ 
+ /** A denied write, captured for a registered fallback to retry through a privileged channel. */
+ export interface FileWriteFallbackRequest {
+@@ -303,6 +306,7 @@ export function withFileMutationSession<T>(sessionId: string | undefined, fn: ()
+  * must propagate — `edit`'s `REM` turns it into a `NotFoundError`.
+  */
+ export async function deleteFileWithFallback(dst: string, file?: BunFile): Promise<void> {
++	assertNoEditorResourceMutation(dst);
+ 	try {
+ 		if (file) {
+ 			await file.unlink();
+@@ -400,6 +404,7 @@ async function classifyWriteFailure(dst: string, error: unknown): Promise<WriteF
+ }
+ 
+ export async function writeFileWithFallback(dst: string, content: string, file?: BunFile): Promise<void> {
++	if (await applyEditorContent(dst, content)) return;
+ 	// Attempt 0 is the plain write. The single retry is reachable only when the
+ 	// first failure turned out to be a parent-directory race this call repaired,
+ 	// which bounds the loop at two writes.
+diff --git a/src/tools/index.ts b/src/tools/index.ts
+index abbcb46cb13fe09e7c193b5cdfd3cdfb28f56b68..c61d1f94136ddc1c0deda9df8a9c554aa1d386a8 100644
+--- a/src/tools/index.ts
++++ b/src/tools/index.ts
+@@ -91,6 +91,7 @@ import {
+ 	cfgLaunchEnabled,
+ 	cfgSecurityEnabled,
+ 	cfgTodoEnabled,
++	cfgToolsDeferred,
+ 	cfgToolsXdev,
+ 	cfgWebSearchEnabled,
+ } from "./settings";
+@@ -820,6 +821,7 @@ export function createXdevState(
+ 		mountedNames,
+ 		builtInNames,
+ 		isActive: name => session.isToolActive?.(name) === true,
++		deferredNames: new Set(cfgToolsDeferred.get(session.settings)),
+ 		// Card rendering reads the same predicate as execution: mounted devices
+ 		// plus active top-level tools, which the `write` transport also accepts.
+ 		resolve: name => resolveXdevTool(state, name),
+@@ -899,13 +901,14 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
+ 	const mountBuiltinTools = requestedTools === undefined;
+ 	if (xdevEnabled) {
+ 		const mountedNames = new Set<string>();
++		const xdev = createXdevState(session, toolRegistry, builtInNames, mountedNames);
++		session.xdev = xdev;
+ 		const kept: Tool[] = [];
+ 		for (const tool of tools) {
+-			const mountable = mountBuiltinTools && isMountableUnderXdev(tool) && tool.name in BUILTIN_TOOLS;
++			const mountable = mountBuiltinTools && isMountableUnderXdev(tool, xdev) && tool.name in BUILTIN_TOOLS;
+ 			if (mountable) mountedNames.add(tool.name);
+ 			else kept.push(tool);
+ 		}
+-		session.xdev = createXdevState(session, toolRegistry, builtInNames, mountedNames);
+ 		tools = kept;
+ 	}
+ 	// Staged previews from deferrable tools (e.g. ast_edit) resolve through a
+diff --git a/src/tools/read-pdf.ts b/src/tools/read-pdf.ts
+index e799d201fc779f2104eea557ef148d903b656307..c43fa6d6d46ad725f953b83cf4af9bdd36078f9d 100644
+--- a/src/tools/read-pdf.ts
++++ b/src/tools/read-pdf.ts
+@@ -111,7 +111,7 @@ export async function renderPdfPageScreenshot(
+ 				timeoutMs: PDF_RENDER_TIMEOUT_MS,
+ 				deadlineStartMs: deadlineStart,
+ 				signal: renderSignal,
+-				ownerSessionId: session.getSessionId?.() ?? undefined,
++				ownerSessionId: session.getEvalKernelOwnerId?.() ?? session.getSessionId?.() ?? undefined,
+ 			}),
+ 		);
+ 		await releaseBrowser(acquiredBrowser, { kill: false });
+diff --git a/src/tools/settings.ts b/src/tools/settings.ts
+index c2761f4fa6cf63a9f3d8f4d06b91e72f4eb646a3..5974999660d6ad799f7b78aa0b34f1fbf249acd4 100644
+--- a/src/tools/settings.ts
++++ b/src/tools/settings.ts
+@@ -236,10 +236,13 @@ export const cfgReadSummarizeMinCommentLines = register({
+ 	},
+ });
+ 
++// 300 = read.defaultLimit: a file one plain read returns whole is returned whole, as Claude Code's Read does (whole
++// files up to its token budget). At 100, runtime/harness-bench's Aider Polyglot runs got the 100–330-line test file
++// as an outline in 7 of 10 exercises, and in 5 of those the agent read it again 2–4 times.
+ export const cfgReadSummarizeMinTotalLines = register({
+ 	id: "read.summarize.minTotalLines",
+ 	type: "number",
+-	default: 100,
++	default: 300,
+ 	ui: {
+ 		tab: "files",
+ 		group: "Read Summaries",
+@@ -986,6 +989,23 @@ export const cfgToolsXdevInlineDevices = register({
+ 	},
+ });
+ 
++// Claude Code's `defer_loading`: named tools leave the request's tools array and appear as one `xd://<tool>` catalog
++// line each; their schema is fetched on demand (`read xd://<tool>`) and they run through `write xd://<tool>`.
++// Empty by default: Ombra's client renders task/todo/eval/web_search calls by tool name, and a device dispatch
++// arrives as `write`. runtime/harness-bench measured deferring all five (K5 in docs/PRODUCT_DIRECTIONS.md).
++export const cfgToolsDeferred = register({
++	id: "tools.deferred",
++	type: "array",
++	default: EMPTY_STRING_ARRAY,
++	ui: {
++		tab: "tools",
++		group: "Discovery & MCP",
++		label: "Deferred Tools",
++		description:
++			"Built-in tools to mount under xd:// even when they normally stay top-level (for example task, eval, todo, web_search, wait): their schemas leave every request and are fetched on demand. read and write cannot be deferred.",
++	},
++});
++
+ export const cfgDevAutoqa = register({
+ 	id: "dev.autoqa",
+ 	type: "boolean",
+diff --git a/src/tools/write.ts b/src/tools/write.ts
+index 1ebada028f6846ff4960e3004f96ffa81584a5b5..ee0ee4b7c65c1989a156ba5748a1670acd183d06 100644
+--- a/src/tools/write.ts
++++ b/src/tools/write.ts
+@@ -27,6 +27,7 @@ import { extractUriScheme, InternalUrlRouter, sessionResolveContext, sessionWrit
+ import { createLspWritethrough, type WritethroughCallback, writethroughNoop } from "../lsp";
+ 
+ import { DeferredDiagnostics } from "../lsp/deferred-diagnostics";
++import { applyEditorContent, assertNoEditorResourceMutation } from "../lsp/editor-documents";
+ import { getLspBatchRequest } from "../lsp/batch";
+ import { getDiagnosticsLedger } from "../lsp/diagnostics-ledger";
+ 
+@@ -889,6 +890,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
+ 
+ 			const resolvedArchivePath = await this.#resolveArchiveWritePath(path, signal);
+ 			if (resolvedArchivePath) {
++				assertNoEditorResourceMutation(resolvedArchivePath.archivePath);
+ 				await enforcePlanModeWrite(this.session, resolvedArchivePath.archivePath, {
+ 					op: resolvedArchivePath.exists ? "update" : "create",
+ 					signal,
+@@ -917,6 +919,7 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
+ 
+ 			const resolvedSqlitePath = await this.#resolveSqliteWritePath(path, signal);
+ 			if (resolvedSqlitePath) {
++				assertNoEditorResourceMutation(resolvedSqlitePath.sqlitePath);
+ 				await enforcePlanModeWrite(this.session, resolvedSqlitePath.sqlitePath, { op: "update", signal });
+ 
+ 				emitWriteProgress(onUpdate, cleanBytes, path, resolvedSqlitePath.absolutePath);
+@@ -961,6 +964,13 @@ export class WriteTool implements AgentTool<typeof writeSchema, WriteToolDetails
+ 				cleanContent,
+ 			);
+ 
++			if (await applyEditorContent(absolutePath, cleanContent)) {
++				this.session.bumpFileMutationVersion?.(absolutePath);
++				return {
++					content: [{ type: "text", text: `Updated editor buffer ${displayPath}; changes are unsaved and available in Undo.` }],
++					details: { resolvedPath: absolutePath },
++				};
++			}
+ 			emitWriteProgress(onUpdate, cleanBytes, displayPath, absolutePath);
+ 
+ 			// Try ACP bridge first for editor-visible filesystem paths. Internal
+diff --git a/src/tools/xdev.ts b/src/tools/xdev.ts
+index 60ae0257e497e587787dee709b932dd40432a199..05ce7ac362f4e05610ffe3521328f93c920ab335 100644
+--- a/src/tools/xdev.ts
++++ b/src/tools/xdev.ts
+@@ -79,11 +79,17 @@ export type XdevDocsMode = "inline" | "builtins" | "catalog";
+  * Whether an enabled tool is presented under `xd://` (rather than top-level)
+  * while the `xd://` transport is active. Discoverable tools mount unless they
+  * are pinned top-level by {@link XDEV_KEEP_TOP_LEVEL} or carry the transport
+- * itself ({@link XDEV_TRANSPORT_TOOLS}); essential tools never do. The caller
+- * gates this on the transport being active.
++ * itself ({@link XDEV_TRANSPORT_TOOLS}); essential tools never do — except the
++ * ones the user deferred (`tools.deferred`, {@link XdevState.deferredNames}).
++ * The caller gates this on the transport being active.
+  */
+-export function isMountableUnderXdev(tool: { name: string; loadMode?: ToolLoadMode }): boolean {
+-	if (tool.name in XDEV_TRANSPORT_TOOLS || tool.name in XDEV_KEEP_TOP_LEVEL) return false;
++export function isMountableUnderXdev(
++	tool: { name: string; loadMode?: ToolLoadMode },
++	state: Pick<XdevState, "deferredNames">,
++): boolean {
++	if (tool.name in XDEV_TRANSPORT_TOOLS) return false;
++	if (state.deferredNames.has(tool.name)) return true;
++	if (tool.name in XDEV_KEEP_TOP_LEVEL) return false;
+ 	return tool.loadMode === "discoverable";
+ }
+ 
+@@ -239,6 +245,8 @@ export interface XdevState {
+ 	readonly builtInNames: Set<string>;
+ 	/** Whether a name is active at the top level. */
+ 	readonly isActive: (name: string) => boolean;
++	/** Tools mounted regardless of their load mode (`tools.deferred`). */
++	readonly deferredNames: ReadonlySet<string>;
+ 	/** Canonical renderer for a dispatched device name; mirrors {@link resolveXdevTool}. */
+ 	readonly resolve?: (name: string) => Tool | undefined;
+ 	/** Optional execution-only decorator, such as the ACP permission gate. */

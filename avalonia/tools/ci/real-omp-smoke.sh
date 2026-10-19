@@ -27,7 +27,7 @@ esac
 echo "::group::Pinned runtime via the client's installer"
 (cd "$HERE" && OMBRA_RUNTIME_INSTALL_DIR="$WORK/runtimes" dotnet test tests/Ombra.Tests -c Release --no-build "${ARTIFACT_ARGS[@]}" \
   --filter "FullyQualifiedName~RealRuntimeInstallTests" --logger "console;verbosity=detailed")
-RT="$WORK/runtimes/ombra-engine-18.8.0-bun-1.4.2-v1"
+RT="$WORK/runtimes/ombra-engine-18.12.2-bun-1.4.2-v1"
 BUN="$RT/bun/bun$EXE"
 CLI="$RT/omp/engine/coding-agent/src/cli.ts"
 HOST="$RT/omp/engine/host.ts"

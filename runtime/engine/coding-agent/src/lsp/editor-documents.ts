@@ -68,6 +68,11 @@ export function assertEditorDocumentTrusted(cwd: string, file: string, configura
 	}
 }
 export function editorDocument(file: string): EditorDocument | undefined {
+	// With no overlays there is no identity to protect. Leave inaccessible disk
+	// metadata to the filesystem/broker instead of introducing a new preflight.
+	// Once any document is open, canonicalization must still fail closed: an
+	// unresolved path could alias that document.
+	if (documents.size === 0) return undefined;
 	return documents.get(canonicalEditorUri(file));
 }
 export function validateEditorSnapshot(snapshot: EditorDocumentSnapshot): void {
@@ -120,6 +125,7 @@ export function assertNoUnsavedEditorBuffer(file: string): void {
 }
 /** Resource operations cannot preserve the identity/undo history of a live GUI buffer. */
 export function assertNoEditorResourceMutation(file: string): void {
+	if (documents.size === 0) return;
 	const uri = canonicalEditorUri(file);
 	for (const key of documents.keys()) if (key === uri || key.startsWith(`${uri}/`)) {
 		throw new Error(`Close the editor document before deleting, replacing or moving ${file}`);

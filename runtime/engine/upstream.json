@@ -1,0 +1,119 @@
+{
+  "schema": 1,
+  "version": "18.12.2",
+  "packages": {
+    "@oh-my-pi/pi-coding-agent": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/pi-coding-agent/-/pi-coding-agent-18.12.2.tgz",
+      "integrity": "sha512-1qh9EwuiMBUTVix0ZWZNOMPTW++nWhL6t3EaRhGe05sVIBfDTyVl36iTyDv0TvM+R/EmOL4PvFrmIPgXd3xYQQ=="
+    },
+    "@oh-my-pi/pi-ai": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/pi-ai/-/pi-ai-18.12.2.tgz",
+      "integrity": "sha512-byMHgpupvdZB089poArdIgz2p9fFhB/dGH3ttuJSyI6sQ211uyhA2kyvsFVZYnXxgOTvZBWP6KefwBHoCstSzA=="
+    },
+    "@oh-my-pi/pi-tui": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/pi-tui/-/pi-tui-18.12.2.tgz",
+      "integrity": "sha512-bVYQjUMj4AVLqEqYVat8peZB3HbNP2aslGsqH/4OmlV91kRERyHp166cO0a3HHgtw2IYZA9dT931onds9hdazA=="
+    },
+    "@oh-my-pi/omptype": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/omptype/-/omptype-18.12.2.tgz",
+      "integrity": "sha512-RDCM+geyZ74XTJ0LtMRvJQReTsPmOVEy65nCt83geR0dh2r+nj3uXkNZP5gY5dYTFx2AdbxJgQBlMhkbVDxlaw=="
+    },
+    "@oh-my-pi/pi-wire": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/pi-wire/-/pi-wire-18.12.2.tgz",
+      "integrity": "sha512-P0NKM1/MAiK5e+AlaRLKfvjz2NVVB7CTxDb4ej2HfitDhopd/54nQBMcU2DZ8hwcwYhcqJ+XeVnnxysjmnp+Eg=="
+    },
+    "@oh-my-pi/pi-utils": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/pi-utils/-/pi-utils-18.12.2.tgz",
+      "integrity": "sha512-kXiiaWJREw8ypOForwS/z5sKz3BfGIWrd5vRfswviPCZxuafPplF7VjQx5aPGom4iSwgzmIJR7hWHj0XOXhjwQ=="
+    },
+    "@oh-my-pi/omp-stats": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/omp-stats/-/omp-stats-18.12.2.tgz",
+      "integrity": "sha512-UZ6IhN2FyJhyPzek6KIHIGfnqWo8Pcbsn9XzqUP2Oept7RBL/SGTlIgAEXyGJ+lY+mn9jZRVSbG/Wri5mWfdjg=="
+    },
+    "@oh-my-pi/pi-catalog": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/pi-catalog/-/pi-catalog-18.12.2.tgz",
+      "integrity": "sha512-XTbwV2WrTVjXmIxTUEJI+Kb0e9jhxENkgXTJboRzivZ1aN2zZcWiOu1dV4uAyuXiaIIsm/aNhG+Jkz8P0gCBWw=="
+    },
+    "@oh-my-pi/pi-mnemopi": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/pi-mnemopi/-/pi-mnemopi-18.12.2.tgz",
+      "integrity": "sha512-oMbw91bJ5t7b7TByga6WZW91N/Qw0dHc+cd7PR9QRmJyZ1/sK/y29FFbCHbDT1ojduJDBOD1gWv4rWFOpyxG3w=="
+    },
+    "@oh-my-pi/pi-natives": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/pi-natives/-/pi-natives-18.12.2.tgz",
+      "integrity": "sha512-Seat0TcAr+HyV2tdwKWoq/znUuEi6Ngxug0TqCL7Biqpj82IIcvGhEc4wElp2w3x11Ij7oCSZJ4as5dc8/pkWQ=="
+    },
+    "@oh-my-pi/snapcompact": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/snapcompact/-/snapcompact-18.12.2.tgz",
+      "integrity": "sha512-+IUtE0ZHeaKu51ti4M9MhYX5hCFMXkRAOeiK6gJW4x5Wm7iAq8qffGdG8Bgkl7iZiTyjYzdgbsumeFsdAR+2Zw=="
+    },
+    "@oh-my-pi/pi-agent-core": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/pi-agent-core/-/pi-agent-core-18.12.2.tgz",
+      "integrity": "sha512-P50XQ8eduCjyk6fFnxVY2ODMr2WtNXC8LYB1kRhOw7gFKnFmpIFbYR3+9742yZNXKmv2L7C19wJ0IXGSuv71VA=="
+    },
+    "@oh-my-pi/pi-natives-linux-x64": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/pi-natives-linux-x64/-/pi-natives-linux-x64-18.12.2.tgz",
+      "integrity": "sha512-lOEu20EaH0vXq4OLtfEcVePIapZYts1H0bOX0HRh9jOtcYuZxNGIqh9dkLd1JVa3oih20hCbSq9p26umcMp/hw=="
+    },
+    "@oh-my-pi/pi-natives-linux-arm64": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/pi-natives-linux-arm64/-/pi-natives-linux-arm64-18.12.2.tgz",
+      "integrity": "sha512-3aD8q/MY7JZR6T4zW3Y2wBJs6BBaYwoXX8/ARAx9Z4SlZ16q6vLEYbjtvd6p5v6aaIzkLPgkgHKYb9H/TsRhTw=="
+    },
+    "@oh-my-pi/pi-natives-darwin-x64": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/pi-natives-darwin-x64/-/pi-natives-darwin-x64-18.12.2.tgz",
+      "integrity": "sha512-zY72i1HDgcqfHmyFjjgl0f69l0+sdR2lqKf0XqbsIt2nsLkLmrtGrh8wzV1o5HXGe58TCQr24gQ+bcwDiUhNpw=="
+    },
+    "@oh-my-pi/pi-natives-darwin-arm64": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/pi-natives-darwin-arm64/-/pi-natives-darwin-arm64-18.12.2.tgz",
+      "integrity": "sha512-XvMxb3U3zPRNeBxSjkvAN55Natf/DewZCigOFbS1Lu3LVNit6wUl34Cgavvgc+dvrlIHNVNHWU9UeE5OiGJyNA=="
+    },
+    "@oh-my-pi/pi-natives-win32-x64": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/pi-natives-win32-x64/-/pi-natives-win32-x64-18.12.2.tgz",
+      "integrity": "sha512-NKjEN/xWeSCWHAX9yvTDJ9V+QIsMQQ7sAwHsqA5LpH22hGi6SR42rkl496isjyVhj5U/8T0enhdnZ0zknd6GLA=="
+    },
+    "@oh-my-pi/pi-natives-win32-arm64": {
+      "version": "18.12.2",
+      "tarball": "https://registry.npmjs.org/@oh-my-pi/pi-natives-win32-arm64/-/pi-natives-win32-arm64-18.12.2.tgz",
+      "integrity": "sha512-2FDlBcM/PHc6QTO2ib4f9aiRQBU+jj532pJtfk74zg8Nba4imFuTtv2Y411j+GDL6gBuPu9bkyasHEKCLZMzrA=="
+    }
+  },
+  "patches": [
+    "010-rpc-plan-mode.patch",
+    "011-rpc-background-jobs.patch",
+    "012-rpc-mcp-connectors.patch",
+    "013-rpc-editor-documents.patch",
+    "014-rpc-history-paging.patch",
+    "015-rpc-tree-navigation.patch",
+    "016-rpc-input-recovery.patch",
+    "019-rpc-host-protocol.patch",
+    "020-browser-session-isolation.patch",
+    "030-editor-documents.patch",
+    "040-mcp-host-integration.patch",
+    "050-background-job-output.patch",
+    "060-typed-tool-approvals.patch",
+    "070-small-context-recovery.patch",
+    "080-untrusted-project-discovery.patch",
+    "090-session-leases-and-isolation.patch",
+    "100-session-runtime-isolation.patch",
+    "110-tool-policy-and-deferred-devices.patch",
+    "120-embedded-cli-boundary.patch",
+    "130-host-runtime-integration.patch",
+    "150-ombra-change-notes.patch"
+  ]
+}

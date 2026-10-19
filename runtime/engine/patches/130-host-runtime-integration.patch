@@ -1,0 +1,2240 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Igor Shulga <igo.shulga@macbook-lf73jk0j09.t-oblako.ru>
+Date: Mon, 19 Oct 2026 21:42:09 +0300
+Subject: [PATCH] host runtime integration
+
+What: Preserve the repository-owned host runtime integration.
+Why: Ombra embeds multiple concurrent sessions and renders native host features.
+Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
+
+diff --git a/src/collab/guest.ts b/src/collab/guest.ts
+index b0335467ed301eaae28a31484e6aa8bd7a95d7fb..154aa0dd31f818b83afa5746eb91e99d0f00002c 100644
+--- a/src/collab/guest.ts
++++ b/src/collab/guest.ts
+@@ -29,7 +29,7 @@ import { AgentRegistry } from "../registry/agent-registry";
+ import type { AgentSessionEvent } from "../session/agent-session";
+ import type { SessionEntry } from "../session/session-entries";
+ import { mintSessionId, SessionManager } from "../session/session-manager";
+-import { FileSessionStorage } from "../session/session-storage";
++import { SessionLeaseAuthority } from "../session/session-storage";
+ import { shouldDisableReasoning, toReasoningEffort } from "@oh-my-pi/pi-tui/thinking";
+ import { emitSubagentFrame } from "../utils/event-bus";
+ import { GuestLifecycleEmitter } from "../extensibility/extensions/lifecycle-mirror";
+@@ -180,11 +180,11 @@ export class CollabGuestLink {
+ 	readonly #replicaId = mintSessionId();
+ 	/**
+ 	 * The replica's ownership lease, held from the first snapshot write until
+-	 * the guest has left. Opening and reloading the replica never claims it, so
+-	 * without this an idle guest would leave its live replica unowned (and
+-	 * collectable by `omp gc`).
++	 * the guest has left. Replica managers explicitly borrow this authority,
++	 * keeping the same OS lease across snapshot reloads without letting an
++	 * independent manager write the replica.
+ 	 */
+-	#replicaLease: (() => void) | undefined;
++	#replicaLease: SessionLeaseAuthority | undefined;
+ 	/** Previous session file to restore on leave; null = previous session was unsaved. */
+ 	#returnSessionFile: string | null = null;
+ 	/** Frames apply strictly in arrival order through this chain. */
+@@ -480,8 +480,9 @@ export class CollabGuestLink {
+ 			providerPromptCacheKey: SessionManager.getInheritedProviderPromptCacheKey(pending.header),
+ 		};
+ 		const lines = [header, ...pending.entries].map(entry => JSON.stringify(entry)).join("\n");
+-		const storage = new FileSessionStorage();
+-		this.#replicaLease ??= storage.claimSession(this.#replicaId, replicaPath) ?? undefined;
++		this.#replicaLease ??= SessionLeaseAuthority.acquire(this.#replicaId, replicaPath) ?? undefined;
++		if (!this.#replicaLease)
++			throw new Error(`Session replica is busy in another live writer: ${replicaPath}`);
+ 		// Published atomically: `omp gc` reads the replica's header to find its
+ 		// lease, so a resync must never expose a truncated, headerless file.
+ 		const tempPath = `${replicaPath}.${mintSessionId()}.tmp`;
+@@ -496,7 +497,11 @@ export class CollabGuestLink {
+ 
+ 		// Resume through AgentSession without adopting the host's cwd. The replica
+ 		// keeps its model: #applyHostState mirrors the host's, which runs inference.
+-		const switched = await this.#ctx.session.switchSession(replicaPath, { preserveLocalCwd: true, keepModel: true });
++		const switched = await this.#ctx.session.switchSession(replicaPath, {
++			preserveLocalCwd: true,
++			keepModel: true,
++			writerLease: this.#replicaLease,
++		});
+ 		if (switched === false) {
+ 			throw new Error("Collab replica activation was cancelled");
+ 		}
+@@ -913,7 +918,7 @@ export class CollabGuestLink {
+ 		try {
+ 			if (this.#replicaActivated) await this.#resumeLocalSession();
+ 		} finally {
+-			this.#replicaLease?.();
++			this.#replicaLease?.release();
+ 			this.#replicaLease = undefined;
+ 		}
+ 		if (this.#ctx.collabGuest !== this) return false;
+diff --git a/src/commands/launch-help.ts b/src/commands/launch-help.ts
+index d1bb4ac9982153a9bb9ac226c7d325c6bc7eb937..bf914c61d806944fb263debb6a2b2d29479ed34c 100644
+--- a/src/commands/launch-help.ts
++++ b/src/commands/launch-help.ts
+@@ -107,6 +107,10 @@ export const launchHelp = {
+ 		"no-skills": Flags.boolean({ description: "Disable skills discovery and loading" }),
+ 		skills: Flags.string({ description: "Comma-separated glob patterns to filter skills (e.g., git-*,docker)" }),
+ 		"no-rules": Flags.boolean({ description: "Disable rules discovery and loading" }),
++		"untrusted-project": Flags.boolean({
++			description:
++				"Untrusted folder: none of its settings, MCP servers, tools, commands, skills, prompt templates, subagents, extensions, hooks or plugins load (yours do); implies --no-lsp",
++		}),
+ 		export: Flags.string({ description: "Export session file to HTML and exit" }),
+ 		"no-title": Flags.boolean({ description: "Disable title auto-generation" }),
+ 		"no-ui": Flags.boolean({
+diff --git a/src/config/neutral-project-dir.ts b/src/config/neutral-project-dir.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..74d88fb5f3a1b7c49cf82a2ec4e8a721b15bb2f2
+--- /dev/null
++++ b/src/config/neutral-project-dir.ts
+@@ -0,0 +1,19 @@
++import * as fs from "node:fs";
++import * as os from "node:os";
++import * as path from "node:path";
++
++let neutralProjectDir: string | undefined;
++
++/**
++ * An empty folder outside every project, created once per process. Running the engine's own
++ * discovery against it yields what the user's setup contributes (user extensions, hooks, plugins)
++ * without anything an untrusted folder would add.
++ */
++export function getNeutralProjectDir(): string {
++	if (neutralProjectDir === undefined) {
++		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-neutral-"));
++		process.once("exit", () => fs.rmSync(dir, { recursive: true, force: true }));
++		neutralProjectDir = dir;
++	}
++	return neutralProjectDir;
++}
+diff --git a/src/config/settings-context.ts b/src/config/settings-context.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1bb388ce33e1be206803af8b115f93ca87ef4f93
+--- /dev/null
++++ b/src/config/settings-context.ts
+@@ -0,0 +1,33 @@
++import { AsyncLocalStorage } from "node:async_hooks";
++import type { Settings } from "./settings";
++
++// This module must not import settings or capability registration at runtime:
++// discovery and settings initialization both need the ambient session context.
++const activeSettingsScope = new AsyncLocalStorage<Settings>();
++
++/** Bind session settings without changing unrelated request/admission async scopes. */
++export function withActiveSettings<T>(instance: Settings | undefined, fn: () => T): T {
++	return instance ? activeSettingsScope.run(instance, fn) : fn();
++}
++
++/** The current session's settings, without a process-singleton fallback. */
++export function getActiveSettings(): Settings | undefined {
++	return activeSettingsScope.getStore();
++}
++
++let processSettings: Settings | undefined;
++
++/** Record the process-wide `Settings.init` instance (owned by `settings.ts`). */
++export function setProcessSettings(instance: Settings | undefined): void {
++	processSettings = instance;
++}
++
++/**
++ * The folder in scope is not trusted (`--untrusted-project`): the current session's settings,
++ * else the process singleton, leave out the project layer. Gates project-local code that
++ * discovery would otherwise run (plugins, interpreters) and the folder's skills, slash
++ * commands and prompt templates.
++ */
++export function isUntrustedProjectScope(): boolean {
++	return (activeSettingsScope.getStore() ?? processSettings)?.ignoresProjectSettings === true;
++}
+diff --git a/src/config/settings.ts b/src/config/settings.ts
+index 4dbb386384671ad3506ad0ac46c0f7d1e0239968..cc11905e3a08dfde4efe3dda397dd202066a01eb 100644
+--- a/src/config/settings.ts
++++ b/src/config/settings.ts
+@@ -10,7 +10,7 @@
+  *   const isolated = Settings.isolated({ "compaction.enabled": false });
+  */
+ 
+-import { AsyncLocalStorage } from "node:async_hooks";
++import { getActiveSettings, setProcessSettings } from "./settings-context";
+ import { randomUUID } from "node:crypto";
+ import * as fs from "node:fs";
+ import * as os from "node:os";
+@@ -169,6 +169,13 @@ export interface SettingsOptions {
+ 	overrides?: Readonly<Record<string, unknown>>;
+ 	/** Extra config.yml-style overlays loaded after global/project settings */
+ 	configFiles?: string[];
++	/** Leave out the project layer (`.omp/settings.json`, `.claude/settings.json`, …): the folder is not trusted. */
++	ignoreProjectSettings?: boolean;
++	/**
++	 * The only folder whose project layer this instance (and its clones) may read; any other
++	 * scope (`reloadForCwd`/`cloneForCwd` after `/move`) gets an empty project layer. Unset: every scope.
++	 */
++	projectRoot?: string;
+ }
+ 
+ // ═══════════════════════════════════════════════════════════════════════════
+@@ -668,6 +675,10 @@ export class Settings {
+ 
+ 	/** Whether to persist changes */
+ 	#persist: boolean;
++	/** The project layer stays empty: settings in an untrusted folder can name programs to run (`shellPath`, `extensions`). */
++	#ignoreProjectSettings: boolean;
++	/** Absolute launch folder when the project layer is pinned to it (see {@link SettingsOptions.projectRoot}). */
++	#projectRoot: string | undefined;
+ 
+ 	private constructor(options: SettingsOptions = {}) {
+ 		this.#cwd = path.normalize(options.cwd ?? getProjectDir());
+@@ -677,6 +688,8 @@ export class Settings {
+ 		if (options.configFiles) configFiles.push(...options.configFiles);
+ 		this.#configFiles = configFiles.map(file => path.resolve(this.#cwd, expandTilde(file)));
+ 		this.#persist = !options.inMemory && options.readOnly !== true;
++		this.#ignoreProjectSettings = options.ignoreProjectSettings === true;
++		this.#projectRoot = options.projectRoot === undefined ? undefined : path.resolve(options.projectRoot);
+ 		liveSettingsInstances.add(new WeakRef(this));
+ 		if (options.overrides) this.#overrides = this.#overrideLayer(options.overrides);
+ 	}
+@@ -724,6 +737,7 @@ export class Settings {
+ 		return promise.then(
+ 			instance => {
+ 				globalInstance = instance;
++				setProcessSettings(instance);
+ 				clearBoundSettingsMethods();
+ 				globalInstancePromise = Promise.resolve(instance);
+ 				bindEffects(instance);
+@@ -731,6 +745,7 @@ export class Settings {
+ 			},
+ 			error => {
+ 				globalInstance = null;
++				setProcessSettings(undefined);
+ 				globalInstancePromise = null;
+ 				clearBoundSettingsMethods();
+ 				throw error;
+@@ -738,6 +753,16 @@ export class Settings {
+ 		);
+ 	}
+ 
++	/**
++	 * The settings that govern work done for the current session: its own (from the async session
++	 * context) when there is one, else the process singleton. Shells and interpreters must use this,
++	 * never `init()` directly: in a shared engine the singleton belongs to no chat, so it must not
++	 * decide which program runs for one (an untrusted folder's `shellPath`, another chat's env).
++	 */
++	static forSession(): Promise<Settings> {
++		return Settings.current ?? Settings.init();
++	}
++
+ 	/**
+ 	 * Load effective settings from config.yml and project providers without
+ 	 * opening agent.db, migrating legacy settings, or writing marker files.
+@@ -837,6 +862,8 @@ export class Settings {
+ 	 * Throws if not initialized.
+ 	 */
+ 	static get instance(): Settings {
++		const active = getActiveSettings();
++		if (active) return active;
+ 		if (!globalInstance) {
+ 			throw new Error("Settings not initialized. Call Settings.init() first.");
+ 		}
+@@ -845,6 +872,8 @@ export class Settings {
+ 
+ 	/** Return the initialized or in-flight global settings without starting a writable load. */
+ 	static get current(): Promise<Settings> | null {
++		const active = getActiveSettings();
++		if (active) return Promise.resolve(active);
+ 		return globalInstancePromise;
+ 	}
+ 
+@@ -1294,11 +1323,15 @@ export class Settings {
+ 				cwd,
+ 				agentDir: this.#agentDir,
+ 				inMemory: !this.#persist,
++				ignoreProjectSettings: this.#ignoreProjectSettings,
++				projectRoot: this.#projectRoot,
+ 			});
+ 			cloned.#storage = this.#storage;
+ 			cloned.#configPath = this.#configPath;
+-			cloned.#project = this.#persist ? await cloned.#loadProjectSettings() : structuredClone(this.#project);
+-			if (!this.#persist) cloned.#projectShellPathSource = this.#projectShellPathSource;
++			// An in-memory clone copies the layer it has, unless that layer belongs to another folder.
++			const readProject = this.#persist || cloned.#projectLayerPinnedAway(cwd);
++			cloned.#project = readProject ? await cloned.#loadProjectSettings() : structuredClone(this.#project);
++			if (!readProject) cloned.#projectShellPathSource = this.#projectShellPathSource;
+ 			cloned.#configFiles = [...this.#configFiles];
+ 			cloned.#overlayShellPathSource = this.#overlayShellPathSource;
+ 		}
+@@ -1494,7 +1527,10 @@ export class Settings {
+ 		try {
+ 			if (normalized === this.#cwd) return;
+ 			await this.flush();
+-			const project = this.#persist ? await this.#readProjectSettings(true, { cwd: normalized }) : undefined;
++			const project =
++				this.#persist || this.#projectLayerPinnedAway(normalized)
++					? await this.#readProjectSettings(true, { cwd: normalized })
++					: undefined;
+ 			const candidate: OwnLayers = {
+ 				global: this.#global,
+ 				project: project?.settings ?? this.#project,
+@@ -1542,6 +1578,16 @@ export class Settings {
+ 		return this.#agentDir;
+ 	}
+ 
++	/** The folder is not trusted: the project layer (here or on the parent) is always empty. */
++	get ignoresProjectSettings(): boolean {
++		return this.#ignoreProjectSettings || (this.#parent?.ignoresProjectSettings ?? false);
++	}
++
++	/** `cwd` is not the folder the project layer is pinned to ({@link SettingsOptions.projectRoot}). */
++	#projectLayerPinnedAway(cwd: string): boolean {
++		return this.#projectRoot !== undefined && path.resolve(cwd) !== this.#projectRoot;
++	}
++
+ 	/** Resolved absolute paths of the config overlays supplied to this instance. */
+ 	getConfigFiles(): readonly string[] {
+ 		return [...this.#configFiles];
+@@ -2400,6 +2446,9 @@ export class Settings {
+ 		options: { rejectNewWarnings?: boolean; cwd?: string } = {},
+ 	): Promise<ProjectSettingsReadResult> {
+ 		const cwd = options.cwd ?? this.#cwd;
++		if (this.#ignoreProjectSettings || this.#projectLayerPinnedAway(cwd)) {
++			return { settings: {}, fileSettings: {}, shellPathSource: undefined, sourcePaths: [], warningsSeen: new Set() };
++		}
+ 		// Resolve once: capability discovery, fs-cache invalidation, and the
+ 		// warning prefix below must all derive from the same absolute scope so
+ 		// relative cwds (e.g. ".") produce absolute provider paths that match.
+@@ -3969,32 +4018,17 @@ export class Settings {
+  */
+ const liveSettingsInstances = new Set<WeakRef<Settings>>();
+ 
+-const activeSettingsScope = new AsyncLocalStorage<Settings>();
+-
+-/**
+- * Run extension-owned work with the settings instance of its active session.
+- *
+- * Legacy Pi extensions synchronously call `SettingsManager.create(ctx.cwd)`;
+- * `cwd` alone cannot distinguish concurrent sessions that use different
+- * settings for the same project. The async scope supplies that missing session
+- * identity without process-global mutation.
+- */
+-export function withActiveSettings<T>(instance: Settings | undefined, fn: () => T): T {
+-	return instance ? activeSettingsScope.run(instance, fn) : fn();
+-}
+ 
+ let globalInstance: Settings | null = null;
+ let globalInstancePromise: Promise<Settings> | null = null;
+-let boundSettingsInstance: Settings | null = null;
+-let boundSettingsMethods = new Map<PropertyKey, unknown>();
++let boundSettingsMethods = new WeakMap<Settings, Map<PropertyKey, unknown>>();
+ 
+ function clearBoundSettingsMethods(): void {
+-	boundSettingsInstance = null;
+-	boundSettingsMethods = new Map<PropertyKey, unknown>();
++	boundSettingsMethods = new WeakMap();
+ }
+ 
+ export function isSettingsInitialized(): boolean {
+-	return globalInstance !== null;
++	return getActiveSettings() !== undefined || globalInstance !== null;
+ }
+ 
+ /**
+@@ -4006,7 +4040,7 @@ export function isSettingsInitialized(): boolean {
+  * best available scope; an unscoped lookup falls back to the global singleton.
+  */
+ export function findScopedSettings(cwd?: string, agentDir?: string): Settings | undefined {
+-	const active = activeSettingsScope.getStore();
++	const active = getActiveSettings();
+ 	if (active) return active;
+ 
+ 	const wantCwd = cwd === undefined ? undefined : path.normalize(cwd);
+@@ -4041,6 +4075,7 @@ export function resetSettingsForTest(): void {
+ 	}
+ 	liveSettingsInstances.clear();
+ 	globalInstance = null;
++	setProcessSettings(undefined);
+ 	globalInstancePromise = null;
+ 	clearBoundSettingsMethods();
+ 	// Effect-owned process state (theme, redaction, request limits, …) returns to its defaults.
+@@ -4062,19 +4097,21 @@ export const __physicalTargetSegmentsForTesting = physicalTargetSegments;
+  */
+ export const settings = new Proxy({} as Settings, {
+ 	get(_target, prop) {
+-		if (!globalInstance) {
++		const instance = getActiveSettings() ?? globalInstance;
++		if (!instance) {
+ 			throw new Error("Settings not initialized. Call Settings.init() first.");
+ 		}
+-		if (boundSettingsInstance !== globalInstance) {
+-			clearBoundSettingsMethods();
+-			boundSettingsInstance = globalInstance;
+-		}
+-		const value = (globalInstance as unknown as Record<PropertyKey, unknown>)[prop];
++		const value = (instance as unknown as Record<PropertyKey, unknown>)[prop];
+ 		if (typeof value === "function") {
+-			const cached = boundSettingsMethods.get(prop);
++			let methods = boundSettingsMethods.get(instance);
++			if (!methods) {
++				methods = new Map();
++				boundSettingsMethods.set(instance, methods);
++			}
++			const cached = methods.get(prop);
+ 			if (cached) return cached;
+-			const bound = value.bind(globalInstance);
+-			boundSettingsMethods.set(prop, bound);
++			const bound = value.bind(instance);
++			methods.set(prop, bound);
+ 			return bound;
+ 		}
+ 		return value;
+diff --git a/src/dap/config.ts b/src/dap/config.ts
+index d2d3959839c637754b91dba5e96a19dff9e186b5..847caddf48d122c24136e9fc61953636ae187706 100644
+--- a/src/dap/config.ts
++++ b/src/dap/config.ts
+@@ -2,6 +2,7 @@ import * as fs from "node:fs";
+ import * as os from "node:os";
+ import * as path from "node:path";
+ import { isRecord, logger, WhichCachePolicy } from "@oh-my-pi/pi-utils";
++import { isUntrustedProjectScope } from "../config/settings-context";
+ import { hasRootMarkers, parseConfigContent, resolveCommand } from "../lsp/config";
+ import { type ConfigFileAdapter, configFileSources } from "../utils/config-file-sources";
+ import DEFAULTS from "./defaults.json" with { type: "json" };
+@@ -99,7 +100,10 @@ function mergeAdapters(
+ 
+ function loadAdapterConfigs(cwd: string): Record<string, DapAdapterConfig> {
+ 	let adapters = { ...DEFAULT_ADAPTERS };
+-	for (const source of configFileSources("dap", cwd, adaptConfig).reverse()) {
++	// Adapter configs name programs to run; never read an untrusted project's sources.
++	for (const source of configFileSources("dap", cwd, adaptConfig, {
++		includeProject: !isUntrustedProjectScope(),
++	}).reverse()) {
+ 		const parsed = source.read();
+ 		if (!parsed) continue;
+ 		adapters = mergeAdapters(adapters, parsed.adapters);
+diff --git a/src/extensibility/custom-commands/loader.ts b/src/extensibility/custom-commands/loader.ts
+index 08cc87cf6328582df95e56e7ee795dd3b701703b..026f305bc52ae1f4329185f87d7e1b30220d69e2 100644
+--- a/src/extensibility/custom-commands/loader.ts
++++ b/src/extensibility/custom-commands/loader.ts
+@@ -147,6 +147,8 @@ export interface LoadCustomCommandsOptions {
+ 	cwd?: string;
+ 	/** Agent config directory. Default: from getAgentDir() */
+ 	agentDir?: string;
++	/** Leave out project-level command modules (the folder is not trusted); user and bundled ones still load. */
++	excludeProject?: boolean;
+ }
+ 
+ /**
+@@ -185,7 +187,8 @@ export async function loadCustomCommands(options: LoadCustomCommandsOptions = {}
+ 	const cwd = options.cwd ?? getProjectDir();
+ 	const agentDir = options.agentDir ?? getAgentDir();
+ 
+-	const { paths } = await discoverCustomCommands({ cwd, agentDir });
++	const { paths: discovered } = await discoverCustomCommands({ cwd, agentDir });
++	const paths = options.excludeProject ? discovered.filter(entry => entry.source !== "project") : discovered;
+ 
+ 	const commands: LoadedCustomCommand[] = [];
+ 	const errors: Array<{ path: string; error: string }> = [];
+diff --git a/src/extensibility/custom-tools/loader.ts b/src/extensibility/custom-tools/loader.ts
+index 06e2d4a4f70eb682257f659f3f0bc389eda28872..ac184967fb440a7c822605fc7a3abed898ce2d3d 100644
+--- a/src/extensibility/custom-tools/loader.ts
++++ b/src/extensibility/custom-tools/loader.ts
+@@ -14,7 +14,7 @@ import { type CustomTool, loadCapability } from "../../discovery";
+ import type { ExecOptions } from "../../exec/exec";
+ import { execCommand } from "../../exec/exec";
+ import type { HookUIContext } from "../../extensibility/hooks/types";
+-import { getAllPluginToolPaths } from "../../extensibility/plugins/loader";
++import { getEnabledPlugins, resolvePluginToolPaths } from "../../extensibility/plugins/loader";
+ // Runtime self-reference: dereference this namespace only inside loader functions to keep the index.ts cycle safe.
+ import * as PiCodingAgent from "../../index";
+ import * as typebox from "../legacy-typebox";
+@@ -268,9 +268,11 @@ export async function discoverCustomToolPaths(
+ 		});
+ 	}
+ 
+-	// 2. Plugin tools: ~/.omp/plugins/node_modules/*/
+-	for (const pluginPath of await getAllPluginToolPaths(cwd)) {
+-		addPath(pluginPath, { provider: "plugin", providerName: "Plugin", level: "user" });
++	// 2. Plugin tools: ~/.omp/plugins/node_modules/*/ (user) and <project>/.omp/plugins/node_modules/*/ (project)
++	for (const plugin of await getEnabledPlugins(cwd)) {
++		for (const pluginPath of resolvePluginToolPaths(plugin)) {
++			addPath(pluginPath, { provider: "plugin", providerName: "Plugin", level: plugin.scope });
++		}
+ 	}
+ 
+ 	// 3. Explicitly configured paths (can override/add)
+diff --git a/src/extensibility/legacy-pi-coding-agent-shim.ts b/src/extensibility/legacy-pi-coding-agent-shim.ts
+index 7d6815c46eec72e795932d39abb30b86d225bbc8..1c7de16aab66ccc4f9df0faf513600f4dc97e9ac 100644
+--- a/src/extensibility/legacy-pi-coding-agent-shim.ts
++++ b/src/extensibility/legacy-pi-coding-agent-shim.ts
+@@ -41,8 +41,10 @@ import {
+ } from "@oh-my-pi/pi-utils";
+ import { getPackageDir as getOmpPackageDir } from "../config";
+ import { formatKeyHints } from "@oh-my-pi/pi-tui/app-keybindings";
++import { getNeutralProjectDir } from "../config/neutral-project-dir";
+ import type { PromptTemplate } from "../config/prompt-templates";
+ import { findScopedSettings, Settings } from "../config/settings";
++import { getActiveSettings } from "../config/settings-context";
+ import { EditTool } from "../edit";
+ import type { CreateAgentSessionOptions, CreateAgentSessionResult, LoadExtensionsResult } from "../sdk";
+ import {
+@@ -859,7 +861,12 @@ export class DefaultPackageManager {
+ 		const configuredPaths = cfgExtensions.get(settings);
+ 		const disabledExtensionIds = cfgDisabledExtensions.get(settings);
+ 		const [extensionPaths, plugins] = await Promise.all([
+-			discoverExtensionPaths(configuredPaths, this.#cwd, disabledExtensionIds),
++			// An untrusted folder contributes nothing; see `discoverSessionExtensionPaths`.
++			discoverExtensionPaths(
++				configuredPaths,
++				settings.ignoresProjectSettings ? getNeutralProjectDir() : this.#cwd,
++				disabledExtensionIds,
++			),
+ 			getEnabledPlugins(this.#cwd),
+ 		]);
+ 		const pluginByExtensionPath = new Map<string, ScopedInstalledPlugin>();
+@@ -1103,7 +1110,13 @@ export class DefaultResourceLoader implements ResourceLoader {
+ 
+ 		let settingsPromise = this.#state.settingsPromise;
+ 		if (!settingsPromise) {
+-			settingsPromise = Settings.init({ cwd, agentDir });
++			// The calling session's settings first: in the shared engine the process-wide instance is untrusted by
++			// design, which would hide a trusted chat's own project extensions.
++			const active = getActiveSettings();
++			settingsPromise =
++				active && (cwd === undefined || active.getCwd() === cwd)
++					? Promise.resolve(active)
++					: Settings.init({ cwd, agentDir });
+ 			this.#state.settingsPromise = settingsPromise;
+ 		}
+ 		const settings = await settingsPromise;
+diff --git a/src/extensibility/plugins/loader.ts b/src/extensibility/plugins/loader.ts
+index 6f20fc18fe452aa6cff4d673437ead64ce7cd485..eebe8cfc61009cbd8dcd4ef81dc7f298e1ee9f43 100644
+--- a/src/extensibility/plugins/loader.ts
++++ b/src/extensibility/plugins/loader.ts
+@@ -16,6 +16,7 @@ import {
+ 	normalizePathForComparison,
+ } from "@oh-my-pi/pi-utils";
+ import { getConfigDirPaths } from "../../config";
++import { isUntrustedProjectScope } from "../../config/settings-context";
+ import { registerPluginCacheInvalidator, resolveActiveProjectRegistryPath } from "../../discovery/helpers";
+ import { findExtensionDirectoryIndex, resolveExtensionDirectory } from "../extensions/directory-resolution";
+ import { installLegacyPiSpecifierShim } from "./legacy-pi-compat";
+@@ -31,8 +32,8 @@ installLegacyPiSpecifierShim();
+ 
+ const enabledPluginsCache = new Map<string, Promise<ScopedInstalledPlugin[]>>();
+ 
+-function enabledPluginsCacheKey(cwd: string, home?: string): string {
+-	return `${path.resolve(cwd)}\0${home === undefined ? "" : path.resolve(home)}`;
++function enabledPluginsCacheKey(cwd: string, home: string | undefined, includeProject: boolean): string {
++	return `${path.resolve(cwd)}\0${home === undefined ? "" : path.resolve(home)}\0${includeProject ? "project" : "user"}`;
+ }
+ 
+ function clearEnabledPluginsCache(): void {
+@@ -240,14 +241,22 @@ async function collectPluginsAtRoot(
+  * The optional `home` parameter pins the user plugins root for callers that
+  * need to enumerate plugins relative to a non-default home (tests with a
+  * tempdir, discovery loaders threaded with `LoadContext.home`).
++ *
++ * In an untrusted folder ({@link isUntrustedProjectScope}) the project root and
++ * the project's plugin overrides are left out unless `includeProject` asks for them
++ * (path-only reporting of what the folder would contribute).
+  */
+-export async function getEnabledPlugins(cwd: string, opts: { home?: string } = {}): Promise<ScopedInstalledPlugin[]> {
++export async function getEnabledPlugins(
++	cwd: string,
++	opts: { home?: string; includeProject?: boolean } = {},
++): Promise<ScopedInstalledPlugin[]> {
+ 	const { home } = opts;
+-	const cacheKey = enabledPluginsCacheKey(cwd, home);
++	const includeProject = opts.includeProject ?? !isUntrustedProjectScope();
++	const cacheKey = enabledPluginsCacheKey(cwd, home, includeProject);
+ 	const cached = enabledPluginsCache.get(cacheKey);
+ 	if (cached) return cached;
+ 
+-	const loadPromise = loadEnabledPlugins(cwd, home);
++	const loadPromise = loadEnabledPlugins(cwd, home, includeProject);
+ 	enabledPluginsCache.set(cacheKey, loadPromise);
+ 	try {
+ 		return await loadPromise;
+@@ -259,14 +268,18 @@ export async function getEnabledPlugins(cwd: string, opts: { home?: string } = {
+ 	}
+ }
+ 
+-async function loadEnabledPlugins(cwd: string, home?: string): Promise<ScopedInstalledPlugin[]> {
+-	const projectOverrides = await loadProjectOverrides(cwd);
++async function loadEnabledPlugins(
++	cwd: string,
++	home: string | undefined,
++	includeProject: boolean,
++): Promise<ScopedInstalledPlugin[]> {
++	const projectOverrides = includeProject ? await loadProjectOverrides(cwd) : {};
+ 
+ 	const userRoot = getPluginsDir(home);
+ 	const userPlugins = await collectPluginsAtRoot(userRoot, projectOverrides, "user");
+ 
+ 	let projectPlugins: ScopedInstalledPlugin[] = [];
+-	const projectRegistryPath = await resolveActiveProjectRegistryPath(cwd);
++	const projectRegistryPath = includeProject ? await resolveActiveProjectRegistryPath(cwd) : null;
+ 	if (projectRegistryPath) {
+ 		const projectRoot = path.dirname(projectRegistryPath);
+ 		if (normalizePathForComparison(projectRoot) !== normalizePathForComparison(userRoot)) {
+diff --git a/src/ida/runtime.ts b/src/ida/runtime.ts
+index 55fc76ddca0c3034c9866eee8463416b76a9bf7a..a8b6ae2c5ecca1c5f179238184e6588cbef37717 100644
+--- a/src/ida/runtime.ts
++++ b/src/ida/runtime.ts
+@@ -1,7 +1,8 @@
+ import { $env, logger } from "@oh-my-pi/pi-utils";
+ import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
+ import { $ } from "bun";
+-import { Settings } from "../config/settings";
++import type { Settings } from "../config/settings";
++import { withActiveSettings } from "../config/settings-context";
+ import {
+ 	enumeratePythonRuntimes,
+ 	filterEnv,
+@@ -44,10 +45,11 @@ export function resolveIdaRuntime(session: ToolSession): Promise<IdaRuntime> {
+ 		);
+ 	}
+ 	const python = cfgIdaPython.get(session.settings)?.trim() || undefined;
+-	const key = `${python ?? ""}\0${installDir}\0${session.cwd}`;
++	// An untrusted session never reuses an interpreter a trusted one found in the same folder (its `.venv`).
++	const key = `${python ?? ""}\0${installDir}\0${session.cwd}\0${session.settings.ignoresProjectSettings ? "untrusted" : "trusted"}`;
+ 	const cached = runtimes.get(key);
+ 	if (cached) return cached;
+-	const promise = probeIdaRuntime(python, installDir, session.cwd);
++	const promise = withActiveSettings(session.settings, () => probeIdaRuntime(session.settings, python, installDir, session.cwd));
+ 	runtimes.set(key, promise);
+ 	promise.catch(() => {
+ 		if (runtimes.get(key) === promise) runtimes.delete(key);
+@@ -55,8 +57,13 @@ export function resolveIdaRuntime(session: ToolSession): Promise<IdaRuntime> {
+ 	return promise;
+ }
+ 
+-async function probeIdaRuntime(python: string | undefined, installDir: string, cwd: string): Promise<IdaRuntime> {
+-	const baseEnv = filterEnv((await Settings.init()).getShellConfig().env);
++async function probeIdaRuntime(
++	settings: Settings,
++	python: string | undefined,
++	installDir: string,
++	cwd: string,
++): Promise<IdaRuntime> {
++	const baseEnv = filterEnv(settings.getShellConfig().env);
+ 	const candidates: PythonRuntime[] = python
+ 		? [resolveExplicitPythonRuntime(python, cwd, baseEnv)]
+ 		: enumeratePythonRuntimes(cwd, baseEnv);
+diff --git a/src/irc/bus.ts b/src/irc/bus.ts
+index a9ee9f3bc71a5177d04faa1b829d892c3ca83023..a475f77b820cb7810cec4f6a129308ce2d626343 100644
+--- a/src/irc/bus.ts
++++ b/src/irc/bus.ts
+@@ -25,18 +25,21 @@ interface IrcWaiter {
+ const MAILBOX_CAP = 100;
+ 
+ export class IrcBus {
+-	static #global: IrcBus | undefined;
++	static #instances = new WeakMap<AgentRegistry, IrcBus>();
+ 
+ 	static global(): IrcBus {
+-		if (!IrcBus.#global) {
+-			IrcBus.#global = new IrcBus();
++		const registry = AgentRegistry.global();
++		let bus = IrcBus.#instances.get(registry);
++		if (!bus) {
++			bus = new IrcBus(registry);
++			IrcBus.#instances.set(registry, bus);
+ 		}
+-		return IrcBus.#global;
++		return bus;
+ 	}
+ 
+ 	/** Reset the global bus. Test-only. */
+ 	static resetGlobalForTests(): void {
+-		IrcBus.#global = undefined;
++		IrcBus.#instances.delete(AgentRegistry.global());
+ 	}
+ 
+ 	readonly #registry: AgentRegistry;
+@@ -48,9 +51,7 @@ export class IrcBus {
+ 
+ 	constructor(registry: AgentRegistry = AgentRegistry.global(), lifecycle?: AgentLifecycleManager) {
+ 		this.#registry = registry;
+-		// Lazy: the lifecycle global self-constructs against the global registry,
+-		// so only touch it when a parked recipient actually needs reviving.
+-		this.#lifecycle = () => lifecycle ?? AgentLifecycleManager.global();
++		this.#lifecycle = () => lifecycle ?? AgentLifecycleManager.forRegistry(registry);
+ 	}
+ 
+ 	/**
+diff --git a/src/modes/runtime-init.test.ts b/src/modes/runtime-init.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..3ef3c98e9ae6992810caab0fe506a18c3eba1004
+--- /dev/null
++++ b/src/modes/runtime-init.test.ts
+@@ -0,0 +1,209 @@
++import { describe, expect, test } from "bun:test";
++import type { ExtensionActions } from "../extensibility/extensions/types";
++import type { AgentSession } from "../session/agent-session";
++import { RpcExtensionUserMessageTracker, watchRpcInputAdmission } from "./rpc/rpc-prompt-results";
++import { initializeExtensions } from "./runtime-init";
++
++async function initializeSendHarness(sends: Pick<AgentSession, "sendUserMessage" | "sendCustomMessage">) {
++	let actions: ExtensionActions | undefined;
++	const session = {
++		...sends,
++		extensionRunner: {
++			initialize(next: ExtensionActions) { actions = next; },
++			onError() {},
++			async emit() {},
++		},
++	} as unknown as AgentSession;
++	const tracker = new RpcExtensionUserMessageTracker();
++	const errors: Error[] = [];
++	await initializeExtensions(session, {
++		reportSendError: (_action, error) => errors.push(error),
++		reportRuntimeError: error => { throw new Error(error.error); },
++		trackAgentInvokingMessage: (task, admission) => tracker.trackAgentMessageTask(task, admission),
++	});
++	if (!actions) throw new Error("Extension actions were not initialized");
++	return { actions, tracker, errors };
++}
++
++describe("extension runtime admission wiring", () => {
++	for (const deliverAs of [undefined, "steer", "followUp", "aside"] as const) {
++		test(`sendUserMessage ${deliverAs ?? "default"} acknowledges prepared delivery before turn completion`, async () => {
++			const prepared = Promise.withResolvers<void>();
++			const fullTurn = Promise.withResolvers<void>();
++			const queued: string[] = [];
++			const harness = await initializeSendHarness({
++				sendUserMessage: async (_content, options) => {
++					expect(options?.deliverAs).toBe(deliverAs);
++					await prepared.promise;
++					queued.push("message");
++					options?.onPromptAdmitted?.();
++					await fullTurn.promise;
++				},
++				sendCustomMessage: async () => false,
++			});
++			const ack = watchRpcInputAdmission({
++				extensionUserMessageTracker: harness.tracker,
++				startInput: async () => {
++					harness.actions.sendUserMessage("message", { deliverAs });
++					return "local";
++				},
++			}).then(result => {
++				expect(queued).toEqual(["message"]);
++				return result;
++			});
++			prepared.resolve();
++			expect(await ack).toEqual({ inputDisposition: "local", agentInvoked: true });
++			expect(harness.errors).toEqual([]);
++			fullTurn.resolve();
++		});
++	}
++
++	for (const sendOptions of [{ triggerTurn: true }, { deliverAs: "aside" as const }]) {
++		test(`sendMessage ${sendOptions.triggerTurn ? "triggerTurn" : "aside"} counts streaming queue insertion even when no fresh turn starts`, async () => {
++			const prepared = Promise.withResolvers<void>();
++			let queued = false;
++			const harness = await initializeSendHarness({
++				sendUserMessage: async () => {},
++				sendCustomMessage: async (_message, options) => {
++					await prepared.promise;
++					queued = true;
++					options?.onPromptAdmitted?.();
++					return false;
++				},
++			});
++			const ack = watchRpcInputAdmission({
++				extensionUserMessageTracker: harness.tracker,
++				startInput: async () => {
++					harness.actions.sendMessage({ customType: "test", content: "queued", display: false }, sendOptions);
++					return "local";
++				},
++			}).then(result => {
++				expect(queued).toBe(true);
++				return result;
++			});
++			prepared.resolve();
++			expect(await ack).toEqual({ inputDisposition: "local", agentInvoked: true });
++			expect(harness.errors).toEqual([]);
++		});
++	}
++
++	test("triggerTurn custom send does not wait for its full turn to acknowledge", async () => {
++		const fullTurn = Promise.withResolvers<void>();
++		const harness = await initializeSendHarness({
++			sendUserMessage: async () => {},
++			sendCustomMessage: async (_message, options) => {
++				options?.onPromptAdmitted?.();
++				await fullTurn.promise;
++				return true;
++			},
++		});
++		const ack = await watchRpcInputAdmission({
++			extensionUserMessageTracker: harness.tracker,
++			startInput: async () => {
++				harness.actions.sendMessage({ customType: "test", content: "turn", display: false }, { triggerTurn: true });
++				return "local";
++			},
++		});
++		expect(ack).toEqual({ inputDisposition: "local", agentInvoked: true });
++		fullTurn.resolve();
++	});
++
++	test("folded aside and deferred triggerTurn sends remain local without synthetic failures", async () => {
++		const harness = await initializeSendHarness({
++			sendUserMessage: async () => {},
++			sendCustomMessage: async () => false,
++		});
++		const ack = await watchRpcInputAdmission({
++			extensionUserMessageTracker: harness.tracker,
++			startInput: async () => {
++				harness.actions.sendMessage({ customType: "test", content: "fold", display: false }, { deliverAs: "aside" });
++				harness.actions.sendMessage({ customType: "test", content: "defer", display: false }, { triggerTurn: true });
++				return "local";
++			},
++		});
++		expect(ack).toEqual({ inputDisposition: "local", agentInvoked: false });
++		expect(harness.errors).toEqual([]);
++	});
++
++	test("cancelled user and custom sends preserve the originating input", async () => {
++		for (const sendKind of ["user", "custom"] as const) {
++			const harness = await initializeSendHarness({
++				sendUserMessage: async () => {},
++				sendCustomMessage: async (_message, options) => {
++					options?.onPromptCancelled?.();
++					return false;
++				},
++			});
++			const ack = await watchRpcInputAdmission({
++				extensionUserMessageTracker: harness.tracker,
++				startInput: async () => {
++					if (sendKind === "user") harness.actions.sendUserMessage("cancelled");
++					else harness.actions.sendMessage(
++						{ customType: "test", content: "cancelled", display: false },
++						{ triggerTurn: true },
++					);
++					return "local";
++				},
++			});
++			expect(ack).toEqual({ inputDisposition: "cancelled", agentInvoked: false });
++		}
++	});
++
++	test("an admitted sibling wins over a cancelled nested send", async () => {
++		const harness = await initializeSendHarness({
++			sendUserMessage: async () => {},
++			sendCustomMessage: async (_message, options) => {
++				options?.onPromptAdmitted?.();
++				return false;
++			},
++		});
++		const ack = await watchRpcInputAdmission({
++			extensionUserMessageTracker: harness.tracker,
++			startInput: async () => {
++				harness.actions.sendUserMessage("cancelled");
++				harness.actions.sendMessage({ customType: "test", content: "queued", display: false }, { triggerTurn: true });
++				return "local";
++			},
++		});
++		expect(ack).toEqual({ inputDisposition: "local", agentInvoked: true });
++	});
++
++	test("nested sendMessage during sendUserMessage preparation delays the original ACK", async () => {
++		const parentPrepared = Promise.withResolvers<void>();
++		const childPrepared = Promise.withResolvers<void>();
++		const childStarted = Promise.withResolvers<void>();
++		const fullTurn = Promise.withResolvers<void>();
++		const queue: string[] = [];
++		const harness = await initializeSendHarness({
++			sendUserMessage: async (_content, options) => {
++				await parentPrepared.promise;
++				harness.actions.sendMessage({ customType: "test", content: "child", display: false }, { triggerTurn: true });
++				queue.push("parent");
++				options?.onPromptAdmitted?.();
++				await fullTurn.promise;
++			},
++			sendCustomMessage: async (_message, options) => {
++				childStarted.resolve();
++				await childPrepared.promise;
++				queue.push("child");
++				options?.onPromptAdmitted?.();
++				return false;
++			},
++		});
++		const ack = watchRpcInputAdmission({
++			extensionUserMessageTracker: harness.tracker,
++			startInput: async () => {
++				harness.actions.sendUserMessage("parent");
++				return "local";
++			},
++		}).then(result => {
++			expect(queue).toEqual(["parent", "child"]);
++			return result;
++		});
++		parentPrepared.resolve();
++		await childStarted.promise;
++		childPrepared.resolve();
++		expect(await ack).toEqual({ inputDisposition: "local", agentInvoked: true });
++		fullTurn.resolve();
++	});
++});
+diff --git a/src/modes/runtime-init.ts b/src/modes/runtime-init.ts
+index edf58307c8d189cef39a16a496ce7f6a74221fd4..50e9a19acdf1f65290c0fe2ddc6293ffe046f712 100644
+--- a/src/modes/runtime-init.ts
++++ b/src/modes/runtime-init.ts
+@@ -15,6 +15,8 @@ import { USER_INTERRUPT_LABEL } from "../session/messages";
+ /** Action name for an extension-originated send failure. */
+ export type ExtensionSendAction = "extension_send" | "extension_send_user";
+ 
++export type ExtensionMessageAdmission = "admitted" | "local" | "cancelled";
++
+ export interface InitializeExtensionsOptions {
+ 	/** Reports an error thrown by an extension-initiated send. */
+ 	reportSendError: (action: ExtensionSendAction, error: Error) => void;
+@@ -26,10 +28,8 @@ export interface InitializeExtensionsOptions {
+ 	mode?: ExtensionMode;
+ 	/** Optional UI context (rpc supplies one; print runs headless). */
+ 	uiContext?: ExtensionUIContext;
+-	/** Optional lifecycle hook for extension-originated messages that can start an agent turn. */
+-	markAgentInvokingMessage?: () => void;
+-	/** Optional lifecycle hook for extension-originated sends whose success/failure determines turn ownership. */
+-	trackAgentInvokingMessage?: (task: Promise<unknown>) => void;
++	/** Tracks completion separately from causal queue/dispatch admission. */
++	trackAgentInvokingMessage?: (task: Promise<unknown>, admission: Promise<ExtensionMessageAdmission>) => void;
+ 	/** Optional observer of every extension-originated send, turn-triggering or not. */
+ 	trackExtensionSend?: (task: Promise<unknown>) => void;
+ 	/** Optional filter applied to tool names an extension activates. */
+@@ -63,7 +63,6 @@ export async function initializeExtensions(session: AgentSession, options: Initi
+ 		onShutdown,
+ 		mode = "print",
+ 		uiContext,
+-		markAgentInvokingMessage,
+ 		trackAgentInvokingMessage,
+ 		trackExtensionSend,
+ 		filterActiveTools,
+@@ -75,44 +74,33 @@ export async function initializeExtensions(session: AgentSession, options: Initi
+ 		// ExtensionActions
+ 		{
+ 			sendMessage: (message, sendOptions) => {
+-				const sendTask = session.sendCustomMessage(message, sendOptions);
++				const admission = Promise.withResolvers<ExtensionMessageAdmission>();
++				const sendTask = session.sendCustomMessage(message, {
++					...sendOptions,
++					onPromptAdmitted: () => admission.resolve("admitted"),
++					onPromptCancelled: () => admission.resolve("cancelled"),
++				});
+ 				trackExtensionSend?.(sendTask);
+-				if (sendOptions?.triggerTurn || sendOptions?.deliverAs === "aside") {
+-					// sendCustomMessage resolves `false` for outcomes that provably start no turn
+-					// (streaming queue, idle plan-mode fold, deferred ACP turn) — only a `true`
+-					// result should mark this send as agent-invoking, so downstream trackers (RPC's
+-					// hasAgentMessageTask) don't wait on agent events that will never arrive.
+-					const invokingTask = sendTask.then(started => {
+-						if (!started) throw new Error("send did not invoke the agent");
+-					});
+-					// A send that starts no turn (idle steer superseded by a concurrent turn,
+-					// plan-mode fold, deferred ACP turn) is a normal outcome, not a process error.
+-					// `trackAgentInvokingMessage` only attaches a handler while a prompt scope is
+-					// active (RpcExtensionUserMessageTracker); outside that window this rejection
+-					// would otherwise be unobserved and fatal the process. Mark it handled up front.
+-					invokingTask.catch(() => {});
+-					if (trackAgentInvokingMessage) {
+-						trackAgentInvokingMessage(invokingTask);
+-					} else {
+-						invokingTask.then(
+-							() => markAgentInvokingMessage?.(),
+-							() => {},
+-						);
+-					}
+-				}
+-				sendTask.catch(e => {
++				trackAgentInvokingMessage?.(sendTask, admission.promise);
++				// Appending/folding a message is local; cancelled setup reports separately.
++				// A successful full turn must never be the acknowledgement barrier.
++				void sendTask.then(() => admission.resolve("local"), admission.reject);
++				void admission.promise.catch(() => {});
++				void sendTask.catch(e => {
+ 					reportSendError("extension_send", e instanceof Error ? e : new Error(String(e)));
+ 				});
+ 			},
+ 			sendUserMessage: (content, sendOptions) => {
+-				const sendTask = session.sendUserMessage(content, sendOptions);
++				const admission = Promise.withResolvers<ExtensionMessageAdmission>();
++				const sendTask = session.sendUserMessage(content, {
++					...sendOptions,
++					onPromptAdmitted: () => admission.resolve("admitted"),
++				});
+ 				trackExtensionSend?.(sendTask);
+-				if (trackAgentInvokingMessage) {
+-					trackAgentInvokingMessage(sendTask);
+-				} else {
+-					markAgentInvokingMessage?.();
+-				}
+-				sendTask.catch(e => {
++				trackAgentInvokingMessage?.(sendTask, admission.promise);
++				void sendTask.then(() => admission.resolve("cancelled"), admission.reject);
++				void admission.promise.catch(() => {});
++				void sendTask.catch(e => {
+ 					reportSendError("extension_send_user", e instanceof Error ? e : new Error(String(e)));
+ 				});
+ 			},
+diff --git a/src/sdk.ts b/src/sdk.ts
+index 6ff6f7f5aee0fb07ab79587d6a84432af20d5dba..cbddd01a048f718881a08a4a9e3cb33c7c931a86 100644
+--- a/src/sdk.ts
++++ b/src/sdk.ts
+@@ -86,14 +86,16 @@ import { formatModelSelectorValue, parseModelString } from "@oh-my-pi/pi-tui/ove
+ import { loadPromptTemplates as loadPromptTemplatesInternal, type PromptTemplate } from "./config/prompt-templates";
+ import { buildServiceTierByFamily } from "./config/service-tier";
+ import { bindEffects, combine } from "./config/registry";
++import { getNeutralProjectDir } from "./config/neutral-project-dir";
+ import { Settings } from "./config/settings";
++import { withActiveSettings } from "./config/settings-context";
+ import { CursorExecHandlers, type CursorMcpResourceAdapter } from "./cursor";
+ import { createBridgeEditTool, createBridgeGrepFactory } from "./cursor-bridge-tools";
+ import "./discovery";
+ import { LiveImageUrlService } from "./blob-broker/service";
+ import { wrapStreamFnWithBlobUrlFallback } from "./blob-broker/stream-fallback";
+ import { initializeWithSettings } from "./discovery";
+-import { setInvocationConfiguredExtensions, withOmpExtensionRootScope } from "./discovery/omp-extension-roots";
++import { captureOmpExtensionRootScope, setInvocationConfiguredExtensions, withOmpExtensionRootScope } from "./discovery/omp-extension-roots";
+ import { disposeVmContextsByOwner } from "./eval/js/context-manager";
+ import { getEnabledEvalPreludes, type EvalPreludeDefinition } from "./eval/preludes";
+ import { disposeAllKernelSessions, disposeKernelSessionsByOwner } from "./eval/py/executor";
+@@ -143,6 +145,7 @@ import {
+ } from "./extensibility/skills";
+ import { type FileSlashCommand, loadSlashCommands as loadSlashCommandsInternal } from "./extensibility/slash-commands";
+ import type { HindsightSessionState } from "./hindsight/state";
++import { SessionModelUnavailableError } from "./session/session-model-error";
+ import { LocalProtocolHandler, type LocalProtocolOptions } from "./internal-urls";
+ import { stripXdUrlPrefix } from "@oh-my-pi/pi-tui/tools/xd-url";
+ import { setSharedLspEnabled } from "./lsp/client";
+@@ -729,6 +732,8 @@ export interface CreateAgentSessionOptions {
+ 	 * parent — wrong for isolated tasks and for pending-action routing.
+ 	 */
+ 	preloadedCustomToolPaths?: ToolPathWithSource[];
++	/** Skip project-level custom tools (`.omp/tools/`, `.claude/tools/`, …): the cwd is not trusted. */
++	disableProjectCustomTools?: boolean;
+ 
+ 	/** Shared event bus for tool/extension communication. Default: creates new bus. */
+ 	eventBus?: EventBus;
+@@ -761,6 +766,12 @@ export interface CreateAgentSessionOptions {
+ 	enableMCP?: boolean;
+ 	/** Existing MCP manager to reuse when MCP is enabled (skips discovery, propagates to toolSession). */
+ 	mcpManager?: MCPManager;
++	/**
++	 * Declare MCP form elicitation to servers this session discovers. The host
++	 * must attach `MCPManager.setElicitationHandler`; requests that arrive
++	 * before it does are answered `cancel`. Default: false.
++	 */
++	mcpElicitation?: boolean;
+ 	/**
+ 	 * MCP tools minted from a parent's shared manager (subagent proxies). They
+ 	 * register as manager-owned MCP tools — active from the start and replaced
+@@ -864,9 +875,9 @@ export interface CreateAgentSessionOptions {
+ 	 * default at startup (`modelFallbackMessage`), or the current model when
+ 	 * `switchSession` later opens another session. Applies only when `hasUI` is
+ 	 * true and `retry.modelFallback` is on; otherwise `createAgentSession` and
+-	 * `switchSession` throw `Could not restore model <provider/id>`. Hosts whose
+-	 * `hasUI` only enables tool dialogs and cannot show the warning (rpc-ui) set
+-	 * this to false. Default: true.
++	 * `switchSession` throw `SessionModelUnavailableError`. Hosts requiring explicit
++	 * replacement consent set this to false: the last saved role model must then
++	 * restore, without silently substituting even the saved default. Default: true.
+ 	 */
+ 	allowSessionModelFallback?: boolean;
+ 	/**
+@@ -946,6 +957,8 @@ export interface CreateAgentSessionResult {
+ 	eventBus: EventBus;
+ 	/** Root-scoped bus carrying this session tree's `task:subagent:*` frames. */
+ 	subagentEventBus?: EventBus;
++	/** Re-enter this session's settings, registry and extension-discovery scope. */
++	runInContext: <T>(work: () => T) => T;
+ }
+ 
+ export type DialectFormat = "auto" | "native" | Dialect;
+@@ -1063,6 +1076,10 @@ type CliExtensionProviderOptions = ExtensionDiscoveryOptions & {
+  * (cached on {@link ToolSession.extensionPaths}) and rebuild Extension
+  * instances themselves so each session's `ExtensionAPI` (cwd, eventBus,
+  * runtime) is its own.
++ *
++ * In an untrusted folder (`settings.ignoresProjectSettings`) ambient discovery
++ * runs against an empty neutral folder instead of `cwd`: the user's own
++ * extensions, hooks and plugins load, nothing the folder contributes does.
+  */
+ export async function discoverSessionExtensionPaths(
+ 	options: ExtensionDiscoveryOptions,
+@@ -1070,13 +1087,16 @@ export async function discoverSessionExtensionPaths(
+ 	settings: Settings,
+ ): Promise<string[]> {
+ 	const roots = options.extensionRoots?.();
+-	const explicit = roots?.explicit ?? options.additionalExtensionPaths ?? [];
++	const untrusted = settings.ignoresProjectSettings;
++	const explicit = (roots?.explicit ?? options.additionalExtensionPaths ?? []).map(extensionPath =>
++		untrusted ? resolvePath(extensionPath, cwd) : extensionPath,
++	);
+ 	const explicitOnly = roots ? roots.mode === "explicit-only" : options.disableExtensionDiscovery;
+ 	const configuredPaths = explicitOnly
+ 		? [...explicit]
+ 		: [...explicit, ...(roots?.configured ?? cfgExtensions.get(settings))];
+ 	const disabledExtensionIds = explicitOnly ? undefined : cfgDisabledExtensions.get(settings);
+-	return discoverExtensionPaths(configuredPaths, cwd, disabledExtensionIds, {
++	return discoverExtensionPaths(configuredPaths, untrusted ? getNeutralProjectDir() : cwd, disabledExtensionIds, {
+ 		ambient: !explicitOnly,
+ 		includeAmbientHooks: options.includeAmbientHooks,
+ 	});
+@@ -1413,6 +1433,8 @@ export function customToolToDefinition(tool: CustomTool, sourcePath?: string): T
+ 		deferrable: tool.deferrable,
+ 		readsSkillUris: tool.readsSkillUris,
+ 		approval: typeof tool.approval === "function" ? tool.approval.bind(tool) : tool.approval,
++		// The tool's own approval summary (MCP arguments): without it the prompt shows only the tool's name.
++		formatApprovalDetails: tool.formatApprovalDetails?.bind(tool),
+ 		// Preserved through RegisteredToolAdapter so MCP-backed tools' explicit
+ 		// `strict: false` (#4336/#4340) survives the custom-tool → definition bridge.
+ 		strict: tool.strict,
+@@ -1724,7 +1746,16 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
+ 	const extensionRoots = options.extensionRoots?.();
+ 	const explicit = extensionRoots?.explicit ?? options.additionalExtensionPaths ?? [];
+ 	const mode = extensionRoots?.mode ?? (options.disableExtensionDiscovery ? "explicit-only" : "merge");
+-	return await withOmpExtensionRootScope(explicit, mode, () => createAgentSessionScoped(options));
++	const settings = await (options.settings ?? options.settingsManager ??
++		(options.bindProcessState === false
++			? Settings.loadIsolated({ cwd: options.cwd, agentDir: options.agentDir })
++			: Settings.init({ cwd: options.cwd, agentDir: options.agentDir })));
++	const registry = options.agentRegistry ?? AgentRegistry.global();
++	return await AgentRegistry.runWithRegistry(registry, () =>
++		withActiveSettings(settings, () =>
++			withOmpExtensionRootScope(explicit, mode, () => createAgentSessionScoped({ ...options, settings })),
++		),
++	);
+ }
+ 
+ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Promise<CreateAgentSessionResult> {
+@@ -1742,6 +1773,14 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 	const settings = await (options.settings ??
+ 		options.settingsManager ??
+ 		logger.time("settings", Settings.init, { cwd, agentDir }));
++	const contextRegistry = options.agentRegistry ?? AgentRegistry.global();
++	const runInExtensionScope = captureOmpExtensionRootScope();
++	// Rebind only session-owned stores: snapshot()/bind() would erase a host's
++	// per-request causal tracking scope whenever it calls a session method.
++	const runInContext = <T>(work: () => T): T =>
++		AgentRegistry.runWithRegistry(contextRegistry, () =>
++			withActiveSettings(settings, () => runInExtensionScope(work)),
++		);
+ 	// Discovery provider toggles and process-wide setting effects (theme, request limits, …)
+ 	// follow the newest holder: each top-level session holds both on its settings until disposed,
+ 	// then hands them back to the previous holder. Subagents and helper sessions never take them,
+@@ -1876,7 +1915,11 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 	const customCommandsPromise =
+ 		options.disableExtensionDiscovery || options.restrictToolNames === true
+ 			? Promise.resolve<CustomCommandsLoadResult>({ commands: [], errors: [] })
+-			: logger.time("discoverCustomCommands", loadCustomCommandsInternal, { cwd, agentDir });
++			: logger.time("discoverCustomCommands", loadCustomCommandsInternal, {
++					cwd,
++					agentDir,
++					excludeProject: settings.ignoresProjectSettings,
++				});
+ 	customCommandsPromise.catch(() => {});
+ 	const skillsSettings = cfgSkills.get(settings);
+ 	const disabledExtensionIds = cfgDisabledExtensions.get(settings);
+@@ -2038,7 +2081,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 	// extensions register below.
+ 	const sessionModelStrings =
+ 		!hasExplicitModel && hasExistingSession
+-			? getRestorableSessionModels(existingSession.models, sessionManager.getLastModelChangeRole())
++			? getRestorableSessionModels(existingSession.models, sessionManager.getLastModelChangeRole(), options.allowSessionModelFallback !== false)
+ 			: [];
+ 	let restoredSessionModelIndex = -1;
+ 	let restoredSessionThinkingLevel: ConfiguredThinkingLevel | undefined;
+@@ -2232,7 +2275,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 	let hasSession = false;
+ 	let hasRegistered = false;
+ 	const restrictToolNames = options.restrictToolNames === true;
+-	const enableLsp = options.enableLsp ?? !restrictToolNames;
++	// No language server ever runs for an untrusted folder, whichever caller (a helper session,
++	// a subagent) asks for one: the untrusted scope lives on the settings that every child inherits.
++	const enableLsp = !settings.ignoresProjectSettings && (options.enableLsp ?? !restrictToolNames);
+ 	const lspReadOnly = options.lspReadOnly ?? restrictToolNames;
+ 	// Every root owns its jobs and delivery sinks, even when another root is live.
+ 	// Children use the exact manager passed by their parent; the singleton remains
+@@ -2372,11 +2417,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 			getToolForEvalBridge: name => session?.getToolForEvalBridge(name),
+ 			getEvalBridgeToolNames: () => session?.getEvalBridgeToolNames() ?? [],
+ 			agentRegistry,
+-			// The global lifecycle releases through AgentRegistry.global(); wiring it
+-			// onto a caller-supplied registry would report a cancel while releasing an
+-			// unrelated global ref. With no lifecycle, explicit cancellation falls back to
+-			// dispose + unregister on the session's own registry.
+-			agentLifecycle: options.agentRegistry ? undefined : () => AgentLifecycleManager.global(),
++			agentLifecycle: () => AgentLifecycleManager.forRegistry(agentRegistry),
+ 			getSessionSpawns: () => options.spawns ?? "*",
+ 			getSessionAgents: () => session?.getSessionAgents() ?? [],
+ 			advertisedSessionAgents: () => session?.getAdvertisedSessionAgents() ?? [],
+@@ -2485,7 +2526,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 		// prompt is built from, and therefore advertises, the live set.
+ 		toolSession.getAdvertisedEvalPreludes = () => session?.getAdvertisedEvalPreludes() ?? getEvalPreludes();
+ 
+-		// Wire process-wide internal URL singletons owned by their real classes.
++		// Wire registry-scoped internal URL snapshots owned by their real classes.
+ 		// Top-level sessions install the active snapshots; subagents inherit them.
+ 		// Artifact and agent-output URLs resolve via `AgentRegistry.global()` —
+ 		// the protocol handlers walk each ref's `sessionManager.getArtifactsDir()`,
+@@ -2499,13 +2540,13 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 			// so without this a TTSR-only rule (e.g. a triggered builtin) is not
+ 			// addressable and `rule://` reports "Available: none".
+ 			setActiveRules([...rulebookRules, ...alwaysApplyRules, ...ttsrManager.getRules()]);
+-			if (asyncJobManager && !AsyncJobManager.instance()) AsyncJobManager.setInstance(asyncJobManager);
+ 		}
++		if (asyncJobManager) AsyncJobManager.setInstance(asyncJobManager);
+ 		const localProtocolOptions = options.localProtocolOptions ?? {
+ 			getArtifactsDir,
+ 			getSessionId: () => sessionManager.getSessionId?.() ?? null,
+ 		};
+-		if (options.localProtocolOptions && !options.parentTaskPrefix) {
++		if (options.localProtocolOptions && bindsProcessState) {
+ 			LocalProtocolHandler.setOverride(options.localProtocolOptions);
+ 		}
+ 		toolSession.getArtifactsDir = getArtifactsDir;
+@@ -2564,6 +2605,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 				const cacheStorage = settings.getStorage();
+ 				mcpManager = new MCPManager(cwd, cacheStorage ? new MCPToolCache(cacheStorage) : null);
+ 				mcpManager.setAuthStorage(authStorage);
++				if (options.mcpElicitation) mcpManager.declareElicitation();
+ 				toolSession.mcpManager = mcpManager;
+ 
+ 				if (cfgMcpNotifications.get(settings)) {
+@@ -2613,6 +2655,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 					...mcpDiscoverOptions,
+ 					cacheStorage: settings.getStorage(),
+ 					authStorage,
++					elicitation: options.mcpElicitation,
+ 				});
+ 				mcpManager = mcpResult.manager;
+ 				toolSession.mcpManager = mcpManager;
+@@ -2654,6 +2697,10 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 			customToolPaths =
+ 				options.preloadedCustomToolPaths ??
+ 				(await logger.time("discoverCustomToolPaths", () => discoverCustomToolPaths([], cwd, agentDir)));
++			// Child and isolated sessions inherit the folder's trust through their settings.
++			if (options.disableProjectCustomTools || settings.ignoresProjectSettings) {
++				customToolPaths = customToolPaths.filter(tool => tool.source?.level !== "project");
++			}
+ 			const customToolsLoadResult = await logger.time("loadCustomTools", () =>
+ 				loadCustomTools(customToolPaths, cwd, builtInToolNames, action => queueResolveHandler(toolSession, action)),
+ 			);
+@@ -2872,7 +2919,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 			restoredSessionModelIndex < 0 &&
+ 			(!options.hasUI || options.allowSessionModelFallback === false || !cfgRetryModelFallback.get(settings))
+ 		) {
+-			throw new Error(`Could not restore model ${sessionModelStrings[0]}`);
++			throw new SessionModelUnavailableError(sessionModelStrings[0]);
+ 		}
+ 		// Resolve deferred --model/subagent patterns now that extension models are
+ 		// registered. Use the same CLI resolver as the immediate path so bare role
+@@ -4221,7 +4268,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 			for (const name of initialToolNames) {
+ 				const tool = toolRegistry.get(name);
+ 				const explicitlyRequested = presentationPinnedToolNames?.has(name) === true;
+-				if (tool && xdevReadAvailable && xdevWriteAvailable && !explicitlyRequested && isMountableUnderXdev(tool))
++				if (tool && xdevReadAvailable && xdevWriteAvailable && !explicitlyRequested && isMountableUnderXdev(tool, toolSession.xdev))
+ 					mountedNames.push(name);
+ 				else topLevelToolNames.push(name);
+ 			}
+@@ -4699,6 +4746,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 			extensionPaths,
+ 			disableExtensionDiscovery: options.disableExtensionDiscovery,
+ 			autoApprove: options.autoApprove,
++			bindProcessState: bindsProcessState,
+ 			scoutAllowedBySpawnPolicy: isScoutSpawnable(undefined, options.spawns ?? "*"),
+ 			evalKernelOwnerId,
+ 			// Children borrow their parent's manager but never dispose it.
+@@ -4946,7 +4994,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 						builtInRegistryToolNames.has("write") &&
+ 						enabled.includes("read") &&
+ 						(enabled.includes("write") || toolSession.deviceOnlyWrite === true) &&
+-						isMountableUnderXdev(liveTool);
++						isMountableUnderXdev(liveTool, toolSession.xdev);
+ 					const nextMounted = shouldMount
+ 						? mounted.includes(name)
+ 							? mounted
+@@ -5132,7 +5180,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 							getActiveModelString,
+ 						};
+ 						await vibeRegistry.suspendScope(vibeRegistry.ownerScope(vibeParentSession), scopedAsyncJobManager);
+-						await AgentLifecycleManager.global().dispose();
++						await AgentLifecycleManager.forRegistry(agentRegistry).dispose();
+ 					}
+ 					await originalDispose();
+ 				} finally {
+@@ -5487,16 +5535,34 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
+ 		startDeferredMCPDiscovery?.(session);
+ 
+ 		startupCleanup.move();
++		// Calls from an embedding host arrive outside the construction async chain.
++		// Bind both prototype methods and the SDK's own dispose override so tools,
++		// deferred work and extension callbacks retain their owning chat's scope.
++		for (const name of new Set([
++			...Object.getOwnPropertyNames(AgentSession.prototype),
++			...Object.getOwnPropertyNames(session),
++		])) {
++			if (name === "constructor") continue;
++			const descriptor = Object.getOwnPropertyDescriptor(session, name) ??
++				Object.getOwnPropertyDescriptor(AgentSession.prototype, name);
++			if (!descriptor || typeof descriptor.value !== "function") continue;
++			const method = descriptor.value as (...args: unknown[]) => unknown;
++			Object.defineProperty(session, name, {
++				...descriptor,
++				value: (...args: unknown[]) => runInContext(() => method.apply(session, args)),
++			});
++		}
+ 		return {
+ 			session,
+ 			extensionsResult,
+-			setToolUIContext,
++			setToolUIContext: (ui, hasUI) => runInContext(() => setToolUIContext(ui, hasUI)),
+ 			mcpManager,
+ 			modelFallbackMessage,
+ 			lspServers,
+-			startBackgroundModelDiscovery: startRuntimeDiscovery,
++			startBackgroundModelDiscovery: () => runInContext(startRuntimeDiscovery),
+ 			eventBus,
+ 			subagentEventBus,
++			runInContext,
+ 		};
+ 	} catch (error) {
+ 		try {
+diff --git a/src/session/agent-session-types.ts b/src/session/agent-session-types.ts
+index d7344a265aaf1abb23267675b4f3dd9c8f07d9a3..89a0fff0cc47785b0fcbc50c5b17e4071edb9d3a 100644
+--- a/src/session/agent-session-types.ts
++++ b/src/session/agent-session-types.ts
+@@ -22,6 +22,7 @@ import type {
+ import type { postmortem } from "@oh-my-pi/pi-utils";
+ import type { AdvisorConfig } from "@oh-my-pi/pi-tui/overlays/advisor-config";
+ import type { AsyncJob, AsyncJobDeliveryState, AsyncJobManager } from "../async";
++import type { JobOutputLog } from "../async/job-output";
+ import type { EffectiveExtensionRoots } from "../capability/types";
+ import type { AgentDefinition } from "../task/types";
+ import type { SessionAccountPoolScope } from "../config/account-pools";
+@@ -95,6 +96,8 @@ export interface AsyncJobInspection {
+ 	output?: string;
+ 	/** Artifact holding the full output when `output` is cut. */
+ 	artifactId?: string;
++	/** The output the job streamed, by byte offset; live while it runs. Absent for jobs that never stream. */
++	outputLog?: JobOutputLog;
+ }
+ 
+ /** Snapshot of running, recent, and pending-delivery asynchronous jobs. */
+@@ -399,6 +402,8 @@ export interface AgentSessionConfig {
+ 	advisorConfigWarnings?: string[];
+ 	/** Disconnect the MCP manager owned by this session during disposal. */
+ 	disconnectOwnedMcpManager?: () => Promise<void>;
++	/** Whether this session owns process-wide workers and extension-triggered exit. */
++	bindProcessState?: boolean;
+ 	/** System prompt used by automatic session-title generation. */
+ 	titleSystemPrompt?: string;
+ 	/**
+@@ -443,14 +448,10 @@ export interface PromptOptions {
+ 	/** Delegator's open-endedness description (task tool `solutionSpace`); replaces the prompt as `auto` thinking classification input. */
+ 	solutionSpace?: string;
+ 	/**
+-	 * Called synchronously once this prompt is admitted: idle, at the start of
+-	 * #promptWithMessage's own turn setup (before preflight, image
+-	 * normalization, or provider dispatch); while streaming, once the message
+-	 * is pushed onto its steer/follow-up/aside queue (after image
+-	 * normalization and vision-description preprocessing for that prompt); or
+-	 * is routed to an extension command, before its handler runs. Admission is
+-	 * not proof that a model call will occur. A prompt dropped, cancelled, or
+-	 * failed before admission still only settles through the returned promise.
++	 * Called synchronously when this message enters its steer/follow-up/aside
++	 * queue, or when the agent accepts its prepared idle turn.
++	 * Local commands, cancelled preparation and failed preflight do not call it.
++	 * The returned promise still covers the full turn, independently of admission.
+ 	 */
+ 	onPromptAdmitted?: () => void;
+ }
+@@ -473,12 +474,16 @@ export interface FollowUpOptions {
+ 	expandPromptTemplates?: boolean;
+ 	/** Explicit billing/initiator attribution. */
+ 	attribution?: MessageAttribution;
++	/** Called when the prepared message is actually queued. */
++	onPromptAdmitted?: () => void;
+ }
+ 
+ /** Options for AgentSession.steer(). */
+ export interface SteerOptions {
+ 	/** Explicit billing/initiator attribution. */
+ 	attribution?: MessageAttribution;
++	/** Called when the prepared message is actually queued. */
++	onPromptAdmitted?: () => void;
+ }
+ 
+ /** Options for AgentSession.sendUserMessage(). */
+@@ -487,6 +492,8 @@ export interface SendUserMessageOptions {
+ 	deliverAs?: "steer" | "followUp" | "aside";
+ 	/** Explicit billing/initiator attribution. */
+ 	attribution?: MessageAttribution;
++	/** Called at queue insertion or prepared turn dispatch, not at turn completion. */
++	onPromptAdmitted?: () => void;
+ }
+ 
+ /** Result from a handoff operation. */
+diff --git a/src/session/agent-session.ts b/src/session/agent-session.ts
+index e9e75186ed56a4dd061e0597cf896c003734f17d..fc543262c9eb1056f5cc7a6236f4d34319122800 100644
+--- a/src/session/agent-session.ts
++++ b/src/session/agent-session.ts
+@@ -13,6 +13,7 @@
+  * Modes use this class and add their own I/O layer on top.
+  */
+ 
++import { SessionModelUnavailableError } from "./session-model-error";
+ import * as fs from "node:fs";
+ import * as os from "node:os";
+ import * as path from "node:path";
+@@ -454,6 +455,7 @@ import {
+ 	type PersistedSessionInit,
+ 	type SessionManager,
+ } from "./session-manager";
++import type { SessionLeaseAuthority } from "./session-storage";
+ import { SessionMemory, type SessionMemoryHost } from "./session-memory";
+ import { buildSessionMetadata } from "./session-metadata";
+ import { SessionProviderBoundary, type SessionProviderBoundaryHost } from "./session-provider-boundary";
+@@ -1096,10 +1098,13 @@ export class AgentSession implements SettingsScope {
+ 	 * refreshed exactly once rather than on every response (#9001).
+ 	 */
+ 	#lazyContextRefreshed = new Set<string>();
++	/** Windows providers stated in overflow errors, by `provider/id`; re-applied on every rebind of that model. */
++	readonly #reportedContextWindows = new Map<string, number>();
+ 	#onSseEvent: SimpleStreamOptions["onSseEvent"] | undefined;
+ 	#sideStreamFn: StreamFn;
+ 	#convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
+ 	#disconnectOwnedMcpManager: (() => Promise<void>) | undefined;
++	readonly #bindProcessState: boolean;
+ 
+ 	readonly #ttsr: TtsrCoordinator;
+ 	readonly #stats: SessionStatsTracker;
+@@ -1773,6 +1778,7 @@ export class AgentSession implements SettingsScope {
+ 			settings: this.settings,
+ 			extensionRunner: () => this.#extensionRunner,
+ 			isStreaming: () => this.isStreaming,
++			getResourceOwnerId: () => this.#eval.getKernelOwnerId(),
+ 		};
+ 		this.#bash = new BashRunner(bashHost);
+ 		// Power assertions are taken per turn (see #beginInFlight); nothing acquired here.
+@@ -2222,6 +2228,7 @@ export class AgentSession implements SettingsScope {
+ 			skillsReloadable: config.skillsReloadable,
+ 		});
+ 		this.#disconnectOwnedMcpManager = config.disconnectOwnedMcpManager;
++		this.#bindProcessState = config.bindProcessState !== false;
+ 		const ttsrHost: TtsrCoordinatorHost = {
+ 			agent: this.agent,
+ 			sessionManager: this.sessionManager,
+@@ -2548,6 +2555,7 @@ export class AgentSession implements SettingsScope {
+ 				this.#models.setModelTemporary(model, thinkingLevel, options, "automatic"),
+ 			abort: options => this.abort(options),
+ 			abortHandoff: () => this.abortHandoff(),
++			adoptReportedContextWindow: tokens => this.#adoptReportedContextWindow(tokens),
+ 		};
+ 		this.#maintenance = new SessionMaintenance(maintenanceHost);
+ 		this.addDisposer(
+@@ -2602,7 +2610,7 @@ export class AgentSession implements SettingsScope {
+ 		cfgRatchetEnabled.listen(this, enabled => this.#reconcileEvalPreludeSetting("ratchet.enabled", enabled));
+ 		cfgArchiveEnabled.listen(this, enabled => this.#reconcileEvalPreludeSetting("archive.enabled", enabled));
+ 		cfgBrowserIdleCloseSec.listen(this, seconds => {
+-			const ownerId = this.sessionManager.getSessionId() ?? "";
++			const ownerId = this.#eval.getKernelOwnerId() ?? this.sessionManager.getSessionId() ?? "";
+ 			// Any change invalidates the armed deadline: cancel first (its
+ 			// sequence bump stops an in-flight sweep re-arming the old
+ 			// value), then re-arm under the new one. A non-positive value
+@@ -3070,6 +3078,7 @@ export class AgentSession implements SettingsScope {
+ 			exitCode,
+ 			output,
+ 			artifactId: details?.meta?.truncation?.artifactId,
++			outputLog: job.output,
+ 		};
+ 	}
+ 
+@@ -5868,7 +5877,7 @@ export class AgentSession implements SettingsScope {
+ 	 * never throws, so teardown cannot break the event flow.
+ 	 */
+ 	async #settleOwnedBrowserTabs(): Promise<void> {
+-		const ownerId = this.sessionManager.getSessionId();
++		const ownerId = this.#eval.getKernelOwnerId() ?? this.sessionManager.getSessionId();
+ 		if (!ownerId) return;
+ 		try {
+ 			const idleSec = cfgBrowserIdleCloseSec.get(this.settings);
+@@ -5934,8 +5943,8 @@ export class AgentSession implements SettingsScope {
+ 		try {
+ 			await state?.dispose({ timeoutMs: consolidateTimeoutMs });
+ 		} finally {
+-			// Consolidation may embed final memories, so drop the embedding-server connection only afterward.
+-			await shutdownMnemopiEmbedClient();
++			// Embedded chats share the embedding connection; only its process owner may close it.
++			if (this.#bindProcessState) await shutdownMnemopiEmbedClient();
+ 		}
+ 	}
+ 
+@@ -5990,11 +5999,11 @@ export class AgentSession implements SettingsScope {
+ 			logger.warn("Session dispose: Sharpshooter release failed", { error: String(error) });
+ 		}
+ 		const advisorRecorderClosed = this.#advisors.recorderClosed();
+-		releaseShellSessions(this.sessionManager.getSessionId());
++		releaseShellSessions(this.#eval.getKernelOwnerId());
+ 		const results = await Promise.allSettled([
+ 			this.#disposeOwnedAsyncJobs(),
+ 			this.#eval.disposeKernels(),
+-			this.#releaseOwnedBrowserTabs(this.sessionManager.getSessionId()),
++			this.#releaseOwnedBrowserTabs(this.#eval.getKernelOwnerId() ?? this.sessionManager.getSessionId()),
+ 			this.#releaseOwnedComputerSessions(this.#eval.getKernelOwnerId()),
+ 			this.#disconnectOwnedMcp(),
+ 			advisorRecorderClosed,
+@@ -6291,10 +6300,10 @@ export class AgentSession implements SettingsScope {
+ 
+ 	async #refreshLazyLocalContext(model: Model): Promise<void> {
+ 		try {
+-			const refreshed = this.#modelRegistry.fitContextWindow(
++			const refreshed = this.#withReportedContextWindow(this.#modelRegistry.fitContextWindow(
+ 				await this.#modelRegistry.refreshSelectedModelMetadata(model),
+ 				this.settings,
+-			);
++			));
+ 			const current = this.model;
+ 			// Skip if the user switched models mid-stream, or the runtime window
+ 			// matches what the session already holds.
+@@ -7598,7 +7607,7 @@ export class AgentSession implements SettingsScope {
+ 		// Handle extension commands first (execute immediately, even during streaming)
+ 		if (expandPromptTemplates && text.startsWith("/")) {
+ 			if (options?.runCommands !== false) {
+-				const handled = await this.#tryExecuteExtensionCommand(text, options?.onPromptAdmitted);
++				const handled = await this.#tryExecuteExtensionCommand(text);
+ 				if (handled) {
+ 					return false;
+ 				}
+@@ -8193,7 +8202,6 @@ export class AgentSession implements SettingsScope {
+ 		const setupAbort = new AbortController();
+ 		this.#promptSetupAbortController = setupAbort;
+ 		try {
+-			options?.onPromptAdmitted?.();
+ 			await this.#recovery.maybeRestoreRetryFallbackPrimary();
+ 			// Auto-prewalk: return from the previous task's handoff before the usage preflight checks the model,
+ 			// then judge this task alongside the rest of setup; the decision is applied right before dispatch.
+@@ -8416,7 +8424,7 @@ export class AgentSession implements SettingsScope {
+ 				this.#planReferenceSent = true;
+ 			}
+ 			try {
+-				await this.#recovery.promptAgentWithIdleRetry(messages, agentPromptOptions);
++				await this.#recovery.promptAgentWithIdleRetry(messages, agentPromptOptions, options?.onPromptAdmitted);
+ 			} finally {
+ 				this.#stats.setPendingSnapshot(undefined);
+ 			}
+@@ -8435,9 +8443,8 @@ export class AgentSession implements SettingsScope {
+ 
+ 	/**
+ 	 * Try to execute an extension command. Returns true if command was found and executed.
+-	 * `onRouted` fires once the command is found, before its handler runs.
+ 	 */
+-	async #tryExecuteExtensionCommand(text: string, onRouted?: () => void): Promise<boolean> {
++	async #tryExecuteExtensionCommand(text: string): Promise<boolean> {
+ 		if (!this.#extensionRunner) return false;
+ 
+ 		// Parse command name and args
+@@ -8447,7 +8454,6 @@ export class AgentSession implements SettingsScope {
+ 
+ 		const command = this.#extensionRunner.getCommand(commandName);
+ 		if (!command) return false;
+-		onRouted?.();
+ 
+ 		// Get command context from extension runner (includes session control methods)
+ 		const ctx = this.#extensionRunner.createCommandContext();
+@@ -8478,7 +8484,7 @@ export class AgentSession implements SettingsScope {
+ 			cwd: this.sessionManager.getCwd(),
+ 			sessionManager: this.sessionManager,
+ 			modelRegistry: this.#modelRegistry,
+-			isProjectTrusted: () => true,
++			isProjectTrusted: () => !this.settings.ignoresProjectSettings,
+ 			// Used only when the session has no extension runner. `createAgentSession` always builds
+ 			// one (carrying the real identity), so only hand-constructed sessions land here.
+ 			agent: TOP_LEVEL_AGENT,
+@@ -8491,11 +8497,9 @@ export class AgentSession implements SettingsScope {
+ 			},
+ 			hasPendingMessages: () => this.queuedMessageCount > 0,
+ 			shutdown: () => {
+-				// Await the idempotent dispose() before exiting so the browser
+-				// reaper and other bounded teardown complete — a fire-and-forget
+-				// `void this.dispose()` raced process.exit() and could leave an
+-				// OMP-owned Chromium alive (#5643).
+-				void this.dispose().finally(() => process.exit(0));
++				void this.dispose().finally(() => {
++					if (this.#bindProcessState) process.exit(0);
++				});
+ 			},
+ 			resolvePlanReview: () => false,
+ 			getPendingPlanReview: () => undefined,
+@@ -8616,6 +8620,7 @@ export class AgentSession implements SettingsScope {
+ 			timestamp: submittedAt,
+ 			attribution: options?.attribution,
+ 			rawText: text,
++			onPromptAdmitted: options?.onPromptAdmitted,
+ 		});
+ 	}
+ 
+@@ -8641,6 +8646,7 @@ export class AgentSession implements SettingsScope {
+ 				timestamp: submittedAt,
+ 				attribution: options?.attribution,
+ 				rawText: text,
++				onPromptAdmitted: options?.onPromptAdmitted,
+ 			});
+ 			return;
+ 		}
+@@ -8648,6 +8654,7 @@ export class AgentSession implements SettingsScope {
+ 		// #queueUserMessage (which clears advisor auto-resume suppression and
+ 		// enqueues as a user-role message) and place the developer message
+ 		// directly on the follow-up queue.
++		const generation = this.#promptGeneration;
+ 		const normalizedImages = await this.#normalizeImagesForModel(images);
+ 		const content: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
+ 		if (normalizedImages?.length) {
+@@ -8656,6 +8663,7 @@ export class AgentSession implements SettingsScope {
+ 		const imageDescriptionNotice = normalizedImages?.length
+ 			? await this.#buildImageDescriptionNotice(normalizedImages)
+ 			: undefined;
++		if (this.#promptGeneration !== generation || this.#isDisposed) return;
+ 		this.#allowQueuedMessageDrainRetry();
+ 		if (imageDescriptionNotice) this.agent.followUp(imageDescriptionNotice);
+ 		this.agent.followUp({
+@@ -8668,6 +8676,7 @@ export class AgentSession implements SettingsScope {
+ 			// user's prompt anchor, matching the live agent_start clear.
+ 			synthetic: true,
+ 		});
++		options.onPromptAdmitted?.();
+ 		this.#scheduleIdleQueueDrain();
+ 	}
+ 
+@@ -8684,11 +8693,15 @@ export class AgentSession implements SettingsScope {
+ 	 * it, reintroducing the mode's stale-tool failure on the restarted turn
+ 	 * (issue #8326). Suppressing the drain across teardown guarantees the queued
+ 	 * turn resumes only after teardown, so it runs as a clean non-mode turn.
++	 *
++	 * RPC `abort_and_prompt` holds the drain the same way until its replacement
++	 * prompt is admitted, so queued input follows that prompt instead of
++	 * resuming first and refusing it as busy.
+ 	 */
+-	async runModeExitTeardown(teardown: () => Promise<void>): Promise<void> {
++	async runModeExitTeardown<T>(teardown: () => Promise<T>): Promise<T> {
+ 		this.#modeExitDrainSuppressionDepth++;
+ 		try {
+-			await teardown();
++			return await teardown();
+ 		} finally {
+ 			this.#modeExitDrainSuppressionDepth--;
+ 			if (this.#modeExitDrainSuppressionDepth === 0) {
+@@ -8742,6 +8755,7 @@ export class AgentSession implements SettingsScope {
+ 		// description was in flight and drop a record that would otherwise land in a
+ 		// different session's queue.
+ 		const sessionGeneration = this.#sessionGeneration;
++		const promptGeneration = options?.promptGeneration ?? (mode === "aside" ? undefined : this.#promptGeneration);
+ 		// A queued user message (RPC/SDK/collab steer or follow-up, or a typed message
+ 		// while streaming) is a deliberate resume; re-enable advisor auto-resume that
+ 		// a user interrupt suppressed. An aside is non-interrupting by design — it must
+@@ -8766,11 +8780,15 @@ export class AgentSession implements SettingsScope {
+ 			: normalizedImages?.length
+ 				? await this.#buildImageDescriptionNotice(normalizedImages)
+ 				: undefined;
+-		if (options?.promptGeneration !== undefined && this.#promptGeneration !== options.promptGeneration) {
++		if (this.#sessionGeneration !== sessionGeneration && await this.#sessionGenerationChanged(sessionGeneration)) {
++			return false;
++		}
++		if ((promptGeneration !== undefined && this.#promptGeneration !== promptGeneration) || this.#isDisposed) {
+ 			return false;
+ 		}
+ 		if (mode === "aside") {
+ 			if (await this.#sessionGenerationChanged(sessionGeneration)) return false;
++			if ((promptGeneration !== undefined && this.#promptGeneration !== promptGeneration) || this.#isDisposed) return false;
+ 			const records: AgentMessage[] = [...prependMessages, ...attachmentSourceNotices];
+ 			if (imageDescriptionNotice) records.push(imageDescriptionNotice);
+ 			const userMessage: AgentMessage = { role: "user", content, attribution, timestamp: timestamp ?? Date.now() };
+@@ -8987,17 +9005,27 @@ export class AgentSession implements SettingsScope {
+ 	 *  are expected) must not assume dispatch happened just because this was awaited. */
+ 	async #promptAgentInitiatedMessage(
+ 		message: CustomMessage,
+-		options?: { acceptTerminalEmptyStop?: boolean },
++		options?: {
++			acceptTerminalEmptyStop?: boolean;
++			onPromptAdmitted?: () => void;
++			onPromptCancelled?: () => void;
++		},
+ 	): Promise<boolean> {
+ 		const inFlightEpoch = this.#beginInFlight();
+ 		try {
+-			if (!(await this.#runUsageAwarePreflightForNextModelCall())) return false;
++			if (!(await this.#runUsageAwarePreflightForNextModelCall())) {
++				options?.onPromptCancelled?.();
++				return false;
++			}
+ 			const acceptTerminalEmptyStop = options?.acceptTerminalEmptyStop === true;
+ 			if (acceptTerminalEmptyStop) {
+ 				this.#resetPromptMaintenanceState();
+ 			}
+ 			this.#recovery.setAcceptTerminalEmptyStop(acceptTerminalEmptyStop);
+-			await this.agent.prompt(message);
++			const wasStreaming = this.agent.state.isStreaming;
++			const prompt = this.agent.prompt(message);
++			if (!wasStreaming && this.agent.state.isStreaming) options?.onPromptAdmitted?.();
++			await prompt;
+ 			await this.#waitForPostPromptRecovery();
+ 			return true;
+ 		} finally {
+@@ -9023,6 +9051,7 @@ export class AgentSession implements SettingsScope {
+ 	): Promise<void> {
+ 		// Captured before the normalization await below — see #sessionGeneration's doc comment.
+ 		const sessionGeneration = this.#sessionGeneration;
++		const promptGeneration = this.#promptGeneration;
+ 		const details =
+ 			options?.queueChipText !== undefined
+ 				? ({
+@@ -9051,8 +9080,11 @@ export class AgentSession implements SettingsScope {
+ 		const descriptionNotice = preprocessed
+ 			? preprocessed.descriptionNotice
+ 			: await this.#buildSkillImageDescriptionNotice(normalizedAppMessage);
++		if (this.#sessionGeneration !== sessionGeneration && await this.#sessionGenerationChanged(sessionGeneration)) return;
++		if (this.#promptGeneration !== promptGeneration || this.#isDisposed) return;
+ 		if (deliverAs === "aside") {
+ 			if (await this.#sessionGenerationChanged(sessionGeneration)) return;
++			if (this.#promptGeneration !== promptGeneration || this.#isDisposed) return;
+ 			// Non-interrupting: rides the same step-boundary aside poll as
+ 			// sendCustomMessage's streaming aside branch — not an agent-core queue
+ 			// entry, so no drain-retry latch and no idle-queue drain scheduling.
+@@ -9107,6 +9139,9 @@ export class AgentSession implements SettingsScope {
+ 			deliverAs?: "steer" | "followUp" | "nextTurn" | "aside";
+ 			queueChipText?: string;
+ 			acceptTerminalEmptyStop?: boolean;
++			onPromptAdmitted?: () => void;
++			/** Distinguishes cancelled preparation from a deliberately local append/fold. */
++			onPromptCancelled?: () => void;
+ 		},
+ 	): Promise<boolean> {
+ 		return this.#admitSubmission(() => this.#sendCustomMessage(message, options));
+@@ -9119,6 +9154,8 @@ export class AgentSession implements SettingsScope {
+ 			deliverAs?: "steer" | "followUp" | "nextTurn" | "aside";
+ 			queueChipText?: string;
+ 			acceptTerminalEmptyStop?: boolean;
++			onPromptAdmitted?: () => void;
++			onPromptCancelled?: () => void;
+ 		},
+ 	): Promise<boolean> {
+ 		// An extension command parked on a manual compaction may fire this
+@@ -9145,12 +9182,15 @@ export class AgentSession implements SettingsScope {
+ 					deliverAs?: "steer" | "followUp" | "nextTurn" | "aside";
+ 					queueChipText?: string;
+ 					acceptTerminalEmptyStop?: boolean;
++					onPromptAdmitted?: () => void;
++					onPromptCancelled?: () => void;
+ 			  }
+ 			| undefined,
+ 		outcome: PromptDispatchOutcome,
+ 	): Promise<boolean> {
+ 		// Captured before the normalization await below — see #sessionGeneration's doc comment.
+ 		const sessionGeneration = this.#sessionGeneration;
++		const promptGeneration = this.#promptGeneration;
+ 		const normalizedPayload = normalizeCustomMessagePayload<T>(message);
+ 		const suppressQueueChip = options?.deliverAs === "nextTurn" || options?.deliverAs === "aside";
+ 		const details =
+@@ -9172,21 +9212,34 @@ export class AgentSession implements SettingsScope {
+ 			timestamp: Date.now(),
+ 		};
+ 		const normalizedAppMessage = await this.#normalizeAgentMessageImages(appMessage);
++		if (this.#sessionGeneration !== sessionGeneration && await this.#sessionGenerationChanged(sessionGeneration)) {
++			options?.onPromptCancelled?.();
++			return false;
++		}
++		if ((options?.deliverAs !== "aside" && this.#promptGeneration !== promptGeneration) || this.#isDisposed) {
++			options?.onPromptCancelled?.();
++			return false;
++		}
+ 		if (this.isStreaming) {
+ 			// Queued into a turn the agent owns: that turn holds the session. Busy only
+ 			// from another prompt's setup claims nothing (that prompt decides).
+ 			outcome.sessionClaimed = this.agent.state.isStreaming;
+ 			if (options?.deliverAs === "nextTurn") {
+ 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, options?.triggerTurn ?? false);
++				if (options?.triggerTurn) options.onPromptAdmitted?.();
+ 				return false;
+ 			}
+ 			if (options?.deliverAs === "aside") {
+-				if (await this.#sessionGenerationChanged(sessionGeneration)) return false;
++				if (await this.#sessionGenerationChanged(sessionGeneration) || this.#isDisposed) {
++					options.onPromptCancelled?.();
++					return false;
++				}
+ 				// Non-interrupting: the agent loop's step-boundary poll (see the setAsideMessageProvider
+ 				// registration in the constructor) picks this up without interrupting the current tool
+ 				// batch. Not an agent-core queue entry, so no drain-retry latch and no idle-queue drain
+ 				// scheduling here.
+ 				this.#irc.queueAside([normalizedAppMessage]);
++				options.onPromptAdmitted?.();
+ 				return false;
+ 			}
+ 			this.#allowQueuedMessageDrainRetry();
+@@ -9196,6 +9249,7 @@ export class AgentSession implements SettingsScope {
+ 			} else {
+ 				this.agent.steer(normalizedAppMessage);
+ 			}
++			options?.onPromptAdmitted?.();
+ 			this.#scheduleIdleQueueDrain();
+ 			return false;
+ 		}
+@@ -9208,6 +9262,8 @@ export class AgentSession implements SettingsScope {
+ 				}
+ 				outcome.sessionClaimed = await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
+ 					acceptTerminalEmptyStop: options.acceptTerminalEmptyStop === true,
++					onPromptAdmitted: options.onPromptAdmitted,
++					onPromptCancelled: options.onPromptCancelled,
+ 				});
+ 				return outcome.sessionClaimed;
+ 			}
+@@ -9223,7 +9279,10 @@ export class AgentSession implements SettingsScope {
+ 		}
+ 
+ 		if (options?.deliverAs === "aside") {
+-			if (await this.#sessionGenerationChanged(sessionGeneration)) return false;
++			if (await this.#sessionGenerationChanged(sessionGeneration) || this.#isDisposed) {
++				options.onPromptCancelled?.();
++				return false;
++			}
+ 			if (this.#planModeState?.enabled) {
+ 				// Plan mode stays user-driven: fold into context without an autonomous turn, same as
+ 				// IrcBridge.deliver()/#resumeStrandedIrcAsides do in plan mode. Routed through the
+@@ -9248,6 +9307,8 @@ export class AgentSession implements SettingsScope {
+ 			}
+ 			outcome.sessionClaimed = await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
+ 				acceptTerminalEmptyStop: options.acceptTerminalEmptyStop === true,
++				onPromptAdmitted: options.onPromptAdmitted,
++				onPromptCancelled: options.onPromptCancelled,
+ 			});
+ 			return outcome.sessionClaimed;
+ 		}
+@@ -9257,7 +9318,10 @@ export class AgentSession implements SettingsScope {
+ 				this.#queueHiddenNextTurnMessage(normalizedAppMessage, false);
+ 				return false;
+ 			}
+-			outcome.sessionClaimed = await this.#promptAgentInitiatedMessage(normalizedAppMessage);
++			outcome.sessionClaimed = await this.#promptAgentInitiatedMessage(normalizedAppMessage, {
++				onPromptAdmitted: options.onPromptAdmitted,
++				onPromptCancelled: options.onPromptCancelled,
++			});
+ 			return outcome.sessionClaimed;
+ 		}
+ 
+@@ -9321,17 +9385,17 @@ export class AgentSession implements SettingsScope {
+ 		let deliveredAsAside = false;
+ 		if (options?.deliverAs === "aside") {
+ 			if (this.isStreaming) {
+-				await this.#queueUserMessage(text, images, "aside", { attribution: options.attribution });
++				await this.#queueUserMessage(text, images, "aside", options);
+ 				return;
+ 			}
+ 			// Idle: fall through to the prompt flow below (starts a turn, like an omitted
+ 			// deliverAs) — there is no live run to inject an aside into.
+ 			deliveredAsAside = true;
+ 		} else if (options?.deliverAs === "followUp") {
+-			await this.#queueUserMessage(text, images, "followUp", { attribution: options.attribution });
++			await this.#queueUserMessage(text, images, "followUp", options);
+ 			return;
+ 		} else if (options?.deliverAs === "steer") {
+-			await this.#queueUserMessage(text, images, "steer", { attribution: options.attribution });
++			await this.#queueUserMessage(text, images, "steer", options);
+ 			return;
+ 		}
+ 
+@@ -9344,6 +9408,7 @@ export class AgentSession implements SettingsScope {
+ 		// tool-batch-aborting steer.
+ 		await this.prompt(text, {
+ 			attribution: options?.attribution,
++			onPromptAdmitted: options?.onPromptAdmitted,
+ 			expandPromptTemplates: false,
+ 			images,
+ 			streamingBehavior: deliveredAsAside ? "aside" : "steer",
+@@ -10194,17 +10259,15 @@ export class AgentSession implements SettingsScope {
+ 			await this.#advisors.drainAndDetachRecorders();
+ 			try {
+ 				this.#releaseQueuedTtsrReservations();
+-				this.agent.reset();
+-				this.tokenRate.reset();
+ 				if (options?.drop && previousSessionFile) {
+-					try {
+-						await this.sessionManager.dropSession(previousSessionFile);
+-					} catch (err) {
+-						logger.error("Failed to delete session during /delete", { err });
+-					}
++					// Refusal must reach RPC/TUI; never reset the visible conversation
++					// and report success when another writer still owns its journal.
++					await this.sessionManager.dropSession(previousSessionFile);
+ 				} else {
+ 					await this.sessionManager.flush();
+ 				}
++				this.agent.reset();
++				this.tokenRate.reset();
+ 				await this.sessionManager.newSession({
+ 					...options,
+ 					additionalDirectories: cfgWorkspaceAdditionalDirectories.get(this.settings),
+@@ -11114,7 +11177,7 @@ export class AgentSession implements SettingsScope {
+ 				this.#clearInheritedProviderPromptCacheKey();
+ 			}
+ 		}
+-		this.agent.setModel(model);
++		this.agent.setModel(this.#withReportedContextWindow(model));
+ 		// Model mutations driven through ModelControls (explicit /model, prewalk
+ 		// hand-offs, retry-fallback, model cycling) funnel through this method,
+ 		// so this is the single point that notifies subscribers (ACP config
+@@ -11778,6 +11841,8 @@ export class AgentSession implements SettingsScope {
+ 			model?: Model;
+ 			/** Keep the current model without restoring the target's (collab replicas mirror the host's model). */
+ 			keepModel?: boolean;
++			/** The collab operation's already-held replica lease, never an ambient process claim. */
++			writerLease?: SessionLeaseAuthority;
+ 			/**
+ 			 * Receives the model fallback warning after the switch commits, instead of a
+ 			 * `notice` event; for hosts that re-render the transcript after switching.
+@@ -11885,7 +11950,7 @@ export class AgentSession implements SettingsScope {
+ 			// The file may be reloaded at the same path with a different latest contract (or the
+ 			// switch rolled back via restoreState); re-read it on the next model call either way.
+ 			this.#sessionInit = undefined;
+-			await this.sessionManager.setSessionFile(sessionPath);
++			await this.sessionManager.setSessionFile(sessionPath, { writerLease: options?.writerLease });
+ 			this.#bash.markSessionTransition(bashTransition);
+ 			const newCwd = this.sessionManager.getCwd();
+ 			const recordedCwd = this.sessionManager.getRecordedCwd() ?? previousSessionState.cwd;
+@@ -11920,6 +11985,7 @@ export class AgentSession implements SettingsScope {
+ 			const targetModelStrings = getRestorableSessionModels(
+ 				sessionContext.models,
+ 				this.sessionManager.getLastModelChangeRole(),
++				this.#allowSessionModelFallback,
+ 			);
+ 			let targetModel = explicitModel;
+ 			let modelFallbackWarning: string | undefined;
+@@ -11929,7 +11995,7 @@ export class AgentSession implements SettingsScope {
+ 					// Like startup resume: never hand the transcript to a model the
+ 					// session did not choose unless a UI can say so.
+ 					if (!this.#allowSessionModelFallback || !cfgRetryModelFallback.get(this.settings)) {
+-						throw new Error(`Could not restore model ${targetModelStrings[0]}`);
++						throw new SessionModelUnavailableError(targetModelStrings[0]);
+ 					}
+ 					const currentModel = this.model;
+ 					modelFallbackWarning = currentModel
+@@ -11978,7 +12044,7 @@ export class AgentSession implements SettingsScope {
+ 				if (shouldResetProviderState) {
+ 					await this.#setModelWithProviderSessionReset(targetModel);
+ 				} else {
+-					this.agent.setModel(targetModel);
++					this.agent.setModel(this.#withReportedContextWindow(targetModel));
+ 				}
+ 				// Saved selectors may carry a thinking suffix; compare resolved models.
+ 				const savedModel =
+@@ -13921,7 +13987,7 @@ export class AgentSession implements SettingsScope {
+ 		const current = this.model;
+ 		if (!current || !modelsAreEqual(current, boundAtStartup)) return;
+ 		const found = this.#modelRegistry.find(current.provider, current.id);
+-		const refreshed = found && this.#modelRegistry.fitContextWindow(found, this.settings);
++		const refreshed = found && this.#withReportedContextWindow(this.#modelRegistry.fitContextWindow(found, this.settings));
+ 		if (!refreshed || refreshed.contextWindow === current.contextWindow) return;
+ 		this.agent.setModel(refreshed);
+ 		await this.#reconcileModelDependentState(refreshed);
+@@ -13929,6 +13995,31 @@ export class AgentSession implements SettingsScope {
+ 		this.#emit({ type: "model_changed" });
+ 	}
+ 
++	/**
++	 * Session-only metadata refresh like {@link #rebindActiveModelAfterModelDiscovery}: the provider's own
++	 * overflow error named a smaller window than the configured one, so compaction and the context bar must
++	 * measure against it. Never grows the window.
++	 */
++	#adoptReportedContextWindow(tokens: number): boolean {
++		const current = this.model;
++		if (!current || (current.contextWindow !== undefined && current.contextWindow > 0 && tokens >= current.contextWindow)) {
++			return false;
++		}
++		this.#reportedContextWindows.set(`${current.provider}/${current.id}`, tokens);
++		this.agent.setModel(this.#withReportedContextWindow(current));
++		this.#emit({ type: "model_changed" });
++		return true;
++	}
++
++	/** `model` capped at the window its provider reported for this session, if smaller. */
++	#withReportedContextWindow(model: Model): Model {
++		const reported = this.#reportedContextWindows.get(`${model.provider}/${model.id}`);
++		if (reported === undefined || (model.contextWindow !== undefined && model.contextWindow > 0 && model.contextWindow <= reported)) {
++			return model;
++		}
++		return { ...model, contextWindow: reported };
++	}
++
+ 	/**
+ 	 * Toggle the advisor setting and start/stop the runtime accordingly.
+ 	 *
+diff --git a/src/session/bash-runner.ts b/src/session/bash-runner.ts
+index 7cca88258332fdaa0e3e809f960bbe182ada0d1a..0edfc851be5cfd172257bd69483058a30231d6a1 100644
+--- a/src/session/bash-runner.ts
++++ b/src/session/bash-runner.ts
+@@ -54,6 +54,7 @@ export interface BashRunnerHost {
+ 	settings: Settings;
+ 	extensionRunner(): ExtensionRunner | undefined;
+ 	isStreaming(): boolean;
++	getResourceOwnerId?(): string;
+ }
+ 
+ /** Owns bash execution and preserves result ownership across transcript transitions. */
+@@ -121,7 +122,9 @@ export class BashRunner {
+ 				result = await executeBashCommand(command, {
+ 					onChunk,
+ 					signal: abortController.signal,
+-					sessionKey: target.sessionId,
++					sessionKey: this.#host.getResourceOwnerId
++						? `${this.#host.getResourceOwnerId()}\n${target.sessionId}`
++						: target.sessionId,
+ 					// A command still pending when its session was left must not keep a
+ 					// shell under that session after the transition released its shells.
+ 					isSessionCurrent: () => this.#host.sessionManager.getSessionId() === target.sessionId,
+@@ -270,7 +273,11 @@ export class BashRunner {
+ 		// The left session's persistent shells are unreachable under the new id; drop
+ 		// them as dispose does, rather than holding each one until process exit.
+ 		if (success && transition.oldSessionId !== manager.getSessionId()) {
+-			releaseShellSessions(transition.oldSessionId);
++			releaseShellSessions(
++				this.#host.getResourceOwnerId
++					? `${this.#host.getResourceOwnerId()}\n${transition.oldSessionId}`
++					: transition.oldSessionId,
++			);
+ 		}
+ 		if (transition.detachedManager && (oldDestination.kind !== "detached" || transition.oldTarget.refs === 0)) {
+ 			void transition.detachedManager.close().catch(error => {
+diff --git a/src/session/eval-runner.ts b/src/session/eval-runner.ts
+index 5f8771f11a747faef1bb05eee5d597bb03a44ca0..f4a66ea86f03ebed0d98801d7d252f6131a0f1f3 100644
+--- a/src/session/eval-runner.ts
++++ b/src/session/eval-runner.ts
+@@ -151,6 +151,7 @@ export class EvalRunner {
+ 		return defaultEvalSessionId({
+ 			cwd: this.#host.sessionManager.getCwd(),
+ 			getSessionFile: () => this.#host.sessionManager.getSessionFile() ?? null,
++			getEvalKernelOwnerId: () => this.#kernelOwnerId,
+ 		});
+ 	}
+ 
+diff --git a/src/session/turn-recovery-admission.test.ts b/src/session/turn-recovery-admission.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..9e83e287408ec78df56b974f623cc55ccee8a490
+--- /dev/null
++++ b/src/session/turn-recovery-admission.test.ts
+@@ -0,0 +1,62 @@
++import { describe, expect, test } from "bun:test";
++import { AgentBusyError } from "@oh-my-pi/pi-agent-core";
++import { TurnRecovery, type TurnRecoveryHost } from "./turn-recovery";
++
++describe("prompt admission through idle retry", () => {
++	test("a busy attempt waits for actual dispatch without waiting for the new full turn", async () => {
++		const previousTurn = Promise.withResolvers<void>();
++		const waitingForIdle = Promise.withResolvers<void>();
++		const nextTurn = Promise.withResolvers<void>();
++		const admitted = Promise.withResolvers<void>();
++		let attempts = 0;
++		let admissions = 0;
++		const state = { isStreaming: true };
++		const host = {
++			agent: {
++				state,
++				async prompt() {
++					attempts++;
++					if (state.isStreaming) throw new AgentBusyError();
++					state.isStreaming = true;
++					await nextTurn.promise;
++					state.isStreaming = false;
++				},
++				async waitForIdle() {
++					waitingForIdle.resolve();
++					await previousTurn.promise;
++				},
++			},
++		} as unknown as TurnRecoveryHost;
++		const recovery = new TurnRecovery(host, { deferFallbackChainValidation: true });
++		const turn = recovery.promptAgentWithIdleRetry([], undefined, () => {
++			admissions++;
++			admitted.resolve();
++		});
++		await waitingForIdle.promise;
++		expect(attempts).toBe(1);
++		expect(admissions).toBe(0);
++		state.isStreaming = false;
++		previousTurn.resolve();
++		await admitted.promise;
++		expect(attempts).toBe(2);
++		expect(admissions).toBe(1);
++		expect(state.isStreaming).toBe(true);
++		nextTurn.resolve();
++		await turn;
++		expect(admissions).toBe(1);
++	});
++
++	test("an immediate rejected prompt does not report admission", async () => {
++		let admissions = 0;
++		const host = {
++			agent: {
++				state: { isStreaming: false },
++				async prompt() { throw new Error("model unavailable"); },
++			},
++		} as unknown as TurnRecoveryHost;
++		const recovery = new TurnRecovery(host, { deferFallbackChainValidation: true });
++		await expect(recovery.promptAgentWithIdleRetry([], undefined, () => { admissions++; }))
++			.rejects.toThrow("model unavailable");
++		expect(admissions).toBe(0);
++	});
++});
+diff --git a/src/session/turn-recovery.ts b/src/session/turn-recovery.ts
+index e89ad2157ca24cc632f5f9af5c344e41d0827be6..37e073cb2e2304d5b38a8616f57b29ecef7f3e48 100644
+--- a/src/session/turn-recovery.ts
++++ b/src/session/turn-recovery.ts
+@@ -820,8 +820,12 @@ export class TurnRecovery {
+ 	}
+ 
+ 	/** Prompts after transient overlap with a prior agent run. */
+-	promptAgentWithIdleRetry(messages: AgentMessage[], options?: { toolChoice?: ToolChoice }): Promise<void> {
+-		return this.#promptAgentWithIdleRetry(messages, options);
++	promptAgentWithIdleRetry(
++		messages: AgentMessage[],
++		options?: { toolChoice?: ToolChoice },
++		onPromptAdmitted?: () => void,
++	): Promise<void> {
++		return this.#promptAgentWithIdleRetry(messages, options, onPromptAdmitted);
+ 	}
+ 
+ 	/** Parses provider retry and rate-limit reset hints into a delay. */
+@@ -3107,11 +3111,24 @@ export class TurnRecovery {
+ 		this.resolveRetry();
+ 	}
+ 
+-	async #promptAgentWithIdleRetry(messages: AgentMessage[], options?: { toolChoice?: ToolChoice }): Promise<void> {
++	async #promptAgentWithIdleRetry(
++		messages: AgentMessage[],
++		options?: { toolChoice?: ToolChoice },
++		onPromptAdmitted?: () => void,
++	): Promise<void> {
+ 		const deadline = Date.now() + 30_000;
+ 		for (;;) {
+ 			try {
+-				await this.#host.agent.prompt(messages, options);
++				const wasStreaming = this.#host.agent.state.isStreaming;
++				const prompt = this.#host.agent.prompt(messages, options);
++				// A busy attempt is not admission: its retry may still be waiting on
++				// another full turn. Agent.prompt claims isStreaming synchronously
++				// when it accepts a run; an immediate rejection claims nothing.
++				if (!wasStreaming && this.#host.agent.state.isStreaming) {
++					onPromptAdmitted?.();
++					onPromptAdmitted = undefined;
++				}
++				await prompt;
+ 				return;
+ 			} catch (err) {
+ 				if (!(err instanceof AgentBusyError)) {
+diff --git a/src/system-prompt.ts b/src/system-prompt.ts
+index 7f4647fe8f96f75359a22c518c10d069086216cf..49f103cb27af8370c220666c8f9550a2efa49f2d 100644
+--- a/src/system-prompt.ts
++++ b/src/system-prompt.ts
+@@ -282,7 +282,11 @@ export async function loadSystemPromptTemplateFile(filePath: string): Promise<st
+ }
+ 
+ /** Resolve input as file path or literal string */
+-export async function resolvePromptInput(input: string | undefined, description: string): Promise<string | undefined> {
++export async function resolvePromptInput(
++	input: string | undefined,
++	description: string,
++	cwd?: string,
++): Promise<string | undefined> {
+ 	if (!input) {
+ 		return input;
+ 	} else if (input.includes("\n")) {
+@@ -290,7 +294,7 @@ export async function resolvePromptInput(input: string | undefined, description:
+ 	}
+ 
+ 	try {
+-		return await Bun.file(input).text();
++		return await Bun.file(cwd ? path.resolve(cwd, input) : input).text();
+ 	} catch (error) {
+ 		if (!hasFsCode(error, "ENAMETOOLONG") && !isEnoent(error)) {
+ 			logger.warn(`Could not read ${description} file`, { path: input, error: String(error) });
+diff --git a/src/task/index.ts b/src/task/index.ts
+index e2f11708bdf4d4ff7c4c0db8e510edf6a8e56dca..030dc35b0e86695f969e14a9e482cbf59d12247b 100644
+--- a/src/task/index.ts
++++ b/src/task/index.ts
+@@ -27,6 +27,7 @@ import type { Usage } from "@oh-my-pi/pi-ai";
+ import { $env, logger, prompt } from "@oh-my-pi/pi-utils";
+ import type { ToolSession } from "..";
+ import type { EffectiveExtensionRoots } from "../capability/types";
++import { isUntrustedProjectScope } from "../config/settings-context";
+ import type { Theme } from "@oh-my-pi/pi-tui/theme";
+ import subagentUserPromptTemplate from "../prompts/system/subagent-user-prompt.md" with { type: "text" };
+ import taskDescriptionTemplate from "../prompts/tools/task.md" with { type: "text" };
+@@ -532,9 +533,12 @@ const discoveryMemo = new Map<string, Promise<DiscoveryResult>>();
+ const discoverySnapshots = new Map<string, AgentDefinition[]>();
+ let discoveryMemoFn: typeof discoverAgents | undefined;
+ 
+-/** Stable cache identity for the filesystem root and the full effective extension-root struct. */
++/**
++ * Stable cache identity for the filesystem root, the full effective extension-root struct and the folder's
++ * trust: an untrusted chat never sees (or leaves behind) the agent list of a trusted one in the same folder.
++ */
+ function discoveryCacheKey(cwd: string, extensionRoots?: EffectiveExtensionRoots): string {
+-	return `${path.resolve(cwd)}\0${JSON.stringify(extensionRoots ?? null)}`;
++	return `${path.resolve(cwd)}\0${JSON.stringify(extensionRoots ?? null)}\0${isUntrustedProjectScope() ? "untrusted" : "trusted"}`;
+ }
+ 
+ function discoverAgentsForCreate(cwd: string, extensionRoots?: EffectiveExtensionRoots): Promise<DiscoveryResult> {
+diff --git a/src/task/structured-subagent.ts b/src/task/structured-subagent.ts
+index 15e84c2c625b3e926f059b70ba3710b4b2204d0a..28727cdce254f6a39082d13492919984b56d9212 100644
+--- a/src/task/structured-subagent.ts
++++ b/src/task/structured-subagent.ts
+@@ -16,6 +16,7 @@ import {
+ 	validateAgentCompactionThresholdOverrides,
+ } from "../config/compaction-threshold";
+ import { type ServiceTierInheritSettingValue, validateAgentServiceTierOverrides } from "../config/service-tier";
++import { isUntrustedProjectScope } from "../config/settings-context";
+ import { isProviderEnabled, isUserSourceEnabled } from "../capability";
+ import type { EffectiveExtensionRoots } from "../capability/types";
+ import type { CustomTool } from "../extensibility/custom-tools/types";
+@@ -326,6 +327,7 @@ function discoverAgentsShared(cwd: string, extensionRoots?: EffectiveExtensionRo
+ 		isProviderEnabled("claude-plugins"),
+ 		isUserSourceEnabled("claude-plugins"),
+ 		isUserSourceEnabled("claude"),
++		isUntrustedProjectScope(),
+ 	].join(",");
+ 	const key = `${path.resolve(cwd)}\0${policy}\0${JSON.stringify(extensionRoots ?? null)}`;
+ 	const existing = inflightDiscovery.get(key);
+diff --git a/src/task/workpool.ts b/src/task/workpool.ts
+index d215fa1c1829decce2cd198b146b8e754f848a18..d16238fba0b7c9ee264e3c9a0ce1df7456ed9ac8 100644
+--- a/src/task/workpool.ts
++++ b/src/task/workpool.ts
+@@ -631,17 +631,22 @@ export class WorkPool {
+ 
+ /** Process-local workpool registry scoped by owner id and pool name. */
+ export class WorkPoolRegistry {
+-	static #instance: WorkPoolRegistry | undefined;
++	static #instances = new WeakMap<AgentRegistry, WorkPoolRegistry>();
+ 
+-	/** Return the process-global workpool registry. */
++	/** Return the current session tree's workpool registry. */
+ 	static global(): WorkPoolRegistry {
+-		WorkPoolRegistry.#instance ??= new WorkPoolRegistry();
+-		return WorkPoolRegistry.#instance;
++		const registry = AgentRegistry.global();
++		let pools = WorkPoolRegistry.#instances.get(registry);
++		if (!pools) {
++			pools = new WorkPoolRegistry();
++			WorkPoolRegistry.#instances.set(registry, pools);
++		}
++		return pools;
+ 	}
+ 
+ 	/** Replace the global registry with an empty instance for tests. */
+ 	static resetForTests(): void {
+-		WorkPoolRegistry.#instance = new WorkPoolRegistry();
++		WorkPoolRegistry.#instances.delete(AgentRegistry.global());
+ 	}
+ 
+ 	readonly #pools = new Map<string, WorkPool>();

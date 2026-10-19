@@ -17,7 +17,7 @@ import type {
 	TextEdit,
 	WorkspaceEdit,
 } from "./types";
-import { uriToFile } from "./utils";
+import { readTextFromDisk, uriToFile } from "./utils";
 
 // =============================================================================
 // Text Edit Application
@@ -164,7 +164,7 @@ export function flattenWorkspaceTextEdits(edit: WorkspaceEdit): Map<string, Text
 export async function applyTextEdits(filePath: string, edits: TextEdit[]): Promise<void> {
 	assertNoUnsavedEditorBuffer(filePath);
 	const document = assertEditorWritable(filePath);
-	const content = document?.text ?? await Bun.file(filePath).text();
+	const content = document?.text ?? await readTextFromDisk(filePath);
 	const result = applyTextEditsToString(content, edits);
 	if (!await applyEditorContent(filePath, result, document)) await Bun.write(filePath, result);
 }
@@ -198,7 +198,7 @@ export async function applyEditsThenRename(
 	for (const reference of references) assertNoEditorResourceMutation(reference.filePath);
 	const backups: Array<{ filePath: string; original: string }> = [];
 	for (const { filePath, edits } of references) {
-		backups.push({ filePath, original: await Bun.file(filePath).text() });
+		backups.push({ filePath, original: await readTextFromDisk(filePath) });
 		await applyTextEdits(filePath, edits);
 	}
 	try {

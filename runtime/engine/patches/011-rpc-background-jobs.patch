@@ -1,0 +1,165 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ombra engine maintainers <engine@ombra.local>
+Date: Sat, 1 Jan 2000 00:00:00 +0000
+Subject: [PATCH] rpc background jobs
+
+What: Expose bounded background job output and cancellation to native hosts.
+Why: Ombra requires this behavior in its native multi-session host.
+Upstream-Status: Ombra-only RPC integration; generic recovery fixes are upstream candidates.
+
+diff --git a/src/modes/rpc/rpc-jobs.ts b/src/modes/rpc/rpc-jobs.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..913c1bf541538da3107dcb0f0cf46356d5f7a1a0
+--- /dev/null
++++ b/src/modes/rpc/rpc-jobs.ts
+@@ -0,0 +1,150 @@
++/**
++ * Background jobs over RPC (`get_jobs`, `cancel_job`, `get_job_output`): the
++ * session's own async jobs (long bash commands, async tasks) as structured rows,
++ * a bounded byte-cursor read of what a job printed, and a "waiting for input"
++ * hint for a running command that went quiet on what looks like a prompt.
++ */
++import type { AgentSession } from "../../session/agent-session";
++import type { AsyncJobSnapshotItem } from "../../session/agent-session-types";
++import type { RpcJobOutputResult, RpcJobSnapshot } from "./rpc-types";
++
++export type RpcJobsSession = Pick<AgentSession, "getAsyncJobSnapshot" | "inspectAsyncJob" | "cancelAsyncJob">;
++
++/** Settled jobs `get_jobs` lists after the running ones, newest first. */
++export const RPC_RECENT_JOBS_LIMIT = 20;
++/** Bytes `get_job_output` returns when the client names no `maxBytes`. */
++export const RPC_JOB_OUTPUT_DEFAULT_BYTES = 64 * 1024;
++/** Largest `maxBytes` one `get_job_output` read accepts. */
++export const RPC_JOB_OUTPUT_MAX_BYTES = 256 * 1024;
++/** Quiet time after which a running job whose last line looks like a prompt counts as waiting for input. */
++export const RPC_JOB_INPUT_IDLE_MS = 5_000;
++/** Output tail the prompt heuristic looks at. */
++const PROMPT_TAIL_BYTES = 512;
++
++export class RpcJobsUnavailableError extends Error {
++	constructor() {
++		super("Background jobs are unavailable in this session");
++	}
++}
++
++// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequences are stripped before matching.
++const ANSI_ESCAPE = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
++/** Prompts that stand on their own line: a yes/no question, a secret, a question, or "press enter" anywhere in it. */
++const STRONG_PROMPT =
++	/(?:[[(](?:y\/n|yes\/no|y\/n\/a)[\])]|(?:password|passphrase|passcode|username|login|token|otp|pin)\b[^\n]{0,40}:|\?)\s*$|\b(?:press (?:any key|enter|return)|hit enter)\b/i;
++/** A prompt the cursor waits on: the line was left open after one of these. */
++const OPEN_LINE_PROMPT = /[:>$#?]\s*$/;
++
++/**
++ * Whether output ending in `tail` looks like it waits on a reply: its last line
++ * is a yes/no, secret, "press enter" or question prompt, or a line left open
++ * (no newline) after `:`, `>`, `$`, `#` or `?`.
++ */
++export function looksLikeInputPrompt(tail: string): boolean {
++	const text = tail.replace(ANSI_ESCAPE, "").replace(/\r/g, "");
++	const open = !text.endsWith("\n");
++	const lines = text.split("\n");
++	const last = (open ? lines.at(-1) : lines.at(-2))?.trimEnd() ?? "";
++	if (last.trim().length === 0) return false;
++	return STRONG_PROMPT.test(last) || (open && OPEN_LINE_PROMPT.test(last));
++}
++
++function snapshotItems(session: RpcJobsSession, recentLimit: number): AsyncJobSnapshotItem[] {
++	const snapshot = session.getAsyncJobSnapshot({ recentLimit });
++	if (!snapshot) throw new RpcJobsUnavailableError();
++	return [...snapshot.running, ...snapshot.recent];
++}
++
++function describeJob(session: RpcJobsSession, item: AsyncJobSnapshotItem, now: number): RpcJobSnapshot {
++	const inspection = session.inspectAsyncJob(item.id);
++	const log = inspection?.outputLog;
++	const lastOutputAt = log?.lastOutputAt;
++	const waitingForInput =
++		item.status === "running" &&
++		lastOutputAt !== undefined &&
++		now - lastOutputAt >= RPC_JOB_INPUT_IDLE_MS &&
++		looksLikeInputPrompt(log!.tail(PROMPT_TAIL_BYTES).text);
++	return {
++		id: item.id,
++		type: item.type,
++		status: item.status,
++		label: item.label,
++		...(item.command !== undefined ? { command: item.command } : {}),
++		startTime: item.startTime,
++		...(item.endTime !== undefined ? { endTime: item.endTime } : {}),
++		...(inspection?.exitCode !== undefined ? { exitCode: inspection.exitCode } : {}),
++		...(item.agentId !== undefined ? { agentId: item.agentId } : {}),
++		outputBytes: log?.totalBytes ?? 0,
++		...(lastOutputAt !== undefined ? { lastOutputAt } : {}),
++		waitingForInput,
++	};
++}
++
++/** `get_jobs`: running jobs in start order, then recent settled ones, newest first. */
++export function listRpcJobs(session: RpcJobsSession, now = Date.now()): RpcJobSnapshot[] {
++	return snapshotItems(session, RPC_RECENT_JOBS_LIMIT).map(item => describeJob(session, item, now));
++}
++
++/** `cancel_job`: true when the job was running and is now cancelled. */
++export function cancelRpcJob(session: RpcJobsSession, jobId: string): boolean {
++	if (!session.getAsyncJobSnapshot()) throw new RpcJobsUnavailableError();
++	return session.cancelAsyncJob(jobId);
++}
++
++/**
++ * `get_job_output`: up to `maxBytes` of what the job printed from `fromByte`.
++ * Without `fromByte` (or past the end, flagged `reset`) it reads the tail.
++ * Bytes older than the job keeps are reported in `skippedBytes`. A job that
++ * never streamed (an async task, eval) answers its latest text as a `snapshot`
++ * that replaces, rather than extends, what the client shows.
++ */
++export function readRpcJobOutput(
++	session: RpcJobsSession,
++	params: { jobId: string; fromByte?: number; maxBytes?: number },
++	now = Date.now(),
++): RpcJobOutputResult {
++	const { jobId, fromByte } = params;
++	const maxBytes = params.maxBytes ?? RPC_JOB_OUTPUT_DEFAULT_BYTES;
++	if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > RPC_JOB_OUTPUT_MAX_BYTES) {
++		throw new Error(`maxBytes must be an integer from 1 to ${RPC_JOB_OUTPUT_MAX_BYTES}`);
++	}
++	if (fromByte !== undefined && (!Number.isInteger(fromByte) || fromByte < 0)) {
++		throw new Error("fromByte must be a non-negative integer");
++	}
++	const item = snapshotItems(session, Number.POSITIVE_INFINITY).find(job => job.id === jobId);
++	const inspection = item && session.inspectAsyncJob(jobId);
++	if (!item || !inspection) throw new Error(`Unknown background job: ${jobId}`);
++	const job = describeJob(session, item, now);
++	const base = { jobId, status: job.status, waitingForInput: job.waitingForInput };
++	const log = inspection.outputLog;
++	if (!log) {
++		const whole = Buffer.from(inspection.output ?? "", "utf8");
++		let start = Math.max(0, whole.length - maxBytes);
++		while (start < whole.length && (whole[start]! & 0xc0) === 0x80) start++;
++		return {
++			...base,
++			fromByte: 0,
++			nextByte: 0,
++			totalBytes: 0,
++			startByte: 0,
++			skippedBytes: 0,
++			reset: false,
++			snapshot: true,
++			text: whole.subarray(start).toString("utf8"),
++		};
++	}
++	const reset = fromByte !== undefined && fromByte > log.totalBytes;
++	const slice = fromByte === undefined || reset ? log.tail(maxBytes) : log.read(fromByte, maxBytes);
++	return {
++		...base,
++		fromByte: slice.fromByte,
++		nextByte: slice.nextByte,
++		totalBytes: log.totalBytes,
++		startByte: log.startByte,
++		// Up to the first whole character returned: retention may have cut the one the cursor pointed into
++		skippedBytes: fromByte === undefined || reset ? 0 : Math.max(0, slice.fromByte - fromByte),
++		reset,
++		snapshot: false,
++		text: slice.text,
++	};
++}

@@ -254,7 +254,7 @@ export type RpcSessionChangeResult =
 	| { type: "switch_session"; data: { cancelled: boolean } }
 	| { type: "branch"; data: { text: string; cancelled: boolean } }
 	| { type: "fork"; data: { cancelled: boolean } }
-	| { type: "navigate_tree"; data: { text?: string; cancelled: boolean } };
+	| { type: "navigate_tree"; data: { text?: string; images?: ImageContent[]; cancelled: boolean } };
 
 export type RpcSessionChangeSession = Pick<
 	AgentSession,
@@ -954,11 +954,11 @@ export async function handleRpcSessionChange(
 
 		case "navigate_tree": {
 			// The TUI's /tree and Esc Esc rewind, without a summary: the leaf moves in the same file and the
-			// abandoned path stays there as a sibling branch. A user message rewinds past itself, its text back.
+			// abandoned path stays there as a sibling branch. A user message rewinds past itself, its text and images back.
 			// Same session, same subagents: nothing to reset. Refused once work started during the awaits before it.
 			if (session.isBusyForSnapshot) throw new SessionBusyError("rewind the session");
 			const result = await session.navigateTree(command.targetId, { summarize: false });
-			return { type: "navigate_tree", data: { text: result.editorText, cancelled: result.cancelled } };
+			return { type: "navigate_tree", data: { text: result.editorText, images: result.editorImages, cancelled: result.cancelled } };
 		}
 	}
 	throw new Error("Unsupported RPC session change command");
@@ -1507,6 +1507,7 @@ export async function createRpcSessionRuntime(
 	 * Extension UI context that uses the RPC protocol.
 	 */
 	class RpcExtensionUIContext implements ExtensionUIContext {
+		readonly supportsEditor = true;
 		/** Set by `set_ask_dialog`; hosts that never opt in keep the select/editor ask fallback. */
 		askDialogEnabled = false;
 
@@ -1694,6 +1695,10 @@ export async function createRpcSessionRuntime(
 
 		setEditorComponent(): void {
 			// Custom editor components not supported in RPC mode
+		}
+
+		getEditorComponent() {
+			return undefined;
 		}
 	}
 
@@ -2082,7 +2087,11 @@ export async function createRpcSessionRuntime(
 					hasPendingAsyncWork: session.hasPendingAsyncWork(),
 					// A scheduled goal continuation will start a turn: not settled.
 					isSettled: isRpcSessionSettled(session, goalTurnScheduled),
-					queuedMessages: { steering: [...queuedMessages.steering], followUp: [...queuedMessages.followUp] },
+					queuedMessages: {
+						steering: [...queuedMessages.steering],
+						followUp: [...queuedMessages.followUp],
+						liveSteered: queuedMessages.liveSteered,
+					},
 					todoPhases: session.getTodoPhases(),
 					fastModeEnabled: session.isFastModeEnabled(),
 					tokensPerSecond: calculateTokensPerSecond(session.messages, session.isStreaming),

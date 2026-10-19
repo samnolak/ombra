@@ -1,0 +1,552 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Igor Shulga <igo.shulga@macbook-lf73jk0j09.t-oblako.ru>
+Date: Mon, 19 Oct 2026 21:42:07 +0300
+Subject: [PATCH] untrusted project discovery
+
+What: Preserve the repository-owned untrusted project discovery.
+Why: Ombra embeds multiple concurrent sessions and renders native host features.
+Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
+
+diff --git a/src/capability/index.ts b/src/capability/index.ts
+index 8d2155e8b940e5ec5d405beac9c4d44c541672e1..88ca8961ecf028e588222bf1c314fe81342178de 100644
+--- a/src/capability/index.ts
++++ b/src/capability/index.ts
+@@ -11,6 +11,7 @@ import * as path from "node:path";
+ import { getProjectDir, logger } from "@oh-my-pi/pi-utils";
+ 
+ import type { Settings } from "../config/settings";
++import { getActiveSettings, isUntrustedProjectScope } from "../config/settings-context";
+ import { clearCache as clearFsCache, findRepoRoot, cacheStats as fsCacheStats, invalidate as invalidateFs } from "./fs";
+ import type {
+ 	Capability,
+@@ -63,12 +64,11 @@ const FOREIGN_USER_PROVIDERS: Record<string, true> = {
+ const settingsHolds: { settings: Settings }[] = [];
+ 
+ /**
+- * Settings instance the newest {@link initializeWithSettings} hold bound.
+- * Unset when nothing is bound; callers must not fall back to the process
+- * singleton or tests pick up the developer's config.
++ * Settings for the active session, otherwise the newest {@link initializeWithSettings} hold.
++ * Unset when neither is bound; never fall back to the process singleton.
+  */
+ export function boundSettings(): Settings | undefined {
+-	return settingsHolds.at(-1)?.settings;
++	return getActiveSettings() ?? settingsHolds.at(-1)?.settings;
+ }
+ 
+ /** Disabled provider IDs in effect: the bound settings' live value, else the unbound set. */
+@@ -154,6 +154,7 @@ async function loadImpl<T>(
+ 	const disabledExtensionIds = new Set<string>(
+ 		options.disabledExtensions ?? (settings ? cfgDisabledExtensions.get(settings) : undefined) ?? [],
+ 	);
++	const dropProject = capability.projectNeedsTrust === true && isUntrustedProjectScope();
+ 
+ 	const results = await Promise.all(
+ 		providers.map(async provider => {
+@@ -192,6 +193,7 @@ async function loadImpl<T>(
+ 				allWarnings.push(`[${provider.displayName}] Item missing _source metadata, skipping`);
+ 				continue;
+ 			}
++			if (dropProject && itemWithSource._source.level === "project") continue;
+ 
+ 			const extensionId = capability.toExtensionId?.(itemWithSource);
+ 			const isDisabled = extensionId !== undefined && disabledExtensionIds.has(extensionId);
+diff --git a/src/capability/prompt.ts b/src/capability/prompt.ts
+index a7b69aabd1755822d1d9a09882cc7c8856792ba0..1c17a344a66c32b3ae2f96cd33b73e9bd2fa7f92 100644
+--- a/src/capability/prompt.ts
++++ b/src/capability/prompt.ts
+@@ -26,6 +26,7 @@ export const promptCapability = defineCapability<Prompt>({
+ 	description: "Reusable prompt templates available via /prompts: menu",
+ 	key: prompt => prompt.name,
+ 	toExtensionId: prompt => `prompt:${prompt.name}`,
++	projectNeedsTrust: true,
+ 	validate: prompt => {
+ 		if (!prompt.name) return "Missing name";
+ 		if (!prompt.path) return "Missing path";
+diff --git a/src/capability/rule.ts b/src/capability/rule.ts
+index 143fba3243cb5862a24ef67e1409cab940a09fd6..3e4207df8d3db599dc0ad7439dee442f8536a800 100644
+--- a/src/capability/rule.ts
++++ b/src/capability/rule.ts
+@@ -6,6 +6,7 @@
+  */
+ import { defineCapability } from ".";
+ import type { SourceMeta } from "./types";
++import { AgentRegistry } from "../registry/agent-registry";
+ 
+ const CONDITION_GLOB_SCOPE_TOOLS = ["edit", "write"] as const;
+ 
+@@ -369,24 +370,25 @@ export function compileRuleCondition(pattern: string): RegExp {
+ 	return optimizeRuleCondition(new RegExp(pattern));
+ }
+ 
+-let activeRules: readonly Rule[] = [];
++const activeRules = new WeakMap<AgentRegistry, readonly Rule[]>();
++const NO_ACTIVE_RULES: readonly Rule[] = [];
+ 
+ /**
+- * Process-global snapshot of rules the active session loaded.
++ * Snapshot of rules loaded by the current session tree.
+  * Read by internal URL protocol handlers (rule://).
+  */
+ export function getActiveRules(): readonly Rule[] {
+-	return activeRules;
++	return activeRules.get(AgentRegistry.global()) ?? NO_ACTIVE_RULES;
+ }
+ 
+ /** Replace the active rule snapshot. Called once per top-level session. */
+ export function setActiveRules(value: readonly Rule[]): void {
+-	activeRules = value;
++	activeRules.set(AgentRegistry.global(), value);
+ }
+ 
+ /** Reset the active rule snapshot. Test-only. */
+ export function resetActiveRulesForTests(): void {
+-	activeRules = [];
++	activeRules.delete(AgentRegistry.global());
+ }
+ 
+ export const ruleCapability = defineCapability<Rule>({
+diff --git a/src/capability/skill.ts b/src/capability/skill.ts
+index 46124483ee09292cd86be13b8748f5408722c8cf..f6615553d1647eed27584513cbb13ccdd2751998 100644
+--- a/src/capability/skill.ts
++++ b/src/capability/skill.ts
+@@ -61,6 +61,7 @@ export const skillCapability = defineCapability<Skill>({
+ 	description: "Specialized knowledge and workflow files that extend agent capabilities",
+ 	key: skill => skill.name,
+ 	toExtensionId: skill => `skill:${skill.name}`,
++	projectNeedsTrust: true,
+ 	validate: skill => {
+ 		if (!skill.name) return "Missing skill name";
+ 		if (!skill.path) return "Missing skill path";
+diff --git a/src/capability/slash-command.ts b/src/capability/slash-command.ts
+index 311f2a382e1d6db0d19e012bbb34cecfe686262d..7e4a24a0d71de852cc76f9f3191c36c40eed0a7b 100644
+--- a/src/capability/slash-command.ts
++++ b/src/capability/slash-command.ts
+@@ -32,6 +32,7 @@ export const slashCommandCapability = defineCapability<SlashCommand>({
+ 	description: "Custom slash commands defined as markdown files",
+ 	key: cmd => cmd.name,
+ 	toExtensionId: cmd => `slash-command:${cmd.name}`,
++	projectNeedsTrust: true,
+ 	validate: cmd => {
+ 		if (!cmd.name) return "Missing name";
+ 		if (!cmd.path) return "Missing path";
+diff --git a/src/capability/types.ts b/src/capability/types.ts
+index cf2ee9b18c7ff60449bdfa50081d3264873adcc9..680c42e510ee4a940449bba697deaa2ca62ab46a 100644
+--- a/src/capability/types.ts
++++ b/src/capability/types.ts
+@@ -221,6 +221,14 @@ export interface Capability<T> {
+ 	 */
+ 	toExtensionId?(item: T): string | undefined;
+ 
++	/**
++	 * Project-level items load only in a trusted folder: in an untrusted one
++	 * (`--untrusted-project`, see `isUntrustedProjectScope`) they are dropped
++	 * before deduplication, so they are neither listed nor invocable and never
++	 * shadow the user's own items of the same name.
++	 */
++	projectNeedsTrust?: boolean;
++
+ 	/** Registered providers, sorted by priority (highest first) */
+ 	providers: Provider<T>[];
+ }
+diff --git a/src/config/prompt-templates.ts b/src/config/prompt-templates.ts
+index 24c8e5f94797c311e7b3ef4820b8363a0724f754..3737f6818264d070f43fd34dc92a60292a5d31e7 100644
+--- a/src/config/prompt-templates.ts
++++ b/src/config/prompt-templates.ts
+@@ -9,6 +9,7 @@ import {
+ 	prompt,
+ } from "@oh-my-pi/pi-utils";
+ import { jtdToTypeScript } from "../tools/jtd-to-typescript";
++import { isUntrustedProjectScope } from "./settings-context";
+ import { parseCommandArgs, substituteArgs } from "../utils/command-args";
+ 
+ /**
+@@ -19,6 +20,8 @@ export interface PromptTemplate {
+ 	description: string;
+ 	content: string;
+ 	source: string; // e.g., "(user)", "(project)", "(project:frontend)"
++	/** The template's file, for templates loaded from a prompts directory. */
++	filePath?: string;
+ }
+ 
+ prompt.registerHelper("jtdToTypeScript", (schema: unknown): string => {
+@@ -134,6 +137,7 @@ async function loadTemplatesFromDir(
+ 						description,
+ 						content: body,
+ 						source: sourceStr,
++						filePath: fullPath,
+ 					});
+ 				}
+ 			} catch (error) {
+@@ -160,7 +164,7 @@ export interface LoadPromptTemplatesOptions {
+ /**
+  * Load all prompt templates from:
+  * 1. Global: agentDir/prompts/
+- * 2. Project: cwd/.omp/prompts/
++ * 2. Project: cwd/.omp/prompts/ — only in a trusted folder (see {@link isUntrustedProjectScope})
+  */
+ export async function loadPromptTemplates(options: LoadPromptTemplatesOptions = {}): Promise<PromptTemplate[]> {
+ 	const resolvedCwd = options.cwd ?? getProjectDir();
+@@ -173,9 +177,11 @@ export async function loadPromptTemplates(options: LoadPromptTemplatesOptions =
+ 	const globalPromptsDir = options.agentDir ? path.join(options.agentDir, "prompts") : resolvedAgentDir;
+ 	templates.push(...(await loadTemplatesFromDir(globalPromptsDir, "user")));
+ 
+-	// 2. Load project templates from cwd/.omp/prompts/
+-	const projectPromptsDir = getProjectPromptsDir(resolvedCwd);
+-	templates.push(...(await loadTemplatesFromDir(projectPromptsDir, "project")));
++	// 2. Load project templates from cwd/.omp/prompts/: an untrusted folder's are neither listed nor expanded
++	if (!isUntrustedProjectScope()) {
++		const projectPromptsDir = getProjectPromptsDir(resolvedCwd);
++		templates.push(...(await loadTemplatesFromDir(projectPromptsDir, "project")));
++	}
+ 
+ 	return templates;
+ }
+diff --git a/src/config/untrusted-project.ts b/src/config/untrusted-project.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..bf70f4bae32ccd4f40f8bbe020c90bfcb8c02fb1
+--- /dev/null
++++ b/src/config/untrusted-project.ts
+@@ -0,0 +1,134 @@
++/**
++ * What an untrusted folder would have contributed to a session, computed with the engine's own
++ * discovery so the report matches what would have loaded. Paths and JSON only: nothing is
++ * imported, spawned or connected.
++ */
++import * as os from "node:os";
++import * as path from "node:path";
++import { type Hook, hookCapability } from "../capability/hook";
++import { type Settings as SettingsFile, settingsCapability } from "../capability/settings";
++import { type SlashCommand, slashCommandCapability } from "../capability/slash-command";
++import { loadCapability } from "../discovery";
++import { listClaudePluginRoots, resolveActiveProjectRegistryPath } from "../discovery/helpers";
++import { discoverCustomCommands } from "../extensibility/custom-commands";
++import { discoverCustomToolPaths } from "../extensibility/custom-tools";
++import { getEnabledPlugins } from "../extensibility/plugins/loader";
++import { cfgDisabledExtensions, cfgSkills } from "../extensibility/settings";
++import { loadSkills } from "../extensibility/skills";
++import { findRootMarker, findServerConfigFile, loadConfig } from "../lsp/config";
++import { loadAllMCPConfigs } from "../mcp/config";
++import { discoverSessionExtensionPaths } from "../sdk";
++import type { UntrustedProjectItem } from "../session/untrusted-project-report";
++import { discoverAgents } from "../task/discovery";
++import { getNeutralProjectDir } from "./neutral-project-dir";
++import { loadPromptTemplates } from "./prompt-templates";
++import { Settings } from "./settings";
++import { withActiveSettings } from "./settings-context";
++
++/**
++ * Everything the folder (cwd, the ancestors discovery walks, its plugin roots) would contribute
++ * to a session that `--untrusted-project` suppresses. `settings` is the session's own (untrusted)
++ * settings; the folder's view is rebuilt from a throwaway in-memory instance that reads its project layer.
++ */
++export async function collectUntrustedProjectItems(
++	cwd: string,
++	agentDir: string,
++	settings: Settings,
++): Promise<UntrustedProjectItem[]> {
++	const root = path.resolve(cwd);
++	const display = (file: string): string => {
++		const relative = path.relative(root, file);
++		return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : path.resolve(file);
++	};
++	// The folder's view: its own settings layer (an invalid one still shows everything but its `extensions` key).
++	const folderSettings = await Settings.loadIsolated({ cwd: root, agentDir, inMemory: true }).catch(() =>
++		Settings.loadIsolated({ cwd: getNeutralProjectDir(), agentDir, inMemory: true }),
++	);
++	const userExtensionPaths = await withActiveSettings(settings, () =>
++		discoverSessionExtensionPaths({}, root, settings),
++	);
++
++	const items: UntrustedProjectItem[] = [];
++	const seen = new Set<string>();
++	const add = (item: UntrustedProjectItem): void => {
++		const key = `${item.kind}\0${item.name}\0${item.source}`;
++		if (seen.has(key)) return;
++		seen.add(key);
++		items.push(item);
++	};
++
++	await withActiveSettings(folderSettings, async () => {
++		const [extensionPaths, hooks, tools, commands, mcp, plugins, pluginRoots, registryPath, settingsFiles, skills, slashCommands, templates, agents] =
++			await Promise.all([
++				discoverSessionExtensionPaths({}, root, folderSettings),
++				loadCapability<Hook>(hookCapability.id, { cwd: root }),
++				discoverCustomToolPaths([], root, agentDir),
++				discoverCustomCommands({ cwd: root, agentDir }),
++				loadAllMCPConfigs(root, { enableProjectConfig: true, filterExa: false }),
++				getEnabledPlugins(root, { includeProject: true }),
++				listClaudePluginRoots(os.homedir(), root),
++				resolveActiveProjectRegistryPath(root),
++				loadCapability<SettingsFile>(settingsCapability.id, { cwd: root }),
++				loadSkills({ ...cfgSkills.get(folderSettings), cwd: root, disabledExtensions: cfgDisabledExtensions.get(folderSettings) }),
++				loadCapability<SlashCommand>(slashCommandCapability.id, { cwd: root }),
++				loadPromptTemplates({ cwd: root, agentDir }),
++				discoverAgents(root),
++			]);
++
++		// Extensions and hooks: whatever discovery finds here beyond what the user's own setup finds in an empty folder.
++		const userPaths = new Set(userExtensionPaths.map(file => path.resolve(root, file)));
++		const hookPaths = new Set(
++			hooks.items.filter(hook => hook.level === "project").map(hook => path.resolve(hook.path)),
++		);
++		for (const file of extensionPaths.map(extensionPath => path.resolve(root, extensionPath))) {
++			if (userPaths.has(file)) continue;
++			add({ kind: hookPaths.has(file) ? "hook" : "extension", name: display(file), source: file });
++		}
++		for (const tool of tools) {
++			if (tool.source?.level !== "project") continue;
++			const file = path.resolve(root, tool.path);
++			add({ kind: "tool", name: display(file), source: file });
++		}
++		for (const command of commands.paths) {
++			if (command.source !== "project") continue;
++			add({ kind: "command", name: `/${path.basename(path.dirname(command.path))}`, source: command.path });
++		}
++		// Skills, markdown slash commands, prompt templates and subagent definitions: what the folder would add to the agent.
++		for (const skill of skills.skills) {
++			if (skill._source?.level === "project") add({ kind: "skill", name: skill.name, source: skill.filePath });
++		}
++		for (const command of slashCommands.items) {
++			if (command.level === "project") add({ kind: "command", name: `/${command.name}`, source: command.path });
++		}
++		for (const template of templates) {
++			if (template.filePath && template.source.startsWith("(project")) {
++				add({ kind: "command", name: `/${template.name}`, source: template.filePath });
++			}
++		}
++		for (const agent of agents.agents) {
++			if (agent.source === "project" && agent.filePath) add({ kind: "agent", name: agent.name, source: agent.filePath });
++		}
++		for (const [name, source] of Object.entries(mcp.sources)) {
++			if (source.level === "project") add({ kind: "mcp", name, source: source.path });
++		}
++		for (const plugin of plugins) {
++			if (plugin.scope !== "project") continue;
++			add({ kind: "plugin", name: plugin.name, source: path.join(plugin.path, "package.json") });
++		}
++		for (const pluginRoot of pluginRoots.roots) {
++			if (pluginRoot.scope !== "project" || !registryPath) continue;
++			add({ kind: "plugin", name: pluginRoot.id, source: registryPath });
++		}
++		for (const file of settingsFiles.items) {
++			const keys = Object.keys(file.data);
++			if (file.level !== "project" || keys.length === 0) continue;
++			add({ kind: "settings", name: `${display(file.path)}: ${keys.join(", ")}`, source: file.path });
++		}
++		// Every language server is off under the flag; report each one the normal config would enable here.
++		for (const [name, server] of Object.entries(loadConfig(root).servers)) {
++			const source = findServerConfigFile(root, name) ?? findRootMarker(root, server.rootMarkers);
++			if (source) add({ kind: "lsp", name: `${name} (${server.resolvedCommand ?? server.command})`, source });
++		}
++	});
++	return items;
++}
+diff --git a/src/discovery/helpers.ts b/src/discovery/helpers.ts
+index 8a435ea5a731009312ba991054aeb958e79e0f04..51a0ac683a238f6ffb36b00a6ed5da18f96c4f3f 100644
+--- a/src/discovery/helpers.ts
++++ b/src/discovery/helpers.ts
+@@ -28,6 +28,8 @@ import {
+ import type { Skill, SkillFrontmatter } from "../capability/skill";
+ import type { LoadContext, LoadResult, SourceMeta } from "../capability/types";
+ import { resolveClaudePaths } from "../config/claude-paths";
++import type { Settings } from "../config/settings";
++import { isUntrustedProjectScope, withActiveSettings } from "../config/settings-context";
+ import type { MCPRequestIdFormat } from "../mcp/types";
+ import { type ConfiguredThinkingLevel, parseConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+ import { normalizeToolNames } from "../tools/builtin-names";
+@@ -1215,7 +1217,8 @@ export function registerPluginCacheInvalidator(invalidator: () => void): void {
+ 
+ /**
+  * List all installed Claude Code plugin roots from its active plugin cache and
+- * ~/.omp/plugins/installed_plugins.json, plus the nearest project registry when present.
++ * ~/.omp/plugins/installed_plugins.json, plus the nearest project registry when present
++ * (never in an untrusted folder, see {@link isUntrustedProjectScope}).
+  *
+  * Results are cached per Claude and OMP config directories, project registry, and canonical active project.
+  */
+@@ -1225,7 +1228,8 @@ export async function listClaudePluginRoots(
+ ): Promise<{ roots: ClaudePluginRoot[]; warnings: string[] }> {
+ 	const claudeConfigDir = resolveClaudePaths(home).configDir;
+ 	const ompRegistryPath = path.join(getPluginsDir(home), "installed_plugins.json");
+-	const projectPath = cwd ? await resolveActiveProjectRegistryPath(cwd) : null;
++	const untrusted = isUntrustedProjectScope();
++	const projectPath = cwd && !untrusted ? await resolveActiveProjectRegistryPath(cwd) : null;
+ 	const resolvedProjectPath =
+ 		projectPath && normalizePathForComparison(projectPath) !== normalizePathForComparison(ompRegistryPath)
+ 			? projectPath
+@@ -1233,7 +1237,10 @@ export async function listClaudePluginRoots(
+ 	const projectRoot = resolvedProjectPath ? path.dirname(path.dirname(path.dirname(resolvedProjectPath))) : cwd;
+ 	const activeClaudeProjectPath = projectRoot ? await canonicalClaudeProjectPath(projectRoot) : null;
+ 	const canonicalCwd = cwd ? await canonicalClaudeProjectPath(cwd) : null;
+-	const settingsDirs = [...new Set([activeClaudeProjectPath, canonicalCwd].filter((d): d is string => !!d))];
++	// An untrusted folder's `.claude/settings*.json` never switch plugins on or off.
++	const settingsDirs = untrusted
++		? []
++		: [...new Set([activeClaudeProjectPath, canonicalCwd].filter((d): d is string => !!d))];
+ 	const enabledOverrides = await readClaudeEnabledPlugins(claudeConfigDir, settingsDirs);
+ 	const cacheKey = `${claudeConfigDir}:${ompRegistryPath}:${resolvedProjectPath ?? ""}:${activeClaudeProjectPath ?? ""}:${canonicalCwd ?? ""}:${enabledOverrides.sources.join("|")}`;
+ 	const cached = pluginRootsCache.get(cacheKey);
+@@ -1490,6 +1497,22 @@ export async function preloadPluginRoots(home: string, cwd?: string): Promise<vo
+ 	preloadedPluginRoots = roots;
+ }
+ 
++/**
++ * The launch's plugin-root preload (`--plugin-dir` roots injected when given), run under the launch `settings`:
++ * the process-wide roots LSP/DAP read must follow that launch's folder trust, which may be read before
++ * those settings become the process singleton.
++ */
++export function preloadLaunchPluginRoots(
++	settings: Settings,
++	home: string,
++	cwd: string,
++	pluginDirs: string[] | undefined,
++): Promise<void> {
++	return withActiveSettings(settings, () =>
++		pluginDirs?.length ? injectPluginDirRoots(home, pluginDirs, cwd) : preloadPluginRoots(home, cwd),
++	);
++}
++
+ /**
+  * Get pre-loaded plugin roots synchronously.
+  * Returns empty array if preloadPluginRoots() hasn't been called.
+diff --git a/src/discovery/omp-extension-roots.ts b/src/discovery/omp-extension-roots.ts
+index 05a5d3793eb70f5c8ed2397d710ba0c793d261b8..aa8ae1f05f4c5956005dca01766fe386f025809a 100644
+--- a/src/discovery/omp-extension-roots.ts
++++ b/src/discovery/omp-extension-roots.ts
+@@ -92,6 +92,12 @@ export function withOmpExtensionRootScope<T>(
+ 	return invocationRootScope.run({ paths: [...paths], mode }, callback);
+ }
+ 
++/** Capture only discovery ownership, preserving unrelated caller async-local scopes. */
++export function captureOmpExtensionRootScope(): <T>(work: () => T) => T {
++	const scope = invocationRootScope.getStore();
++	return work => scope ? invocationRootScope.run(scope, work) : work();
++}
++
+ /**
+  * Record the owning session's effective `extensions` setting (and its
+  * `Settings`-resolved provenance) on the active invocation scope so
+diff --git a/src/extensibility/skills.ts b/src/extensibility/skills.ts
+index dd8deeb3fe4dfe832e8b9f29da84d9dab37355cc..78fd9905d6c3cc750f6027cd63a394fbabfd06d8 100644
+--- a/src/extensibility/skills.ts
++++ b/src/extensibility/skills.ts
+@@ -8,6 +8,7 @@ import {
+ } from "../autolearn/managed-skills";
+ import { skillCapability } from "../capability/skill";
+ import type { EffectiveExtensionRoots, SourceMeta } from "../capability/types";
++import { AgentRegistry } from "../registry/agent-registry";
+ import type { SkillsSettings } from "./settings";
+ import {
+ 	type Skill as CapabilitySkill,
+@@ -198,24 +199,25 @@ function resolveCollision(
+ 	};
+ }
+ 
+-let activeSkills: readonly Skill[] = [];
++const activeSkills = new WeakMap<AgentRegistry, readonly Skill[]>();
++const NO_ACTIVE_SKILLS: readonly Skill[] = [];
+ 
+ /**
+- * Process-global snapshot of skills the active session loaded.
++ * Snapshot of skills loaded by the current session tree.
+  * Read by internal URL protocol handlers (skill://).
+  */
+ export function getActiveSkills(): readonly Skill[] {
+-	return activeSkills;
++	return activeSkills.get(AgentRegistry.global()) ?? NO_ACTIVE_SKILLS;
+ }
+ 
+ /** Replace the active skill snapshot. Called once per top-level session. */
+ export function setActiveSkills(value: readonly Skill[]): void {
+-	activeSkills = value;
++	activeSkills.set(AgentRegistry.global(), value);
+ }
+ 
+ /** Reset the active skill snapshot. Test-only. */
+ export function resetActiveSkillsForTests(): void {
+-	activeSkills = [];
++	activeSkills.delete(AgentRegistry.global());
+ }
+ 
+ /**
+diff --git a/src/session/untrusted-project-report.ts b/src/session/untrusted-project-report.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..9825608bc7ba8e9b9f8fa048048defe0a9ad68c2
+--- /dev/null
++++ b/src/session/untrusted-project-report.ts
+@@ -0,0 +1,31 @@
++import type { AgentSession } from "./agent-session";
++
++/** One thing an untrusted folder would have contributed and `--untrusted-project` kept from running. */
++export interface UntrustedProjectItem {
++	kind: "mcp" | "extension" | "hook" | "tool" | "command" | "skill" | "agent" | "plugin" | "lsp" | "settings";
++	/**
++	 * MCP server name; extension/hook/tool path (relative to cwd when inside it); command `/name`
++	 * (command modules, markdown slash commands, prompt templates); skill or subagent name; plugin id;
++	 * lsp `server (command)`; settings `<file>: key1, key2`.
++	 */
++	name: string;
++	/** Absolute path of the file that declares (or is) the item. */
++	source: string;
++}
++
++/** `get_state.untrustedProject`: present only for sessions opened with `--untrusted-project`. */
++export interface UntrustedProjectReport {
++	items: UntrustedProjectItem[];
++}
++
++// Keyed by the logical session object, which survives `new_session`/`switch_session`.
++const reports = new WeakMap<AgentSession, UntrustedProjectReport>();
++
++export function setUntrustedProjectReport(session: AgentSession, report: UntrustedProjectReport): void {
++	reports.set(session, report);
++}
++
++/** The report computed when the session was created, or `null` when its folder was not restricted. */
++export function getUntrustedProjectReport(session: AgentSession): UntrustedProjectReport | null {
++	return reports.get(session) ?? null;
++}
+diff --git a/src/task/discovery.ts b/src/task/discovery.ts
+index f433e225d5a6a4245496af0c3f31355cca617c6c..585bc97d0efe62bdcc054955b275f6cef83fa6c0 100644
+--- a/src/task/discovery.ts
++++ b/src/task/discovery.ts
+@@ -3,7 +3,7 @@
+  *
+  * Discovers agent definitions from OMP-native task-agent roots:
+  *   - ~/.omp/agent/agents/*.md (user-level)
+- *   - .omp/agents/*.md (project-level)
++ *   - .omp/agents/*.md (project-level; only in a trusted folder, see `isUntrustedProjectScope`)
+  *   - <ext>/agents/*.md for every OMP extension package wired through
+  *     `listOmpExtensionRoots` (CLI `--extension` roots, `extensions:` in
+  *     settings, and enabled npm/link plugins under `<plugins>/node_modules/`).
+@@ -24,6 +24,7 @@ import { logger } from "@oh-my-pi/pi-utils";
+ import { isProviderEnabled, isUserSourceEnabled } from "../capability";
+ import type { EffectiveExtensionRoots } from "../capability/types";
+ import { findAllNearestProjectConfigDirs, getConfigDirs } from "../config";
++import { isUntrustedProjectScope } from "../config/settings-context";
+ import { pluginUsesClaudeModelDialect } from "../discovery/agent-plugin-format";
+ import { listClaudePluginRoots } from "../discovery/helpers";
+ import { listOmpExtensionRoots } from "../discovery/omp-extension-roots";
+@@ -154,8 +155,11 @@ export async function discoverAgents(
+ 		});
+ 	});
+ 
++	// An untrusted folder's agent definitions (its `.omp/agents`, project-scope extension and plugin
++	// agents) are neither offered nor spawnable, and never shadow the user's own of the same name.
++	const trustedDirs = isUntrustedProjectScope() ? orderedDirs.filter(entry => entry.source !== "project") : orderedDirs;
+ 	const seen = new Set<string>();
+-	const loadedAgents = (await Promise.all(orderedDirs.map(loadAgentsFromDir))).flat().filter(agent => {
++	const loadedAgents = (await Promise.all(trustedDirs.map(loadAgentsFromDir))).flat().filter(agent => {
+ 		if (seen.has(agent.name)) return false;
+ 		seen.add(agent.name);
+ 		return true;
+@@ -172,7 +176,7 @@ export async function discoverAgents(
+ 	return {
+ 		agents: [...loadedAgents, ...bundledAgents],
+ 		projectAgentsDir,
+-		searchedDirs: orderedDirs.map(entry => entry.dir),
++		searchedDirs: trustedDirs.map(entry => entry.dir),
+ 	};
+ }
+ 

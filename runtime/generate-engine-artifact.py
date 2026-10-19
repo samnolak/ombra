@@ -11,7 +11,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 ROOT = Path(__file__).resolve().parent.parent
-NAME = "ombra-engine-18.8.0-bun-1.4.2-v1"
+NAME = "ombra-engine-18.12.2-bun-1.4.2-v1"
 PACK = ROOT / "runtime" / "packs" / NAME
 ENGINE = ROOT / "runtime" / "engine"
 MAX_FILES, MAX_FILE_BYTES, MAX_TOTAL_BYTES = 8192, 16 << 20, 128 << 20
@@ -27,6 +27,8 @@ def render():
         if not source.is_file():
             continue
         path = source.relative_to(ENGINE).as_posix()
+        if path.split("/", 1)[0] in {".temp", "patches", "patcher.py", "upstream.json", "README.md"}:
+            continue
         if any(part in {"node_modules", ".git", "__pycache__"} for part in source.relative_to(ENGINE).parts):
             raise ValueError(f"Non-source directory in engine: {path}")
         if path.casefold() in seen or any(c in path for c in "\\:\n\r\0"):
@@ -45,15 +47,15 @@ def render():
         "schema": 2,
         "name": NAME,
         "revision": 1,
-        "omp": {"package": "@oh-my-pi/pi-coding-agent", "version": "18.8.0", "integrity": "sha512-i0m5z+sljos+Fb7GwKhtXimAbvZ3EOiulyN9RiDeVy0yl1UtNlErgp2O376EurT263rD7C/CAbVOp9EyK7saOQ==", "entry": "engine/coding-agent/src/cli.ts"},
+        "omp": {"package": "@oh-my-pi/pi-coding-agent", "version": "18.12.2", "integrity": "sha512-1qh9EwuiMBUTVix0ZWZNOMPTW++nWhL6t3EaRhGe05sVIBfDTyVl36iTyDv0TvM+R/EmOL4PvFrmIPgXd3xYQQ==", "entry": "engine/coding-agent/src/cli.ts"},
         "engine": {"entry": "engine/host.ts", "protocolVersion": 1},
         "bun": {"version": "1.4.2", "revision": "744846f84"},
         "sourceArtifact": {
             "identity": "ombra-engine-v1", "kind": "complete-owned-source",
             "upstreamBase": {
                 "repository": "https://github.com/can1357/oh-my-pi",
-                "revision": "4ef97c8826ee012829a3e756b693a2a16a414f47",
-                "attestation": "https://registry.npmjs.org/-/npm/v1/attestations/@oh-my-pi%2fpi-coding-agent@18.8.0",
+                "revision": "1d5aff90b057ce7dbfe32ea557a527c1b3144b72",
+                "attestation": "https://registry.npmjs.org/-/npm/v1/attestations/@oh-my-pi%2fpi-coding-agent@18.12.2",
                 "verification": "npm tarball integrity verified; SLSA payload decoded, signatures not independently verified",
             },
             "sha256": digest, "bytes": total, "files": files,

@@ -16,6 +16,8 @@ export interface ThinkingContent {
 	thinking: string;
 	thinkingSignature?: string;
 	itemId?: string;
+	/** Prose the model addressed to the user, returned by the provider as thinking; present it as answer text. */
+	narration?: boolean;
 }
 
 export interface RedactedThinkingContent {
@@ -366,6 +368,11 @@ export interface ModelInfo {
 	compat?: Record<string, unknown>;
 }
 
+export interface EditorPosition {
+	line: number;
+	character: number;
+}
+
 export type QueueMode = "all" | "one-at-a-time";
 
 export type InterruptMode = "immediate" | "wait";
@@ -418,6 +425,8 @@ export interface ContextUsage {
 export interface QueuedMessagesState {
 	steering: string[];
 	followUp: string[];
+	/** Leading `steering` entries are live steering already sent into the streaming response; `remove_queued_message` cannot reach them. */
+	liveSteered?: number;
 }
 
 export interface ToolDescriptor {
@@ -451,6 +460,30 @@ export interface GoalModeState {
 export interface GoalResult {
 	goal: Goal | null;
 	state: GoalModeState | null;
+}
+
+export type PlanModeOp = "get" | "enter" | "exit" | "approve" | "reject";
+
+/** Session plan mode: the agent drafts `planFilePath` read-only until a plan is approved. */
+export interface PlanModeState {
+	enabled: boolean;
+	planFilePath: string;
+	workflow?: "parallel" | "iterative";
+	reentry?: boolean;
+}
+
+/** A plan the agent proposed (`xd://propose`) that waits for `plan_mode` approve or reject naming its `revision`; `content` is the Markdown approval executes. */
+export interface PlanReview {
+	revision: string;
+	planFilePath: string;
+	title: string;
+	content: string;
+}
+
+/** Outcome of every `plan_mode` op; `state` is null when plan mode is off, `review` when no plan waits. */
+export interface PlanModeResult {
+	state: PlanModeState | null;
+	review: PlanReview | null;
 }
 
 /** Where `/slow` lives: persisted config shared by every session, or this session's flex tier. */
@@ -514,6 +547,8 @@ export interface SessionState {
 	contextUsage?: ContextUsage;
 	/** Current goal mode; null when the session has no goal. */
 	goal?: GoalModeState | null;
+	/** Plan mode and the proposed plan awaiting approval. */
+	planMode?: PlanModeResult;
 }
 
 export interface BashResult {
@@ -545,6 +580,7 @@ export interface CompactionResult {
 	shortSummary?: string;
 	details?: unknown;
 	preserveData?: Record<string, unknown>;
+	providerReplayThroughEntryId?: string;
 }
 
 export interface ModelCycleResult {
@@ -608,8 +644,9 @@ export interface BranchResult {
 }
 
 export interface NavigateTreeResult {
-	text?: string;
 	cancelled: boolean;
+	text?: string;
+	images?: ImageContent[];
 }
 
 export interface TokenUsage {
@@ -805,6 +842,46 @@ export interface LogoutAccount {
 	active: boolean;
 }
 
+/** Connector sign-in: no OMP-managed OAuth, a working credential, none that works, or one the server now refuses. */
+export type McpAuthState = "none" | "signed_in" | "signed_out" | "expired";
+
+/** One MCP server of the session. Never carries credentials. */
+export interface McpServerInfo {
+	name: string;
+	transport: "stdio" | "http" | "sse";
+	status: "connected" | "connecting" | "disconnected" | "failed";
+	/** Tools of this server in the session; 0 while connected deserves a warning. */
+	toolCount: number;
+	auth: McpAuthState;
+	scope?: "user" | "project" | "native";
+	/** Last connection failure (URL queries removed) until the server connects again. */
+	error?: string;
+}
+
+export interface ElicitationOption {
+	value: string;
+	label: string;
+}
+
+/** One field of an MCP form, normalized from the server's JSON Schema; limits apply to its kind. */
+export interface ElicitationField {
+	name: string;
+	title: string;
+	required: boolean;
+	kind: "text" | "number" | "integer" | "boolean" | "select" | "multiselect";
+	description?: string;
+	format?: "email" | "uri" | "date" | "date-time";
+	minLength?: number;
+	maxLength?: number;
+	minimum?: number;
+	maximum?: number;
+	/** For `select` and `multiselect`. */
+	options?: ElicitationOption[];
+	minItems?: number;
+	maxItems?: number;
+	default?: string | number | boolean | string[];
+}
+
 export interface HandoffResult {
 	savedPath?: string;
 }
@@ -832,6 +909,8 @@ export type NotifyType = "info" | "warning" | "error";
 
 export interface AgentStartEvent {
 	type: "agent_start";
+	/** Calls of an unpaired assistant tail a continued run executes before its first model request. */
+	resumedToolCallIds?: string[];
 }
 
 export interface AgentEndEvent {
@@ -1049,10 +1128,31 @@ export interface QueueUpdateEvent {
 	type: "queue_update";
 	steering: string[];
 	followUp: string[];
+	/** Leading `steering` entries are live steering already sent into the streaming response; `remove_queued_message` cannot reach them. */
+	liveSteered?: number;
 }
 
 /** A session event, discriminated by `type`; `set_event_filter` selects which are sent. */
 export type RpcAgentEvent = AgentStartEvent | AgentEndEvent | TurnStartEvent | TurnEndEvent | MessageStartEvent | MessageUpdateEvent | MessageEndEvent | ToolExecutionStartEvent | ToolExecutionUpdateEvent | ToolStreamUpdateEvent | ToolExecutionEndEvent | AutoCompactionStartEvent | AutoCompactionEndEvent | AutoRetryStartEvent | AutoRetryEndEvent | CacheWarmingStartEvent | CacheWarmingEndEvent | RetryFallbackAppliedEvent | RetryFallbackSucceededEvent | ModelChangedEvent | ConfigWarningsChangedEvent | AdvisorCostChangedEvent | AdvisorYieldedEvent | TtsrTriggeredEvent | TodoReminderEvent | TodoAutoClearEvent | IrcMessageEvent | NoticeEvent | ThinkingLevelChangedEvent | GoalUpdatedEvent | QueueUpdateEvent;
+
+export interface EditorDocumentSnapshot {
+	uri: string;
+	version: number;
+	text: string;
+	languageId: string;
+	baseHash: string;
+	dirty: boolean;
+	conflict?: boolean;
+}
+
+export interface EditorApplyEditEvent {
+	type: "editor_apply_edit";
+	requestId: string;
+	uri: string;
+	expectedRevision: number;
+	expectedHash: string;
+	text: string;
+}
 
 /** First frame after startup; transport fields are absent on servers without protocol v2. */
 export interface ReadyEvent {
@@ -1199,6 +1299,40 @@ export interface BtwRecordEvent {
 	record: BtwHistoryRecord;
 }
 
+/** Plan mode changed: entered, exited, a plan proposed for review (with its document), approved or rejected. */
+export interface PlanModeUpdatedEvent {
+	type: "plan_mode_updated";
+	state: PlanModeState | null;
+	review: PlanReview | null;
+}
+
+/** A connector needs the user to sign in (again); nothing was opened. Offer `mcp_login`. */
+export interface McpAuthRequiredEvent {
+	type: "mcp_auth_required";
+	serverName: string;
+	reason: "signed_out" | "expired";
+}
+
+/** Who holds (or asked for) a session's writer lease, as that process published itself. */
+export interface SessionLeaseHolder {
+	/** The holder process's lease identity (random per process). */
+	id: string;
+	/** `ombra` for the desktop app's engine, `omp` for the terminal and CLI. */
+	kind: string;
+	pid: number;
+	/** When it took the lease (ISO 8601). */
+	since: string;
+	label?: string;
+}
+
+/** Another window or terminal asked to write this session (`holder`, null when unknown): the run is aborted and the logical session closes after its last write. Show the chat read-only with an action to take it back. */
+export interface SessionLeaseLostEvent {
+	type: "session_lease_lost";
+	holder: SessionLeaseHolder | null;
+	/** A reply was in progress: it is stopped, not finished. */
+	interrupted: boolean;
+}
+
 /** Output of a builtin slash command. */
 export interface CommandOutputEvent {
 	type: "command_output";
@@ -1250,6 +1384,34 @@ export interface AskQuestion {
 	recommended?: number;
 }
 
+export type ToolApprovalRisk = "read" | "write" | "exec";
+
+export type ToolApprovalScope = "once" | "session" | "always";
+
+/** Typed tool approval: render it instead of parsing the select `title`. */
+export interface ToolApprovalRequest {
+	tool: string;
+	/** Capability tier of this call. */
+	risk: ToolApprovalRisk;
+	/** The tool's argument summary lines, bounded as in the text prompt. */
+	details: string[];
+	/** Scopes a host may keep an approval for; only `once` with safety checks or when the tool or the user's policy insists on asking every time. */
+	scopes: ToolApprovalScope[];
+	toolCallId?: string;
+	/** The tool's own reason for asking. */
+	reason?: string;
+	/** A tool of an MCP server. */
+	origin?: "mcp";
+	/** With `origin`: the MCP server's name. */
+	server?: string;
+	/** `bash` only: the complete command; absent when longer than 65536 characters. */
+	command?: string;
+	/** `bash` only: the folder the call runs in, as given (relative to the session's folder). */
+	cwd?: string;
+	/** Provider safety checks only a person may confirm. */
+	safetyChecks?: string[];
+}
+
 export interface SelectUiRequest {
 	type: "extension_ui_request";
 	id: string;
@@ -1257,6 +1419,8 @@ export interface SelectUiRequest {
 	title: string;
 	options: string[];
 	optionDetails?: SelectOptionDetail[];
+	/** Set on tool approvals (options Approve/Deny); a `Deny` answer may carry `reason`. */
+	approval?: ToolApprovalRequest;
 	timeout?: number;
 }
 
@@ -1351,10 +1515,22 @@ export interface OpenUrlUiRequest {
 	/** Short loopback redirect to `url`; the truncation-safe copy target. */
 	launchUrl?: string;
 	instructions?: string;
+	/** Set when the URL belongs to the host's `mcp_login` for this server. */
+	mcpServer?: string;
+}
+
+/** An MCP server asks the user for a form; show `serverName` and offer Decline. Answers are validated against `fields`. */
+export interface ElicitUiRequest {
+	type: "extension_ui_request";
+	id: string;
+	method: "elicit";
+	serverName: string;
+	message: string;
+	fields: ElicitationField[];
 }
 
 /** Extension UI request, discriminated by `method`. */
-export type ExtensionUiRequest = SelectUiRequest | ConfirmUiRequest | InputUiRequest | EditorUiRequest | AskUiRequest | CancelUiRequest | NotifyUiRequest | SetStatusUiRequest | SetWidgetUiRequest | SetTitleUiRequest | SetEditorTextUiRequest | OpenUrlUiRequest;
+export type ExtensionUiRequest = SelectUiRequest | ConfirmUiRequest | InputUiRequest | EditorUiRequest | AskUiRequest | CancelUiRequest | NotifyUiRequest | SetStatusUiRequest | SetWidgetUiRequest | SetTitleUiRequest | SetEditorTextUiRequest | OpenUrlUiRequest | ElicitUiRequest;
 
 /** Answer to one `ask` question: exact option labels, plus optional free text. */
 export interface AskAnswer {
@@ -1368,6 +1544,8 @@ export interface ValueUiResponse {
 	type: "extension_ui_response";
 	id: string;
 	value: string;
+	/** With `Deny` on an `approval` select: why, for the agent's failed tool result. */
+	reason?: string;
 }
 
 /** Answers a `confirm` request. */
@@ -1392,8 +1570,17 @@ export interface AnswersUiResponse {
 	answers: AskAnswer[];
 }
 
+/** Answers an `elicit` form; dismissing it sends `CancelUiResponse` instead. */
+export interface ElicitUiResponse {
+	type: "extension_ui_response";
+	id: string;
+	action: "accept" | "decline";
+	/** Field values by name; required with `accept`. */
+	content?: Record<string, string | number | boolean | string[]>;
+}
+
 /** Host reply to an extension UI request; variants share `type` and differ by their payload key. */
-export type ExtensionUiResponse = ValueUiResponse | ConfirmUiResponse | CancelUiResponse | AnswersUiResponse;
+export type ExtensionUiResponse = ValueUiResponse | ConfirmUiResponse | CancelUiResponse | AnswersUiResponse | ElicitUiResponse;
 
 export interface HostToolCallRequest {
 	type: "host_tool_call";
@@ -1504,7 +1691,7 @@ export interface HostUriSchemeDefinition {
 }
 
 /** Unsolicited outbound frame (everything except responses and host tool/URI requests), discriminated by `type`. */
-export type RpcNotification = ReadyEvent | EditorApplyEditEvent | PromptResultEvent | SessionSettledEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | LivePhaseEvent | LiveLevelsEvent | LiveTranscriptEvent | LiveEndEvent | BtwDeltaEvent | BtwRecordEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | RpcFrameErrorEvent | RpcAgentEvent;
+export type RpcNotification = ReadyEvent | EditorApplyEditEvent | PromptResultEvent | SessionSettledEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | LivePhaseEvent | LiveLevelsEvent | LiveTranscriptEvent | LiveEndEvent | BtwDeltaEvent | BtwRecordEvent | PlanModeUpdatedEvent | McpAuthRequiredEvent | SessionLeaseLostEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | RpcFrameErrorEvent | RpcAgentEvent;
 
 /** Any frame the server writes to stdout (after reassembling `rpc_chunk` sequences), discriminated by `type`. */
 export type RpcServerFrame = RpcResponse | RpcHostRequest | RpcNotification;
@@ -1516,6 +1703,43 @@ export interface NegotiateProtocolParams {
 export interface NegotiateProtocolResult {
 	protocolVersion: number;
 }
+
+export interface EditorDocumentParams {
+	action: "open" | "change" | "save" | "close" | "request";
+	uri: string;
+	version: number;
+	text?: string;
+	languageId?: string;
+	baseHash?: string;
+	dirty?: boolean;
+	conflict?: boolean;
+	method?: "completion" | "hover" | "definition" | "rename" | "diagnostics";
+	position?: EditorPosition;
+	newName?: string;
+}
+
+export interface EditorDocumentResult {
+	version: number;
+	result: unknown;
+	positionEncoding: "utf-16";
+}
+
+export interface EditorTrustParams {
+	trusted: boolean;
+}
+
+export interface EditorTrustResult {
+	trusted: boolean;
+}
+
+export interface EditorEditResultParams {
+	requestId: string;
+	success: boolean;
+	error?: string;
+	document?: EditorDocumentSnapshot;
+}
+
+export type EditorEditResultResult = Record<string, unknown>;
 
 export interface PromptParams {
 	message: string;
@@ -1577,6 +1801,13 @@ export interface GoalParams {
 	op: GoalOp;
 	objective?: string;
 	token_budget?: number;
+}
+
+export interface PlanModeParams {
+	op: PlanModeOp;
+	planFilePath?: string;
+	feedback?: string;
+	revision?: string;
 }
 
 export interface SetAskDialogParams {
@@ -1866,6 +2097,30 @@ export interface GetBtwHistoryResult {
 	records: BtwHistoryRecord[];
 }
 
+export interface GetMcpServersResult {
+	servers: McpServerInfo[];
+}
+
+export interface McpLoginParams {
+	serverName: string;
+}
+
+export interface McpLoginCancelParams {
+	serverName: string;
+}
+
+export interface McpLoginCancelResult {
+	cancelled: boolean;
+}
+
+export interface McpReconnectParams {
+	serverName?: string;
+}
+
+export interface McpReconnectResult {
+	servers: McpServerInfo[];
+}
+
 /** Every RPC command's parameters and successful response `data`. */
 export interface RpcWireCommands {
 	negotiate_protocol: { params: NegotiateProtocolParams; result: NegotiateProtocolResult };
@@ -1886,6 +2141,7 @@ export interface RpcWireCommands {
 	set_fast_mode: { params: SetFastModeParams; result: FastModeResult };
 	set_slow_mode: { params: SetSlowModeParams; result: SetSlowModeResult };
 	goal: { params: GoalParams; result: GoalResult };
+	plan_mode: { params: PlanModeParams; result: PlanModeResult };
 	set_ask_dialog: { params: SetAskDialogParams; result: SetAskDialogResult };
 	get_available_commands: { params: undefined; result: GetAvailableCommandsResult };
 	get_entries: { params: GetEntriesParams; result: SessionEntries };
@@ -1942,53 +2198,8 @@ export interface RpcWireCommands {
 	btw: { params: BtwParams; result: BtwResult };
 	btw_cancel: { params: BtwCancelParams; result: BtwCancelResult };
 	get_btw_history: { params: undefined; result: GetBtwHistoryResult };
+	get_mcp_servers: { params: undefined; result: GetMcpServersResult };
+	mcp_login: { params: McpLoginParams; result: McpServerInfo };
+	mcp_login_cancel: { params: McpLoginCancelParams; result: McpLoginCancelResult };
+	mcp_reconnect: { params: McpReconnectParams; result: McpReconnectResult };
 }
-
-export interface EditorDocumentSnapshot {
-	uri: string;
-	version: number;
-	text: string;
-	languageId: string;
-	baseHash: string;
-	dirty: boolean;
-	conflict?: boolean;
-}
-
-export interface EditorApplyEditEvent {
-	type: "editor_apply_edit";
-	requestId: string;
-	uri: string;
-	expectedRevision: number;
-	expectedHash: string;
-	text: string;
-}
-
-export interface EditorDocumentParams {
-	action: "open" | "change" | "save" | "close" | "request";
-	uri: string;
-	version: number;
-	text?: string;
-	languageId?: string;
-	baseHash?: string;
-	dirty?: boolean;
-	conflict?: boolean;
-	method?: "completion" | "hover" | "definition" | "rename" | "diagnostics";
-	position?: { line: number; character: number };
-	newName?: string;
-}
-
-export interface EditorDocumentResult {
-	version: number;
-	result: unknown;
-	positionEncoding: "utf-16";
-}
-
-export interface EditorTrustParams { trusted: boolean }
-export interface EditorTrustResult { trusted: boolean }
-export interface EditorEditResultParams {
-	requestId: string;
-	success: boolean;
-	error?: string;
-	document?: EditorDocumentSnapshot;
-}
-export interface EditorEditResultResult {}

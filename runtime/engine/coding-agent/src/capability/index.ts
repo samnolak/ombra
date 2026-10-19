@@ -63,8 +63,11 @@ const FOREIGN_USER_PROVIDERS: Record<string, true> = {
 /** Outstanding {@link initializeWithSettings} holds, oldest first; the newest one is bound. */
 const settingsHolds: { settings: Settings }[] = [];
 
-/** Settings instance provider switches are read from and persisted to (the newest hold), if any. */
-function boundSettings(): Settings | undefined {
+/**
+ * Settings for the active session, otherwise the newest {@link initializeWithSettings} hold.
+ * Unset when neither is bound; never fall back to the process singleton.
+ */
+export function boundSettings(): Settings | undefined {
 	return getActiveSettings() ?? settingsHolds.at(-1)?.settings;
 }
 

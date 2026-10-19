@@ -45,12 +45,17 @@ public sealed class RuntimeSourceArtifactTests
         var canonical = Path.GetDirectoryName(RuntimeInstallerTests.RepoFile("runtime/engine/host.ts"))!;
         var paths = artifact.GetProperty("files").EnumerateArray().Select(f => f.GetProperty("path").GetString()!).ToArray();
         Assert.Equal(Directory.EnumerateFiles(canonical, "*", SearchOption.AllDirectories)
-            .Select(p => Path.GetRelativePath(canonical, p).Replace('\\', '/')).Order(), paths.Order());
+            .Select(p => Path.GetRelativePath(canonical, p).Replace('\\', '/'))
+            .Where(p => p.Split('/')[0] is not (".temp" or "patches" or "patcher.py" or "upstream.json" or "README.md"))
+            .Order(), paths.Order());
         Assert.Contains("host.ts", paths);
         Assert.Contains("session-factory.ts", paths);
         Assert.Contains("coding-agent/LICENSE", paths);
         Assert.Contains("coding-agent/THIRD-PARTY-NOTICES.txt", paths);
         Assert.True(paths.Length > 1700);
+        Assert.DoesNotContain(paths, p => p.StartsWith("patches/", StringComparison.Ordinal)
+            || p is "patcher.py" or "upstream.json" or "README.md"
+            || p.StartsWith(".temp/", StringComparison.Ordinal));
         foreach (var file in artifact.GetProperty("files").EnumerateArray())
         {
             var relative = file.GetProperty("path").GetString()!;
@@ -173,6 +178,7 @@ public sealed class RuntimeSourceArtifactTests
     [Theory]
     [InlineData("omp-18.8.0-bun-1.4.2")]
     [InlineData("omp-18.8.0-bun-1.4.2-ombra-history2")]
+    [InlineData("ombra-engine-18.8.0-bun-1.4.2-v1")]
     public async Task Historical_pack_is_preserved_but_never_selected_as_default(string previousName)
     {
         var root = TestProcesses.TempDir("engine-previous");

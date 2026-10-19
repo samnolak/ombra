@@ -1,11 +1,15 @@
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { $which, isRecord, logger, pathIsWithin, type WhichOptions } from "@oh-my-pi/pi-utils";
 import { YAML } from "bun";
-import { getConfigDirPaths } from "../config";
 import { isUntrustedProjectScope } from "../config/settings-context";
-import { type ClaudePluginRoot, getPreloadedPluginRoots } from "../discovery/helpers";
+import type { ClaudePluginRoot } from "../discovery/helpers";
+import {
+	type ConfigFileAdapter,
+	type ConfigFileSource,
+	configFileSources,
+	readConfigFile,
+} from "../utils/config-file-sources";
 import { BiomeClient } from "./clients/biome-client";
 import { SwiftLintClient } from "./clients/swiftlint-client";
 import DEFAULTS from "./defaults.json" with { type: "json" };
@@ -104,15 +108,8 @@ function normalizeServerConfig(name: string, config: RawServerConfig): ServerCon
 	};
 }
 
-function readConfigFile(filePath: string): NormalizedConfig | null {
-	try {
-		const content = fs.readFileSync(filePath, "utf-8");
-		const parsed = parseConfigContent(content, filePath);
-		return normalizeConfig(parsed);
-	} catch {
-		return null;
-	}
-}
+const adaptConfig: ConfigFileAdapter<NormalizedConfig> = (content, filePath) =>
+	normalizeConfig(parseConfigContent(content, filePath));
 
 function coerceServerConfigs(servers: Record<string, RawServerConfig>): Record<string, ServerConfig> {
 	const result: Record<string, ServerConfig> = {};
@@ -371,19 +368,6 @@ function selectTypescriptServer(servers: Record<string, ServerConfig>): void {
 	}
 }
 
-interface ConfigSource {
-	read(): NormalizedConfig | null;
-	/** The config file, when the source is one. */
-	path?: string;
-}
-
-function fileConfigSource(filePath: string): ConfigSource {
-	return {
-		read: () => readConfigFile(filePath),
-		path: filePath,
-	};
-}
-
 function readMarketplaceLspConfig(root: ClaudePluginRoot): NormalizedConfig | null {
 	const catalogPaths = [
 		path.resolve(root.path, "..", "..", "marketplace.json"),
@@ -402,7 +386,7 @@ function readMarketplaceLspConfig(root: ClaudePluginRoot): NormalizedConfig | nu
 				if (typeof lspServers === "string") {
 					const configPath = path.resolve(root.path, lspServers);
 					if (!pathIsWithin(root.path, configPath)) return null;
-					return readConfigFile(configPath);
+					return readConfigFile(configPath, adaptConfig);
 				}
 				if (isRecord(lspServers)) {
 					return normalizeConfig({ servers: lspServers });
@@ -415,56 +399,10 @@ function readMarketplaceLspConfig(root: ClaudePluginRoot): NormalizedConfig | nu
 	return null;
 }
 
-function marketplaceConfigSource(root: ClaudePluginRoot): ConfigSource {
+function marketplaceConfigSource(root: ClaudePluginRoot): ConfigFileSource<NormalizedConfig> {
 	return {
 		read: () => readMarketplaceLspConfig(root),
 	};
-}
-
-/**
- * Configuration sources in priority order.
- * Supports both visible and hidden variants at each config location.
- */
-function getConfigSources(cwd: string): ConfigSource[] {
-	const filenames = ["lsp.json", ".lsp.json", "lsp.yaml", ".lsp.yaml", "lsp.yml", ".lsp.yml"];
-	const sources: ConfigSource[] = [];
-
-	// Project root files and config directories (.omp/, .pi/, .claude/), highest priority — never in an untrusted folder
-	if (!isUntrustedProjectScope()) {
-		for (const filename of filenames) {
-			sources.push(fileConfigSource(path.join(cwd, filename)));
-		}
-		const projectDirs = getConfigDirPaths("", { user: false, project: true, cwd });
-		for (const dir of projectDirs) {
-			for (const filename of filenames) {
-				sources.push(fileConfigSource(path.join(dir, filename)));
-			}
-		}
-	}
-
-	// User config directories (~/.omp/agent/, ~/.pi/agent/, ~/.claude/)
-	const userDirs = getConfigDirPaths("", { user: true, project: false });
-	for (const dir of userDirs) {
-		for (const filename of filenames) {
-			sources.push(fileConfigSource(path.join(dir, filename)));
-		}
-	}
-
-	// Plugin LSP configs (from marketplace/--plugin-dir roots)
-	const pluginRoots = getPreloadedPluginRoots();
-	for (const root of pluginRoots) {
-		for (const filename of filenames) {
-			sources.push(fileConfigSource(path.join(root.path, filename)));
-		}
-		sources.push(marketplaceConfigSource(root));
-	}
-
-	// User home root files (lowest priority fallback)
-	for (const filename of filenames) {
-		sources.push(fileConfigSource(path.join(os.homedir(), filename)));
-	}
-
-	return sources;
 }
 
 /**
@@ -472,7 +410,10 @@ function getConfigSources(cwd: string): ConfigSource[] {
  * `undefined` when only the built-in defaults (or a plugin marketplace catalog) define it.
  */
 export function findServerConfigFile(cwd: string, server: string): string | undefined {
-	for (const source of getConfigSources(cwd)) {
+	for (const source of configFileSources("lsp", cwd, adaptConfig, {
+		includeProject: !isUntrustedProjectScope(),
+		pluginRootSource: marketplaceConfigSource,
+	})) {
 		if (source.path && source.read()?.servers[server]) return source.path;
 	}
 	return undefined;
@@ -513,7 +454,10 @@ export function findServerConfigFile(cwd: string, server: string): string | unde
 export function loadConfig(cwd: string): LspConfig {
 	let mergedServers = coerceServerConfigs(DEFAULTS);
 
-	const configSources = getConfigSources(cwd).reverse();
+	const configSources = configFileSources("lsp", cwd, adaptConfig, {
+		includeProject: !isUntrustedProjectScope(),
+		pluginRootSource: marketplaceConfigSource,
+	}).reverse();
 
 	let idleTimeoutMs: number | undefined;
 	for (const source of configSources) {

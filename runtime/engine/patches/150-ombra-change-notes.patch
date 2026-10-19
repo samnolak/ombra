@@ -1,0 +1,152 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Igor Shulga <igo.shulga@macbook-lf73jk0j09.t-oblako.ru>
+Date: Mon, 19 Oct 2026 21:42:09 +0300
+Subject: [PATCH] ombra change notes
+
+What: Preserve the repository-owned ombra change notes.
+Why: Ombra embeds multiple concurrent sessions and renders native host features.
+Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 8b299b899693383a7e24627e841874cafae0bd9a..32071a53089c8ca08089a37c76f93be087b2d88b 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -2,6 +2,43 @@
+ 
+ ## [Unreleased]
+ 
++### Changed
++
++- Synced the owned engine from upstream 18.8.0 to 18.12.2 with integrity-pinned upstream packages and an ordered, reproducible patch series (`patcher.py import/export/rebase/status`). Bun remains 1.4.2. Ombra retains its native RPC features, session isolation, writer leases, trust boundaries and typed approvals while adopting upstream live-steering queue state, narration metadata, session replay markers and browser recovery.
++- Removed the redundant process-owner LSP guard patch now supplied upstream, the obsolete browser ambient declaration patch after upstream removed that file, and the custom MCP argument-formatting core in favor of upstream's bounded formatter. Native approval dialogs and engine session grants now use upstream's request path with Ombra's typed metadata and denial reasons.
++
++### Added
++
++- RPC hosts can drive plan mode: the `plan_mode` command enters and exits it and approves or rejects (with feedback sent as the next planning turn) the plan the agent proposed. A proposed plan stops the planning turn quietly and arrives with its Markdown document and a `revision` in a `plan_mode_updated` frame and in `get_state.planMode`. Approve and reject name that `revision` (another is refused with `plan_review_stale`) and are refused while a turn runs (`session_busy`); approval executes exactly the reviewed text, exits plan mode and restores the tools, as the interactive review does.
++- Tool approvals carry a typed request for RPC hosts: the Approve/Deny `select` gains `approval` (tool, tool call id, risk tier, reason, MCP origin, argument summary lines, the complete `bash` command, provider safety checks and the scopes a host may keep the answer for — only `once` with safety checks). A `Deny` answer may carry `reason`, which the agent reads in the failed tool result. The text title is unchanged for hosts that ignore it.
++- Session writer leases name their holder (`ombra` or `omp`, pid, since) and can be asked for: a shared-engine open of a restored chat (and `switch_session`) claims the lease up front and is refused with `session_lease_held` and the holder while another window or terminal writes it; the root command `engine_take_session` asks that writer to let go and waits until it has. An RPC holder reports `session_lease_lost` and closes the logical session; a terminal or CLI holder finishes its writes and continues in a sibling file. Nothing is taken by force: a holder that does not answer keeps the lease.
++- `tools.deferred` setting: the named built-in tools (even ones that normally stay top-level, such as `task`, `eval`, `todo`, `web_search`) leave the request's tools array and are offered as `xd://` devices whose schemas are fetched on demand; `read` and `write` cannot be deferred. Empty by default.
++- Background jobs over RPC: `get_jobs` lists the session's async jobs (long bash commands, async tasks; running ones first, then recent settled ones) with a `waitingForInput` hint for a running command that went quiet on what looks like a prompt; `cancel_job` stops one; `get_job_output` reads up to `maxBytes` (64 KiB default, 256 KiB max) from a `fromByte` cursor that never splits a UTF-8 character, reports trimmed bytes as `skippedBytes`, reads the tail without a cursor (or past the end, flagged `reset`) and answers jobs that never streamed with a replacing `snapshot`. Each job keeps its last 1 MiB of output, all jobs together at most 16 MiB.
++- MCP connectors over RPC: `get_mcp_servers` reports each server's state and sign-in status; `mcp_login` runs the OAuth sign-in (the authorization URL arrives as `open_url` tagged with `mcpServer`, only while the host's own login runs; nothing opens a browser by itself) and `mcp_login_cancel` stops it (`mcp_login_cancelled`); `mcp_reconnect` reconnects one server from its config or, without a name, rediscovers and reconnects them all and rebinds the session's MCP tools. A server that needs sign-in is announced with `mcp_auth_required`; server form elicitations arrive as `extension_ui_request` with `method: "elicit"`. Frames carry names, states and redacted errors only.
++- Editor documents over RPC: `editor_document` opens, changes, saves and closes a host editor's buffer (`file:` URI, revision, base hash) and requests completion, hover, definition, rename and diagnostics from the language servers; `editor_trust` starts the project's language servers only once the host trusts the folder; agent edits to an open document go to the host as `editor_apply_edit` (expected revision and hash) and are answered with `editor_edit_result`.
++- `get_messages_page` takes `direction: "backward"`: newest page first, each page in chronological order, bounded to 768 KiB, with cursors pinned to the session, branch and message count (`stale_cursor` once they change).
++- Shared-engine root commands: `engine_read_session` pages a stored session file (absolute `.jsonl` path, cursor, `limit` 1–256; at most four at once) without opening it, `engine_cancel_read` stops one, and `engine_delete_session` deletes a session with its artifacts.
++- RPC `navigate_tree` (`RpcClient.navigateTree(targetId)`): the TUI's `/tree` and Esc Esc rewind for RPC hosts, without a summary. It moves the leaf in place, in the same session file: a user message rewinds past itself and its text and images come back, any other entry becomes the leaf, and the abandoned path stays in the file as a sibling branch. Refused with `session_busy` while the session works. Unlike `branch`, it writes no new session file holding a copy of the whole history.
++
++### Fixed
++
++- Compound session operations explicitly delegate their own writer lease: collab replicas retain their identity across live entries and resyncs, and session transfer markers and local-copy replacements no longer conflict with the operation's lease. Independent managers still cannot write, move or delete an owned journal.
++- Parked subagents' settings overlays are no longer retained by the ambient settings proxy's bound-method cache; cached methods remain scoped to their owning settings instance.
++- RPC `abort_and_prompt` no longer fails with "Agent is already processing" when a steer (for example a follow-up sent early with `promote_queued_message`) was still queued: the stopped run's queued input used to resume as the abort settled and take the session from the new prompt. The new prompt now runs next and queued input follows it.
++- A server whose real context window is smaller than the model's configured one (a local vLLM, llama.cpp or LM Studio started with a short context) no longer dead-ends the run with "Compaction freed too little context" when one large tool result overflows it: the window the overflow error names is adopted for the session (and kept when the same model is selected again or its metadata is refreshed), the recovery elide is no longer skipped after an auto-shake that removed nothing or failed (its protected recent tail can be the whole small window), and a retry that fits after the elide counts as recovery even when nothing is left to summarize.
++- `read` returns files of up to 300 lines (`read.summarize.minTotalLines`, was 100 — one default read page) verbatim instead of as a structural outline; agents re-read outlined 100–300-line files range by range.
++
++### Security
++
++- An approval the tool or the user's policy insists on every time (a critical bash command, a bash pattern with `approval: prompt`, an explicit `tools.approval.<tool>: prompt`) offers only the `once` scope, so no host may keep the answer and answer the next such call by itself.
++- Critical bash commands (`rm -rf /…`, `sudo rm`, `mkfs`, `curl … | sh`, …) ask for approval in `yolo` mode too, so they are refused where nobody can answer; before, yolo ran them unasked.
++- A bash approval names the call's `cwd` (request `cwd`, prompt line `Cwd: …`): a command run in another folder runs that folder's scripts and is no longer shown as if it ran in the session's own.
++- MCP tools' approvals carry `origin: "mcp"` with the `server` name and the call's arguments (bounded JSON); before, MCP tools with their declared `write` tier showed neither.
++- Session takeover requests are bound to the claim they ask for and expire after the requester's 30 s wait: a request a requester left behind is dropped instead of closing a later holder's chat mid-reply, and one requester never withdraws another's request. `session_lease_lost` says (`interrupted`) when a running reply was stopped.
++- A denial's reason reaches the agent as a JSON string after a fixed label (`The user said (approval prompt): "…"`), so a reason spanning lines cannot pose as more tool output.
++- `--untrusted-project` also keeps the folder's skills (`.omp/skills`, `.claude/skills`, `.agents/skills`… and the ancestors discovery walks), markdown slash commands and prompt templates out: they are neither listed (system prompt, `/skill:` and file commands, `skill://`) nor invocable until the folder is trusted, and the user's own skills and commands of the same name still load. `get_state.untrustedProject` reports them (kind `skill` with the `SKILL.md` path; slash commands and prompt templates as `command` `/name`). Context files (`AGENTS.md`) and rules are unchanged.
++- `--untrusted-project` also keeps the folder's subagent definitions (`.omp/agents/*.md`, project-scope extension and plugin agents) out: the `task` tool neither offers nor spawns them until the folder is trusted, and they never replace a bundled or user agent of the same name. Agent discovery caches are keyed by trust, so an untrusted and a trusted chat of one folder in the shared engine never share a list. `get_state.untrustedProject` reports them as kind `agent`.
++
+ ## [18.12.2] - 2026-10-18
+ 
+ ### Added
+@@ -786,7 +823,6 @@
+ - Corrected tool behavior and configuration documentation for `read`, background `bash`, Python evaluation, replace editing, goal removal, and `advisor.immuneTurns`.
+ - Fixed custom glob backends from hanging indefinitely; scans now respect the tool deadline and report incomplete results when necessary.
+ - Fixed `--resume <path>` from silently creating a new session for a missing path; it now reports the missing path, consistent with `--fork <path>` and `--resume <id>`.
+-
+ ## [18.8.0] - 2026-10-07
+ 
+ ### Added
+diff --git a/README.md b/README.md
+index e749b40f5abfdfc1aca03e56017d7d0d4638c27e..8a82dcfe7c6c9e614b8b36b27a0e0ac78c565048 100644
+--- a/README.md
++++ b/README.md
+@@ -33,3 +33,82 @@ The agent supports three mutually-exclusive memory backends, selected via the `m
+    - `HINDSIGHT_BANK_MISSION`, `HINDSIGHT_DEBUG`
+ 
+ Switching backends mid-session immediately replaces the live backend, memory tools, listeners, and system-prompt context. Existing users with `memories.enabled = true|false` are migrated to `memory.backend = "local"|"off"` exactly once on first launch; afterward, `memory.backend` is the sole runtime selector.
++
++## Session-file ownership in the owned engine
++
++The shared RPC host, CLI and TUI use the same `FileSessionStorage.claimSession`
++lease, keyed by journal session ID rather than pathname. Mutation claims
++ownership, and so does a shared-engine open of a restored chat (or
++`switch_session`) up front; catalog reads, inspection and export do not claim a
++writer lease. That open is refused with `session_lease_held` and the holder while
++another window or terminal writes the chat, so the desktop shows it read-only.
++Another writer's append/title rewrite (CLI, TUI) still forks to a new identity
++with an explicit persistence warning. RPC warnings include the new session ID
++and file so the desktop state follows that fork. Move and deletion refuse a busy
++journal instead.
++Desktop sidebar deletion uses `engine_delete_session`, not filesystem deletion.
++An idle desktop starts only its existing shared root-host lifetime for deletion,
++using the same configuration/privacy and protocol-negotiation path as a logical
++open; it does not open or resume an unrelated chat.
++Deletion also checks nested session journals before removing their artifacts.
++GC archive and collaboration replica publication participate in the same lease.
++
++OS lease failures are persistence failures, never local-only authorization.
++Close retains the claim through queued writes, storage drain and artifact copying;
++it releases afterward. Native handles are strongly retained for the writer's
++lifetime. There is no heartbeat, expiry, PID-reuse heuristic or timeout-based
++takeover. Journal symlinks, hard links and renames preserve the header ID and
++therefore meet the same lease in the shared ownership namespace.
++
++**Holder records and “Open here”.** Next to each lease the holder writes `<lease>.holder.json` (`kind` `ombra` for
++the desktop engine, `omp` for terminal and CLI, `pid`, `since`, and a random id of this claim). It is display
++only: it is read while the lease is held and its pid is alive, and is withdrawn
++before release. The root command `engine_take_session {path}` writes
++`<lease>.takeover.json` naming that claim and waits up to 30 s for the lease to become free. A
++holder polls for requests every 250 ms while it holds a lease: an RPC session
++sends `session_lease_lost` (who asked, and `interrupted` when a reply was running)
++and closes after its run is aborted and its last write landed — a running reply is
++stopped, not finished; a CLI/TUI manager drains its writes, releases, and continues
++in a sibling file on its next write. A request for another claim, from before the
++current claim, or older than 30 s is removed unanswered, so one a requester left
++behind never cuts off a later holder; each requester withdraws only its own request,
++on success and on timeout. A holder that does not answer (an older omp, a stopped
++process) keeps the lease and the requester gets `session_lease_held` again. Nothing
++is taken by force.
++
++**Typed approvals.** A request offers `scopes` `once` only while provider safety
++checks are pending and whenever the tool or the user's `tools.approval` policy
++insists on asking every time (a critical bash command, a `tools.bash.patterns`
++rule with `approval: prompt`); hosts never keep such an answer. A bash call's
++`cwd` is part of the request and of the text prompt; MCP tools carry `origin` and
++`server` and show their arguments.
++
++Pinned native implementation (18.8.0):
++[Linux abstract socket](https://github.com/can1357/oh-my-pi/blob/v18.8.0/crates/pi-natives/src/file_lock/linux.rs),
++[Windows named kernel object](https://github.com/can1357/oh-my-pi/blob/v18.8.0/crates/pi-natives/src/file_lock/windows.rs),
++[other Unix flock](https://github.com/can1357/oh-my-pi/blob/v18.8.0/crates/pi-natives/src/file_lock/unix.rs).
++The kernel releases ownership on process death. Unix sidecars are persistent:
++unlinking one would split inode ownership and is forbidden. These are cooperative,
++local-machine advisory guarantees, not protection against legacy/uncooperative
++writers, users replacing lock sidecars, different ownership namespaces, or
++cross-machine/network-filesystem writers.
++
++Behavioral regressions are in `runtime/tests/session-ownership.test.ts` and its
++real-process worker; typed approvals in `runtime/tests/structured-approval.test.ts`
++(real host, local OpenAI-compatible model). They require the pack's **Bun 1.4.2**
++and a staged copy of `runtime/engine` whose `node_modules` points at the pinned
++pack's `omp/node_modules`. From the repository root, after preparing that staging:
++
++```sh
++OMBRA_ENGINE_ROOT="$PWD/.temp/ownership-runtime/engine" \
++  .temp/runtime-installer-final/ombra-engine-18.12.2-bun-1.4.2-v1/bun/bun \
++  test runtime/tests/session-ownership.test.ts runtime/tests/structured-approval.test.ts
++dotnet test avalonia/tests/Ombra.Tests/Ombra.Tests.csproj \
++  --filter 'FullyQualifiedName~ConversationStateTests|FullyQualifiedName~DraftDeletionTests|FullyQualifiedName~DraftFolderRecoveryTests'
++```
++
++These additions have not been run during implementation. macOS/Unix process tests
++cover stop/kill and symlink/rename behavior; Windows still needs its native
++termination/suspend and symlink-privilege gate. Linux and Windows skip the
++filesystem-sidecar setup-error case (their lease providers do not use sidecars)
++and require native provider failure-injection coverage on those platforms.
