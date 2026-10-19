@@ -98,25 +98,9 @@ public sealed partial class NightlyRuntimeTests
         }
     }
 
-    /// <summary>The traffic lights' state: op 9 of Command for no window, "shown" or "hidden" (Ombra's full screen).</summary>
+    /// <summary>user.js: no "Update Complete!" toast on the runtime's first start, and the appearance's current state.</summary>
     [Fact]
-    public void WindowControlsMessageIsACommandForNoWindow()
-    {
-        foreach (var (shown, text) in new[] { (true, "shown"), (false, "hidden") })
-        {
-            var m = NightlyProtocol.WindowControlsMessage(shown);
-            Assert.Equal(NightlyProtocol.Command, BinaryPrimitives.ReadInt32LittleEndian(m.AsSpan(20)));
-            Assert.Equal(0u, BinaryPrimitives.ReadUInt32LittleEndian(m.AsSpan(24)));
-            Assert.Equal(9u, BinaryPrimitives.ReadUInt32LittleEndian(m.AsSpan(28)));
-            var length = (int)BinaryPrimitives.ReadUInt32LittleEndian(m.AsSpan(32));
-            Assert.Equal(text, System.Text.Encoding.UTF8.GetString(m, 40, length));
-        }
-    }
-
-    /// <summary>user.js: no "Update Complete!" toast on the runtime's first start, and the traffic lights' and the
-    /// appearance's current state.</summary>
-    [Fact]
-    public void UserPrefsCarryTheToastTheLightsAndTheTheme()
+    public void UserPrefsCarryTheToastAndTheTheme()
     {
         if (!OperatingSystem.IsMacOS()) return;
         var profile = Directory.CreateTempSubdirectory("ombra-userjs-").FullName;
@@ -126,14 +110,11 @@ public sealed partial class NightlyRuntimeTests
             runtime.WriteUserPrefs();
             var prefs = File.ReadAllText(Path.Combine(profile, "user.js"));
             Assert.Contains("user_pref(\"zen.updates.show-update-notification\", false);", prefs);
-            Assert.Contains("user_pref(\"zen.embed.window-controls-hidden\", false);", prefs);
             Assert.Contains("user_pref(\"ui.systemUsesDarkTheme\", 0);", prefs);
 
-            runtime.WindowControlsShown = false;
             runtime.DarkTheme = true;
             runtime.WriteUserPrefs();
             prefs = File.ReadAllText(Path.Combine(profile, "user.js"));
-            Assert.Contains("user_pref(\"zen.embed.window-controls-hidden\", true);", prefs);
             Assert.Contains("user_pref(\"ui.systemUsesDarkTheme\", 1);", prefs);
         }
         finally

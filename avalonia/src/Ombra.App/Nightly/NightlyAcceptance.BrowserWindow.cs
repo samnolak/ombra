@@ -44,22 +44,24 @@ internal static partial class NightlyAcceptance
         }
 
         /// <summary>
-        /// The Browser page's Nightly window, driven as a user would: it is the page's sheet from the window's top (its
-        /// corners the sheet's), a link opened for it is a tab of its own (the white fixture page in its content), a
-        /// right click shows Nightly's context menu as a real window over the pane where the pointer is, which Esc and a
-        /// click elsewhere close, ⌘T opens Nightly's new tab (its URL bar floating over the content) and ⌘W closes it
-        /// again, while Ombra's own menu items (⌘W is one) leave the keys to it; switching Chats ↔ Browser and resizing
+        /// The Browser page's Nightly window, driven as a user would: it is the page's sheet, the rect, radius and edge of
+        /// every page's (<see cref="SheetMatches"/>), a link opened for it is a tab of its own (the white fixture page in its
+        /// content), a right click shows Nightly's context menu as a real window over the pane where the pointer is, which
+        /// Esc and a click elsewhere close, ⌘T opens Nightly's new tab (its URL bar floating over the content) and ⌘W closes
+        /// it again, while Ombra's own menu items (⌘W is one) leave the keys to it; switching Chats ↔ Browser and resizing
         /// never leaves a second copy of a page on screen (the agent's pane, open in the right panel, hides meanwhile).
         /// Returns to the chats.
         /// </summary>
         private async Task BrowserWindowChecks(int agentPid)
         {
+            vm.ShowChatsCommand.Execute(null);
+            await Task.Delay(600);
+            var chats = Shot("p-browser-window-chats");
             if (await OpenBrowserWindow("p-browser-window", agentPid) is not { } pane) return;
             var host = Named<Border>("BrowserWindowHost");
-            var at = pane.TranslatePoint(default, window) ?? new Point(-1, -1);
-            Check("browser-window-sheet", host is not null && at.Y == 0 && host.CornerRadius.TopRight > 0
-                && host.CornerRadius == (CornerRadius)window.FindResource("GuiSheetRadius")! && host.ClipToBounds,
-                $"pane at {at} size={pane.Bounds.Size} radius={host?.CornerRadius}");
+            var sheet = SheetMatches(pane, chats, Shot("p-browser-window-sheet"), out var sheetDetail);
+            Check("browser-window-sheet", sheet && host is not null && host.ClipToBounds
+                && host.CornerRadius == (CornerRadius)window.FindResource("GuiSheetClipRadius")!, sheetDetail);
 
             // A link for the window (the Browser page's OpenInBrowserWindow): a new tab with the white fixture page.
             var cutover = new Uri(new Uri(url), "cutover.html");
@@ -121,6 +123,70 @@ internal static partial class NightlyAcceptance
             vm.ShowChatsCommand.Execute(null);
             Check("browser-window-hidden", await Until(() => !pane.IsEffectivelyVisible && Named<Border>("Sidebar") is not null, 10)
                 && BrowserWindow() == pane, $"panes={Panes().Count}");
+        }
+
+        /// <summary>
+        /// The Browser page's sheet is every page's: the pane (the Nightly window's frame, <see cref="Matches"/>) is the sheet
+        /// frame's rect (under the band, right of the rail, the frame inset round it) within a device pixel, the traffic
+        /// lights stay in the band above it, and round its four corners the sheet's edge and the chrome outside it are the
+        /// Chats page's (<paramref name="chatsShot"/>, same window size) pixel for pixel: no notch, no second border.
+        /// </summary>
+        private unsafe bool SheetMatches(NightlyPane pane, string chatsShot, string browserShot, out string detail)
+        {
+            var s = window.RenderScaling;
+            var frame = Named<Border>("SheetFrame");
+            var at = pane.TranslatePoint(default, window) ?? new Point(-100, -100);
+            var paneRect = new Rect(at, pane.Bounds.Size);
+            var sheetRect = frame?.TranslatePoint(default, window) is { } o ? new Rect(o, frame.Bounds.Size) : default;
+            var r = frame?.CornerRadius.TopLeft ?? 0;
+            var offBy = Math.Max(Math.Max(Math.Abs(paneRect.X - sheetRect.X), Math.Abs(paneRect.Y - sheetRect.Y)),
+                Math.Max(Math.Abs(paneRect.Right - sheetRect.Right), Math.Abs(paneRect.Bottom - sheetRect.Bottom))) * s;
+            var lights = MacTrafficLights.ButtonFrames(NsWindow);
+            var lightsInBand = !((Views.MainWindow)window).TrafficLightsShown || lights.All(l => l.Y + l.Height <= sheetRect.Y);
+
+            (byte[] Pixels, int Stride, PixelSize Size) Load(string file)
+            {
+                using var bitmap = new Avalonia.Media.Imaging.Bitmap(file);
+                var size = bitmap.PixelSize;
+                var pixels = new byte[size.Width * 4 * size.Height];
+                fixed (byte* buffer = pixels) bitmap.CopyPixels(new PixelRect(size), (nint)buffer, pixels.Length, size.Width * 4);
+                return (pixels, size.Width * 4, size);
+            }
+            var (a, stride, sizeA) = Load(chatsShot);
+            var (b, _, sizeB) = Load(browserShot);
+            // How far a point (DIP) lies outside the sheet's rounded rect (negative inside).
+            double Outside(double x, double y)
+            {
+                var dx = Math.Max(Math.Max(sheetRect.X + r - x, x - (sheetRect.Right - r)), 0);
+                var dy = Math.Max(Math.Max(sheetRect.Y + r - y, y - (sheetRect.Bottom - r)), 0);
+                var inner = Math.Min(Math.Max(Math.Max(sheetRect.X + r - x, x - (sheetRect.Right - r)), Math.Max(sheetRect.Y + r - y, y - (sheetRect.Bottom - r))), 0);
+                return Math.Sqrt(dx * dx + dy * dy) + inner - r;
+            }
+            // Each corner's square, the radius in and 4 DIP out: every device pixel on the edge's outer half (the hairline's
+            // inner side blends with what each page shows) or outside it.
+            int worst = 0, compared = 0;
+            var worstAt = "";
+            var corners = new[] { (sheetRect.X, sheetRect.Y), (sheetRect.Right, sheetRect.Y), (sheetRect.X, sheetRect.Bottom), (sheetRect.Right, sheetRect.Bottom) };
+            if (sizeA == sizeB && sheetRect.Width > 0)
+                foreach (var (cx, cy) in corners)
+                {
+                    int x0 = (int)Math.Floor((Math.Min(cx, cx == sheetRect.X ? cx + r : cx - r) - (cx == sheetRect.X ? 4 : 0)) * s);
+                    int y0 = (int)Math.Floor((Math.Min(cy, cy == sheetRect.Y ? cy + r : cy - r) - (cy == sheetRect.Y ? 4 : 0)) * s);
+                    var side = (int)Math.Ceiling((r + 4) * s);
+                    for (var y = Math.Max(y0, 0); y < Math.Min(y0 + side, sizeA.Height); y++)
+                    for (var x = Math.Max(x0, 0); x < Math.Min(x0 + side, sizeA.Width); x++)
+                    {
+                        if (Outside((x + 0.5) / s, (y + 0.5) / s) * s < -1) continue;
+                        var i = y * stride + x * 4;
+                        var d = Math.Max(Math.Abs(a[i] - b[i]), Math.Max(Math.Abs(a[i + 1] - b[i + 1]), Math.Abs(a[i + 2] - b[i + 2])));
+                        compared++;
+                        if (d > worst) (worst, worstAt) = (d, $"{x},{y} px chats {a[i + 2]:x2}{a[i + 1]:x2}{a[i]:x2} browser {b[i + 2]:x2}{b[i + 1]:x2}{b[i]:x2}");
+                    }
+                }
+            detail = FormattableString.Invariant($"pane {paneRect} sheet {sheetRect} radius={r} off by {offBy:0.##} px frame matches={Matches(pane)} ")
+                + $"lights={string.Join(" ", lights.Select(l => FormattableString.Invariant($"{l.X:0},{l.Y:0} {l.Width:0}x{l.Height:0}")))} in band={lightsInBand} "
+                + $"corners: {compared} px compared, worst delta {worst} {worstAt} shots {sizeA} {sizeB}";
+            return offBy <= 1 && Matches(pane) && lightsInBand && compared > 0 && worst <= 24;
         }
 
         /// <summary>The content's middle, right of the window's sidebar (fractions of the pane).</summary>
@@ -216,7 +282,9 @@ internal static partial class NightlyAcceptance
         /// top-left), <c>key MODS CODE CHARS</c> (MODS: <c>-</c> or a <c>+</c>-joined list of cmd, shift, ctrl, alt; CODE the
         /// macOS key code in hex), <c>type TEXT</c>, <c>open URL</c> (a new tab of the window), <c>shot NAME</c> (the screen
         /// under the window, popups included), <c>wshot NAME</c> (the window alone), <c>state</c>, <c>windows</c> (Nightly's
-        /// windows on screen), <c>wait MS</c>, <c>quit</c>. Each is logged; <c>DONE n</c> after each.
+        /// windows on screen), <c>sheet NAME</c> (the Browser page's sheet against the Chats page's, <see cref="SheetMatches"/>),
+        /// <c>position X Y</c> (the window's top-left on the desktop), <c>wait MS</c>, <c>quit</c>. Each is logged; <c>DONE n</c>
+        /// after each.
         /// </summary>
         private async Task Drive(string file)
         {
@@ -332,6 +400,22 @@ internal static partial class NightlyAcceptance
                     break;
                 case "wait":
                     await Task.Delay((int)D(1));
+                    break;
+                case "sheet" when pane is not null:
+                    // The Browser page's sheet against the Chats page's at this size and theme (SheetMatches); NAME's shots.
+                    vm.ShowChatsCommand.Execute(null);
+                    await Task.Delay(800);
+                    var chatsShot = Shot(parts[1] + "-chats");
+                    vm.OpenBrowserPageCommand.Execute(null);
+                    await Until(() => pane.IsEffectivelyVisible && Matches(pane), 10);
+                    await Task.Delay(800);
+                    var sheetOk = SheetMatches(pane, chatsShot, Shot(parts[1] + "-browser"), out var sheetDetail);
+                    Log($"sheet {parts[1]} {(sheetOk ? "PASS" : "FAIL")} {sheetDetail}");
+                    break;
+                case "position":
+                    // The window's top-left on the desktop (Avalonia's Position: a second display is another origin).
+                    window.Position = new PixelPoint((int)D(1), (int)D(2));
+                    await Task.Delay(1200);
                     break;
                 default:
                     Log($"DRIVE unknown or not possible now: {line}");

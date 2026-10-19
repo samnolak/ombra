@@ -205,21 +205,6 @@ internal sealed class NightlyRuntime : IDisposable
         }
     }
 
-    private bool _windowControlsShown = true;
-
-    /// <summary>Whether Ombra's traffic lights show over Nightly's windows (not in full screen), whose top row then keeps
-    /// their place free: written into the profile before each start and sent to the running process when it changes.</summary>
-    public bool WindowControlsShown
-    {
-        get => _windowControlsShown;
-        set
-        {
-            if (_windowControlsShown == value) return;
-            _windowControlsShown = value;
-            Send(NightlyProtocol.WindowControlsMessage(value));
-        }
-    }
-
     /// <summary>Adds a pane: the runtime starts if it is not running, else it opens a window for the pane.</summary>
     public uint Register(INightlyView view)
     {
@@ -502,7 +487,6 @@ internal sealed class NightlyRuntime : IDisposable
             "user_pref(\"zen.view.window.scheme\", 2);",
         }) prefs.AppendLine(line);
         prefs.AppendLine($"user_pref(\"ui.systemUsesDarkTheme\", {(_darkTheme ? 1 : 0)});");
-        prefs.AppendLine($"user_pref(\"zen.embed.window-controls-hidden\", {(_windowControlsShown ? "false" : "true")});");
         File.WriteAllText(Path.Combine(_options.ProfileDirectory, "user.js"), prefs.ToString());
     }
 
@@ -646,9 +630,8 @@ internal sealed class NightlyRuntime : IDisposable
             _peerPort = port;
             _peerPid = senderPid;
             _supervisor.MarkReady();
-            // The appearance and the traffic lights may have changed since user.js was written.
+            // The appearance may have changed since user.js was written.
             Send(NightlyProtocol.ThemeMessage(_darkTheme));
-            Send(NightlyProtocol.WindowControlsMessage(_windowControlsShown));
             // The command line's chrome-less window is on its way; every other pane's window is asked for now.
             foreach (var token in _panes.Keys.Order().Where(t => t != _commandLinePane)) Send(OpenMessage(token));
         });

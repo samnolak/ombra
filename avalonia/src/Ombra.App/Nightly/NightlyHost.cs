@@ -16,19 +16,6 @@ internal static class NightlyHost
     private static NightlyRuntime? _runtime;
     private static bool _exitHooked;
     private static bool _themeHooked;
-    private static bool _windowControlsShown = true;
-
-    /// <summary>Whether the main window's traffic lights show (MainWindow.FitChrome; not in full screen): Nightly's top
-    /// row keeps their place free while they do.</summary>
-    public static bool WindowControlsShown
-    {
-        get => _windowControlsShown;
-        set
-        {
-            _windowControlsShown = value;
-            if (_runtime is { } runtime) runtime.WindowControlsShown = value;
-        }
-    }
 
     /// <summary>The runtime, or why it cannot run (looked up again on every call until it can).</summary>
     public static (NightlyRuntime? Runtime, string? Problem) Get()
@@ -49,7 +36,6 @@ internal static class NightlyHost
         {
             // Nightly follows Ombra's appearance (the effective one: Settings' light/dark, or macOS's under "system").
             _runtime.DarkTheme = app.ActualThemeVariant == ThemeVariant.Dark;
-            _runtime.WindowControlsShown = _windowControlsShown;
             if (!_themeHooked)
             {
                 _themeHooked = true;
