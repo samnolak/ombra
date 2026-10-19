@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Ombra.App.Controls;
 using Ombra.App.ViewModels;
 
@@ -53,7 +54,16 @@ public sealed partial class MainWindow
     {
         if (_browserWindow is { } existing) return existing;
         // The window is the sheet's rect: BrowserWindowHost (its clip) lies 1 DIP inside the sheet (MainWindow.axaml).
-        var pane = new NightlyPane { IsBrowserWindow = true, Margin = new Avalonia.Thickness(-1) };
+        // Its shortcuts are its own also while the rail (or nothing) has Ombra's focus: the page is the window's then,
+        // and ⌘T must not go to the hidden built-in preview's tabs (OnFocusShortcut) and leave no new tab on screen.
+        var pane = new NightlyPane
+        {
+            IsBrowserWindow = true,
+            Margin = new Avalonia.Thickness(-1),
+            TakesShortcutsUnfocused = () => vm is { ShowBrowserPage: true, IsSettingsOpen: false, IsPaletteOpen: false, IsShortcutsOpen: false, IsImageViewerOpen: false }
+                && !vm.Share.IsDialogOpen
+                && (FocusManager?.GetFocusedElement() is not Avalonia.Visual focused || IconRail.IsVisualAncestorOf(focused)),
+        };
         // Nightly cannot show the window (it cannot start, or gave up restarting): the built-in preview takes the page,
         // with the reason on its fallback strip (Try again brings the window back).
         pane.RuntimeUnusable += reason => Dispatcher.UIThread.Post(() => vm.Browser.ReportNightlyUnusable(reason));
