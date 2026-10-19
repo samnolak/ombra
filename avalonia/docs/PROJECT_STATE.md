@@ -6,7 +6,7 @@ Living document; keep it short. Plan: [`ROADMAP.md`](ROADMAP.md) · features: [`
 ## Goal
 
 A native desktop client on **Windows, macOS and Linux** with an owned coding-agent source tree derived from
-omp 18.8.0. The beta architecture uses one app-owned Bun host for independent logical `AgentSession` objects,
+omp 18.12.2. The beta architecture uses one app-owned Bun host for independent logical `AgentSession` objects,
 not an omp CLI process per chat. Versioned multiplexed JSONL RPC connects the host to the .NET client.
 Upstream changes are reviewed and verified, not adopted automatically.
 
@@ -140,7 +140,7 @@ The harness profile template (`harness/profile`) is used by the stand-in environ
 ## Architecture
 
 ```
-Ombra-owned engine (omp 18.8.0 source, Bun 1.4.2): one host, independent AgentSession objects
+Ombra-owned engine (omp 18.12.2 source, Bun 1.4.2): one host, independent AgentSession objects
         ⇅ stdin/stdout (multiplexed session keys, JSONL protocol v2 rpc_chunk), engine-labelled stderr
 Client Integration Layer   OmpEngine → OmpSession → RpcConnection (bounded channel, deadlines) → OmpCommands
         ↓ ChannelReader<RpcFrame> (4096, backpressure, never drops)
@@ -179,7 +179,7 @@ Nothing critical depends on UI timers, focus or rendering. No OS checks outside 
 
 ## Baseline facts
 
-omp 18.8.0 npm sources (pinned since 2026-10-07; 18.2.0 before it, RPC byte-identical to tag v18.2.0 `6f2c14b3`), Bun `1.4.2+744846f84`; harness template
+omp 18.12.2 npm sources (upgraded from 18.8.0 on 2026-10-19; upstream base `1d5aff90b057ce7dbfe32ea557a527c1b3144b72` from npm SLSA provenance, signatures not independently verified), Bun `1.4.2+744846f84`; harness template
 1.2.0; the tests' model route is the stand-in model.
 
 ## How to run

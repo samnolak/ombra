@@ -1,8 +1,8 @@
-# Feature parity: pinned omp 18.8.0 vs Ombra
+# Feature parity: pinned omp 18.12.2 vs Ombra
 
 The original inventory covered omp 18.2.0 CLI flags, builtins and RPC, using its source (`packages/coding-agent/src`:
 `cli/args.ts`, `slash-commands/builtin-*.ts`, `modes/rpc/rpc-mode.ts`, `modes/rpc/rpc-types.ts`) and running help/tests.
-The current runtime pin is **omp 18.8.0**. Beta R0.2 updates the recovery and approval rows below; this does not
+The current runtime pin is **omp 18.12.2**. Beta R0.2 updates the recovery and approval rows below; this does not
 claim a fresh exhaustive audit of every historical row. Additional pin capabilities and remaining gaps are tracked
 in [PARITY_ROADMAP](PARITY_ROADMAP.md), with executed gates in [NEXT_RELEASE_ROADMAP](../../docs/NEXT_RELEASE_ROADMAP.md).
 
@@ -23,8 +23,8 @@ was checked against the merged client and its tests.
 
 | Gate | Contract |
 |---|---|
-| F1: owned runtime pin | `ombra-engine-18.8.0-bun-1.4.2-v1`: complete repository-owned engine sources based on omp **18.8.0**, not a patched installed npm tree; Bun **1.4.2**, frozen dependency lockfile and integrity-pinned downloads. |
-| F2: protocol and source identity | Shared-engine protocol **1** wraps session RPC v2 framing. Installer requires the host's `--self-check` to report protocol 1 and omp 18.8.0 before activation. Manifest/source SHA256 and source identity must match this client; tests reject protocol 0/2 and another omp version. |
+| F1: owned runtime pin | `ombra-engine-18.12.2-bun-1.4.2-v1`: complete repository-owned engine sources based on omp **18.12.2**, not a patched installed npm tree; Bun **1.4.2**, frozen dependency lockfile and integrity-pinned downloads. |
+| F2: protocol and source identity | Shared-engine protocol **1** wraps session RPC v2 framing. Installer requires the host's `--self-check` to report protocol 1 and omp 18.12.2 before activation. Manifest/source SHA256 and source identity must match this client; tests reject protocol 0/2 and another omp version. |
 | F3: upgrade path | Engine upgrades ship with the client. Review the upstream source changes, update canonical `runtime/engine` and any dependency/version pins, run `python3 runtime/generate-engine-artifact.py`, then its `--check` gate, runtime installer/source tests and real-engine smoke. In particular recheck steer/settle semantics before raising the upstream base. Staging failure preserves the existing installation; older packs are retained for explicit cleanup, never silently selected as compatible fallbacks. Packages carry the installed pack (`tools/package/package.sh` → `Ombra --install-engine`); after a dependency change recheck each `RuntimePrune` rule's evidence (onnxruntime-web only in transformers' browser export, react/lucide only in omp-stats' dashboard sources, onnxruntime-node's binding path) and rerun a local-model (ONNX) smoke on the pruned pack. |
 
 For isolated local smoke builds, build `tests/Ombra.Tests` in Release with

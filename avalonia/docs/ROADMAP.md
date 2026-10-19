@@ -19,7 +19,7 @@ K7 adds a native code editor; D1's server trust model remains open.
   client workarounds. Review upstream changes in integration branches,
   run contract and end-to-end gates, then pin an immutable runtime artifact. No automatic upstream cutover and
   no patching installed user runtimes. Upstream PRs are useful, not a prerequisite for shipping our changes.
-  The beta uses `ombra-engine-18.8.0-bun-1.4.2-v1`; published release readiness remains gated separately.
+  The beta uses `ombra-engine-18.12.2-bun-1.4.2-v1`; published release readiness remains gated separately.
 - Our layers: **Client Integration Layer** (`Ombra.Rpc`: process, stdio, framing, correlation) →
   **Application Core** (`Ombra.ClientCore`: state, reducer, session control) → **ViewModels** → **Avalonia UI**,
   plus a **Platform Layer** (OS adapters) created only when the first real OS-specific implementation appears.
