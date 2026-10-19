@@ -89,6 +89,11 @@ internal static unsafe class MacTrafficLights
     private static CGRect Placed(nint view, CGRect asked)
     {
         if (!Pinned.TryGetValue(view, out var pin) || !Windows.ContainsKey(pin.Held.Window)) return asked;
+        // Entering full screen AppKit retiles the title bar before Avalonia reports the state (and Release runs): a pinned
+        // container there makes _updateTitlebarContainerViewFrameIfNecessary and _syncToolbarPosition chase each other
+        // until the stack overflows (green button on an SDK 26 launcher).
+        const nuint FullScreen = 1 << 14; // NSWindowStyleMaskFullScreen
+        if ((MacObjC.SendNUInt(pin.Held.Window, "styleMask") & FullScreen) != 0) return asked;
         var held = pin.Held;
         // The container hangs from the window's top edge (AppKit's frames start at the bottom left); the buttons are
         // centred in it at AppKit's spacing
@@ -163,6 +168,26 @@ internal static unsafe class MacTrafficLights
             ((delegate* unmanaged<CGRect*, nint, nint, void>)Stret)(&frame, obj, MacObjC.Sel("frame"));
         else frame = ((delegate* unmanaged<nint, nint, CGRect>)MacObjC.MsgSend)(obj, MacObjC.Sel("frame"));
         return frame;
+    }
+
+    /// <summary>The close, minimize and zoom buttons' frames in the window's content (points, top-left origin), for checks.</summary>
+    public static CGRect[] ButtonFrames(nint handle)
+    {
+        var window = WindowOf(handle);
+        if (window == 0) return [];
+        var height = Frame(MacObjC.Send(window, "contentView")).Height;
+        var frames = new CGRect[3];
+        for (var i = 0; i < 3; i++)
+        {
+            var button = MacObjC.SendIndex(window, "standardWindowButton:", (nuint)i);
+            var parent = MacObjC.Send(button, "superview");
+            CGRect r;
+            if (RuntimeInformation.ProcessArchitecture == Architecture.X64)
+                ((delegate* unmanaged<CGRect*, nint, nint, CGRect, nint, void>)Stret)(&r, parent, MacObjC.Sel("convertRect:toView:"), Frame(button), 0);
+            else r = ((delegate* unmanaged<nint, nint, CGRect, nint, CGRect>)MacObjC.MsgSend)(parent, MacObjC.Sel("convertRect:toView:"), Frame(button), 0);
+            frames[i] = r with { Y = height - r.Y - r.Height };
+        }
+        return frames;
     }
 
     private static void SetFrame(nint view, CGRect frame) =>

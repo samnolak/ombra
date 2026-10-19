@@ -211,7 +211,7 @@ internal static partial class NightlyAcceptance
 
         /// <summary>
         /// Commands, one per line: <c>browser</c> / <c>chats</c> (the rail), <c>preview [URL]</c> (the agent's pane in the
-        /// right panel), <c>size W H</c>, <c>theme dark|light|system</c>,
+        /// right panel), <c>size W H</c>, <c>theme dark|light|system</c>, <c>fullscreen on|off</c> (the window's full screen),
         /// <c>click X Y</c>, <c>rclick X Y</c>, <c>dclick X Y</c>, <c>hover X Y</c> (points from the browser window pane's
         /// top-left), <c>key MODS CODE CHARS</c> (MODS: <c>-</c> or a <c>+</c>-joined list of cmd, shift, ctrl, alt; CODE the
         /// macOS key code in hex), <c>type TEXT</c>, <c>open URL</c> (a new tab of the window), <c>shot NAME</c> (the screen
@@ -294,6 +294,12 @@ internal static partial class NightlyAcceptance
                     vm.SetThemeCommand.Execute(parts[1]);
                     await Task.Delay(600);
                     break;
+                case "fullscreen":
+                    // As the green button does: AppKit's own full screen, which Avalonia then reports as WindowState.
+                    if ((parts[1] == "on") != (window.WindowState == WindowState.FullScreen))
+                        MacObjC.SendVoid(NsWindow, "toggleFullScreen:", 0);
+                    await Task.Delay(2500);
+                    break;
                 case "click" or "rclick" or "dclick" or "hover" when pane is not null:
                     var at = ClientToWindow(pane.TranslatePoint(new Point(D(1), D(2)), window) ?? default);
                     if (parts[0] == "hover") Hover(at);
@@ -341,6 +347,9 @@ internal static partial class NightlyAcceptance
             foreach (var p in Panes())
                 Log($"  pane browser={p.IsBrowserWindow} visible={p.IsEffectivelyVisible} window={p.WindowId} frames={p.FramesShown} "
                     + $"layout={p.FrameLayout} bounds={p.Bounds} matches={Matches(p)} pid={p.RuntimePid}");
+            foreach (var p in Panes().Where(p => p.IsEffectivelyVisible))
+                Log($"  pane origin={p.TranslatePoint(default, window)} lightsShown={((Views.MainWindow)window).TrafficLightsShown} fullscreen={window.WindowState == WindowState.FullScreen}");
+            Log($"  lights={string.Join(" ", MacTrafficLights.ButtonFrames(NsWindow).Select(r => FormattableString.Invariant($"{r.X:0.#},{r.Y:0.#},{r.Width:0.#}x{r.Height:0.#}")))}");
             Log($"  responder={Cls(MacObjC.Send(NsWindow, "firstResponder"))} views={string.Join(",", Views(MacObjC.Send(NsWindow, "contentView"), 0))}");
         }
 

@@ -141,6 +141,14 @@ and it sets `--disable-tests`, which would leave the package without the mochite
    load the harness's `resource://testing-common` actors and every test times out.
 5. In omp: `python3 runtime/nightly/pack-nightly.py --app <dmg> --stage`, then
    `python3 runtime/nightly/pack-nightly.py --check`; commit `runtime/nightly/nightly-runtime.json`.
+6. Publish the asset the pin's `url` names (`nightly-<version>-<build>` / `nightly-runtime-<version>-<build>.zip`):
+   `gh release create nightly-<version>-<build> -R samnolak/nightly-browser --target next --prerelease <omp>/.temp/nightly-runtime/<archive>`;
+   check `curl -sIL <url>` ends `200` with the pin's `size`. Then `rm -rf engine/obj-aarch64-apple-darwin/dist/ombra-release`
+   (`dist/Nightly.app` stays).
+7. Embed trust with the ad-hoc (self-signed) signatures: a Release Ombra launcher (`package.sh`, signed by
+   `sign.sh`, no `OMBRA_NIGHTLY_ALLOW_UNSIGNED`) installs the pinned package from the `url` into a fresh `.temp`
+   profile; the Nightly log must show `embedder pid … authenticated (cdhash H"…")` with the launcher's cdhash from
+   `<package>.signing.txt`, the browser pane must render, and `user.js` must hold `zen.embed.allow-unsigned-peer` false.
 
 **This RC (2026-10-19, re-packed after BrowserMode4).** Version 1.23.2b, BuildID 20261019095634.
 
@@ -152,6 +160,13 @@ and it sets `--disable-tests`, which would leave the package without the mochite
 Packaged-build mochitests: gallery 165 / 0, teams 39 / 0, library 199 / 0, ui 66 / 0, tabs 162 / 0 without `browser_drag_drop_vertical.js` (§4;
 fails the same way on the objdir). The signed runtime copy passes `codesign --verify --deep --strict` and renders a
 headless `--screenshot` with a `.temp/` profile and `-no-remote`.
+
+**`next` pin (2026-10-19, top row vs traffic lights).** BuildID 20261019154359: `nightly-runtime-1.23.2b-20261019154359.zip`
+(130511187 B, cdhash `07a6865c1c72819919fd66bd0cb71f16e0498e0c`, sha256
+`3cbdd5ab9dcb68a4f4a8fedf4c32a8e705426824d7c401600d70a82f7ab410e5`), published as release
+`nightly-1.23.2b-20261019154359` (`curl -sIL` 200, same size). Step 7 on an SDK 26 Release launcher: authenticated
+by cdhash, no unsigned switch; NightlyAcceptance ru 96 / 0, en 95 / 1 (`ime-pinyin-commit`) and 95 / 1
+(`cursor-pointer`, foreign mouse moves in the log): each check passed in at least one en run.
 
 ## Release trust: ad-hoc signatures pinned by cdhash
 
