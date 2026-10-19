@@ -15,7 +15,7 @@ public sealed partial class MainViewModel
 
     /// <summary>The Browser page is the one shown (unless settings are open over it).</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowBrowserPage), nameof(ShowSidebar))]
+    [NotifyPropertyChangedFor(nameof(ShowBrowserPage))]
     private bool _isBrowserPageOpen;
 
     public bool ShowBrowserPage => IsBrowserPageOpen && !IsSettingsOpen;

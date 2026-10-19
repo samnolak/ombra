@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls.Primitives;
 using Ombra.App.Localization;
 using System.Text.Json.Nodes;
@@ -100,6 +101,74 @@ public sealed class TeamUiTests
             Assert.False(Named<Control>(w, "AccountCard").IsVisible);
         }
         finally { await vm.DisposeAsync(); w.Close(); }
+    }
+
+    /// <summary>
+    /// The Team page is a page of its own, as the Browser page: no chats sidebar beside it (New chat, the chats, the
+    /// project folders), its sheet right after the rail, and ⌘B (with its menu item and palette entry) off there, so it
+    /// cannot change the sidebar behind the page. Back on Chats the sidebar is as it was.
+    /// </summary>
+    [AvaloniaTheory]
+    [InlineData("en")]
+    [InlineData("ru")]
+    public async Task Team_and_browser_pages_take_the_sidebars_place_and_cmd_b_is_off_there(string language)
+    {
+        var settingsPath = Path.Combine(TestProcesses.TempDir("team-no-sidebar-" + language), "settings.json");
+        var previous = Loc.Current;
+        Loc.Load(language, settingsPath);
+        var (w, vm) = await OpenAsync();
+        try
+        {
+            var sidebar = Named<Border>(w, "Sidebar");
+            var rail = Named<Border>(w, "IconRail");
+            var mod = (Avalonia.Input.RawInputModifiers)w.GetPlatformSettings()!.HotkeyConfiguration.CommandModifiers;
+            Settle(w);
+            Assert.True(vm.ShowSidebar);
+            Assert.True(sidebar.IsEffectivelyVisible);
+
+            foreach (var (open, host) in new (Action, string)[]
+            {
+                (() => Named<Button>(w, "RailTeamButton").Command!.Execute(null), "TeamPageHost"),
+                (() => Named<Button>(w, "RailBrowserButton").Command!.Execute(null), "BrowserPage"),
+            })
+            {
+                open();
+                Settle(w);
+                var page = Named<Control>(w, host);
+                Assert.True(page.IsVisible, host);
+                Assert.False(vm.ShowSidebar, host);
+                Assert.False(sidebar.IsVisible, host);
+                // The page has the sidebar's width: its sheet starts where the rail ends
+                var pageLeft = page.TranslatePoint(default, w)!.Value.X;
+                var railRight = rail.TranslatePoint(new Avalonia.Point(rail.Bounds.Width, 0), w)!.Value.X;
+                Assert.Equal(railRight, pageLeft, 0.5);
+                // ⌘B does nothing here, nor behind the page
+                Assert.False(vm.ToggleSidebarCommand.CanExecute(null), host);
+                w.KeyPress(Avalonia.Input.Key.B, mod, Avalonia.Input.PhysicalKey.B, null);
+                Settle(w);
+                Assert.True(vm.IsSidebarVisible, host);
+                Assert.False(sidebar.IsVisible, host);
+            }
+            Shot(w, $"browser-page-no-sidebar-{language}");
+            Named<Button>(w, "RailTeamButton").Command!.Execute(null);
+            Settle(w);
+            vm.SettingsTheme = "dark";
+            Shot(w, $"team-page-no-sidebar-dark-{language}");
+            vm.SettingsTheme = "light";
+            Shot(w, $"team-page-no-sidebar-light-{language}");
+            Assert.Contains(Loc.T("Team"), w.GetVisualDescendants().OfType<TextBlock>().Where(t => t.IsEffectivelyVisible).Select(t => t.Text));
+            if (language == "ru") Assert.NotEqual("Available in Chats", Loc.T("Available in Chats"));
+
+            vm.ShowChatsCommand.Execute(null);
+            Settle(w);
+            Assert.True(vm.ShowSidebar);
+            Assert.True(sidebar.IsEffectivelyVisible);
+            Assert.True(vm.ToggleSidebarCommand.CanExecute(null));
+            w.KeyPress(Avalonia.Input.Key.B, mod, Avalonia.Input.PhysicalKey.B, null);
+            Settle(w);
+            Assert.False(vm.ShowSidebar);
+        }
+        finally { await vm.DisposeAsync(); w.Close(); Loc.Load(previous, settingsPath); }
     }
 
     [AvaloniaFact]

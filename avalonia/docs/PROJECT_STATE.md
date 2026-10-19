@@ -198,6 +198,10 @@ tools/package/package.sh linux-x64 <pub> <dist> <version>
 tools/ci/real-omp-smoke.sh <work-dir>           # installs the pinned runtime, builds the harness home, runs the real-omp tests
 #   or by hand: node tools/mock-model/server.mjs 18080 &  tools/stand-in-env/setup.sh <home> 18080 <work>
 #   then OMBRA_TEST_CONFIG=<ombra.local.json with profile "harness", HOME=<home>> dotnet test …
+#   Every real-omp config (OMBRA_TEST_CONFIG, OMBRA_WORKSPACE_TEST_CONFIG, OMBRA_REAL_MODEL_CONFIG) and the feature smoke
+#   (tools/verify/feature-smoke/run.sh) must give omp a HOME and agent folder of their own and the app its own chats and
+#   teams folders: tools/verify/HarnessIsolation.cs fails the test, or stops the smoke before anything starts, otherwise
+#   (an unreadable smoke settings file once ran on the defaults and left a chat in the user's ~/.omp/agent/sessions).
 
 # Real-model environment: SmolLM2-135M on llama.cpp, both from PyPI with checked hashes, on 127.0.0.1:18090
 tools/real-model/setup.sh <work> <omp-runtime-dir> 18090    # writes <work>/realmodel.json

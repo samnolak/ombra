@@ -50,12 +50,15 @@ cat > "$WORK/settings/ombra.local.json" <<EOF
   "profile": "harness", $LANGUAGE_LINE
   "workingDirectory": "$WORK/work",
   "environment": {
-    "HOME": "$WORK/home",
+    "HOME": "$WORK/home", "PI_CODING_AGENT_DIR": null, "OMP_PROFILE": null, "PI_PROFILE": null,
     "QWEN_LOCAL_API_KEY": "dummy-not-a-secret",
     "AWS_ACCESS_KEY_ID": null, "AWS_SECRET_ACCESS_KEY": null, "AWS_SESSION_TOKEN": null
   }
 }
 EOF
+# A settings file the app cannot read makes it run on the defaults — the user's omp profile, ~/.omp sessions and real
+# model (a smoke once did): never start on one. The smoke checks the isolation again before anything starts.
+python3 -m json.tool "$WORK/settings/ombra.local.json" > /dev/null || { echo "not JSON: $WORK/settings/ombra.local.json"; exit 1; }
 
 # Release build with the smoke compiled in, kept apart from the normal build output.
 (cd "$HERE" && dotnet build src/Ombra.App -c Release --artifacts-path "$WORK/artifacts" \

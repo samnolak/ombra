@@ -15,7 +15,7 @@ public sealed class RealWorkspaceTests(ITestOutputHelper log)
     private static OmpRuntimeOptions? Writable()
     {
         var path = Environment.GetEnvironmentVariable("OMBRA_WORKSPACE_TEST_CONFIG");
-        return path is null || !File.Exists(path) ? null : OmpRuntimeOptions.Load(path);
+        return path is null || !File.Exists(path) ? null : TestProcesses.LoadIsolated(path, "OMBRA_WORKSPACE_TEST_CONFIG");
     }
 
     private static async Task<MainViewModel> StartAsync(OmpRuntimeOptions options, string project)

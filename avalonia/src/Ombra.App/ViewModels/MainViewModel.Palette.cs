@@ -350,7 +350,7 @@ public sealed partial class MainViewModel
             C("new-chat", Loc.T("New chat"), NewChatCommand, CommandKey("N")),
             C("open-folder", Loc.T("Open folder…"), OpenFolderCommand, CommandKey("O")),
             C("find", Loc.T("Find in chat"), OpenFindCommand, CommandKey("F")),
-            C("sidebar", Loc.T("Show or hide the sidebar"), ToggleSidebarCommand, CommandKey("B")),
+            C("sidebar", Loc.T("Show or hide the sidebar"), ToggleSidebarCommand, CommandKey("B"), Loc.T("Available in Chats")),
             C("settings", Loc.T("Settings"), OpenSettingsCommand, CommandKey(",")),
             C("shortcuts", Loc.T("Keyboard shortcuts"), ToggleShortcutsCommand, CommandKey("/")),
             C("stop", Loc.T("Stop omp"), AbortCommand, "Esc", Loc.T("omp is not working")),
