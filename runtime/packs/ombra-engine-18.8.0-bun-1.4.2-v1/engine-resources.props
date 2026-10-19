@@ -830,6 +830,7 @@
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/rpc/rpc-messages-backward.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/rpc/rpc-messages-backward.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/rpc/rpc-messages.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/rpc/rpc-messages.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/rpc/rpc-mode.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/rpc/rpc-mode.ts" WithCulture="false" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/rpc/rpc-navigate-tree.test.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/rpc/rpc-navigate-tree.test.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/rpc/rpc-output.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/rpc/rpc-output.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/rpc/rpc-plan.test.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/rpc/rpc-plan.test.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/rpc/rpc-plan.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/rpc/rpc-plan.ts" WithCulture="false" />

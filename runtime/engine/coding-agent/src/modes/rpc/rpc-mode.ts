@@ -241,7 +241,7 @@ type RpcOutput = (
 
 export type RpcSessionChangeCommand = Extract<
 	RpcCommand,
-	{ type: "new_session" } | { type: "switch_session" } | { type: "branch" } | { type: "fork" }
+	{ type: "new_session" } | { type: "switch_session" } | { type: "branch" } | { type: "fork" } | { type: "navigate_tree" }
 >;
 
 export type RpcQueueModeCommand = Extract<
@@ -253,9 +253,13 @@ export type RpcSessionChangeResult =
 	| { type: "new_session"; data: { cancelled: boolean } }
 	| { type: "switch_session"; data: { cancelled: boolean } }
 	| { type: "branch"; data: { text: string; cancelled: boolean } }
-	| { type: "fork"; data: { cancelled: boolean } };
+	| { type: "fork"; data: { cancelled: boolean } }
+	| { type: "navigate_tree"; data: { text?: string; cancelled: boolean } };
 
-export type RpcSessionChangeSession = Pick<AgentSession, "newSession" | "switchSession" | "branch" | "fork" | "sessionManager">;
+export type RpcSessionChangeSession = Pick<
+	AgentSession,
+	"newSession" | "switchSession" | "branch" | "fork" | "navigateTree" | "isBusyForSnapshot" | "sessionManager"
+>;
 
 export type RpcSkillCommandSession = Pick<AgentSession, "promptCustomMessage" | "skills" | "skillsSettings">;
 export type RpcSkillCommandResult = RpcInputAck;
@@ -946,6 +950,15 @@ export async function handleRpcSessionChange(
 			const cancelled = !(await session.fork(command.entryId, { requireIdle: true }));
 			if (!cancelled) subagentRegistry?.clear();
 			return { type: "fork", data: { cancelled } };
+		}
+
+		case "navigate_tree": {
+			// The TUI's /tree and Esc Esc rewind, without a summary: the leaf moves in the same file and the
+			// abandoned path stays there as a sibling branch. A user message rewinds past itself, its text back.
+			// Same session, same subagents: nothing to reset. Refused once work started during the awaits before it.
+			if (session.isBusyForSnapshot) throw new SessionBusyError("rewind the session");
+			const result = await session.navigateTree(command.targetId, { summarize: false });
+			return { type: "navigate_tree", data: { text: result.editorText, cancelled: result.cancelled } };
 		}
 	}
 	throw new Error("Unsupported RPC session change command");
@@ -1971,11 +1984,13 @@ export async function createRpcSessionRuntime(
 			case "new_session":
 			case "switch_session":
 			case "branch":
-			case "fork": {
+			case "fork":
+			case "navigate_tree": {
 				// Fast refusal before the goal controller voids a waiting continuation;
-				// fork() repeats the check after each of its own awaits.
-				if (command.type === "fork" && session.isBusyForSnapshot) {
-					return error(id, "fork", new SessionBusyError("fork the session").message, "session_busy");
+				// fork() repeats the check after each of its own awaits, navigate_tree before it moves the leaf.
+				if ((command.type === "fork" || command.type === "navigate_tree") && session.isBusyForSnapshot) {
+					const action = command.type === "fork" ? "fork the session" : "rewind the session";
+					return error(id, command.type, new SessionBusyError(action).message, "session_busy");
 				}
 				const requestedModel =
 					command.type === "switch_session" ? await resolveRequestedRpcModel(session, command) : undefined;
@@ -1990,9 +2005,13 @@ export async function createRpcSessionRuntime(
 					if (err instanceof SessionBusyError) return error(id, command.type, err.message, "session_busy");
 					throw err;
 				} finally {
-					// Branch and fork switch files in-process without detaching a run (fork requires idle).
+					// Branch, fork and tree navigation change the transcript in-process without detaching a run.
 					await goalController.endSessionChange({
-						detachedRun: command.type !== "branch" && command.type !== "fork" && result?.data.cancelled !== true,
+						detachedRun:
+							command.type !== "branch" &&
+							command.type !== "fork" &&
+							command.type !== "navigate_tree" &&
+							result?.data.cancelled !== true,
 					});
 					// Respond only once this change's reattach (and any queued ahead of it) has run.
 					await goalController.settled();
@@ -2000,7 +2019,8 @@ export async function createRpcSessionRuntime(
 				if (!result.data.cancelled) {
 					inputGate.commitSessionChange(command);
 					// `branch` leaves a live run streaming to its normal yield; new/switch detach it.
-					if (command.type !== "branch" && command.type !== "fork") promptResults.abortOpen();
+					if (command.type !== "branch" && command.type !== "fork" && command.type !== "navigate_tree")
+						promptResults.abortOpen();
 					// The detached run publishes no terminal agent_end to settle on.
 					void settleWatcher.check();
 					await planController.reconcile();

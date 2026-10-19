@@ -1180,6 +1180,17 @@ export class RpcClient {
 	}
 
 	/**
+	 * Move the session's leaf in place, in the same session file (the TUI's /tree and Esc Esc rewind, without a
+	 * summary): a user message rewinds past itself, any other entry becomes the leaf. The abandoned path stays in
+	 * the file as a sibling branch. Refused with `session_busy` while the session works.
+	 * @returns Object with `text` (a rewound user message's text) and `cancelled` (if an extension cancelled)
+	 */
+	async navigateTree(targetId: string): Promise<{ text?: string; cancelled: boolean }> {
+		const response = await this.#send({ type: "navigate_tree", targetId });
+		return this.#getData(response);
+	}
+
+	/**
 	 * Get messages available for branching.
 	 */
 	async getBranchMessages(): Promise<Array<{ entryId: string; text: string }>> {

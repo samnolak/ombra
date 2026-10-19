@@ -13,6 +13,7 @@
 - Editor documents over RPC: `editor_document` opens, changes, saves and closes a host editor's buffer (`file:` URI, revision, base hash) and requests completion, hover, definition, rename and diagnostics from the language servers; `editor_trust` starts the project's language servers only once the host trusts the folder; agent edits to an open document go to the host as `editor_apply_edit` (expected revision and hash) and are answered with `editor_edit_result`.
 - `get_messages_page` takes `direction: "backward"`: newest page first, each page in chronological order, bounded to 768 KiB, with cursors pinned to the session, branch and message count (`stale_cursor` once they change).
 - Shared-engine root commands: `engine_read_session` pages a stored session file (absolute `.jsonl` path, cursor, `limit` 1–256; at most four at once) without opening it, `engine_cancel_read` stops one, and `engine_delete_session` deletes a session with its artifacts.
+- RPC `navigate_tree` (`RpcClient.navigateTree(targetId)`): the TUI's `/tree` and Esc Esc rewind for RPC hosts, without a summary. It moves the leaf in place, in the same session file: a user message rewinds past itself and its text comes back, any other entry becomes the leaf, and the abandoned path stays in the file as a sibling branch. Refused with `session_busy` while the session works. Unlike `branch`, it writes no new session file holding a copy of the whole history.
 
 ### Fixed
 

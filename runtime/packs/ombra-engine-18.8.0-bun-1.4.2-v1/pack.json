@@ -25,8 +25,8 @@
       "attestation": "https://registry.npmjs.org/-/npm/v1/attestations/@oh-my-pi%2fpi-coding-agent@18.8.0",
       "verification": "npm tarball integrity verified; SLSA payload decoded, signatures not independently verified"
     },
-    "sha256": "d362c05e2b94c9bd3f9824558fdc7ca5e2b6348ac2f79b5abc84d90a7e8a680d",
-    "bytes": 22207946,
+    "sha256": "1f91ec3dc4c980fcc2ee597b26ebfdddc2bcdd1a751554fba2c683552db46262",
+    "bytes": 22220735,
     "files": [
       {
         "path": "approval-lease.test.ts",
@@ -45,8 +45,8 @@
       },
       {
         "path": "coding-agent/CHANGELOG.md",
-        "size": 175550,
-        "sha256": "d28564fc909d2447721d78fa67cb11043933c75320f2c23986f289c983af912f"
+        "size": 176028,
+        "sha256": "2046d684b1dbba548b0751f07ab4fee582da03f153fa1a0c997a63483dbc4000"
       },
       {
         "path": "coding-agent/LICENSE",
@@ -4100,8 +4100,8 @@
       },
       {
         "path": "coding-agent/src/modes/rpc/rpc-client.ts",
-        "size": 60488,
-        "sha256": "6b29750ed040d2e493858f1251884194d31892f92d6fef2da23fe52fc823bc57"
+        "size": 61115,
+        "sha256": "5dd97948fb310ebd7271b353d86160eeb923ad88c66989c12fb843efccd675ba"
       },
       {
         "path": "coding-agent/src/modes/rpc/rpc-compat.ts",
@@ -4170,8 +4170,13 @@
       },
       {
         "path": "coding-agent/src/modes/rpc/rpc-mode.ts",
-        "size": 108472,
-        "sha256": "e1155df9b69022b1ac5ae8e5d0c9e7f8ce070321e335f68cfdfae7ae1076a3d2"
+        "size": 109531,
+        "sha256": "ccd5febd732dfb392ea9e519ab34e1af4723f979143163cbd736b2f78ecf5de1"
+      },
+      {
+        "path": "coding-agent/src/modes/rpc/rpc-navigate-tree.test.ts",
+        "size": 8916,
+        "sha256": "308d78a3e74570740180550c3eb8c2fe09ed377470aed9315df53818607dea74"
       },
       {
         "path": "coding-agent/src/modes/rpc/rpc-output.ts",
@@ -4215,13 +4220,13 @@
       },
       {
         "path": "coding-agent/src/modes/rpc/rpc-types.ts",
-        "size": 40032,
-        "sha256": "5391a1de1d47218f2cc18e2300b1023c4e6597219c1c1166caff171e056501a0"
+        "size": 40234,
+        "sha256": "a7ebde8cab5dbf404f5b9eec42e57a1ed6571e7124c236b9fe72dff875a0f75d"
       },
       {
         "path": "coding-agent/src/modes/rpc/wire/commands.ts",
-        "size": 16243,
-        "sha256": "ef78921698f1054652585d7ccfbb068157237c33822ce6e2370a0678fb1b9fcd"
+        "size": 16609,
+        "sha256": "7d3049110a08267385aaf8991a5c405c7851c6e2be0853cda3a23beadbc1e678"
       },
       {
         "path": "coding-agent/src/modes/rpc/wire/content.ts",
@@ -4250,18 +4255,18 @@
       },
       {
         "path": "coding-agent/src/modes/rpc/wire/rpc-wire.generated.ts",
-        "size": 52329,
-        "sha256": "2b7dbbbb487d6c3215bc4e52938f8742b218ff5f400e99150ebfbf4133949d01"
+        "size": 52543,
+        "sha256": "f207041505a4e23c3ebcfe54c1af1673394130bd1793f0a9dccb0f5a140a7c20"
       },
       {
         "path": "coding-agent/src/modes/rpc/wire/rpc-wire.schema.json",
-        "size": 132390,
-        "sha256": "c4ceaf4191a21894988a61849d06375995d7182aeefc3e3b779b0d7bb25db273"
+        "size": 133251,
+        "sha256": "b120d8dc8375eb26402b666b345a939aab331bcf002abb7c987ddd8eeb5b6520"
       },
       {
         "path": "coding-agent/src/modes/rpc/wire/state.ts",
-        "size": 15903,
-        "sha256": "1934e07241bc54f0713e8ab497864a16cb086700c7076acf46fb0d2ba422d523"
+        "size": 15969,
+        "sha256": "efb4d38f2624a63d34dd0cd7314351fa30fd325cc939f124004c3b515d07b2b1"
       },
       {
         "path": "coding-agent/src/modes/runtime-init.test.ts",

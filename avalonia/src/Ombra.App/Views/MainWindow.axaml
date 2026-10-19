@@ -35,7 +35,7 @@
         <Border Classes="menu-separator" />
         <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                 Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RewindToCommand}" CommandParameter="{Binding}"
-                ToolTip.Tip="{loc:T 'A new session from before this message, which comes back into the box to edit and send'}"
+                ToolTip.Tip="{loc:T 'This chat goes on from before this message, which comes back into the box to edit and send'}"
                 AutomationProperties.Name="{loc:T 'Rewind to here'}">
           <Grid ColumnDefinitions="Auto,*">
             <ctl:Icon Data="{StaticResource IconRewind}" Size="16" Margin="0,0,10,0" />
@@ -602,7 +602,7 @@
                   <ctl:Icon Data="{StaticResource IconCopy}" Size="16" />
                 </Button>
                 <Button Classes="icon row-action" Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).RewindToCommand}" CommandParameter="{Binding}"
-                        ToolTip.Tip="{loc:T 'Rewind to here: a new session from before this message, which comes back into the box'}"
+                        ToolTip.Tip="{loc:T 'Rewind to here: this chat goes on from before this message, which comes back into the box'}"
                         AutomationProperties.Name="{loc:T 'Rewind to here'}">
                   <ctl:Icon Data="{StaticResource IconRewind}" Size="16" />
                 </Button>

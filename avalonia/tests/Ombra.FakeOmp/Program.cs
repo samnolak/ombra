@@ -1463,19 +1463,24 @@ await foreach (var cmd in session.Commands.ReadAllAsync(session.Stopping))
                 .Where(x => x.n?["role"]?.GetValue<string>() == "user")
                 .Select(x => new { entryId = $"e{x.i}", text = x.n?["content"]?[0]?["text"]?.GetValue<string>() ?? "" }) });
             break;
-        case "branch":
-            // A new session file with the conversation before that message; answers with the message's text
-            var at = int.TryParse(cmd?["entryId"]?.GetValue<string>()?.TrimStart('e'), out var bi) && bi < history.Count ? bi : -1;
-            if (at < 0) { Respond(id, type, error: "Invalid entry ID for branching"); break; }
-            var chosen = JsonSerializer.SerializeToNode(history[at])?["content"]?[0]?["text"]?.GetValue<string>() ?? "";
-            var kept = history.Take(at).ToList();
+        case "navigate_tree":
+        {
+            // Like omp (rpc-mode.ts): in place, in the same session file; refused while the session works. A user
+            // message rewinds past itself and its text comes back; any other entry becomes the leaf.
+            if (streaming) { Respond(id, type, error: "Cannot rewind the session while it is busy", code: "session_busy"); break; }
+            var treeTarget = cmd?["targetId"]?.GetValue<string>() ?? "";
+            if (!(int.TryParse(treeTarget.TrimStart('e'), out var treeAt) && treeAt >= 0 && treeAt < history.Count)) { Respond(id, type, error: $"Entry {treeTarget} not found"); break; }
+            if (Environment.GetEnvironmentVariable("FAKE_OMP_COMMAND_LOG") is { Length: > 0 } navigateLog)
+                Ombra.FakeOmp.FakeEngineHost.AppendLog(navigateLog, "navigate_tree " + treeTarget + "\n");
+            var treeNode = JsonSerializer.SerializeToNode(history[treeAt]);
+            var rewound = treeNode?["role"]?.GetValue<string>() == "user";
+            var treeKept = history.Take(rewound ? treeAt : treeAt + 1).ToList();
             history.Clear();
-            sessionFile = NewSessionFile();
-            freshSessionId = null;
-            history.AddRange(kept);
-            WriteSessionFile(); // omp forces a branch's file into existence at once
-            Respond(id, type, new { text = chosen, cancelled = false });
+            history.AddRange(treeKept);
+            WriteSessionFile();
+            Respond(id, type, rewound ? new { text = treeNode?["content"]?[0]?["text"]?.GetValue<string>() ?? "", cancelled = false } : (object)new { cancelled = false });
             break;
+        }
         case "get_entries":
             // Like omp: every entry in append order (here one branch: e0 → e1 → …) and the leaf
             Respond(id, type, new

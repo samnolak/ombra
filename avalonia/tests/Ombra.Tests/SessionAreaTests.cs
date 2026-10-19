@@ -312,7 +312,7 @@ public sealed class SessionAreaTests
     }
 
     [AvaloniaFact]
-    public async Task Rewind_starts_a_new_session_before_the_chosen_message_and_gives_it_back()
+    public async Task Rewind_goes_on_in_the_same_session_from_before_the_chosen_message_and_gives_it_back()
     {
         var e = await OpenAsync();
         var vm = e.Vm;
@@ -320,7 +320,7 @@ public sealed class SessionAreaTests
         await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.OfType<AssistantRowViewModel>().Any(), "first reply");
         await Send(e, "second question");
         await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.OfType<AssistantRowViewModel>().Count() == 2, "second reply");
-        var before = vm.Session.Snapshot().SessionFile;
+        var before = vm.Session.Snapshot().SessionFile!;
 
         await Send(e, "/rewind"); // omp's terminal-only /branch, /rewind: the GUI's Rewind
         await Until(() => vm.SessionCard is { Kind: "rewind", HasChoices: true }, "rewind choices");
@@ -329,9 +329,53 @@ public sealed class SessionAreaTests
         Assert.Equal(Loc.T("Rewound"), vm.SessionCard.Title);
         await Until(() => vm.Rows.OfType<UserRowViewModel>().Select(u => u.Text).SequenceEqual(["first question"]), "history before the message");
         Assert.Equal("second question", vm.ComposerText);
-        Assert.NotEqual(before, vm.Session.Snapshot().SessionFile);
-        await Until(() => vm.Sessions.Count == 2, "the earlier session is kept");
+        // In place (omp's navigate_tree, as its own Esc Esc rewind): no second session file, no second chat in the list
+        Assert.Contains("navigate_tree e2", Sent(e));
+        Assert.Equal(before, vm.Session.Snapshot().SessionFile);
+        Assert.Equal([before], Directory.GetFiles(Path.GetDirectoryName(before)!, "*.jsonl"));
+        await Settle();
+        Assert.Single(vm.Sessions);
         await Close(e);
+    }
+
+    /// <summary>
+    /// The owner's duplicate chats: a reply stopped (Stop, or quitting the app mid-reply), then Rewind to here on that
+    /// last message to send it again. Each time this used to copy the whole conversation into a new session file
+    /// (omp's <c>branch</c>) and list it as another chat with the same title.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task Rewinding_a_stopped_last_message_and_sending_it_again_stays_one_chat_in_one_file()
+    {
+        var e = await OpenAsync("multi"); // "multi": a message with LONG streams for a few seconds
+        var vm = e.Vm;
+        try
+        {
+            await Send(e, "first question");
+            await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.OfType<AssistantRowViewModel>().Any(), "first reply");
+            var file = vm.Session.Snapshot().SessionFile!;
+            await Send(e, "LONG second question");
+            await Until(() => vm.Phase == SessionPhase.Running, "the second reply streams");
+            await vm.AbortCommand.ExecuteAsync(null);
+            await Until(() => vm.Phase == SessionPhase.Ready, "stopped");
+
+            var last = vm.Rows.OfType<UserRowViewModel>().Last();
+            Assert.Equal("LONG second question", last.Text);
+            Assert.True(vm.RewindToCommand.CanExecute(last));
+            await vm.RewindToCommand.ExecuteAsync(last);
+            Assert.Equal(Loc.T("Rewound"), vm.SessionCard!.Title);
+            Assert.Equal("LONG second question", vm.ComposerText);
+            await Until(() => vm.Rows.OfType<UserRowViewModel>().Select(u => u.Text).SequenceEqual(["first question"]), "history before the message");
+
+            vm.SendCommand.Execute(null);
+            await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.OfType<UserRowViewModel>().Count() == 2
+                && vm.Rows.OfType<AssistantRowViewModel>().Count() == 2, "the message sent again, answered", seconds: 30);
+            Assert.DoesNotContain(Sent(e), l => l.StartsWith("branch", StringComparison.Ordinal));
+            Assert.Equal(file, vm.Session.Snapshot().SessionFile);
+            Assert.Equal([file], Directory.GetFiles(Path.GetDirectoryName(file)!, "*.jsonl"));
+            await Settle();
+            Assert.Single(vm.Sessions);
+        }
+        finally { await Close(e); }
     }
 
     [AvaloniaTheory]

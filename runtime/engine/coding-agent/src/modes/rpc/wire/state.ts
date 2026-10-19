@@ -214,6 +214,7 @@ export const stateDefs = {
 	),
 	BranchMessage: { entryId: "string", text: "string" },
 	BranchResult: { text: "string", cancelled: "boolean" },
+	NavigateTreeResult: { "text?": "string", cancelled: "boolean" },
 	TokenUsage: {
 		input: "number.integer",
 		output: "number.integer",
