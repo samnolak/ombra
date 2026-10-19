@@ -103,6 +103,8 @@ internal static partial class NightlyAcceptance
             await NewWindowChecks(pane);
             // Its dialogs, doorhangers and the system's save and open panels (NightlyAcceptance.Dialogs.cs).
             await DialogChecks(pane);
+            // Links to an installed app's site go to the app (NightlyAcceptance.OpenInApp.cs).
+            await OpenInAppChecks();
 
             // Chats ↔ Browser and a resize: one copy of the page, the window's frame the pane's.
             var single = true;
@@ -447,6 +449,10 @@ internal static partial class NightlyAcceptance
                     await NewTabChecks(0);
                     break;
                 default:
+                case "openinapp":
+                    // OpenInAppChecks on their own (their PASS/FAIL lines in the log).
+                    await OpenInAppChecks();
+                    break;
                     if (!await PerfCommand(parts, pane)) Log($"DRIVE unknown or not possible now: {line}");
                     break;
             }
