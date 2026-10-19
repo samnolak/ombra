@@ -54,9 +54,7 @@ internal static partial class NightlyAcceptance
         /// </summary>
         private async Task BrowserWindowChecks(int agentPid)
         {
-            vm.ShowChatsCommand.Execute(null);
-            await Task.Delay(600);
-            var chats = Shot("p-browser-window-chats");
+            var chats = await ChatsSheetShot("p-browser-window-chats");
             if (await OpenBrowserWindow("p-browser-window", agentPid) is not { } pane) return;
             var host = Named<Border>("BrowserWindowHost");
             var sheet = SheetMatches(pane, chats, Shot("p-browser-window-sheet"), out var sheetDetail);
@@ -124,6 +122,19 @@ internal static partial class NightlyAcceptance
             vm.ShowChatsCommand.Execute(null);
             Check("browser-window-hidden", await Until(() => !pane.IsEffectivelyVisible && Named<Border>("Sidebar") is not null, 10)
                 && BrowserWindow() == pane, $"panes={Panes().Count}");
+        }
+
+        /// <summary>The Chats page's shot that <see cref="SheetMatches"/> compares with: the right panel hidden meanwhile (the
+        /// Browser page hides it too; open, its page covers the sheet's right corners), then shown again as it was.</summary>
+        private async Task<string> ChatsSheetShot(string name)
+        {
+            vm.ShowChatsCommand.Execute(null);
+            var pane = vm.ActivePane;
+            vm.ClosePaneCommand.Execute(null);
+            await Task.Delay(800);
+            var file = Shot(name);
+            if (pane != ViewModels.SidePane.None) vm.ShowPaneCommand.Execute(pane);
+            return file;
         }
 
         /// <summary>
@@ -410,9 +421,7 @@ internal static partial class NightlyAcceptance
                     break;
                 case "sheet" when pane is not null:
                     // The Browser page's sheet against the Chats page's at this size and theme (SheetMatches); NAME's shots.
-                    vm.ShowChatsCommand.Execute(null);
-                    await Task.Delay(800);
-                    var chatsShot = Shot(parts[1] + "-chats");
+                    var chatsShot = await ChatsSheetShot(parts[1] + "-chats");
                     vm.OpenBrowserPageCommand.Execute(null);
                     await Until(() => pane.IsEffectivelyVisible && Matches(pane), 10);
                     await Task.Delay(800);
