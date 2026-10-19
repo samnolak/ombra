@@ -99,6 +99,9 @@ internal static partial class NightlyAcceptance
             var back = await Until(() => (content = ContentLuma(pane, UrlBarBand)) > 240, 10);
             Check("browser-window-cmd-w", back && Panes().Contains(pane) && window.IsVisible, $"url bar band luma={content:0}");
 
+            // Its dialogs, doorhangers and the system's save and open panels (NightlyAcceptance.Dialogs.cs).
+            await DialogChecks(pane);
+
             // Chats ↔ Browser and a resize: one copy of the page, the window's frame the pane's.
             var single = true;
             var detail = "";
@@ -415,6 +418,10 @@ internal static partial class NightlyAcceptance
                     break;
                 case "swipe" when pane is not null: // swipe X Y left|right: a horizontal two-finger swipe at a pane point
                     Swipe(pane, new Point(D(1), D(2)), parts[3] == "left" ? -1 : 1);
+                    break;
+                case "dialogs" when pane is not null:
+                    // DialogChecks on their own (their PASS/FAIL lines in the log).
+                    await DialogChecks(pane);
                     break;
                 case "spaces" when pane is not null: // SpacesChecks on the window as it is (one space, the white page shown)
                     await SpacesChecks(pane);
