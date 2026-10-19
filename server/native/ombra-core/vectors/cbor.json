@@ -1,0 +1,496 @@
+{
+  "cases": [
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "00"
+      },
+      "name": "cbor-uint-0",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "17"
+      },
+      "name": "cbor-uint-23",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "1818"
+      },
+      "name": "cbor-uint-24",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "18ff"
+      },
+      "name": "cbor-uint-255",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "190100"
+      },
+      "name": "cbor-uint-256",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "1a00010000"
+      },
+      "name": "cbor-uint-65536",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "1b0000000100000000"
+      },
+      "name": "cbor-uint-2pow32",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "1bffffffffffffffff"
+      },
+      "name": "cbor-uint-max",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "20"
+      },
+      "name": "cbor-negint-minus-1",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "3818"
+      },
+      "name": "cbor-negint-minus-25",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "40"
+      },
+      "name": "cbor-bytes-empty",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "43010203"
+      },
+      "name": "cbor-bytes-3",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "6161"
+      },
+      "name": "cbor-text",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "62d096"
+      },
+      "name": "cbor-text-utf8",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "80"
+      },
+      "name": "cbor-array-empty",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "820102"
+      },
+      "name": "cbor-array",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "a0"
+      },
+      "name": "cbor-map-empty",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "a2616101616202"
+      },
+      "name": "cbor-map-sorted",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "a261620162616102"
+      },
+      "name": "cbor-map-shorter-key-first",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "a201006161f6"
+      },
+      "name": "cbor-map-int-keys-before-text",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "83f4f5f6"
+      },
+      "name": "cbor-false-true-null",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": true
+      },
+      "input": {
+        "bytes": "818181818181818181818181818181818181818181818181818181818181818100"
+      },
+      "name": "cbor-nesting-32",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "1805"
+      },
+      "name": "cbor-non-minimal-uint-1byte",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "1a00000100"
+      },
+      "name": "cbor-non-minimal-uint-4byte",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "1b0000000000000000"
+      },
+      "name": "cbor-non-minimal-uint-8byte",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "3800"
+      },
+      "name": "cbor-non-minimal-negint",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "5801ff"
+      },
+      "name": "cbor-non-minimal-bytes-length",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "980100"
+      },
+      "name": "cbor-non-minimal-array-length",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "a2616201616102"
+      },
+      "name": "cbor-map-unsorted",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "a26261610161620002"
+      },
+      "name": "cbor-map-longer-key-first",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "a2616101616102"
+      },
+      "name": "cbor-map-duplicate-key",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "5f4101ff"
+      },
+      "name": "cbor-indefinite-bytes",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "7f6161ff"
+      },
+      "name": "cbor-indefinite-text",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "9f01ff"
+      },
+      "name": "cbor-indefinite-array",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "bf616101ff"
+      },
+      "name": "cbor-indefinite-map",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "f90000"
+      },
+      "name": "cbor-float16",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "fa3f800000"
+      },
+      "name": "cbor-float32",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "fb3ff0000000000000"
+      },
+      "name": "cbor-float64",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "f7"
+      },
+      "name": "cbor-undefined",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "e0"
+      },
+      "name": "cbor-simple-value",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "c001"
+      },
+      "name": "cbor-tag",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "0102"
+      },
+      "name": "cbor-trailing-bytes",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "1901"
+      },
+      "name": "cbor-truncated-uint",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "4301"
+      },
+      "name": "cbor-truncated-bytes",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": ""
+      },
+      "name": "cbor-empty-input",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "61ff"
+      },
+      "name": "cbor-invalid-utf8",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "5bffffffffffffffff"
+      },
+      "name": "cbor-length-too-large",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "1c"
+      },
+      "name": "cbor-reserved-info",
+      "op": "cbor.check"
+    },
+    {
+      "expect": {
+        "canonical": false
+      },
+      "input": {
+        "bytes": "81818181818181818181818181818181818181818181818181818181818181818100"
+      },
+      "name": "cbor-nesting-33",
+      "op": "cbor.check"
+    }
+  ],
+  "description": "Strict deterministic CBOR decoder (RFC 8949 §4.2.1): `canonical` is true only for bytes that re-encode to themselves.",
+  "generatedBy": "cargo run --release --bin gen-vectors -- vectors"
+}

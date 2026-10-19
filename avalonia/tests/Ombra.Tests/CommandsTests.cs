@@ -4,9 +4,11 @@ using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.Threading;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.ClientCore;
+using Ombra.Rpc;
 
 namespace Ombra.Tests;
 
@@ -68,6 +70,144 @@ public sealed class CommandsTests
         Assert.Equal(["completed", "in_progress", "pending"], snap.Todos[0].Tasks.Select(t => t.Status));
     }
 
+    [Theory]
+    [InlineData("auto_compaction_end")]
+    [InlineData("session_settled")]
+    public async Task Compaction_and_settlement_refresh_indicators_without_settling_pending_input(string eventType)
+    {
+        await using var s = new SessionController(TestProcesses.Fake("compaction-refresh"));
+        await s.StartAsync();
+        s.Mutate(state =>
+        {
+            state.Enqueue(QueueKind.FollowUp, "next input", []);
+            state.BeginRun(DateTimeOffset.UtcNow);
+        });
+        await s.Connection!.RequestAsync("test_state_refresh", w => w.WriteString("event", eventType));
+        var refreshed = await TestProcesses.Eventually(s.Snapshot, x => x.ContextPercent == 20, Wait, "authoritative context");
+        Assert.Equal(SessionPhase.Running, refreshed.Phase);
+        Assert.Equal("next input", Assert.Single(refreshed.Queued).Text);
+        Assert.Equal(0, refreshed.RunsEnded);
+    }
+
+    [Theory]
+    [InlineData(false, false, "compaction-refresh")]
+    [InlineData(true, false, "compaction-refresh")]
+    [InlineData(true, true, "compaction-refresh")]
+    [InlineData(false, false, "compaction-refresh-failed")]
+    [InlineData(true, true, "compaction-refresh-failed")]
+    public async Task Manual_compaction_refreshes_without_auto_compaction_or_agent_end(bool intercepted, bool immediate, string scenario)
+    {
+        await using var s = new SessionController(TestProcesses.Fake(scenario));
+        await s.StartAsync();
+        var command = immediate ? "/compact immediate" : "/compact";
+        var printed = "";
+        if (intercepted)
+        {
+            var result = await s.RunSlashCommandAsync(command);
+            Assert.True(result.Ok);
+            printed = result.Output;
+        }
+        else await s.PromptAsync(command);
+        var refreshed = await TestProcesses.Eventually(s.Snapshot, x => x.ContextPercent == 0.25, Wait, "manual compaction context");
+        Assert.Equal(SessionPhase.Ready, refreshed.Phase);
+        Assert.DoesNotContain(refreshed.DebugTail, d => d.Type is "auto_compaction_end" or "agent_end");
+        if (SessionOutputs.ParseCompactEnd(printed) is null)
+            await TestProcesses.Eventually(s.Snapshot,
+                x => x.Items.OfType<CommandOutputItem>().Any(item => SessionOutputs.ParseCompactEnd(item.Text) is not null),
+                Wait, "visible manual compaction completion");
+    }
+
+    [Theory]
+    [InlineData("compaction-refresh")]
+    [InlineData("compaction-refresh-failed")]
+    public async Task Retired_command_interceptor_forwards_background_output_and_refreshes_state(string scenario)
+    {
+        var clock = new CommandCaptureClock();
+        await using var s = new SessionController(TestProcesses.Fake(scenario), clock: clock);
+        await s.StartAsync();
+        var conn = s.Connection!;
+        Func<string, System.Text.Json.JsonElement, bool>? retired = null;
+        // BeginRun reads the clock after installing the hook, before sending the command.
+        clock.Capture = () => { if (conn.Intercept is { } capture) retired = capture; };
+        var immediate = await s.RunSlashCommandAsync("/compact immediate");
+        clock.Capture = null;
+        Assert.True(immediate.Ok);
+        Assert.NotNull(SessionOutputs.ParseCompactEnd(immediate.Output));
+        Assert.NotNull(retired);
+        await TestProcesses.Eventually(s.Snapshot, x => x.ContextPercent == 0.25, Wait, "first compact refresh");
+        await conn.RequestAsync("test_state_refresh");
+        await TestProcesses.Eventually(s.Snapshot, x => x.ContextPercent == 20, Wait, "reset authoritative context");
+
+        // Model the read loop retaining the delegate just before the command seals its output.
+        // A later actual protocol frame must not be consumed into that already-returned buffer.
+        conn.Intercept = retired;
+        try
+        {
+            await conn.PromptAsync("/compact");
+            var visible = await TestProcesses.Eventually(s.Snapshot,
+                x => x.ContextPercent == 0.25 && x.Items.OfType<CommandOutputItem>().Any(),
+                Wait, "late output and automatic refresh");
+            var output = Assert.Single(visible.Items.OfType<CommandOutputItem>());
+            Assert.Equal(immediate.Output, output.Text);
+            Assert.Equal(SessionPhase.Ready, visible.Phase);
+        }
+        finally { conn.Intercept = null; }
+    }
+
+    private sealed class CommandCaptureClock : TimeProvider
+    {
+        public Action? Capture;
+        public override DateTimeOffset GetUtcNow()
+        {
+            Volatile.Read(ref Capture)?.Invoke();
+            return TimeProvider.System.GetUtcNow();
+        }
+    }
+
+    [Fact]
+    public async Task Refresh_bursts_discard_the_obsolete_answer_and_coalesce_into_one_followup()
+    {
+        await using var s = new SessionController(TestProcesses.Fake("compaction-refresh-race"));
+        await s.StartAsync();
+        await s.Connection!.RequestAsync("test_state_refresh", w => w.WriteNumber("percent", 90));
+        var held = await TestProcesses.Eventually(s.Snapshot,
+            x => x.Items.OfType<NoticeItem>().Any(n => n.Text == "refresh held"), Wait, "followup refresh held");
+        Assert.Equal(1.25, held.ContextPercent); // the obsolete 90% reply must never be published
+        Assert.Equal("new/model", held.Model);
+        Assert.Equal("high", held.ThinkingLevel);
+        Assert.Equal("compacted", held.SessionName);
+        var release = await s.Connection.RequestAsync("test_release_refresh");
+        Assert.Equal(3, release.Data!.Value.GetProperty("stateCalls").GetInt32()); // startup + old + one followup
+        await TestProcesses.Eventually(s.Snapshot, x => x.ContextPercent == 20, Wait, "latest context");
+    }
+
+    [Fact]
+    public async Task Background_compaction_refresh_is_private_to_its_logical_session()
+    {
+        await using var foreground = new SessionController(TestProcesses.Fake("compaction-refresh"));
+        await foreground.StartAsync();
+        await using var background = foreground.Sibling(new LaunchRequest());
+        await background.StartAsync();
+        await background.PromptAsync("/compact");
+        await TestProcesses.Eventually(background.Snapshot, x => x.ContextPercent == 0.25, Wait, "background context");
+        Assert.Equal(1.25, foreground.Snapshot().ContextPercent);
+        Assert.Equal(SessionPhase.Ready, foreground.Snapshot().Phase);
+    }
+
+    [AvaloniaFact]
+    public async Task Typed_compaction_updates_the_visible_context_indicator_without_a_new_turn()
+    {
+        var (w, vm, _) = await OpenAsync("compaction-refresh");
+        try
+        {
+            vm.ComposerText = "/compact";
+            vm.SendCommand.Execute(null);
+            await Until(() => vm.Session.Snapshot().ContextPercent == 0.25 && vm.Usage.Percent == 0.25, "compacted indicator");
+            Assert.Equal(SessionPhase.Ready, vm.Phase);
+        }
+        finally { await vm.DisposeAsync(); w.Close(); }
+    }
+
     [AvaloniaFact]
     public async Task Slash_menu_filters_navigates_accepts_and_offers_subcommands()
     {
@@ -122,11 +262,11 @@ public sealed class CommandsTests
     public async Task Todo_card_and_context_usage_are_shown()
     {
         var (w, vm, _) = await OpenAsync("todo");
-        Assert.Contains("context 1%", vm.StatusDetail);
+        Assert.Contains(Loc.F("context {0:0}%", 1), vm.StatusDetail);
         vm.ComposerText = "plan it";
         vm.SendCommand.Execute(null);
         await Until(() => vm.HasTodos && vm.Phase == SessionPhase.Ready, "todos shown");
-        Assert.Equal("Tasks 1/3", vm.TodoSummary);
+        Assert.Equal(Loc.F("Tasks {0}/{1}", 1, 3), vm.TodoSummary);
         Assert.Equal(["✓", "◐", "○"], vm.TodoPhases.Single().Tasks.Select(t => t.Mark));
         Assert.True(w.FindControl<Border>("TodoCard")!.IsEffectivelyVisible);
         await vm.DisposeAsync();

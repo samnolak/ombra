@@ -176,6 +176,12 @@ public sealed partial class MainViewModel
                 finally { mic.Dispose(); }
                 if (previous is not null) await Task.WhenAny(previous); // its outcome was handled by its own take
                 if (_dictationDisposed || take != Volatile.Read(ref _dictationTake)) return ""; // cancelled: not decoded
+                if (samples.Length == 0)
+                    throw new InvalidOperationException(Loc.T("The microphone delivered no audio. Check the input device and microphone permission, then try again."));
+                // Only digital silence is rejected. The waveform's display floor is not a speech threshold:
+                // quiet but nonzero audio still reaches the recognizer unchanged.
+                if (LevelMeter.Rms(samples) == 0)
+                    throw new InvalidOperationException(Loc.T("The microphone recorded only silence. Check the input device and mute settings, then try again."));
                 _transcriber ??= TranscriberFactory(dir);
                 return _transcriber.Transcribe(samples);
             });

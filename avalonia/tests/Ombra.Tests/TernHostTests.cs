@@ -58,6 +58,8 @@ public sealed class TernHostTests
         public bool? ConfirmAnswer { get; private set; }
         public bool Closed { get; private set; }
         public int Copies { get; private set; }
+        public int StateReads { get; private set; }
+        public int Evaluations { get; private set; }
 
         public bool IsClosed => false;
         public DialogBroker? Dialogs => Broker;
@@ -102,11 +104,15 @@ public sealed class TernHostTests
             sink.Post("loaded");
         }
 
-        public Task<TernPageState> GetStateAsync(CancellationToken ct) =>
-            Task.FromResult(new TernPageState(Url, Title, Viewport.W, Viewport.H, false, _index > 0, _index < _history.Count - 1));
+        public Task<TernPageState> GetStateAsync(CancellationToken ct)
+        {
+            StateReads++;
+            return Task.FromResult(new TernPageState(Url, Title, Viewport.W, Viewport.H, false, _index > 0, _index < _history.Count - 1));
+        }
 
         public async Task<string?> EvaluateAsync(string function, string argsJson, TernWorld world, string? frame, CancellationToken ct)
         {
+            Evaluations++;
             if (function.Contains("throw new Error('boom')")) throw new TernException(TernException.Js, "Error: boom\n    at <anonymous>:1:20");
             if (function.Contains("return never")) await Task.Delay(Timeout.Infinite, ct);
             if (function.Contains("return undefined")) return null;
@@ -345,6 +351,43 @@ public sealed class TernHostTests
         })));
     }
 
+    [Theory]
+    [InlineData("state")]
+    [InlineData("eval")]
+    [InlineData("close")]
+    public async Task Another_connection_cannot_access_or_close_a_peers_block(string operation)
+    {
+        if (OperatingSystem.IsWindows()) return; // this harness uses Unix sockets; production framing is shared
+        var (host, browser) = Start();
+        using var lifetime = host;
+        using var owner = new Wire(host.Endpoint);
+        using var stranger = new Wire(host.Endpoint);
+        await owner.HelloAsync();
+        await stranger.HelloAsync();
+        var opened = await owner.CallAsync(new JsonObject { ["op"] = "open", ["owner"] = 7, ["url"] = "about:blank" });
+        var blockId = opened["ok"]!["block"]!.GetValue<int>();
+        var page = Assert.Single(browser.Pages);
+        var block = host.Block(blockId);
+        var stateReads = page.StateReads;
+        var evaluations = page.Evaluations;
+
+        // Knowledge of a sequential block ID or the pane's self-reported owner is not authority.
+        var request = new JsonObject { ["op"] = operation, ["block"] = blockId, ["owner"] = 7 };
+        if (operation == "eval") request["function"] = "function () { return document.title; }";
+        var rejected = await stranger.CallAsync(request);
+        Assert.Equal("not_found", Kind(rejected));
+        Assert.Equal(stateReads, page.StateReads);
+        Assert.Equal(evaluations, page.Evaluations);
+        Assert.False(page.Closed);
+        Assert.Same(block, host.Block(blockId));
+
+        var state = await owner.CallAsync(new JsonObject { ["op"] = "state", ["block"] = blockId });
+        Assert.Equal("ok", Kind(state));
+        Assert.Equal("about:blank", state["ok"]!["url"]!.GetValue<string>());
+        Assert.Equal("ok", Kind(await owner.CallAsync(new JsonObject { ["op"] = "close", ["block"] = blockId })));
+        Assert.True(page.Closed);
+    }
+
     [Fact]
     public async Task A_frame_omps_reader_would_refuse_ends_the_connection_and_its_tabs()
     {
@@ -454,6 +497,40 @@ public sealed class TernHostTests
     }
 
     [Fact]
+    public async Task Credentials_omp_set_never_reach_other_hosts_frames_proxies_or_challenges_omp_did_not_cause()
+    {
+        var block = new TernBlock(1, 1);
+        var page = new FakePage(block, new TernOpenRequest(1, 800, 600));
+        block.Attach(page);
+        var broker = page.Broker;
+        await block.DispatchAsync("credentials", new JsonObject { ["username"] = "agent", ["password"] = "pw", ["origin"] = "https://intranet.test" }, CancellationToken.None);
+        await block.DispatchAsync("goto", new JsonObject { ["url"] = "https://intranet.test/home" }, CancellationToken.None);
+
+        async Task GoesToUser(CredentialRequest request)
+        {
+            var asked = broker.RequestCredentialsAsync(request, CancellationToken.None);
+            Assert.Equal(BrowserDialogKind.Credentials, broker.Current?.Kind);
+            broker.Current!.Cancel();
+            Assert.Null(await asked);
+        }
+
+        // A 401 from a foreign host (an iframe or sub-resource of the page), a proxy, another port or scheme, or a
+        // challenge omp did not cause: the user's card
+        await GoesToUser(new CredentialRequest("attacker.test", 443, "x", false, false) { CausedByAgent = true, PageUrl = new Uri("https://attacker.test") });
+        await GoesToUser(new CredentialRequest("proxy.corp", 3128, "proxy", true, false) { CausedByAgent = true });
+        await GoesToUser(new CredentialRequest("intranet.test", 443, "x", true, false) { CausedByAgent = true });
+        await GoesToUser(new CredentialRequest("intranet.test", 8443, "x", false, false) { CausedByAgent = true });
+        await GoesToUser(new CredentialRequest("intranet.test", 443, "x", false, false) { CausedByAgent = true, PageUrl = new Uri("http://intranet.test:443") });
+        await GoesToUser(new CredentialRequest("intranet.test", 443, "x", false, false));
+        Assert.Equal(new CredentialAnswer("agent", "pw"),
+            await broker.RequestCredentialsAsync(new CredentialRequest("INTRANET.test", 443, "x", false, false) { CausedByAgent = true, PageUrl = new Uri("https://intranet.test") }, CancellationToken.None));
+
+        // A frame of the origin embedded by another page: the user's
+        await block.DispatchAsync("goto", new JsonObject { ["url"] = "https://attacker.test/" }, CancellationToken.None);
+        await GoesToUser(new CredentialRequest("intranet.test", 443, "x", false, false) { CausedByAgent = true });
+    }
+
+    [Fact]
     public async Task Files_credentials_and_hosts_omp_set_are_used_and_the_rest_goes_to_the_user()
     {
         var block = new TernBlock(1, 1);
@@ -478,15 +555,17 @@ public sealed class TernHostTests
         broker.Current.Complete(PermissionAnswer.Deny);
         await permission;
 
-        // Credentials omp set answer a first challenge; a refused one goes to the user
-        await block.DispatchAsync("credentials", new JsonObject { ["username"] = "agent", ["password"] = "pw" }, CancellationToken.None);
-        Assert.Equal(new CredentialAnswer("agent", "pw"), await broker.RequestCredentialsAsync(new CredentialRequest("example.com", 443, "Studio", false, false), CancellationToken.None));
-        var refused = broker.RequestCredentialsAsync(new CredentialRequest("example.com", 443, "Studio", false, true), CancellationToken.None);
+        // Credentials omp set answer a first challenge omp caused at their origin; a refused one goes to the user
+        await Assert.ThrowsAsync<TernException>(() => block.DispatchAsync("credentials", new JsonObject { ["username"] = "agent", ["password"] = "pw" }, CancellationToken.None));
+        await block.DispatchAsync("credentials", new JsonObject { ["username"] = "agent", ["password"] = "pw", ["origin"] = "https://example.com" }, CancellationToken.None);
+        await block.DispatchAsync("goto", new JsonObject { ["url"] = "https://example.com/" }, CancellationToken.None);
+        Assert.Equal(new CredentialAnswer("agent", "pw"), await broker.RequestCredentialsAsync(new CredentialRequest("example.com", 443, "Studio", false, false) { CausedByAgent = true }, CancellationToken.None));
+        var refused = broker.RequestCredentialsAsync(new CredentialRequest("example.com", 443, "Studio", false, true) { CausedByAgent = true }, CancellationToken.None);
         Assert.Equal(BrowserDialogKind.Credentials, broker.Current!.Kind);
         broker.Current.Cancel();
         Assert.Null(await refused);
         await block.DispatchAsync("credentials", [], CancellationToken.None);
-        var nobody = broker.RequestCredentialsAsync(new CredentialRequest("example.com", 443, "Studio", false, false), CancellationToken.None);
+        var nobody = broker.RequestCredentialsAsync(new CredentialRequest("example.com", 443, "Studio", false, false) { CausedByAgent = true }, CancellationToken.None);
         Assert.NotNull(broker.Current);
         broker.Current!.Cancel();
         await nobody;
@@ -496,7 +575,7 @@ public sealed class TernHostTests
         await block.DispatchAsync("goto", new JsonObject { ["url"] = "https://app.example.com/a" }, CancellationToken.None);
         await block.DispatchAsync("goto", new JsonObject { ["url"] = "http://localhost:5173/" }, CancellationToken.None);
         await block.DispatchAsync("goto", new JsonObject { ["url"] = "https://example.org/" }, CancellationToken.None);
-        Assert.Equal(new[] { "https://app.example.com/a", "http://localhost:5173/" }, page.Navigations.Select(u => u.AbsoluteUri));
+        Assert.Equal(new[] { "https://example.com/", "https://app.example.com/a", "http://localhost:5173/" }, page.Navigations.Select(u => u.AbsoluteUri));
         events = (await block.DispatchAsync("events", new JsonObject { ["after"] = 0 }, CancellationToken.None))["events"]!.AsArray();
         Assert.Equal("https://example.org/", events.Last(e => e!["type"]!.GetValue<string>() == "blocked")!["url"]!.GetValue<string>());
 

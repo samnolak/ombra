@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using Ombra.App.Localization;
 using Ombra.ClientCore;
+using Ombra.ClientCore.Teams;
 
 namespace Ombra.App.Services;
 
@@ -77,7 +78,7 @@ public sealed partial record FileDiff(IReadOnlyList<string> Header, IReadOnlyLis
 public static class GitReview
 {
     private static readonly string[] DiffOptions =
-        ["-c", "core.quotepath=off", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", "-U3"];
+        ["-c", "core.quotepath=off", "diff", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", "-U3"];
 
     /// <summary>
     /// The most of a diff that is read (about 8 MB in memory). The view shows only its first rows anyway; a huge
@@ -93,6 +94,7 @@ public static class GitReview
     /// </summary>
     public static async Task<FileDiff?> ReadAsync(string top, string relativePath, bool untracked, CancellationToken ct)
     {
+        if (ProjectFiles.Resolve(top, relativePath) is null) return null;
         string[] args = untracked
             ? [.. DiffOptions, "--no-index", "--", "/dev/null", relativePath]
             : [.. DiffOptions, "HEAD", "--", relativePath];
@@ -122,8 +124,14 @@ public static class GitReview
             // hide the change from this view while the next commit still takes the staged part, so nothing is touched.
             var staged = await Apply("-R", "--cached", "--check");
             if (staged.NotFound) return Loc.T("git was not found on this computer.");
-            if (!staged.Ok && !(await Apply("--cached", "--check")).Ok)
-                return Loc.T("part of it is staged and was changed again since. Stage the file or unstage it in git first.");
+            if (staged.ExitCode < 0 || staged.TimedOut) return staged.Message;
+            if (!staged.Ok)
+            {
+                var original = await Apply("--cached", "--check");
+                if (original.ExitCode < 0 || original.TimedOut) return original.Message;
+                if (!original.Ok)
+                    return Loc.T("part of it is staged and was changed again since. Stage the file or unstage it in git first.");
+            }
             var r = await Apply("-R");
             if (!r.Ok) return r.NotFound ? Loc.T("git was not found on this computer.") : r.Message;
             if (!staged.Ok) return null;
@@ -145,11 +153,14 @@ public static class GitReview
     public static async Task<string?> RevertFileAsync(Func<ToolCommand, CancellationToken, Task<ToolResult>> run, string top, string relativePath, bool untracked,
         string? renamedFrom, CancellationToken ct)
     {
+        if (ProjectFiles.Resolve(top, relativePath) is not { } local
+            || renamedFrom is not null && ProjectFiles.Resolve(top, renamedFrom) is null)
+            return "Only local file paths can be restored.";
         if (untracked)
         {
             try
             {
-                File.Delete(Path.Combine(top, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+                File.Delete(local);
                 return null;
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return e.Message; }
@@ -158,5 +169,37 @@ public static class GitReview
         string[] paths = renamedFrom is null ? [relativePath] : [renamedFrom, relativePath];
         var r = await run(new ToolCommand("git", ["restore", "--source=HEAD", "--staged", "--worktree", "--", .. paths], top, Timeout), ct);
         return r.Ok ? null : r.NotFound ? "git was not found on this computer." : r.Message;
+    }
+
+    /// <summary>
+    /// The project's changes since the last commit (staged and not) as one patch for <c>git apply</c>, and the
+    /// repository and commit it is against; null when git could not say or there are none. Files git does not track
+    /// yet are not in it.
+    /// </summary>
+    public static async Task<(string Patch, RepoIdentity Repo)?> ReadProjectPatchAsync(string top, CancellationToken ct)
+    {
+        if (await RepoIdentity.OfAsync(top, ct) is not { } repo) return null;
+        var r = await Git.RunAsync(top, [.. DiffOptions, "--binary", repo.Commit], ct, Timeout, MaxDiffChars);
+        return r is not { ExitCode: 0, TooLong: false } || r.Output.Length == 0 ? null : (r.Output, repo);
+    }
+
+    /// <summary>Applies a patch (a shared one, accepted) to the working tree when it applies cleanly; null when done, else the reason.</summary>
+    public static async Task<string?> ApplyPatchAsync(Func<ToolCommand, CancellationToken, Task<ToolResult>> run, string top, string patchText, CancellationToken ct)
+    {
+        var patch = Path.Combine(Path.GetTempPath(), $"ombra-shared-{Guid.NewGuid():N}.patch");
+        await File.WriteAllTextAsync(patch, patchText.EndsWith('\n') ? patchText : patchText + "\n", ct);
+        try
+        {
+            var check = await run(new ToolCommand("git", ["apply", "--check", "--whitespace=nowarn", patch], top, Timeout), ct);
+            if (check.NotFound) return Loc.T("git was not found on this computer.");
+            if (!check.Ok) return check.Message;
+            var r = await run(new ToolCommand("git", ["apply", "--whitespace=nowarn", patch], top, Timeout), ct);
+            return r.Ok ? null : r.Message;
+        }
+        finally
+        {
+            try { File.Delete(patch); }
+            catch (IOException) { }
+        }
     }
 }

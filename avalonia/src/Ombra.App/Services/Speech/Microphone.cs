@@ -30,42 +30,55 @@ public sealed class Microphone : IMicrophone
     private readonly object _gate = new();
     private PaStream? _stream;
     private double _rate;
-    private static bool _initialized;
+    private IDisposable? _audio;
 
     /// <exception cref="InvalidOperationException">No microphone, or it could not be opened (message says why).</exception>
     public void Start()
     {
-        if (!_initialized)
+        lock (PortAudioLifetime.Shared.Gate)
         {
-            PortAudio.Initialize();
-            _initialized = true;
-        }
-        var device = PortAudio.DefaultInputDevice;
-        if (device == PortAudio.NoDevice) throw new InvalidOperationException(Loc.T("No microphone found."));
-        var info = PortAudio.GetDeviceInfo(device);
-        _rate = info.defaultSampleRate;
-        var parameters = new StreamParameters
-        {
-            device = device,
-            channelCount = 1,
-            sampleFormat = SampleFormat.Float32,
-            suggestedLatency = info.defaultLowInputLatency,
-            hostApiSpecificStreamInfo = IntPtr.Zero,
-        };
-        var max = (int)(MaxSeconds * _rate);
-        _stream = new PaStream(parameters, null, _rate, 0, StreamFlags.ClipOff, (input, _, frames, ref _, _, _) =>
-        {
-            var chunk = new float[frames];
-            System.Runtime.InteropServices.Marshal.Copy(input, chunk, 0, (int)frames);
-            _meter.Add(chunk);
-            lock (_gate)
+            if (_audio is not null) throw new InvalidOperationException("The microphone is already open.");
+            _audio = PortAudioLifetime.Shared.Acquire();
+            try
             {
-                if (_samples.Count + chunk.Length > max) return StreamCallbackResult.Complete;
-                _samples.AddRange(chunk);
+                var device = PortAudio.DefaultInputDevice;
+                if (device == PortAudio.NoDevice) throw new InvalidOperationException(Loc.T("No microphone found."));
+                var info = PortAudio.GetDeviceInfo(device);
+                lock (_gate)
+                {
+                    _rate = info.defaultSampleRate;
+                    _samples.Clear();
+                }
+                _meter.Reset();
+                var parameters = new StreamParameters
+                {
+                    device = device,
+                    channelCount = 1,
+                    sampleFormat = SampleFormat.Float32,
+                    suggestedLatency = info.defaultLowInputLatency,
+                    hostApiSpecificStreamInfo = IntPtr.Zero,
+                };
+                var max = (int)(MaxSeconds * _rate);
+                _stream = new PaStream(parameters, null, _rate, 0, StreamFlags.ClipOff, (input, _, frames, ref _, _, _) =>
+                {
+                    var chunk = new float[frames];
+                    System.Runtime.InteropServices.Marshal.Copy(input, chunk, 0, (int)frames);
+                    _meter.Add(chunk);
+                    lock (_gate)
+                    {
+                        if (_samples.Count + chunk.Length > max) return StreamCallbackResult.Complete;
+                        _samples.AddRange(chunk);
+                    }
+                    return StreamCallbackResult.Continue;
+                }, null);
+                _stream.Start();
             }
-            return StreamCallbackResult.Continue;
-        }, null);
-        _stream.Start();
+            catch
+            {
+                Close();
+                throw;
+            }
+        }
     }
 
     public TimeSpan Recorded
@@ -78,19 +91,28 @@ public sealed class Microphone : IMicrophone
     /// <summary>Stops and returns the recording as 16 kHz mono.</summary>
     public float[] Stop()
     {
-        _stream?.Stop();
-        _stream?.Dispose();
-        _stream = null;
-        float[] raw;
-        lock (_gate) raw = [.. _samples];
-        return AudioSegmentation.Resample(raw, (int)_rate, SpeechModel.SampleRate);
+        lock (PortAudioLifetime.Shared.Gate)
+        {
+            try { _stream?.Stop(); }
+            finally { Close(); }
+            lock (_gate)
+                return AudioSegmentation.Resample(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_samples), (int)_rate, SpeechModel.SampleRate);
+        }
     }
 
     public void Dispose()
     {
-        try { _stream?.Abort(); } catch (PortAudioException) { }
+        lock (PortAudioLifetime.Shared.Gate) Close();
+    }
+
+    // The caller holds the native control lock. Closing an active PortAudio stream also aborts it; do not release
+    // the lease if closing fails, because termination could otherwise invalidate a still-open stream.
+    private void Close()
+    {
         _stream?.Dispose();
         _stream = null;
+        _audio?.Dispose();
+        _audio = null;
     }
 }
 

@@ -1,0 +1,85 @@
+<!-- The BTW panel above the message box (omp's /btw; MainViewModel.BtwGoal.cs): a side question asked beside the
+     conversation, also while omp works on it. omp answers from the conversation without tools, the answer streams in
+     and Cancel stops it; the session's earlier topics are listed under it, and a topic takes follow-ups. -->
+<UserControl xmlns:loc="using:Ombra.App.Localization"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
+             x:Class="Ombra.App.Views.Session.BtwPanel"
+             x:DataType="vm:MainViewModel">
+  <Border x:Name="BtwCard" Classes="banner btw-panel" AutomationProperties.Name="{loc:T 'Side question'}">
+    <StackPanel Spacing="12">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <ctl:Icon Data="{StaticResource IconComment}" Size="16" VerticalAlignment="Top" Margin="0,2,10,0" />
+        <StackPanel Grid.Column="1" Spacing="2">
+          <TextBlock Classes="card-title" Text="{loc:T 'By the way'}" />
+          <TextBlock Classes="tertiary" TextWrapping="Wrap"
+                     Text="{loc:T 'A side question: omp answers from this conversation, without tools, and its work goes on'}" />
+        </StackPanel>
+        <Button x:Name="BtwCloseButton" Grid.Column="2" Classes="icon sm" VerticalAlignment="Top" Command="{Binding ToggleBtwCommand}"
+                ToolTip.Tip="{loc:T 'Close (an answer being written goes on)'}" AutomationProperties.Name="{loc:T 'Close'}">
+          <ctl:Icon Data="{StaticResource IconClose}" Size="16" />
+        </Button>
+      </Grid>
+      <TextBlock Classes="tertiary" Text="{loc:T 'Reading this session’s side questions…'}" IsVisible="{Binding IsBtwLoading}" />
+      <ScrollViewer x:Name="BtwScroller" MaxHeight="300" HorizontalScrollBarVisibility="Disabled" IsVisible="{Binding HasBtwTopics}">
+        <ItemsControl x:Name="BtwTopicList" ItemsSource="{Binding BtwTopics}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:BtwTopicViewModel">
+              <Border Classes="details btw-topic">
+                <StackPanel Spacing="8">
+                  <ItemsControl ItemsSource="{Binding Turns}">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:BtwTurnViewModel">
+                        <StackPanel Spacing="4">
+                          <SelectableTextBlock Classes="btw-question" Text="{Binding Question}" FontWeight="Medium" TextWrapping="Wrap" />
+                          <ctl:MarkdownView Classes="btw-answer" Markdown="{Binding Answer}" IsVisible="{Binding HasAnswer}" />
+                          <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsRunning}">
+                            <Ellipse Classes="state-dot running" VerticalAlignment="Center" />
+                            <TextBlock Classes="tertiary" Text="{loc:T 'Answering…'}" VerticalAlignment="Center" />
+                          </StackPanel>
+                          <TextBlock Classes="tertiary" Classes.error="{Binding IsFailed}" Text="{Binding Outcome}" TextWrapping="Wrap"
+                                     IsVisible="{Binding HasOutcome}" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <WrapPanel ItemSpacing="8">
+                    <Button Classes="flat sm" Content="{loc:T 'Stop'}" IsVisible="{Binding IsRunning}"
+                            Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).CancelBtwCommand, FallbackValue={x:Null}}"
+                            ToolTip.Tip="{loc:T 'Stop this answer'}" />
+                    <Button Classes="flat sm" Content="{loc:T 'Follow up'}" Command="{Binding FollowUpCommand}" IsVisible="{Binding !IsRunning}"
+                            ToolTip.Tip="{loc:T 'Ask the next question in this topic, with its answers as context'}" />
+                  </WrapPanel>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+      <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding BtwFollowUp, Converter={x:Static ObjectConverters.IsNotNull}}">
+        <TextBlock Classes="tertiary" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                   Text="{Binding BtwFollowUp.Title, StringFormat={loc:T 'Following up: {0}'}, FallbackValue=''}" />
+        <Button Grid.Column="1" Classes="icon sm" Command="{Binding ClearBtwFollowUpCommand}"
+                ToolTip.Tip="{loc:T 'Ask a new question instead'}" AutomationProperties.Name="{loc:T 'New topic'}">
+          <ctl:Icon Data="{StaticResource IconClose}" Size="16" />
+        </Button>
+      </Grid>
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBox x:Name="BtwQuestionBox" Classes="sm" Text="{Binding BtwQuestion}" PlaceholderText="{loc:T 'Ask something on the side…'}"
+                 AcceptsReturn="False" TextWrapping="Wrap" AutomationProperties.Name="{loc:T 'Side question'}" />
+        <Button x:Name="BtwAskButton" Grid.Column="1" Classes="accent" Margin="8,0,0,0" Content="{loc:T 'Ask'}" Command="{Binding AskBtwCommand}"
+                IsVisible="{Binding !IsBtwRunning}" VerticalAlignment="Bottom" />
+        <Button x:Name="BtwCancelButton" Grid.Column="1" Margin="8,0,0,0" Content="{loc:T 'Stop'}" Command="{Binding CancelBtwCommand}"
+                IsVisible="{Binding IsBtwRunning}" VerticalAlignment="Bottom" ToolTip.Tip="{loc:T 'Stop this answer'}" />
+      </Grid>
+    </StackPanel>
+  </Border>
+</UserControl>

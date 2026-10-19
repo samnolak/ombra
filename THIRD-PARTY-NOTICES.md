@@ -12,6 +12,13 @@ upstream copyright and license notices and identify their upstream base and Ombr
   preview panel). Every package ships that file next to the app.
 - **Harness profile template:** [`harness/NOTICE.md`](harness/NOTICE.md) covers the adapted skills (obra/superpowers,
   Astro-Han/karpathy-llm-wiki) and the codebase-memory-mcp release the profile uses.
+- **Owned agent engine sources:** [`runtime/engine/`](runtime/engine/) contains the shared Ombra host and
+  the complete coding-agent source tree derived from omp 18.8.0, upstream base
+  `4ef97c8826ee012829a3e756b693a2a16a414f47`. The retained upstream MIT license is
+  [`coding-agent/LICENSE`](runtime/engine/coding-agent/LICENSE); upstream third-party notices remain beside it.
+  The generated pack manifest records the complete source digest; installed identity is
+  `ombra-engine-18.8.0-bun-1.4.2-v1`, not an unmodified upstream distribution. This local derivative
+  is not a separately published fork release or a claim that an upstream signing identity signed our changes.
 
 ## Lucide icons
 

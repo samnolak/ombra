@@ -21,6 +21,14 @@ public static class SelfTest
         var checks = new List<Check>();
         var started = Stopwatch.GetTimestamp();
 
+        Try(checks, "unicode-normalization", true, () =>
+        {
+            const string original = "cafe\u0301/re\u0301sume\u0301.txt";
+            var hits = ProjectFiles.Search(new ProjectFiles.SearchIndex([original]), "café/résumé", 1, CancellationToken.None);
+            if (hits.Count != 1 || hits[0].RelativePath != original)
+                throw new InvalidOperationException("Canonical filename matching is unavailable; check runtime globalization support.");
+            return "NFC query matches the original NFD filename without rewriting its path";
+        });
         Try(checks, "skia", true, () =>
         {
             using var surface = SkiaSharp.SKSurface.Create(new SkiaSharp.SKImageInfo(16, 16));
@@ -48,9 +56,8 @@ public static class SelfTest
         {
             try
             {
-                PortAudioSharp.PortAudio.Initialize();
-                try { return $"PortAudio: {PortAudioSharp.PortAudio.DeviceCount} device(s), default input {(PortAudioSharp.PortAudio.DefaultInputDevice == PortAudioSharp.PortAudio.NoDevice ? "none" : "present")}"; }
-                finally { PortAudioSharp.PortAudio.Terminate(); }
+                var devices = Speech.PortAudioLifetime.ProbeDevices();
+                return $"PortAudio: {devices.Count} device(s), default input {(devices.DefaultInput == PortAudioSharp.PortAudio.NoDevice ? "none" : "present")}";
             }
             catch (Exception e) when (e is DllNotFoundException or TypeInitializationException)
             {

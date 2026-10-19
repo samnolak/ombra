@@ -1,0 +1,62 @@
+<!-- The command palette (⌘K / Ctrl+K everything, ⌘P / Ctrl+P the project's files; MainViewModel.Palette.cs): a card near
+     the top of the dimmed window with a search box and the matching entries. The keyboard stays in the box: ↑↓ choose,
+     Enter runs, Esc (or a click on the dimmed window) closes it and gives the keyboard back. -->
+<UserControl xmlns:loc="using:Ombra.App.Localization"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
+             x:Class="Ombra.App.Controls.CommandPalette"
+             x:DataType="vm:MainViewModel">
+  <UserControl.Styles>
+    <Style Selector="ListBox#PaletteList">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Padding" Value="6,0,6,6" />
+    </Style>
+    <Style Selector="ListBox#PaletteList ListBoxItem">
+      <Setter Property="Padding" Value="10,5" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Focusable" Value="False" />
+    </Style>
+    <Style Selector="Grid.palette-row.disabled">
+      <Setter Property="Opacity" Value="0.5" />
+    </Style>
+  </UserControl.Styles>
+  <Panel>
+    <Border x:Name="Scrim" Classes="scrim" />
+    <Border x:Name="Card" Classes="menu" Width="640" MaxHeight="480" Margin="24,72,24,24" Padding="0"
+            HorizontalAlignment="Center" VerticalAlignment="Top" AutomationProperties.Name="{loc:T 'Command palette'}">
+      <DockPanel>
+        <TextBox x:Name="PaletteBox" DockPanel.Dock="Top" Classes="search" Margin="8,8,8,6"
+                 Text="{Binding PaletteQuery}" PlaceholderText="{Binding PalettePlaceholder}"
+                 AutomationProperties.Name="{loc:T 'Command palette'}">
+          <TextBox.InnerLeftContent>
+            <ctl:Icon Data="{StaticResource IconSearch}" Size="16" Margin="12,0,0,0" VerticalAlignment="Center" TextElement.Foreground="{DynamicResource GuiTextTertiary}" />
+          </TextBox.InnerLeftContent>
+        </TextBox>
+        <TextBlock DockPanel.Dock="Bottom" Classes="tertiary" Text="{Binding PaletteHint}" FontSize="12" Margin="16,2,16,10" TextTrimming="CharacterEllipsis" />
+        <TextBlock x:Name="PaletteNotice" DockPanel.Dock="Top" Classes="tertiary" Text="{Binding PaletteNotice}" IsVisible="{Binding HasPaletteNotice}"
+                   Margin="16,8,16,10" TextWrapping="Wrap" />
+        <ListBox x:Name="PaletteList" ItemsSource="{Binding PaletteItems}" SelectedItem="{Binding SelectedPaletteItem}" Focusable="False"
+                 SelectionMode="Single" ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="{loc:T 'Results'}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:PaletteItemViewModel">
+              <Grid Classes="palette-row" Classes.disabled="{Binding !IsEnabled}" ColumnDefinitions="Auto,Auto,*,Auto,Auto" MinHeight="24"
+                    AutomationProperties.Name="{Binding Title}" ToolTip.Tip="{Binding DetailText}">
+                <Ellipse Width="6" Height="6" Margin="0,0,8,0" VerticalAlignment="Center" Fill="{DynamicResource GuiTextLink}" IsVisible="{Binding IsUnread}"
+                         ToolTip.Tip="{loc:T 'Unread'}" />
+                <ctl:MatchText Grid.Column="1" Source="{Binding Title}" Matches="{Binding Matches}" FontSize="13" MaxWidth="380"
+                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="tertiary" Text="{Binding DetailText}" IsVisible="{Binding HasDetail}" FontSize="12"
+                           Margin="10,0,0,0" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="3" Classes="tertiary" Text="{Binding Shortcut}" IsVisible="{Binding HasShortcut}" FontSize="12"
+                           Margin="12,0,0,0" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="4" Classes="tertiary" Text="{Binding KindLabel}" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Border>
+  </Panel>
+</UserControl>

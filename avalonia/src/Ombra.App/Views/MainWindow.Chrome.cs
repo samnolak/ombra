@@ -30,7 +30,7 @@ public sealed partial class MainWindow
                 FitChrome();
         };
         FitChrome();
-        // AppKit puts the lights back at the top of its own, lower title bar after a resize or a full-screen change
+        // AppKit swaps in a new title bar after a full-screen change: hold the lights in the one there now
         Opened += (_, _) => PlaceTrafficLights();
         SizeChanged += (_, _) => PlaceTrafficLights();
     }
@@ -38,11 +38,14 @@ public sealed partial class MainWindow
     /// <summary>The traffic lights' close button starts this far from the window's left edge (the ChatGPT app's).</summary>
     internal const double TrafficLightsLeft = 16;
 
-    /// <summary>The traffic lights in the middle of the band, as the header's buttons and title are.</summary>
+    /// <summary>The traffic lights in the middle of the band, as the header's buttons and title are, and kept there
+    /// through AppKit's own title-bar layouts (a new title, the theme, a resize: MacTrafficLights); left to AppKit while
+    /// they are hidden (full screen).</summary>
     private void PlaceTrafficLights()
     {
-        if (!OperatingSystem.IsMacOS() || !TrafficLightsShown || TryGetPlatformHandle() is not { Handle: not 0 } handle) return;
-        Platform.Mac.MacTrafficLights.Place(handle.Handle, TitleBarHeight, TrafficLightsLeft);
+        if (!OperatingSystem.IsMacOS() || TryGetPlatformHandle() is not { Handle: not 0 } handle) return;
+        if (TrafficLightsShown) Platform.Mac.MacTrafficLights.Hold(handle.Handle, TitleBarHeight, TrafficLightsLeft);
+        else Platform.Mac.MacTrafficLights.Release(handle.Handle);
     }
 
     /// <summary>The traffic lights are over the content: extended into the title bar, and not in full screen (where

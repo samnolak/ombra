@@ -43,7 +43,7 @@ public sealed class ReviewRegressionTests
 
         await s.ForceStopAsync().WaitAsync(Wait);
         Assert.Equal(SessionPhase.Ready, s.Snapshot().Phase);
-        Assert.NotEqual(pid, s.ProcessId);
+        Assert.Equal(pid, s.ProcessId);
         Assert.Equal(file, s.Snapshot().SessionFile);
         await abort.WaitAsync(Wait); // the pending abort ends with the old connection, reported not thrown
     }
@@ -59,7 +59,7 @@ public sealed class ReviewRegressionTests
         var second = s.Snapshot().SessionFile;
         Assert.NotEqual(first, second);
 
-        await s.OpenSessionAsync(first, s.Snapshot().Cwd!); // switch succeeds, then get_messages fails once
+        await s.OpenSessionAsync(first, s.Snapshot().Cwd!); // switch succeeds, then get_messages_page fails once
         var snap = s.Snapshot();
         Assert.Equal(first, snap.SessionFile);
         Assert.Contains(snap.Items, i => i is UserItem { Text: "first" });
@@ -93,9 +93,9 @@ public sealed class ReviewRegressionTests
     public void R4_the_approval_flag_is_always_valid_and_never_left_out(string? configured, string expected)
     {
         var spec = new OmpRuntimeOptions { ApprovalMode = configured }.ToLaunchSpec();
-        var i = spec.Arguments.ToList().IndexOf("--approval-mode");
+        var i = spec.SessionArguments.ToList().IndexOf("--approval-mode");
         Assert.True(i >= 0);
-        Assert.Equal(expected, spec.Arguments[i + 1]);
+        Assert.Equal(expected, spec.SessionArguments[i + 1]);
         Assert.Equal(configured is "ask" or "Write", new OmpRuntimeOptions { ApprovalMode = configured }.ApprovalModeWarning is not null);
     }
 

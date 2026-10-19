@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Ombra.App.Localization;
 using Ombra.ClientCore;
+using Ombra.Rpc;
 
 namespace Ombra.App.ViewModels;
 
@@ -22,18 +23,42 @@ public sealed record UsageTotalViewModel(string Label, string Value);
 /// <summary>
 /// Claude Code's context ring next to the model: how full the model's context is (get_state's contextUsage, after
 /// every turn), in the warning colour from 70 % and the negative one from 85 % (omp compacts near the end). Its
-/// popover draws omp's <c>/context</c> breakdown as bars, this session's tokens and cost (<c>get_session_stats</c>)
-/// and the plan limits of the model's provider (<see cref="ProviderUsageViewModel"/>), and offers "Compact now"; it
-/// refreshes after each turn while it is open.
+/// popover draws omp's <c>/context</c> breakdown, this session's tokens and cost (<c>get_session_stats</c>),
+/// and the active account's exceptional usage stage from <c>get_state</c>. Full provider reports belong to Settings.
 /// </summary>
 public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObject
 {
     public const double WarnAt = 70, FullAt = 85;
     private long _runsEnded = -1;
     private int _loads;
+    private long _epoch = -1;
+    private string? _model;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasPercent), nameof(PercentText), nameof(RingLevel), nameof(IsWarn), nameof(IsFull), nameof(Tooltip), nameof(AccessibleName))]
+    [NotifyPropertyChangedFor(nameof(HasUsageLimit), nameof(HasIndicator), nameof(LimitBadge), nameof(LimitStatus), nameof(Tooltip), nameof(AccessibleName))]
+    private OmpUsageLimit? _usageLimit;
+
+    public bool HasUsageLimit => UsageLimit is not null;
+    public bool HasIndicator => HasPercent || HasUsageLimit;
+    public string LimitBadge => UsageLimit?.Stage == "low_priority" ? Loc.T("Low priority")
+        : UsageLimit is not null ? Loc.T("Limit reached · wrapping up") : "";
+    public string LimitStatus
+    {
+        get
+        {
+            if (UsageLimit is not { } limit) return "";
+            var text = limit.Stage == "low_priority" ? Loc.T("Low priority")
+                : limit.ExtraUsage ? Loc.T("Limit reached · wrap-up, then extra usage") : Loc.T("Limit reached · wrapping up");
+            // In the app's language and 24-hour clock, as the conversation's times ("14:08", "29 Sep, 14:08"), never the
+            // system region's mix ("10/18/2026 2:30 PM" inside a Russian sentence)
+            if (limit.ResetsAt is { } reset) text += " · " + Loc.F("Resets {0}", MessageTimes.Short(reset));
+            if (limit.AllowanceLeftPercent is { } left) text += " · " + Loc.F("Low-priority allowance: {0}% left", left);
+            return text;
+        }
+    }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasPercent), nameof(HasIndicator), nameof(PercentText), nameof(RingLevel), nameof(IsWarn), nameof(IsFull), nameof(Tooltip), nameof(AccessibleName))]
     private double? _percent;
 
     public bool HasPercent => Percent is not null;
@@ -48,11 +73,12 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
     public bool IsFull => Percent >= FullAt;
     public string RingLevel => IsFull ? "full" : IsWarn ? "warn" : "normal";
 
-    public string Tooltip => Percent is { } p
+    public string Tooltip => (Percent is { } p
         ? string.Format(CultureInfo.InvariantCulture, Loc.T("Context {0:0}% used"), p) + (IsFull ? Loc.T(" — omp compacts it soon") : "") + Loc.T(" · details")
-        : Loc.T("Context usage: details");
+        : Loc.T("Context usage: details")) + (HasUsageLimit ? " · " + LimitStatus : "");
 
-    public string AccessibleName => Percent is { } p ? string.Format(CultureInfo.InvariantCulture, Loc.T("Context usage, {0:0} percent"), p) : Loc.T("Context usage");
+    public string AccessibleName => (Percent is { } p ? string.Format(CultureInfo.InvariantCulture, Loc.T("Context usage, {0:0} percent"), p) : Loc.T("Context usage"))
+        + (HasUsageLimit ? " · " + LimitStatus : "");
 
     /// <summary>The popover's headline when omp gave no breakdown: the ring's own number, not a bare "Context".</summary>
     private string PercentHeadline => PercentText.Length > 0 ? Loc.F("{0} of the context used", PercentText) : Loc.T("Context");
@@ -61,20 +87,29 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string _contextHeadline = "";
     [ObservableProperty] private string _contextNote = "";
-    [ObservableProperty] private string _usageNote = "";
     [ObservableProperty] private string _error = "";
     [ObservableProperty] private bool _hasContext;
     [ObservableProperty] private bool _hasTotals;
-    [ObservableProperty] private bool _hasLimits;
 
     public ObservableCollection<ContextRowViewModel> ContextRows { get; } = [];
     public ObservableCollection<UsageTotalViewModel> Totals { get; } = [];
-    /// <summary>The plan limits of the session model's provider (every account omp has for it).</summary>
-    public ObservableCollection<ProviderUsageGroupViewModel> Limits { get; } = [];
 
     /// <summary>From each applied snapshot: the ring, and a refresh of the open popover once a turn ended.</summary>
     internal void Apply(SessionSnapshot s)
     {
+        if (_epoch != s.TranscriptEpoch || _model != s.Model)
+        {
+            _epoch = s.TranscriptEpoch;
+            _model = s.Model;
+            ++_loads;
+            IsLoading = false;
+            ContextRows.Clear();
+            Totals.Clear();
+            HasContext = HasTotals = false;
+            ContextHeadline = ContextNote = Error = "";
+            _runsEnded = -1;
+        }
+        UsageLimit = s.UsageLimit;
         // Like Claude: no ring on a new chat. Before the first message omp's percentage is its system prompt and tools
         // alone (5% of an empty chat read as something already used); it shows once there is a conversation.
         var percent = s.Items.Any(i => i is not NoticeItem) ? s.ContextPercent : null;
@@ -135,28 +170,30 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
         return owner.OpenSettingsAtAsync("providers");
     }
 
-    /// <summary>Runs <c>/context</c>, reads <c>get_session_stats</c> and the provider's limits, and draws them.</summary>
+    /// <summary>Reads context and session stats through the active connection, never provider CLI reports.</summary>
     internal async Task LoadAsync()
     {
         var load = ++_loads;
+        var session = owner.Session;
+        var snapshot = session.Snapshot();
+        bool IsCurrent() => load == _loads && ReferenceEquals(owner.Session, session)
+            && session.Snapshot() is var current && current.TranscriptEpoch == snapshot.TranscriptEpoch && current.Model == snapshot.Model;
         IsLoading = true;
         Error = "";
         try
         {
-            var limits = owner.ProviderUsage.LoadAsync(); // a side process: runs while omp answers the rest
             if (!owner.CanRunOmpCommands)
             {
                 Error = Loc.T("omp is not running.");
                 return;
             }
-            owner.Session.RefreshState(); // the ring from get_state, measured now
+            session.RefreshState();
             var context = await owner.RunOmpCommandAsync("/context");
-            var stats = await owner.Session.GetSessionStatsAsync(owner.Closing);
-            await limits;
-            if (load != _loads) return; // a newer refresh is on its way
+            if (!IsCurrent()) return;
+            var stats = await session.GetSessionStatsAsync(owner.Closing);
+            if (!IsCurrent()) return;
             ApplyContext(context);
             ApplyTotals(stats);
-            ApplyLimits();
         }
         catch (OperationCanceledException) { }
         finally
@@ -208,16 +245,6 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
             if (s.Cost > 0) Totals.Add(new UsageTotalViewModel(Loc.T("Cost"), Money(s.Cost)));
         }
         HasTotals = Totals.Count > 0;
-    }
-
-    private void ApplyLimits()
-    {
-        Limits.Clear();
-        var provider = owner.Session.Snapshot().Model is { } m && m.IndexOf('/') is var slash and > 0 ? m[..slash] : null;
-        if (provider is not null)
-            foreach (var g in owner.ProviderUsage.For(provider)) Limits.Add(g);
-        HasLimits = Limits.Count > 0;
-        UsageNote = HasLimits ? owner.ProviderUsage.Note : "";
     }
 
     /// <summary>"$0.42", and four decimals under a cent so a cheap session does not read as free.</summary>

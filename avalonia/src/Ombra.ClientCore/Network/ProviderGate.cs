@@ -40,7 +40,8 @@ public static class ProviderGate
 
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(30);
 
-    private const string CliEntry = "node_modules/@oh-my-pi/pi-coding-agent/src/cli.ts";
+    private const string CliEntry = "engine/coding-agent/src/cli.ts";
+    private const string EngineEntry = "engine/host.ts";
 
     /// <summary>
     /// Prints one JSON line: <c>{"added":[…],"userDisabled":[…],"disabled":[…],"hosts":{"id":{"api":[…],"signIn":[…]}}}</c>.
@@ -49,9 +50,9 @@ public static class ProviderGate
     public const string Script = """
         import * as fs from "node:fs";
         import * as path from "node:path";
-        import { discoverAuthStorage } from "@oh-my-pi/pi-coding-agent/sdk";
-        import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
-        import { cfgDisabledProviders } from "@oh-my-pi/pi-coding-agent/config/model-settings";
+        import { discoverAuthStorage } from "./engine/coding-agent/src/sdk.ts";
+        import { Settings } from "./engine/coding-agent/src/config/settings.ts";
+        import { cfgDisabledProviders } from "./engine/coding-agent/src/config/model-settings.ts";
         import { getAgentDir } from "@oh-my-pi/pi-utils";
         import { PROVIDER_DESCRIPTORS } from "@oh-my-pi/pi-catalog/provider-models/descriptors";
         import { MODELS_DEV_CATALOG_PROVIDER_IDS } from "@oh-my-pi/pi-catalog/provider-models/openai-compat";
@@ -136,18 +137,18 @@ public static class ProviderGate
 
     /// <summary>
     /// The script's launch for <paramref name="engine"/> (an omp launch): omp's Bun runtime, its bunfig, the launch's
-    /// environment (profile, keys) and project folder. Null when omp is not run as <c>bun … cli.ts</c> from a package
-    /// install (a compiled omp, a wrapper): then there are no omp modules to ask.
+    /// environment (profile, keys) and project folder. Null when the command does not name the owned engine or CLI.
     /// </summary>
     public static OmpLaunchSpec? HelperSpec(OmpLaunchSpec engine)
     {
         if (!Path.GetFileNameWithoutExtension(engine.FileName).Equals("bun", StringComparison.OrdinalIgnoreCase)) return null;
-        var cli = engine.Arguments.ToList().FindIndex(a => a.Replace('\\', '/').EndsWith(CliEntry, StringComparison.Ordinal));
-        if (cli < 0) return null;
-        var entry = engine.Arguments[cli];
-        var ompDirectory = entry[..^CliEntry.Length].TrimEnd('/', '\\');
-        // Bun's own options come before cli.ts; omp's (a --config overlay among them) after it
-        var args = engine.Arguments.Take(cli).Where(a => a.StartsWith("--config=", StringComparison.Ordinal)).ToList();
+        var entryIndex = engine.Arguments.ToList().FindIndex(a => EntrySuffix(a) is not null);
+        if (entryIndex < 0) return null;
+        var entry = engine.Arguments[entryIndex];
+        var suffix = EntrySuffix(entry)!;
+        var ompDirectory = entry[..^suffix.Length].TrimEnd('/', '\\');
+        // Only the host executable prefix contains Bun options; logical session flags are never inherited here.
+        var args = engine.Arguments.Take(entryIndex).Where(a => a.StartsWith("--config=", StringComparison.Ordinal)).ToList();
         args.AddRange(["--no-env-file", "-e", Script]);
         var env = new Dictionary<string, string?>(engine.Environment)
         {
@@ -244,11 +245,22 @@ public static class ProviderGate
         return path;
     }
 
-    /// <summary><paramref name="spec"/> with <c>--config=&lt;overlay&gt;</c> right after <paramref name="prefixCount"/> arguments (the runtime's own, e.g. <c>bun … cli.ts</c>).</summary>
-    public static OmpLaunchSpec Apply(OmpLaunchSpec spec, string overlayPath, int prefixCount)
+    private static string? EntrySuffix(string argument)
     {
+        var path = argument.Replace('\\', '/');
+        return path.EndsWith(EngineEntry, StringComparison.Ordinal) ? EngineEntry
+            : path.EndsWith(CliEntry, StringComparison.Ordinal) ? CliEntry : null;
+    }
+
+    /// <summary>A per-project settings overlay, never part of the shared engine's immutable process arguments.</summary>
+    public static OmpLaunchSpec Apply(OmpLaunchSpec spec, string overlayPath)
+    {
+        if (spec.Arguments.Any(argument => EntrySuffix(argument) == EngineEntry))
+            return spec with { SessionArguments = ["--config=" + overlayPath, .. spec.SessionArguments] };
+        var entryIndex = spec.Arguments.ToList().FindIndex(argument => EntrySuffix(argument) == CliEntry);
+        if (entryIndex < 0) throw new ProviderGateException("The owned runtime entry was not found.");
         var args = spec.Arguments.ToList();
-        args.Insert(Math.Min(prefixCount, args.Count), "--config=" + overlayPath);
+        args.Insert(entryIndex + 1, "--config=" + overlayPath);
         return spec with { Arguments = args };
     }
 }

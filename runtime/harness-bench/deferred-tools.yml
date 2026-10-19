@@ -1,0 +1,4 @@
+# Settings overlay for the deferred-tool-schemas experiment (BENCH_CONFIG=deferred-tools.yml): keep read, bash, edit,
+# write, grep, glob top-level; send the others as one xd:// catalog line each, schemas fetched on demand.
+tools:
+  deferred: [task, eval, wait, todo, web_search]

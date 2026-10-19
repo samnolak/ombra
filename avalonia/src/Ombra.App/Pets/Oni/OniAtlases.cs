@@ -24,6 +24,7 @@ public sealed class OniAtlases
     private static readonly TimeSpan FreeAfter = TimeSpan.FromSeconds(3);
 
     private readonly Dictionary<string, (SKImage Image, float Scale)> _images = [];
+    private readonly Dispatcher _dispatcher = Dispatcher.UIThread;
     private int _users;
     private DispatcherTimer? _free;
 
@@ -32,7 +33,7 @@ public sealed class OniAtlases
         Spec = spec;
         Level = level;
         Loaded = Task.Run(() => Load(open));
-        Loaded.ContinueWith(_ => Dispatcher.UIThread.Post(() => Ready?.Invoke()), TaskScheduler.Default);
+        Loaded.ContinueWith(_ => _dispatcher.Post(() => Ready?.Invoke()), TaskScheduler.Default);
     }
 
     public OniSpec Spec { get; }
@@ -61,9 +62,16 @@ public sealed class OniAtlases
     /// <summary>The sheets for pets about <paramref name="deviceHeight"/> device pixels tall; <see cref="Release"/> when done.</summary>
     public static OniAtlases Acquire(OniSpec spec, double deviceHeight, Func<string, Stream> open)
     {
-        Dispatcher.UIThread.VerifyAccess();
+        var dispatcher = Dispatcher.UIThread;
+        dispatcher.VerifyAccess();
         var level = LevelFor(deviceHeight);
-        if (!Live.TryGetValue(level, out var set) || set.Spec != spec) Live[level] = set = new OniAtlases(spec, level, open);
+        // A replacement Application has a new dispatcher; an in-flight decode must never notify its views
+        // through the previous application's stopped dispatcher.
+        if (!Live.TryGetValue(level, out var set) || set.Spec != spec || set._dispatcher != dispatcher)
+        {
+            if (set is { _users: 0 }) set.Free();
+            Live[level] = set = new OniAtlases(spec, level, open);
+        }
         set._users++;
         set._free?.Stop();
         return set;
@@ -71,7 +79,7 @@ public sealed class OniAtlases
 
     public void Release()
     {
-        Dispatcher.UIThread.VerifyAccess();
+        _dispatcher.VerifyAccess();
         if (--_users > 0) return;
         _free ??= new DispatcherTimer(FreeAfter, DispatcherPriority.Background, (_, _) => Free());
         _free.Start();

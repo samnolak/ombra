@@ -1,7 +1,7 @@
-<!-- A sidebar chat's menu (right-click on the row, or its ⋯ on hover), in the order of ChatGPT's: Rename, Pin / Unpin;
-     Export as HTML and Share (omp's /export, /share: the chat shown only); Copy session ID, Copy session file path;
-     Delete (asks first). DataContext: the row's SessionItemViewModel (its commands are MainViewModel's: a popup cannot
-     reach the window). -->
+<!-- A sidebar chat's menu (right-click on the row, or its ⋯ on hover), in the order of ChatGPT's: Rename, Pin / Unpin,
+     Archive / Unarchive (the client's list only); Export as HTML and Share (omp's /export, /share: the chat shown only);
+     Copy session ID, Copy session file path; Delete (asks first). DataContext: the row's SessionItemViewModel (its
+     commands are MainViewModel's: a popup cannot reach the window). -->
 <UserControl xmlns:loc="using:Ombra.App.Localization"
              xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -23,6 +23,27 @@
         <ctl:Icon IsVisible="{Binding !IsPinned}" Data="{StaticResource IconPin}" Size="16" Margin="0,0,10,0" />
         <ctl:Icon IsVisible="{Binding IsPinned}" Data="{StaticResource IconPinOff}" Size="16" Margin="0,0,10,0" />
         <TextBlock Grid.Column="1" Text="{Binding PinLabel}" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Button x:Name="ArchiveItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+            Command="{Binding ToggleArchiveCommand}" CommandParameter="{Binding}" AutomationProperties.Name="{Binding ArchiveLabel}">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconArchive}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="{Binding ArchiveLabel}" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Button x:Name="ReadItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+            Command="{Binding ToggleReadCommand}" CommandParameter="{Binding}" AutomationProperties.Name="{Binding ReadLabel}">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconCheck}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="{Binding ReadLabel}" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Button x:Name="MarkAllReadItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+            Command="{Binding MarkAllReadCommand}" AutomationProperties.Name="{loc:T 'Mark all as read'}">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconCheck}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="{loc:T 'Mark all as read'}" VerticalAlignment="Center" />
       </Grid>
     </Button>
     <Border Classes="menu-separator" IsVisible="{Binding IsCurrent}" />
@@ -53,6 +74,20 @@
       <Grid ColumnDefinitions="Auto,*">
         <ctl:Icon Data="{StaticResource IconCopy}" Size="16" Margin="0,0,10,0" />
         <TextBlock Grid.Column="1" Text="{loc:T 'Copy session file path'}" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Button x:Name="RevealItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+            Command="{Binding RevealCommand}" CommandParameter="{Binding}" AutomationProperties.Name="{loc:T 'Show in folder'}">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconFolder}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="{loc:T 'Show in folder'}" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Button x:Name="TerminalItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+            Command="{Binding OpenTerminalCommand}" CommandParameter="{Binding}" AutomationProperties.Name="{loc:T 'Open in terminal'}">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconTerminal}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="{loc:T 'Open in terminal'}" VerticalAlignment="Center" />
       </Grid>
     </Button>
     <Border Classes="menu-separator" />

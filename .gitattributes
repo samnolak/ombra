@@ -6,3 +6,5 @@
 *.png binary
 *.ico binary
 *.exe binary
+# The owned engine is hashed byte-for-byte for every platform's embedded runtime.
+runtime/engine/** text=auto eol=lf

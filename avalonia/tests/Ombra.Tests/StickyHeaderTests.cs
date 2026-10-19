@@ -10,6 +10,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
 using Ombra.App.Controls;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.ClientCore;
@@ -124,7 +125,7 @@ public sealed class StickyHeaderTests
         };
         var head = ((Border)card.Content!).GetLogicalDescendants().OfType<Border>().Single(b => b.Classes.Contains("diff-head"));
         Assert.True(StickyHeader.GetIsSticky(head));
-        Assert.Contains(head.GetLogicalDescendants().OfType<TextBlock>(), t => t.Text == "New file");
+        Assert.Contains(head.GetLogicalDescendants().OfType<TextBlock>(), t => t.Text == Loc.T("New file"));
         var chevron = head.GetLogicalDescendants().OfType<Button>().Single(b => b.Classes.Contains("diff-collapse"));
         Assert.True(chevron.IsVisible);
         chevron.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
@@ -145,10 +146,10 @@ public sealed class StickyHeaderTests
         // The bar: a border (it is what moves) around the button that folds the console
         Border Bar() => w.GetVisualDescendants().OfType<Border>().Single(b => b.Classes.Contains("card-head") && ReferenceEquals(b.DataContext, bash) && b.IsEffectivelyVisible);
         var bar = Bar();
-        var button = (Button)bar.Child!;
+        var button = bar.GetVisualDescendants().OfType<Button>().Single(b => b.Classes.Contains("card-header"));
         var block = (Control)bar.GetVisualParent()!;
         Assert.True(block.Bounds.Height > 1500, $"the open console is long: {block.Bounds.Height}");
-        Assert.Contains(bar.GetLogicalDescendants().OfType<TextBlock>(), t => t.Text == "Shell");
+        Assert.Contains(bar.GetLogicalDescendants().OfType<TextBlock>(), t => t.Text == Loc.T("Shell"));
         Assert.Contains(bar.GetLogicalDescendants().OfType<TextBlock>(), t => t.Text == "pytest -q");
 
         // Scrolled 600 px into the console: its bar is at the top of the view, over the output
@@ -197,7 +198,7 @@ public sealed class StickyHeaderTests
         Frame(w);
         var output = Output();
         var outputBar = output.GetVisualDescendants().OfType<Border>().Single(b => b.Classes.Contains("card-head"));
-        Assert.Contains(outputBar.GetLogicalDescendants().OfType<TextBlock>(), t => t.Text == "Output");
+        Assert.Contains(outputBar.GetLogicalDescendants().OfType<TextBlock>(), t => t.Text == Loc.T("Output"));
 
         // 600 px into the second step's output: the group's line at the top of the view, the step's bar right under it
         ScrollTo(w, sv, output, 600);

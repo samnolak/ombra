@@ -99,7 +99,7 @@ public sealed class RealSessionAreaTests(ITestOutputHelper log)
         log.WriteLine($"{vm.Usage.ContextHeadline}\n" + string.Join("\n", vm.Usage.ContextRows.Select(r => $"  {r.Label}: {r.Tokens} ({r.Percent})")) +
                       "\n" + string.Join("\n", vm.Usage.Totals.Select(t => $"  {t.Label}: {t.Value}")));
         Assert.True(vm.Usage.HasContext);
-        Assert.True(vm.Usage.HasTotals || vm.Usage.HasLimits);
+        Assert.True(vm.Usage.HasTotals);
         vm.Usage.IsOpen = false;
 
         await vm.OpenModelMenuCommand.ExecuteAsync(null);

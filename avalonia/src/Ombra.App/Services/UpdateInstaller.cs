@@ -10,14 +10,14 @@ namespace Ombra.App.Services;
 /// <summary>A verified update unpacked next to the app, waiting for the app to quit.</summary>
 public sealed record StagedUpdate(string Version, string Staging, string NewRoot);
 
-/// <summary>How the last update ended, written by the apply script (<c>last-update.json</c>).</summary>
+/// <summary>How the last update ended, written by the apply helper or script (<c>last-update.json</c>).</summary>
 public sealed record UpdateResult(bool Ok, string? From, string? To, string? Error, string? Previous);
 
 /// <summary>
 /// Replaces the app with a verified package (<see cref="UpdateChecker"/> checked its signature, size and SHA-256).
 /// The package is unpacked into a folder next to the app (same disk, so the swap is two renames) and started once
-/// with <c>--version</c>; a small script then waits for the app to quit, moves the running version aside to
-/// <c>.&lt;name&gt;.previous</c> (kept for one update, to go back by hand), moves the new one in and starts it again.
+/// with <c>--version</c>; an app-owned Windows helper (a shell script elsewhere) waits for the app to quit,
+/// moves the running version aside to <c>.&lt;name&gt;.previous</c> and moves the new one in and starts it again.
 /// A failed move puts the old version back. Settings, sessions and the omp runtime live elsewhere and are not touched.
 /// Only a packaged app in a folder this user may change is updated in place; otherwise the package is only downloaded.
 /// </summary>
@@ -47,8 +47,8 @@ public sealed class UpdateInstaller
     /// <summary>Runs the staged app once to check it starts here; replaceable in tests.</summary>
     public Func<ProcessStartInfo, TimeSpan, CancellationToken, Task<ProcessResult>> Run { get; init; } = RuntimeInstaller.RunProcessAsync;
 
-    /// <summary>Starts the apply script; replaceable in tests (which run it themselves).</summary>
-    public Action<ProcessStartInfo> Launch { get; init; } = psi => Process.Start(psi)?.Dispose();
+    /// <summary>Starts the independent apply helper or script; replaceable in tests.</summary>
+    public Action<ProcessStartInfo> Launch { get; init; } = psi => Ombra.ClientCore.OwnedProcesses.StartIndependent(psi)?.Dispose();
 
     /// <summary>Where updates keep their files: <c>%LOCALAPPDATA%/Ombra/updates</c> (OMBRA_UPDATES_DIR overrides it).</summary>
     public static string DefaultStateDirectory =>
@@ -107,7 +107,7 @@ public sealed class UpdateInstaller
     public async Task<StagedUpdate> StageAsync(string package, string version, CancellationToken ct)
     {
         RemoveLeftovers();
-        var staging = Path.Combine(Parent, $".{Name}.update-{SafeName(version)}");
+        var staging = Path.Combine(Parent, $".{Name}.update-{SafeName(version)}-{Guid.NewGuid():N}");
         Directory.CreateDirectory(staging);
         await File.WriteAllTextAsync(Path.Combine(staging, StagingMarker), "Ombra update being installed; safe to delete", ct).ConfigureAwait(false);
         var ok = false;
@@ -144,8 +144,10 @@ public sealed class UpdateInstaller
             var result = await Run(check, TimeSpan.FromMinutes(1), ct).ConfigureAwait(false);
             if (result.ExitCode != 0 || !result.Output.Contains(version, StringComparison.Ordinal))
                 throw new InvalidDataException($"the new version did not start here (exit {result.ExitCode}): {result.Output.Trim()}");
+            var staged = new StagedUpdate(version, staging, newRoot);
+            await File.WriteAllTextAsync(Path.Combine(staging, UpdateApplyHelper.ReadyMarker), JsonSerializer.Serialize(staged), ct).ConfigureAwait(false);
             ok = true;
-            return new StagedUpdate(version, staging, newRoot);
+            return staged;
         }
         finally
         {
@@ -155,12 +157,14 @@ public sealed class UpdateInstaller
     }
 
     /// <summary>
-    /// Writes the script that swaps <paramref name="update"/> in once process <paramref name="pid"/> (this app) has
-    /// quit, and starts it. With <paramref name="relaunch"/> the new version is started afterwards.
+    /// Starts the helper (Windows) or writes the script that swaps <paramref name="update"/> in once
+    /// process <paramref name="pid"/> has quit. With <paramref name="relaunch"/> the new version is started afterwards.
     /// </summary>
     public string Apply(StagedUpdate update, string fromVersion, int pid, bool relaunch, IReadOnlyList<string>? relaunchArgs = null)
     {
         if (!Directory.Exists(update.NewRoot)) throw new IOException("the prepared update is gone; download it again");
+        if (OperatingSystem.IsWindows())
+            return UpdateApplyHelper.Prepare(this, update, fromVersion, pid, relaunch, relaunchArgs ?? [], Launch);
         Directory.CreateDirectory(StateDirectory);
         // The version from before the last update, kept until this one: only a folder that holds the app is removed.
         if (Directory.Exists(PreviousDirectory))
@@ -171,24 +175,14 @@ public sealed class UpdateInstaller
         }
         TryDeleteFile(Path.Combine(StateDirectory, ResultFile));
         var log = Path.Combine(StateDirectory, "apply.log");
-        var windows = OperatingSystem.IsWindows();
-        var script = Path.Combine(StateDirectory, windows ? "apply-update.ps1" : "apply-update.sh");
+        var script = Path.Combine(StateDirectory, "apply-update.sh");
         var values = new ScriptValues(pid, InstallRoot, update.NewRoot, update.Staging, PreviousDirectory, Path.Combine(StateDirectory, ResultFile),
             log, Executable, SafeName(fromVersion), SafeName(update.Version), relaunch, relaunchArgs ?? [], OperatingSystem.IsMacOS());
-        File.WriteAllText(script, windows ? PowerShellScript(values) : ShellScript(values), new UTF8Encoding(false));
-        ProcessStartInfo psi;
-        if (windows)
-        {
-            psi = new ProcessStartInfo("powershell.exe") { CreateNoWindow = true, UseShellExecute = false, WorkingDirectory = StateDirectory };
-            foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script }) psi.ArgumentList.Add(a);
-        }
-        else
-        {
-            psi = new ProcessStartInfo("/bin/sh") { UseShellExecute = false, WorkingDirectory = StateDirectory };
-            psi.ArgumentList.Add(script);
-        }
-        // The script outlives the app on purpose (it waits for it to quit): not one of the processes the app ends at
-        // quit (OwnedProcesses), and neither is the new version it starts
+        File.WriteAllText(script, ShellScript(values), new UTF8Encoding(false));
+        var psi = new ProcessStartInfo("/bin/sh") { UseShellExecute = false, WorkingDirectory = StateDirectory };
+        psi.ArgumentList.Add(script);
+        // The script outlives the app on purpose (it waits for it to quit), as does the replacement it starts.
+        // Launch uses explicit Windows job breakaway; removing the Unix mark alone would not escape a Job Object.
         psi.Environment.Remove(Ombra.ClientCore.OwnedProcesses.OwnerVariable);
         Launch(psi);
         return script;
@@ -198,6 +192,7 @@ public sealed class UpdateInstaller
     public static UpdateResult? TakeLastResult(string stateDirectory)
     {
         var file = Path.Combine(stateDirectory, ResultFile);
+        UpdateApplyHelper.CleanupCompleted(stateDirectory);
         try
         {
             if (!File.Exists(file)) return null;
@@ -214,6 +209,7 @@ public sealed class UpdateInstaller
     /// <summary>Unpacked updates never applied (the app was not closed, or the check failed): only folders with our marker.</summary>
     public void RemoveLeftovers()
     {
+        UpdateApplyHelper.CleanupCompleted(StateDirectory);
         try
         {
             foreach (var d in Directory.EnumerateDirectories(Parent, $".{Name}.update-*").ToList())
@@ -259,43 +255,6 @@ public sealed class UpdateInstaller
             """.Replace("\r\n", "\n", StringComparison.Ordinal);
     }
 
-    internal static string PowerShellScript(ScriptValues v)
-    {
-        static string Q(string s) => "'" + s.Replace("'", "''", StringComparison.Ordinal) + "'";
-        var args = v.Args.Count == 0 ? "" : " -ArgumentList @(" + string.Join(", ", v.Args.Select(a => Q("\"" + a + "\""))) + ")";
-        return $$"""
-            # Written by Ombra: replaces the app with a verified update once the app has quit.
-            $ErrorActionPreference = 'Stop'
-            $log = {{Q(v.Log)}}
-            function Say($m) { Add-Content -LiteralPath $log -Value ("{0} {1}" -f (Get-Date -Format o), $m) }
-            function Result($ok, $err) {
-              $o = [ordered]@{ ok = $ok; from = {{Q(v.From)}}; to = {{Q(v.To)}}; error = $err; previous = {{Q(v.Previous)}} }
-              ($o | ConvertTo-Json -Compress) | Set-Content -LiteralPath ({{Q(v.Result)}} + '.tmp') -Encoding UTF8
-              Move-Item -LiteralPath ({{Q(v.Result)}} + '.tmp') -Destination {{Q(v.Result)}} -Force
-            }
-            function Fail($m) { Say "failed: $m"; Result $false $m; exit 1 }
-            function MoveWithRetry($from, $to) {
-              for ($i = 0; $i -lt 20; $i++) {
-                try { Move-Item -LiteralPath $from -Destination $to; return $true } catch { Start-Sleep -Milliseconds 500 }
-              }
-              return $false
-            }
-            Say "updating {{v.From}} -> {{v.To}}: waiting for Ombra (pid {{v.Pid}}) to quit"
-            try { Wait-Process -Id {{v.Pid}} -Timeout 120 -ErrorAction SilentlyContinue } catch { }
-            if (Get-Process -Id {{v.Pid}} -ErrorAction SilentlyContinue) { Fail 'Ombra did not quit within 2 minutes; nothing was changed' }
-            if (-not (MoveWithRetry {{Q(v.Target)}} {{Q(v.Previous)}})) { Fail 'could not move the current version aside (a file in it is still open); nothing was changed' }
-            if (-not (MoveWithRetry {{Q(v.NewRoot)}} {{Q(v.Target)}})) {
-              Move-Item -LiteralPath {{Q(v.Previous)}} -Destination {{Q(v.Target)}}
-              Fail 'could not move the new version in; the current version was put back'
-            }
-            Remove-Item -LiteralPath {{Q(v.Staging)}} -Recurse -Force -ErrorAction SilentlyContinue
-            Result $true $null
-            Say "updated to {{v.To}}; the previous version is in {{v.Previous}}"
-            {{(v.Relaunch ? $"Start-Process -FilePath {Q(Path.Combine(v.Target, v.Executable))} -WorkingDirectory {Q(v.Target)}{args}" : "")}}
-            exit 0
-
-            """;
-    }
 
     private static string SafeName(string version) =>
         new(version.Select(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' ? c : '_').ToArray());

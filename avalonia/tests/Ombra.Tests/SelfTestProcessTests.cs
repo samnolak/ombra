@@ -29,6 +29,8 @@ public sealed class SelfTestProcessTests
         var config = Path.Combine(TestProcesses.TempDir("selftest-config"), "ombra.local.json");
         File.WriteAllText(config, System.Text.Json.JsonSerializer.Serialize(new { command = Path.Combine(home, "no-omp-here") }));
         psi.Environment["OMBRA_CONFIG"] = config;
+        await using var owner = JournalOwnershipTests.Start("admission-owner", config);
+        Assert.Equal("ready", await owner.Line()); // --self-test is a diagnostic, not another journal writer
         using var p = Process.Start(psi)!;
         var stdout = p.StandardOutput.ReadToEndAsync();
         var stderr = p.StandardError.ReadToEndAsync();

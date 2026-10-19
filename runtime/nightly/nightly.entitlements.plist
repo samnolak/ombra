@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Hardened-runtime exceptions of Ombra's ad-hoc signed Nightly runtime (pack-nightly.py). The desktop repo's
+     security/mac/hardenedruntime/developer/browser.xml without get-task-allow and allow-dyld-environment-variables
+     (either would let another process of the user inject into the runtime Ombra pins by cdhash); production's
+     nightly.browser.xml needs a provisioning profile (application-identifier, application groups) that an ad-hoc
+     signature cannot carry. Library validation is off: ad-hoc code has no Team ID to match. -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
+  <key>com.apple.security.device.audio-input</key><true/>
+  <key>com.apple.security.device.camera</key><true/>
+  <key>com.apple.security.device.usb</key><true/>
+  <key>com.apple.security.personal-information.location</key><true/>
+  <key>com.apple.security.smartcard</key><true/>
+</dict>
+</plist>

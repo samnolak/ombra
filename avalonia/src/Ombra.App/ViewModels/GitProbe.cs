@@ -34,6 +34,8 @@ public static class GitProbe
         var top = Full(folder, lines[0]);
         var gitDir = Full(folder, lines[1]);
         var common = Full(folder, lines[2]);
+        if (top is null || gitDir is null || common is null)
+            return (GitProbeState.Failed, null, Loc.T("git printed something unexpected: ") + r.Stdout.Trim());
         string? branch = null, commit = null;
         var sym = await run(new ToolCommand("git", ["symbolic-ref", "--short", "-q", "HEAD"], folder, Timeout), ct);
         if (sym.Ok && sym.Stdout.Trim() is { Length: > 0 } b) branch = b;
@@ -45,11 +47,7 @@ public static class GitProbe
         return (GitProbeState.Ok, new GitHead(top, branch, commit, !SessionCatalog.SamePath(gitDir, common), common), null);
     }
 
-    private static string Full(string folder, string path)
-    {
-        try { return Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(folder, path)); }
-        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return path; }
-    }
+    private static string? Full(string folder, string path) => LocalFilePaths.Resolve(folder, path);
 
     /// <summary>A path for reading: the home folder as ~.</summary>
     public static string Tilde(string path)

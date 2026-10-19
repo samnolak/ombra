@@ -35,7 +35,7 @@
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="vm:PanelTab">
-                  <Border Classes="panel-tab" Classes.active="{Binding IsActive}">
+                  <Border Classes="panel-tab" Classes.active="{Binding IsActive}" ctl:TabMenus.Enabled="True">
                     <DockPanel>
                       <Button DockPanel.Dock="Right" Classes="icon panel-tab-close" Width="20" Height="20" Margin="0,0,4,0"
                               Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).ClosePanelTabCommand}" CommandParameter="{Binding}"

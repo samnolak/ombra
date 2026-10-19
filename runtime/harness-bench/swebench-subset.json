@@ -1,0 +1,137 @@
+{
+  "dataset": "SWE-bench/SWE-bench_Verified (test split, 500 instances)",
+  "images": "ghcr.io/epoch-research/swe-bench.eval.arm64.<instance_id> (native arm64 under colima)",
+  "selection": "stratified: repositories ≈ the Verified mix (django 6, sympy 3, sphinx 2, matplotlib 2, scikit-learn 2, astropy/pytest/pylint/requests/seaborn 1 each; xarray has no arm64 image), difficulty 8 × <15 min, 9 × 15 min–1 h, 3 × 1–4 h; within a stratum by sha256(instance_id), skipping `excluded`",
+  "instances": [
+    {
+      "instance_id": "django__django-16100",
+      "repo": "django/django",
+      "difficulty": "<15 min fix"
+    },
+    {
+      "instance_id": "django__django-11880",
+      "repo": "django/django",
+      "difficulty": "<15 min fix"
+    },
+    {
+      "instance_id": "django__django-13809",
+      "repo": "django/django",
+      "difficulty": "15 min - 1 hour"
+    },
+    {
+      "instance_id": "django__django-11740",
+      "repo": "django/django",
+      "difficulty": "15 min - 1 hour"
+    },
+    {
+      "instance_id": "django__django-15957",
+      "repo": "django/django",
+      "difficulty": "1-4 hours"
+    },
+    {
+      "instance_id": "django__django-11885",
+      "repo": "django/django",
+      "difficulty": "1-4 hours"
+    },
+    {
+      "instance_id": "sympy__sympy-14711",
+      "repo": "sympy/sympy",
+      "difficulty": "<15 min fix"
+    },
+    {
+      "instance_id": "sympy__sympy-13798",
+      "repo": "sympy/sympy",
+      "difficulty": "15 min - 1 hour"
+    },
+    {
+      "instance_id": "sympy__sympy-12489",
+      "repo": "sympy/sympy",
+      "difficulty": "1-4 hours"
+    },
+    {
+      "instance_id": "sphinx-doc__sphinx-9230",
+      "repo": "sphinx-doc/sphinx",
+      "difficulty": "<15 min fix"
+    },
+    {
+      "instance_id": "sphinx-doc__sphinx-8056",
+      "repo": "sphinx-doc/sphinx",
+      "difficulty": "15 min - 1 hour"
+    },
+    {
+      "instance_id": "matplotlib__matplotlib-20676",
+      "repo": "matplotlib/matplotlib",
+      "difficulty": "<15 min fix"
+    },
+    {
+      "instance_id": "matplotlib__matplotlib-14623",
+      "repo": "matplotlib/matplotlib",
+      "difficulty": "15 min - 1 hour"
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-25232",
+      "repo": "scikit-learn/scikit-learn",
+      "difficulty": "<15 min fix"
+    },
+    {
+      "instance_id": "scikit-learn__scikit-learn-25747",
+      "repo": "scikit-learn/scikit-learn",
+      "difficulty": "15 min - 1 hour"
+    },
+    {
+      "instance_id": "astropy__astropy-13453",
+      "repo": "astropy/astropy",
+      "difficulty": "15 min - 1 hour"
+    },
+    {
+      "instance_id": "mwaskom__seaborn-3187",
+      "repo": "mwaskom/seaborn",
+      "difficulty": "15 min - 1 hour"
+    },
+    {
+      "instance_id": "pytest-dev__pytest-7982",
+      "repo": "pytest-dev/pytest",
+      "difficulty": "<15 min fix"
+    },
+    {
+      "instance_id": "pylint-dev__pylint-7080",
+      "repo": "pylint-dev/pylint",
+      "difficulty": "15 min - 1 hour"
+    },
+    {
+      "instance_id": "psf__requests-1142",
+      "repo": "psf/requests",
+      "difficulty": "<15 min fix"
+    }
+  ],
+  "excluded": {
+    "matplotlib__matplotlib-24570": "no arm64 image in the Epoch AI registry",
+    "matplotlib__matplotlib-25332": "no arm64 image in the Epoch AI registry",
+    "matplotlib__matplotlib-24026": "no arm64 image in the Epoch AI registry",
+    "scikit-learn__scikit-learn-13779": "no arm64 image in the Epoch AI registry",
+    "scikit-learn__scikit-learn-13135": "no arm64 image in the Epoch AI registry",
+    "scikit-learn__scikit-learn-14496": "no arm64 image in the Epoch AI registry",
+    "scikit-learn__scikit-learn-13142": "no arm64 image in the Epoch AI registry",
+    "scikit-learn__scikit-learn-13496": "no arm64 image in the Epoch AI registry",
+    "scikit-learn__scikit-learn-13328": "no arm64 image in the Epoch AI registry",
+    "scikit-learn__scikit-learn-14983": "no arm64 image in the Epoch AI registry",
+    "scikit-learn__scikit-learn-14141": "no arm64 image in the Epoch AI registry",
+    "scikit-learn__scikit-learn-12585": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-3993": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-3677": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-3095": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-6721": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-4687": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-4695": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-7229": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-3151": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-2905": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-4966": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-7233": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-6744": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-7393": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-3305": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-6938": "no arm64 image in the Epoch AI registry",
+    "pydata__xarray-6599": "no arm64 image in the Epoch AI registry"
+  }
+}

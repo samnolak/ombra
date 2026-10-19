@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.ClientCore;
@@ -157,8 +158,9 @@ public sealed class ChatLayoutTests
             Assert.Equal(idleTop, Top(w, composer));
             Assert.Equal(20, slot.Bounds.Height);
             Assert.Equal(idleViewport, Scroll(w).Viewport.Height);
-            Assert.DoesNotContain("Ready", vm.StatusText);
-            await Until(() => vm.StatusText.StartsWith("Running ", StringComparison.Ordinal) || vm.StatusText.StartsWith("Thinking", StringComparison.Ordinal), "an activity verb", 10);
+            Assert.DoesNotContain(Loc.T("Ready"), vm.StatusText);
+            var running = Loc.F("Running {0}", "\0").Split('\0')[0];
+            await Until(() => vm.StatusText.StartsWith(running, StringComparison.Ordinal) || vm.StatusText.StartsWith(Loc.T("Thinking"), StringComparison.Ordinal), "an activity verb", 10);
         }
         finally { Environment.SetEnvironmentVariable("FAKE_OMP_PACE_MS", null); }
         await Until(() => vm.Phase == SessionPhase.Ready, "run end");
@@ -306,14 +308,39 @@ public sealed class ChatLayoutTests
         vm.ComposerText = "do the thing";
         vm.SendCommand.Execute(null);
         await Until(() => vm.HasDialog, "approval");
-        await Settle();
-        using var frame = w.CaptureRenderedFrame();
         var composer = w.FindControl<Border>("ComposerBox")!;
-        Assert.True(Top(w, composer) + composer.Bounds.Height <= w.Bounds.Height + 0.5, "the composer is cut off at the bottom");
-        var allow = w.GetVisualDescendants().OfType<Button>().First(b => b.Name == "AllowButton");
         var scroll = w.FindControl<ScrollViewer>("CardsScroll")!;
-        var y = allow.TranslatePoint(new Point(0, 0), scroll)!.Value.Y;
-        Assert.True(y >= 0 && y + allow.Bounds.Height <= scroll.Bounds.Height + 0.5, "Allow is scrolled out of view");
+        foreach (var size in new[] { new Size(480, 360), new Size(640, 600), new Size(480, 360) })
+        {
+            w.Width = size.Width;
+            w.Height = size.Height;
+            await Settle();
+            using var frame = w.CaptureRenderedFrame();
+            Assert.True(Top(w, composer) + composer.Bounds.Height <= w.Bounds.Height + 0.5, "the composer is cut off at the bottom");
+            var allow = w.GetVisualDescendants().OfType<Button>().First(b => b.Name == "AllowButton");
+            var y = allow.TranslatePoint(new Point(0, 0), scroll)!.Value.Y;
+            Assert.True(y >= 0 && y + allow.Bounds.Height <= scroll.Bounds.Height + 0.5, "Allow is scrolled out of view");
+        }
+        // Reading the command at the top must not fight a continuous answer-follow loop.
+        scroll.Offset = default;
+        await Settle();
+        Assert.Equal(0, scroll.Offset.Y);
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task Ordinary_cards_keep_the_readers_scroll_position_after_layout_changes()
+    {
+        var (w, vm) = await Open("normal", 480, 360);
+        vm.WidgetsText = string.Join("\n", Enumerable.Range(1, 12).Select(i => $"Widget line {i}"));
+        await Settle();
+        var scroll = w.FindControl<ScrollViewer>("CardsScroll")!;
+        Assert.True(scroll.Extent.Height - scroll.Viewport.Height > 20);
+        scroll.Offset = new Vector(0, 20);
+        w.Width = 500;
+        await Settle();
+        Assert.Equal(20, scroll.Offset.Y);
         await vm.DisposeAsync();
         w.Close();
     }
@@ -347,6 +374,21 @@ public sealed class ChatLayoutTests
             ToolStatus.Succeeded, "", "acme · weather"));
         Assert.Equal("owner: acme\nrepo: weather\ndraft: true", mcp.Tooltip);
         foreach (var row in new[] { command, read, mcp }) Assert.DoesNotContain("{", row.Tooltip ?? "");
+    }
+
+    [Theory]
+    [InlineData("😀")]
+    [InlineData("e\u0301")]
+    [InlineData("👩‍💻")]
+    public void Tool_argument_tooltips_keep_whole_graphemes_within_their_budget(string glyph)
+    {
+        for (var cut = 1; cut < glyph.Length; cut++)
+        {
+            var head = new string('a', 159 - cut);
+            var args = System.Text.Json.JsonSerializer.Serialize(new { description = head + glyph + " rest" });
+            var row = new ToolRowViewModel(new ToolItem(1, "t", "mcp__example__call", args, ToolStatus.Succeeded, ""));
+            Assert.Equal("description: " + head + "…", row.Tooltip);
+        }
     }
 
     /// <summary>A hovered tool line's fill has rounded corners: the line reaches 8 px past the reading column, and the
@@ -388,15 +430,15 @@ public sealed class ChatLayoutTests
         Assert.False(row.HasContent);
         row.Update(new AssistantItem(1, "", "hmm", true, null, null));
         Assert.True(row.IsThinkingLive);
-        Assert.Equal("Thinking…", row.ThinkingLabel);
+        Assert.Equal(Loc.T("Thinking…"), row.ThinkingLabel);
         row.Update(new AssistantItem(1, "Answer", "hmm", true, null, null));
         Assert.False(row.IsThinkingLive);
-        Assert.Matches(@"^Thought for \d+s$", row.ThinkingLabel);
+        Assert.Matches("^" + Loc.F("Thought for {0}s", @"\d+") + "$", row.ThinkingLabel);
         Assert.False(row.ShowActions); // streaming, and not known to end the turn
         row.Update(new AssistantItem(1, "Answer", "hmm", false, "stop", null));
         row.IsTurnEnd = true;
         Assert.True(row.ShowActions);
         // Loaded from history: no timing
-        Assert.Equal("Thinking", new AssistantRowViewModel(new AssistantItem(2, "x", "old", false, "stop", null)).ThinkingLabel);
+        Assert.Equal(Loc.T("Thinking"), new AssistantRowViewModel(new AssistantItem(2, "x", "old", false, "stop", null)).ThinkingLabel);
     }
 }

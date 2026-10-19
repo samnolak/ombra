@@ -5,6 +5,7 @@ using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.Services;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
@@ -29,12 +30,43 @@ public sealed class DiagnosticsTests
     [InlineData("{\"refresh_token\":\"r3fr3sh-t0k3n\"}", "r3fr3sh-t0k3n")]
     [InlineData("proxy https://user:hunter2hunter2@proxy.local:8080", "hunter2hunter2")]
     [InlineData("omp --api-key s3cr3t-value --model x", "s3cr3t-value")]
+    [InlineData("tool --api-key \"two words secret\" --model x", "words secret")]
+    [InlineData("tool --api-key='two words secret' --model x", "words secret")]
     [InlineData("jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U", "eyJzdWIiOiIxMjM0NTY3ODkwIn0")]
     public void Credential_shapes_are_masked(string text, string secret)
     {
         var redacted = new SecretRedactor().Redact(text);
         Assert.DoesNotContain(secret, redacted);
         Assert.Contains(SecretRedactor.Mask, redacted);
+    }
+
+    [Theory]
+    [InlineData("https://user:part@remaining-secret@example.test/path", "https://user:[redacted]@example.test/path")]
+    [InlineData("https://user:part%40remaining-secret@example.test/path", "https://user:[redacted]@example.test/path")]
+    [InlineData("https://user:p@ss@example.test/path@keep?q=@keep", "https://user:[redacted]@example.test/path@keep?q=@keep")]
+    public void Url_passwords_are_removed_without_leaking_suffixes_or_masking_paths(string input, string expected)
+    {
+        var redactor = new SecretRedactor();
+        Assert.Equal(expected, redactor.Redact(input));
+        Assert.Equal(expected, redactor.Redact(expected));
+    }
+
+    [Fact]
+    public void Connector_and_marketplace_labels_hide_credentials_without_changing_operational_configuration()
+    {
+        const string url = "https://user:p@ss@example.test/path";
+        var remote = new McpServerRowViewModel(null!, new("remote", "http", true, url, "user"));
+        Assert.Equal("https://user:[redacted]@example.test/path", remote.Detail);
+        Assert.Equal(url, remote.Entry.Location);
+        var config = System.Text.Json.Nodes.JsonNode.Parse("""{"command":"server","args":["--api-key","opaque-secret-123","--port","8000"]}""")!.AsObject();
+        var before = config.ToJsonString();
+        var local = new McpServerRowViewModel(null!, new("local", "stdio", true, "server", "user")) { Config = config };
+        Assert.Equal("server --api-key [redacted] --port 8000", local.Detail);
+        Assert.Equal(before, config.ToJsonString());
+        var source = new MarketplaceInfo("catalog", url);
+        var marketplace = new MarketplaceRowViewModel(null!, source);
+        Assert.Equal("https://user:[redacted]@example.test/path", marketplace.Source);
+        Assert.Equal(url, source.Source);
     }
 
     [Theory]
@@ -228,7 +260,7 @@ public sealed class DiagnosticsTests
         Assert.Contains(zip.Entries, e => e.FullName == "settings.json");
         using var reader = new StreamReader(zip.GetEntry("settings.json")!.Open());
         Assert.DoesNotContain("ui-planted-secret-4411", await reader.ReadToEndAsync());
-        Assert.StartsWith("Diagnostics saved.", vm.SettingsMessage);
+        Assert.StartsWith(Loc.T("Diagnostics saved. They hold versions, settings with secrets removed, omp’s state and the app’s own errors — no conversation text."), vm.SettingsMessage);
         await vm.DisposeAsync();
         w.Close();
     }

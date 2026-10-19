@@ -7,3 +7,10 @@
 - Tests clean up after themselves: a run writes every temp file under `<temp>/ombra-tests/run-<pid>`, deleted on exit,
   and the next run deletes folders of runs that were killed (`avalonia/tests/Ombra.Tests/TestEnvironment.cs`). Tests
   create temp folders with `TestProcesses.TempDir`, not the system temp folder directly.
+
+# UI tests
+
+- A test that makes a `MainViewModel`, a control, a `DispatcherTimer` or anything else that reads `Dispatcher.UIThread`
+  is `[AvaloniaFact]` / `[AvaloniaTheory]`. On an xunit worker it makes that worker Avalonia's UI thread whenever no UI
+  test runs (Avalonia 12 gives the UI dispatcher to the first thread that asks), and the UI test starting at that
+  moment fails with `[Test Case Cleanup Failure (…)] … a different thread owns it`.

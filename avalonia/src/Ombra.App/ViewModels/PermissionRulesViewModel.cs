@@ -16,12 +16,19 @@ public sealed partial class PermissionRulesViewModel : WorkspacePageViewModel
     public PermissionRulesViewModel(MainViewModel main) : base(main, "permissions")
     {
         main.ApprovalRules.Changed += () => Dispatcher.UIThread.Post(Refresh);
+        if (main.WorkspaceTrust is { } trust) trust.Changed += () => Dispatcher.UIThread.Post(RefreshTrustedFolders); // .Trust.cs
         Refresh();
     }
 
     public ObservableCollection<PermissionRuleRowViewModel> Rules { get; } = [];
 
     [ObservableProperty] private bool _isEmpty = true;
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(UndoRemoveCommand))]
+    [NotifyPropertyChangedFor(nameof(CanUndoRemove))]
+    private ApprovalGrant? _removedRule;
+
+    public bool CanUndoRemove => RemovedRule is not null;
 
     /// <summary>The saved rules could not be read (the client's settings file does not parse).</summary>
     [ObservableProperty]
@@ -33,6 +40,7 @@ public sealed partial class PermissionRulesViewModel : WorkspacePageViewModel
     /// <summary>Reads the saved rules again (another window may have changed them).</summary>
     public override Task LoadAsync()
     {
+        RemovedRule = null;
         Main.ApprovalRules.Reload(); // raises Changed → Refresh
         Refresh();
         return Task.CompletedTask;
@@ -46,18 +54,36 @@ public sealed partial class PermissionRulesViewModel : WorkspacePageViewModel
         foreach (var g in grants) Rules.Add(new PermissionRuleRowViewModel(g, this, cwd, session));
         IsEmpty = Rules.Count == 0;
         LoadError = Main.ApprovalRules.LoadError ?? "";
+        RefreshTrustedFolders();
     }
 
     internal void Remove(PermissionRuleRowViewModel row)
     {
         try
         {
-            Main.ApprovalRules.Remove(row.Grant);
-            Say(Loc.F("Removed. omp asks again for {0}.", row.Grant.Rule.Description));
+            RemovedRule = Main.ApprovalRules.Remove(row.Grant) ? row.Grant : null;
+            Say(Loc.F("Removed. omp asks again for {0}.", AnswerNotices.RuleDescription(row.Grant.Rule.Description)));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
         {
             Say(Loc.T("Not removed: ") + e.Message, error: true);
+        }
+        Refresh();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanUndoRemove))]
+    private void UndoRemove()
+    {
+        if (RemovedRule is not { } grant) return;
+        try
+        {
+            Main.ApprovalRules.Add(grant.Rule, grant.Scope, grant.Project, grant.Session);
+            RemovedRule = null;
+            Say(Loc.T("Permission rule restored."));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            Say(Loc.T("Not restored: ") + e.Message, error: true);
         }
         Refresh();
     }
@@ -68,10 +94,10 @@ public sealed partial class PermissionRuleRowViewModel(ApprovalGrant grant, Perm
     public ApprovalGrant Grant { get; } = grant;
 
     /// <summary>The rule as written (<c>bash(npm test:*)</c>).</summary>
-    public string RuleText => Grant.Rule.Text;
+    public string RuleText => ApprovalDisplay.Format(Grant.Rule.Text);
 
     /// <summary>The rule in words, capitalized: "Commands starting with “npm test”".</summary>
-    public string Description => Grant.Rule.Description is { Length: > 0 } d ? char.ToUpperInvariant(d[0]) + d[1..] : "";
+    public string Description => AnswerNotices.RuleDescription(Grant.Rule.Description) is { Length: > 0 } d ? char.ToUpperInvariant(d[0]) + d[1..] : "";
 
     public string ScopeLabel => Grant.Scope switch
     {

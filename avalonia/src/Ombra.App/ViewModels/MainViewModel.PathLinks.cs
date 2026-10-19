@@ -19,8 +19,29 @@ public sealed partial class MainViewModel : IPathLinkHandler
 
     public void OpenPath(PathTarget target)
     {
+        if (ProjectFiles.Resolve(ProjectFolder, target.FullPath) is not { } local) return;
+        target = target with { FullPath = local };
         if (target.Kind == PathKind.Image && OpenImageFile(target.FullPath)) return;
         Files.OpenLinkCommand.Execute(new FileLink(target.FullPath, target.Line));
+    }
+
+    public string? EditorName => Files.Editors.FirstOrDefault()?.Name;
+
+    public void OpenInEditor(PathTarget target)
+    {
+        if (Files.Editors.FirstOrDefault() is { } editor) _ = Files.OpenPathInEditorAsync(editor, target.FullPath, target.Line);
+    }
+
+    public void AddToMessage(PathTarget target) => Files.AddToMessageCommand.Execute(target.FullPath);
+
+    public void Reveal(PathTarget target) => Files.RevealInFileManagerCommand.Execute(target.FullPath);
+
+    public void OpenTerminal(string folder) => NewShellIn(folder);
+
+    public void Notify(string iconKey, string title, string message)
+    {
+        if (iconKey == "IconAlert") ShowUrgentBrief(iconKey, title, message);
+        else ShowBrief(iconKey, title, message);
     }
 
     /// <summary>A picture on disk in the image viewer; false when it cannot be read (too large, gone, not allowed).</summary>

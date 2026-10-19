@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Input;
 using Avalonia.Threading;
 
 namespace Ombra.App.Controls;
@@ -18,17 +19,49 @@ public sealed class ChoiceMenu
     private static readonly AttachedProperty<bool> HookedProperty =
         AvaloniaProperty.RegisterAttached<ChoiceMenu, Control, bool>("Hooked");
 
+    private static readonly AttachedProperty<bool> FocusHookedProperty =
+        AvaloniaProperty.RegisterAttached<ChoiceMenu, Flyout, bool>("FocusHooked");
     static ChoiceMenu()
     {
         CloseOnChoiceProperty.Changed.AddClassHandler<Flyout>((flyout, e) =>
         {
-            if (e.NewValue is true) flyout.Opened += OnOpened;
+            if (e.NewValue is true)
+            {
+                flyout.Opened += OnOpened;
+                RestoreFocusOnClose(flyout);
+            }
             else flyout.Opened -= OnOpened;
         });
     }
 
     public static bool GetCloseOnChoice(Flyout flyout) => flyout.GetValue(CloseOnChoiceProperty);
     public static void SetCloseOnChoice(Flyout flyout, bool value) => flyout.SetValue(CloseOnChoiceProperty, value);
+    /// <summary>Menus return the keyboard to their opener, but never take it from an editor their action opened.</summary>
+    public static void RestoreFocusOnClose(Flyout flyout)
+    {
+        if (flyout.GetValue(FocusHookedProperty)) return;
+        flyout.SetValue(FocusHookedProperty, true);
+        Control? previous = null;
+        TopLevel? window = null;
+        flyout.Opening += (_, _) =>
+        {
+            window = flyout.Target is { } target ? TopLevel.GetTopLevel(target) : null;
+            previous = window?.FocusManager?.GetFocusedElement() as Control;
+        };
+        flyout.Closed += (_, _) =>
+        {
+            var owner = previous;
+            var top = window;
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (top is null || top is Window { IsActive: false }) return;
+                if (top.FocusManager?.GetFocusedElement() is Control { IsEffectivelyVisible: true } focused
+                    && TopLevel.GetTopLevel(focused) == top) return;
+                if (owner is { IsEffectivelyVisible: true, IsEffectivelyEnabled: true, Focusable: true }
+                    && TopLevel.GetTopLevel(owner) == top) owner.Focus(NavigationMethod.Unspecified);
+            }, DispatcherPriority.Background);
+        };
+    }
 
     private static void OnOpened(object? sender, EventArgs e)
     {

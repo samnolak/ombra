@@ -17,15 +17,15 @@
   </Style>
   <!-- A row's name: 14 medium, one line -->
   <Style Selector="TextBlock.conn-name">
-    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontUi}" />
     <Setter Property="FontWeight" Value="Medium" />
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
     <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
   <!-- Command line or address under the name -->
   <Style Selector="TextBlock.conn-detail">
-    <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, DejaVu Sans Mono, monospace" />
-    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontFamily" Value="{DynamicResource GuiFontMono}" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
@@ -71,15 +71,121 @@
     <Setter Property="HorizontalAlignment" Value="Left" />
   </Style>
   <Style Selector="Border.conn-code > SelectableTextBlock">
-    <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, DejaVu Sans Mono, monospace" />
-    <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="FontFamily" Value="{DynamicResource GuiFontMono}" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCode}" />
   </Style>
   <!-- The form's multi-line fields (arguments, environment, headers) -->
   <Style Selector="TextBox.conn-lines">
     <Setter Property="AcceptsReturn" Value="True" />
     <Setter Property="TextWrapping" Value="NoWrap" />
     <Setter Property="MinHeight" Value="68" />
-    <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, DejaVu Sans Mono, monospace" />
-    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontFamily" Value="{DynamicResource GuiFontMono}" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCode}" />
+  </Style>
+
+  <!-- ── The Plugins page (Views/Settings/PluginsSettings): one rounded list, rows that open a details page ── -->
+  <!-- The list: one card, rows separated by hairlines, no inner padding (each row pads itself) -->
+  <Style Selector="Border.plug-list">
+    <Setter Property="Background" Value="{DynamicResource GuiCard}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorderSoft}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius16}" />
+    <Setter Property="Padding" Value="0,4" />
+    <Setter Property="ClipToBounds" Value="True" />
+  </Style>
+  <!-- A row: 64 high (icon, name, a line of what it does), its scope, switch and chevron on the right -->
+  <Style Selector="Grid.plug-row">
+    <Setter Property="MinHeight" Value="64" />
+    <Setter Property="Margin" Value="8,0,12,0" />
+  </Style>
+  <!-- The row's left part opens its details: transparent, the content left-aligned, a fill on hover -->
+  <Style Selector="Button.plug-open">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="8,10" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+  </Style>
+  <Style Selector="Button.plug-open:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+  </Style>
+  <!-- Hairline between rows, inset to the text -->
+  <Style Selector="Border.plug-sep">
+    <Setter Property="Height" Value="1" />
+    <Setter Property="Margin" Value="64,0,16,0" />
+    <Setter Property="Background" Value="{DynamicResource GuiBorderSoft}" />
+  </Style>
+  <Style Selector="ContentPresenter:nth-child(1) > StackPanel > Border.plug-sep">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <!-- The row's one line of what it does -->
+  <Style Selector="TextBlock.plug-line">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
+  </Style>
+  <!-- A list's title above its card (the Team page): one height whether or not an action or picker sits on its right,
+       so every card starts the same distance under its title -->
+  <Style Selector="Grid.list-head">
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Margin" Value="4,0,0,0" />
+  </Style>
+  <Style Selector="Grid.list-head > TextBlock">
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <!-- A row's text where the row opens nothing: the padding Button.plug-open gives its content -->
+  <Style Selector="StackPanel.plug-lead">
+    <Setter Property="Margin" Value="8,10" />
+    <Setter Property="Spacing" Value="2" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <!-- Rows with no tile in front: the hairline starts at the text -->
+  <Style Selector="Border.plug-sep.flush">
+    <Setter Property="Margin" Value="16,0" />
+  </Style>
+  <!-- What a row opens under itself (a confirmation, a safety number): inset to the row's text -->
+  <Style Selector="Border.plug-under">
+    <Setter Property="Margin" Value="64,0,16,12" />
+  </Style>
+  <Style Selector="Border.plug-under.flush">
+    <Setter Property="Margin" Value="16,0,16,12" />
+  </Style>
+  <!-- A card's own block (a form, an empty state, a footer) inside a list card -->
+  <Style Selector="StackPanel.plug-body, Grid.plug-body">
+    <Setter Property="Margin" Value="16,12" />
+  </Style>
+  <!-- Scope words on the right (Personal / Project / a file name) -->
+  <Style Selector="TextBlock.plug-scope">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+    <Setter Property="MaxWidth" Value="160" />
+    <Setter Property="Margin" Value="12,0,14,0" />
+  </Style>
+  <!-- The same words ending a row with nothing after them: on the edge where other rows' buttons end -->
+  <Style Selector="TextBlock.plug-scope.end">
+    <Setter Property="Margin" Value="12,0,0,0" />
+  </Style>
+  <!-- The count after a tab's name -->
+  <Style Selector="TextBlock.plug-count">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <!-- A larger tile on a details page -->
+  <Style Selector="Border.conn-tile.large">
+    <Setter Property="Width" Value="48" />
+    <Setter Property="Height" Value="48" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+  </Style>
+  <!-- A catalog section's tiles: two columns -->
+  <Style Selector="Grid.plug-tile">
+    <Setter Property="Margin" Value="0,6,16,6" />
+    <Setter Property="MinHeight" Value="52" />
   </Style>
 </Styles>

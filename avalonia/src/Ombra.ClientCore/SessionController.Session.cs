@@ -118,7 +118,7 @@ public sealed partial class SessionController
             var s = Snapshot();
             if (s.TranscriptEpoch != since.TranscriptEpoch) return null;
             foreach (var item in s.Items.OfType<CommandOutputItem>())
-                if (!seen.Contains(item.Key) && isFinal(item.Text)) return item.Text;
+                if (item.Label is null && !seen.Contains(item.Key) && isFinal(item.Text)) return item.Text;
             if (s.Phase is SessionPhase.Faulted or SessionPhase.Stopped) return null;
             await Task.Delay(TimeSpan.FromMilliseconds(100), _clock, ct).ConfigureAwait(false);
         }

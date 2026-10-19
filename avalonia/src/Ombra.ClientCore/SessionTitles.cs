@@ -27,15 +27,20 @@ public sealed class SessionTitles(string directory)
     /// <summary>A chat's omp with the extension; unchanged when the file cannot be written (a line goes to stderr).</summary>
     public OmpLaunchSpec Apply(OmpLaunchSpec spec)
     {
-        if (!TryWrite()) return spec;
-        return spec with { Arguments = [.. spec.Arguments, ExtensionFlag, ExtensionPath] };
+        var host = spec.Arguments.FirstOrDefault(argument =>
+            argument.Replace('\\', '/').EndsWith("/engine/host.ts", StringComparison.Ordinal));
+        if (host is null) return spec;
+        var sourceRoot = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(host))!, "coding-agent", "src");
+        var generator = System.Text.Json.JsonSerializer.Serialize(new Uri(Path.Combine(sourceRoot, "utils", "title-generator.ts")).AbsoluteUri);
+        var settings = System.Text.Json.JsonSerializer.Serialize(new Uri(Path.Combine(sourceRoot, "config", "settings.ts")).AbsoluteUri);
+        var source = $"import {{ generateSessionTitle }} from {generator};\nimport {{ Settings }} from {settings};\n" + ExtensionBody;
+        if (!TryWrite(source)) return spec;
+        return spec with { SessionArguments = [.. spec.SessionArguments, ExtensionFlag, ExtensionPath] };
     }
 
-    public const string ExtensionSource = """
+    private const string ExtensionBody = """
         // Written by Ombra for the chats it starts: names an unnamed session with omp's own title generator, as omp's
         // terminal does (omp does not do it for prompts sent over RPC). A name you gave is never replaced.
-        import { generateSessionTitle } from "@oh-my-pi/pi-coding-agent/utils/title-generator";
-        import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 
         function textOf(content) {
         	if (typeof content === "string") return content;
@@ -84,7 +89,7 @@ public sealed class SessionTitles(string directory)
 
         """;
 
-    private bool TryWrite()
+    private bool TryWrite(string source)
     {
         lock (_gate)
         {
@@ -93,10 +98,8 @@ public sealed class SessionTitles(string directory)
                 var dir = Path.GetDirectoryName(ExtensionPath)!;
                 if (OperatingSystem.IsWindows()) Directory.CreateDirectory(dir);
                 else Directory.CreateDirectory(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-                if (File.Exists(ExtensionPath) && File.ReadAllText(ExtensionPath, Utf8) == ExtensionSource) return true;
-                var temp = ExtensionPath + ".tmp";
-                File.WriteAllText(temp, ExtensionSource, Utf8);
-                File.Move(temp, ExtensionPath, overwrite: true);
+                if (File.Exists(ExtensionPath) && File.ReadAllText(ExtensionPath, Utf8) == source) return true;
+                AtomicFile.WriteAllText(ExtensionPath, source, Utf8);
                 return true;
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)

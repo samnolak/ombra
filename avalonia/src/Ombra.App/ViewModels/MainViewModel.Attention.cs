@@ -25,14 +25,31 @@ public sealed partial class MainViewModel
     /// </summary>
     public event Action<string, string, Action>? AttentionRequested;
 
+    public int DockWaitingCount { get; private set; }
+    public event Action<int, bool>? DockAttentionChanged;
+
+    private void UpdateDockAttention(bool requestAttention = false)
+    {
+        var count = 0;
+        if (NotificationsEnabled)
+            foreach (var open in _opens.Values)
+                if (open.Seen is { Dialogs.Count: > 0 }) count++;
+        if (count == DockWaitingCount && !requestAttention) return;
+        DockWaitingCount = count;
+        DockAttentionChanged?.Invoke(count, requestAttention && count > 0 && NotificationsEnabled);
+    }
+
     partial void OnSessionTitleChanged(string value) => OnPropertyChanged(nameof(WindowTitle));
 
     public void SetWindowActive(bool active)
     {
         _windowActive = active;
         if (!active) return;
+        RequestCatalogRefresh();
+        GitBellWindowFocused(); // MainViewModel.GitBell.cs: teammates' pushes, at most once a minute
         // The shown chat's reply that came while the window was away is seen now (another chat's stays unread)
-        var seen = _open.Unread;
+        var seen = _open.Unread || MarkedUnread().Contains(ShownFile ?? "");
+        ClearMarkedUnread(ShownFile);
         _open.Unread = false;
         NeedsAttention = false;
         if (seen) UpdateSessionStatuses();
@@ -47,6 +64,8 @@ public sealed partial class MainViewModel
     private void CheckAttention(OpenSession open, SessionSnapshot s)
     {
         var dialog = s.Dialogs.Count > 0 ? s.Dialogs[0] : null;
+        UpdateDockAttention(dialog is not null && open.LastDialogId is null &&
+            (!_windowActive || _windowState == "Minimized"));
         // A count of ended runs, not a running → ready change between two snapshots: a short run can start and end
         // between two applies (or between two background checks) and must still be noticed.
         var runEnded = open.RunsEndedSeen >= 0 && s.RunsEnded > open.RunsEndedSeen;
@@ -61,16 +80,17 @@ public sealed partial class MainViewModel
             title = Loc.T("omp finished");
             var answer = s.Items.OfType<AssistantItem>().LastOrDefault()?.Text ?? "";
             message = answer.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() is { Length: > 0 } line
-                ? (line.Length > 140 ? line[..140] + "…" : line)
+                ? (line.Length > 140 ? line[..GraphemeText.PrefixLength(line, 140)] + "…" : line)
                 : ChatTitle(s);
         }
         else if (runEnded && s.Phase == SessionPhase.Faulted)
         {
             title = Loc.T("omp stopped");
-            message = s.LastError?.Split('\n')[0] ?? Loc.T("omp is not running");
+            message = FailureHeadline(s) ?? Loc.T("omp is not running");
         }
         open.LastDialogId = dialog?.Id;
         open.RunsEndedSeen = Math.Max(open.RunsEndedSeen, s.RunsEnded); // an older snapshot applied late must not count a run twice
+        if (runEnded && s.Phase is SessionPhase.Ready or SessionPhase.Faulted) GitBellTurnEnded(open);
         if (title is null) return;
         var shown = open == _open;
         var windowInFront = _windowActive && _windowState != "Minimized";
@@ -87,10 +107,7 @@ public sealed partial class MainViewModel
     }
 
     /// <summary>A chat's title as the header and the sidebar show it.</summary>
-    private static string ChatTitle(SessionSnapshot s) =>
-        s.SessionName is { Length: > 0 } n ? n
-        : s.Items.OfType<UserItem>().FirstOrDefault()?.Text is { Length: > 0 } u ? SessionCatalogTitle(u)
-        : Loc.T("New session");
+    private static string ChatTitle(SessionSnapshot s) => KnownSessionTitle(s) ?? Loc.T("New session");
 
     /// <summary>The user clicked a notification: its chat is shown (on the question it asked), if it is still open.</summary>
     private void ShowFromNotification(OpenSession open)

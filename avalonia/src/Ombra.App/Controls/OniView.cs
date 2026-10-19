@@ -110,6 +110,7 @@ public sealed class OniView : Control, ICustomHitTest
         if (change.Property == PetProperty)
         {
             Subscribe();
+            Acquire(); // a view attached before its pet (bound later) has no sheets yet
             _spiritsPlaced = false;
             Refresh();
         }

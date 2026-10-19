@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 using Ombra.App.Localization;
 using Ombra.App.Services;
 using Ombra.ClientCore;
+using Ombra.App.Services.Documents;
 using Ombra.Rpc;
 
 namespace Ombra.App.ViewModels;
@@ -22,6 +23,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private static readonly TimeSpan MinimizedAttentionInterval = TimeSpan.FromSeconds(1);
 
     private readonly AppArgs _args;
+    // Background work belongs to this window's dispatcher, even after another Application is created.
+    internal Dispatcher UiDispatcher { get; } = Dispatcher.UIThread;
     private readonly CancellationTokenSource _cts = new();
     private readonly RowList _rows = [];
     private long _lastDebugSeq;
@@ -37,18 +40,42 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private DispatcherTimer? _elapsedTimer;
     private DispatcherTimer? _dialogTimer;
     private int _disposed;
+    private readonly bool _ownsDraftStore;
+    public WorkspaceDocumentService Documents { get; }
+    public EditorLanguageService EditorLanguageService { get; }
 
-    public MainViewModel(SessionController session, AppArgs args, string? configError = null, ClientSettingsStore? settings = null)
+    public MainViewModel(SessionController session, AppArgs args, string? configError = null, ClientSettingsStore? settings = null, DraftStore? drafts = null)
     {
         _args = args;
         _settings = settings;
+        var catalog = new SessionCatalogCache(settings is null ? null : SessionCatalogCache.PathFor(settings.Path));
+        ScanCatalogAsync = (root, ct) => catalog.ScanAsync(root, CatalogLimit, ct); // CatalogLimit: MainViewModel.SidebarNav.cs
+        _ownsDraftStore = drafts is null;
+        _draftStore = drafts ?? new DraftStore(settings is null ? null : DraftStore.PathFor(settings.Path));
+        Documents = new WorkspaceDocumentService(settings is null ? null : settings.Path + ".editor-recovery");
+        EditorLanguageService = new EditorLanguageService(Documents);
+        _draftStore.SaveFailed += error => PostToUi(() => ComposerMessage = Loc.F("Drafts could not be saved: {0}", error));
         if (configError is not null) Rows.Add(RowViewModel.Create(new NoticeItem(0, NoticeLevel.Warning, configError)));
+        if (settings is not null) settings.WarningsChanged += OnSettingsWarningsChanged;
+        RefreshSettingsWarning();
         ApprovalRules = session.ApprovalRules ??= new ApprovalRuleSet(settings); // MainViewModel.Approvals.cs
         _approvalActions = new ApprovalActions(AllowWithRuleAsync, DenyWithFeedbackAsync);
-        _host = new SessionHost(session, MayClose) { MaxProcesses = LoadMaxOpenSessions() }; // MainViewModel.OpenSessions.cs
+        _host = new SessionHost(session); // MainViewModel.OpenSessions.cs
         _host.Closed += OnHostClosed;
         _host.Stopped += OnChatStopped; // MainViewModel.Chats.cs
-        _open = Register(session);
+        _open = Register(session, recoverUnfiled: true);
+        _changingDraft = true;
+        ComposerText = _open.ComposerText;
+        ComposerMessage = _draftStore.LastError ?? _open.ComposerMessage;
+        Refill(Attachments, _open.Attachments);
+        Refill(PastedTexts, _open.PastedTexts);
+        Refill(Marks.Items, _open.Marks);
+        _open.Attachments = [];
+        _open.PastedTexts = [];
+        _open.Marks = [];
+        _changingDraft = false;
+        foreach (var draft in _draftStore.All.Where(d => d.SessionFile is null && !IsDraftClaimed(d.Id)).ToArray())
+            Register(_host.Open(new LaunchRequest(draft.Project)), recoverUnfiled: true);
         Rows.CollectionChanged += (_, _) => NotifyRecoverLayout();
     }
 
@@ -63,10 +90,14 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SendCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SendAsFileCommand))]
     [NotifyCanExecuteChangedFor(nameof(AbortCommand))]
     [NotifyCanExecuteChangedFor(nameof(StartRenameCommand))]
     [NotifyCanExecuteChangedFor(nameof(SteerCommand))]
+    [NotifyCanExecuteChangedFor(nameof(InterruptAndSendCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ApprovePlanCommand), nameof(RejectPlanCommand))]
     [NotifyPropertyChangedFor(nameof(IsRunning), nameof(IsIdle), nameof(ComposerHint), nameof(CanQueue), nameof(StopLabel), nameof(ApprovalPendingNote))]
+    [NotifyPropertyChangedFor(nameof(IsOpeningSession))]
     private SessionPhase _phase = SessionPhase.NotStarted;
 
     /// <summary>The dialog omp is waiting on (the first of possibly several).</summary>
@@ -101,6 +132,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsSigningIn), nameof(SigningInText))]
     [NotifyCanExecuteChangedFor(nameof(SendCommand))]
+    [NotifyCanExecuteChangedFor(nameof(SendAsFileCommand))]
     [NotifyCanExecuteChangedFor(nameof(StartRenameCommand))]
     private string? _signingIn;
 
@@ -110,8 +142,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     /// <summary>Raised on the UI thread when the user chose to open <see cref="PendingUrl"/>; the view launches it.</summary>
     public event Action<string>? OpenUrlRequested;
 
-    /// <summary>Raised on the UI thread when the user chose to copy <see cref="PendingUrl"/>.</summary>
-    public event Action<string>? CopyTextRequested;
+    /// <summary>The view writes the clipboard and reports whether it succeeded, after showing any failure.</summary>
+    public event Func<string, Task<bool>>? CopyTextRequested;
 
     [ObservableProperty] private string _statusText = Loc.T("Starting…");
     [ObservableProperty] private string _statusDetail = "";
@@ -122,7 +154,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     public bool IsRunning => Phase is SessionPhase.Running or SessionPhase.Aborting;
     public bool IsIdle => !IsRunning;
-    public string ComposerHint => Phase switch
+    public string ComposerHint => IsReadOnly ? Loc.T("This conversation is read only.")
+        : IsLeaseReadOnly ? Loc.T("This chat is open elsewhere. Choose Open here to continue it in this window.") : Phase switch
     {
         SessionPhase.Running when HasDialog => Loc.T("Answer the request above, or press Esc to stop"),
         SessionPhase.Running => Loc.F("Queue a message — {0} to queue, {1} to steer", SendKeyHint, KeyboardShortcuts.Steer),
@@ -181,6 +214,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     public void OnWindowOpened()
     {
+        _ = EnablePowerNotificationsAsync();
         // "Usable": the window is open and the first layout pass has run.
         Dispatcher.UIThread.Post(() =>
         {
@@ -189,6 +223,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             AppendStartupLog($"window_usable_ms_since_main={usableMs:F0} window_usable_ms_since_process_start={sinceProcessStart:F0}");
             RefreshRuntimeStatus();
             StartUpdates();
+            StartTeamProgressIfShared(); // MainViewModel.TeamProgress.cs
+            StartGitBell(); // MainViewModel.GitBell.cs
             MoveOmpToNewPack();
             _ = StartAsync();
         }, DispatcherPriority.Background);
@@ -197,6 +233,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private async Task StartAsync()
     {
         var first = _open;
+        foreach (var recovered in _opens.Values.Where(o => o != first).ToArray()) _ = StartSessionAsync(recovered);
         if (_args.TimelinePath is not null) _ = Task.Run(() => TimelineAsync(_args.TimelinePath, _cts.Token));
         _ompSpawnTs = Stopwatch.GetTimestamp();
         try
@@ -213,53 +250,63 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         AppendStartupLog($"omp_spawn_to_session_ready_ms={RpcTimings.Ms(_ompSpawnTs, _ompReadyTs):F0} omp_pid={first.Controller.ProcessId}");
         SmokeExit();
         if (_args.BenchLatency > 0) await RunLatencyBenchAsync(_args.BenchLatency, _args.BenchOut ?? "latency.csv").ConfigureAwait(false);
-        if (_args.AutoPrompt is { } p) await first.Controller.PromptAsync(p, _cts.Token).ConfigureAwait(false);
+        if (_args.AutoPrompt is { } p)
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                // Startup continues off-thread, but admission and scope release belong to the UI thread.
+                using var admission = AdmitWorktreeChat(null);
+                if (admission is null) return;
+                await first.Controller.PromptAsync(p, _cts.Token);
+            });
     }
 
-    /// <summary>Ready: a new prompt. Running: queued as a follow-up. Needs text or an image.</summary>
-    private bool CanSend() => Phase is SessionPhase.Ready or SessionPhase.Running && HasContent && !IsSigningIn;
+    /// <summary>Ready: a new prompt. Running: queued as a follow-up. Needs text or an image. Not while the project's
+    /// repository is being updated from its remote (MainViewModel.GitBell.cs).</summary>
+    private bool CanSend() => !IsReadOnly && Phase is SessionPhase.Ready or SessionPhase.Running && HasContent && !IsSigningIn && !GitUpdatingHere;
 
     // Concurrent: while the first prompt's acknowledgement is still on its way the run is already shown as working,
     // and a message typed then must queue, not be ignored (seen on macOS CI).
     [RelayCommand(CanExecute = nameof(CanSend), AllowConcurrentExecutions = true)]
     private async Task SendAsync()
     {
+        if (IsReadOnly) return;
+        if (!PrepareComposerForSend()) return;
         // Terminal-only commands (/settings, /plan…) never reach omp: they would go to the model as a message
         if (HandleTerminalOnlyCommand(ComposerText)) return;
-        await SubmitAsync(TakeComposer);
+        await SubmitAsync(TakeComposer, fromComposer: true);
     }
 
-    /// <summary>Ready: a new prompt. Running: queued as a follow-up. <paramref name="take"/> takes the content (the
-    /// message box's, or the pet's message box's).</summary>
-    private async Task SubmitAsync(Func<(string Text, ImageAttachment[] Images)> take)
+    /// <summary>Ready: a new prompt. Running: follow-up text or a builtin deferred locally until idle.
+    /// <paramref name="take"/> takes the message box's or pet's content.</summary>
+    private async Task SubmitAsync(Func<(string Text, ImageAttachment[] Images)> take, bool fromComposer = false, DraftContent? recovery = null)
     {
-        // The chat it goes to: another one may be shown by the time omp answers
+        if (IsReadOnly) return;
+        using var admission = AdmitWorktreeChat(null);
+        if (admission is null) return;
         var open = _open;
-        (string Text, ImageAttachment[] Images) content = ("", []);
+        string? submission = null;
         try
         {
-            if (Phase == SessionPhase.Running)
+            var content = take();
+            submission = StageSubmission(open, content, fromComposer);
+            if (Phase == SessionPhase.Running || open.Controller.ShouldQueueSubmission(content.Text))
             {
-                content = take();
-                await open.Controller.QueueAsync(QueueKind.FollowUp, content.Text, content.Images, _cts.Token);
+                var accepted = await open.Controller.QueueAsync(QueueKind.FollowUp, content.Text, content.Images, _cts.Token, submission);
+                FinishSubmission(open, submission, accepted, recovery: recovery);
                 ApplyIfShown(open);
                 return;
             }
-            content = take();
-            // Reflect Running at once instead of waiting for the next pump tick.
             open.OptimisticAfterVersion = open.Controller.Snapshot().Version;
             Phase = SessionPhase.Running;
-            await open.Controller.PromptAsync(content.Text, content.Images, _cts.Token);
+            var sent = await open.Controller.PromptAsync(content.Text, content.Images, _cts.Token, submission);
+            FinishSubmission(open, submission, sent, waitForDelivery: sent, recovery: recovery);
             SettleOptimisticPhase(open);
         }
-        catch (OmpNotRunningException)
+        catch (Exception e) when (e is OmpNotRunningException or ArgumentException or IOException or UnauthorizedAccessException or OperationCanceledException)
         {
-            if (open == _open) PutBackUnsent(content);
+            if (submission is not null) FinishSubmission(open, submission, accepted: false, recovery: recovery);
+            if (open == _open) ComposerMessage = e.Message;
             SettleOptimisticPhase(open);
-        }
-        catch (OperationCanceledException) when (_cts.IsCancellationRequested)
-        {
-            // The window is closing: the request was abandoned on purpose.
         }
     }
 
@@ -274,6 +321,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         var open = _open;
         try
         {
+            FlushDrafts();
             if (Phase == SessionPhase.Aborting)
             {
                 await open.Controller.ForceStopAsync(_cts.Token);
@@ -304,30 +352,40 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private async Task AnswerDialogAsync(string id, DialogAnswer answer)
     {
         var open = _open;
+        var dialog = open == _open ? CurrentDialog : open.Dialog;
         try
         {
-            await open.Controller.AnswerDialogAsync(id, answer, _cts.Token);
+            open.InFlightReply = dialog?.ReplyForRecovery;
+            SaveDraft(open);
+            if (!string.IsNullOrEmpty(open.InFlightReply)) _draftStore.Flush();
+            var accepted = await open.Controller.AnswerDialogAsync(id, answer, _cts.Token);
+            dialog?.CompleteReply(accepted && answer is not DialogAnswer.Cancelled);
+            open.InFlightReply = null;
+            if (dialog is not null && !open.Controller.Snapshot().Dialogs.Any(d => d.Id == id)) RecoverReply(open, dialog);
+            SaveDraft(open);
+            if (dialog?.PreserveReply == true) _draftStore.Flush();
             ApplyIfShown(open);
         }
-        catch (OperationCanceledException) when (_cts.IsCancellationRequested)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or OmpNotRunningException or OperationCanceledException)
         {
-            // The window is closing: the request was abandoned on purpose.
+            open.InFlightReply = null;
+            dialog?.CompleteReply(false);
+            if (dialog is not null && !open.Controller.Snapshot().Dialogs.Any(d => d.Id == id)) RecoverReply(open, dialog);
+            SaveDraft(open);
+            if (open == _open) ComposerMessage = e.Message;
         }
     }
 
     [RelayCommand]
     private void OpenPendingUrl()
     {
-        if (PendingUrl is { } url && Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http")
+        if (PendingUrl is { } url && IsSafeBrowserUrl(url, out var uri))
             OpenUrlRequested?.Invoke(uri.AbsoluteUri);
         PendingUrl = null;
     }
 
     [RelayCommand]
-    private void CopyPendingUrl()
-    {
-        if (PendingUrl is { } url) CopyTextRequested?.Invoke(url);
-    }
+    private Task CopyPendingUrl() => PendingUrl is { } url ? CopyTextAsync(url, Loc.T("Link copied")) : Task.CompletedTask;
 
     [RelayCommand]
     private void DismissPendingUrl() => PendingUrl = null;
@@ -339,6 +397,23 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         // finish). The pump's may have been taken earlier: never let an older snapshot overwrite a newer one, or a
         // run that already ended shows as running again and stays so.
         if (open.Last is { } last && s.Version < last.Version) return;
+        if (_appliedReadOnly != IsReadOnly)
+        {
+            _appliedReadOnly = IsReadOnly;
+            OnPropertyChanged(nameof(IsReadOnly));
+            OnPropertyChanged(nameof(IsComposerLocked));
+            OnPropertyChanged(nameof(ProjectFolder));
+            OnPropertyChanged(nameof(ComposerHint));
+            NewShellCommand.NotifyCanExecuteChanged();
+            OpenOmpTuiCommand.NotifyCanExecuteChanged();
+            RemoveProjectCommand.NotifyCanExecuteChanged();
+            RenameSessionItemCommand.NotifyCanExecuteChanged();
+            TogglePinItemCommand.NotifyCanExecuteChanged();
+            DeleteSessionItemCommand.NotifyCanExecuteChanged();
+        }
+        if (IsReadOnly) OnPropertyChanged(nameof(ReadOnlyExplanation));
+        RecoverRuntimeInput(open, s);
+        ApplyLease(s); // MainViewModel.Lease.cs
         var perf = PerfLog.StartApply(); // OMBRA_PERF=1 only
         Interlocked.Increment(ref _uiApplies);
         var newConversation = s.TranscriptEpoch != open.TranscriptEpoch;
@@ -358,11 +433,18 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         var items = s.Items;
         var applied = open.AppliedItems;
         int added = 0, updated = 0;
+        var reordered = items.Count < applied.Count;
+        object? historyAnchor = reordered ? SaveScrollRequested?.Invoke() : null;
         // The first row whose change may change the step groups (StepGroups.cs)
         var regroupFrom = int.MaxValue;
         for (var i = 0; i < items.Count; i++)
         {
             var item = items[i];
+            if (!reordered && i < applied.Count && applied[i].Key != item.Key)
+            {
+                reordered = true;
+                historyAnchor = SaveScrollRequested?.Invoke();
+            }
             if (i < applied.Count && ReferenceEquals(applied[i], item)) continue;
             OfferPreviewUrls(item); // MainViewModel.Preview.cs: local URLs in new tool output become preview suggestions
             if (open.RowsByKey.TryGetValue(item.Key, out var row))
@@ -381,9 +463,14 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
                 if (StepGroups.Matters(row)) regroupFrom = Math.Min(regroupFrom, Rows.Count - 1);
             }
         }
+        if (reordered)
+        {
+            ReorderHistoryRows(items);
+            regroupFrom = 0;
+        }
         if (regroupFrom != int.MaxValue) StepGroups.Regroup(Rows, regroupFrom);
         open.AppliedItems = items;
-        var changed = newConversation || added + updated > 0;
+        var changed = newConversation || reordered || added + updated > 0;
         var debugAdded = IsDebugVisible && AppendDebugLines(s.DebugTail);
         perf?.Lap("rows");
 
@@ -392,6 +479,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         ApplyQueue(s);
         ApplyCommandsAndProgress(s);
         ApplyPanes(s); // MainViewModel.Panes.cs: the plan and the background tasks
+        ApplyPlanMode(s); // MainViewModel.PlanMode.cs: plan mode and the proposed plan's card
         perf?.Lap("panes");
 
         // A snapshot taken before our optimistic Send/Stop must not flip the phase back for a frame.
@@ -404,9 +492,11 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         var runChanged = IsRun(open.Last) != IsRun(s);
         HasError = s.Phase == SessionPhase.Faulted;
         open.Last = open.Seen = s;
+        ApplyHistory();
         ApplySessionInfo(s);
         ApplyModelInfo(s);
         ApplySessionArea(s); // MainViewModel.Session.cs: context ring, pin, session menu
+        ApplyBtwGoal(s); // MainViewModel.BtwGoal.cs: the goal bar and the BTW panel (after the phase: the BTW chip follows it)
         CheckAttention(open, s);
         WhenIdle(open, s); // MainViewModel.OpenSessions.cs: a restart that waited for the run to end
         if (s.Phase == SessionPhase.Ready) RememberProject(s.Cwd);
@@ -417,7 +507,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         ApplyPet(s); // MainViewModel.Pets.cs
         UpdateElapsedTimer();
         perf?.Lap("header");
-        if (changed || wasRunning != IsRunning) MarkTurnEnds(all: newConversation || added > 0 || wasRunning != IsRunning);
+        if (changed || wasRunning != IsRunning) MarkTurnEnds(all: newConversation || reordered || added > 0 || wasRunning != IsRunning);
+        if (reordered && !newConversation) RestoreScrollRequested?.Invoke(historyAnchor);
         perf?.Lap("turns");
         if (newConversation) ScrollToLatestRequested?.Invoke(); // a chat opens on its latest message
         if (changed) TranscriptChanged?.Invoke();
@@ -559,32 +650,46 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         if (row is not null) row.AwaitsApproval = true;
     }
 
+    // Project only at the display boundary; snapshots and protocol text remain unchanged.
+    private static string WidgetText(IReadOnlyList<ExtensionWidget> widgets) =>
+        Ombra.App.Controls.VisibleText.FromUntrustedOutput(string.Join("\n", widgets.SelectMany(w => w.Lines)));
+
     private void ApplyExtensionUi(SessionSnapshot s)
     {
         var first = s.Dialogs.Count > 0 ? s.Dialogs[0] : null;
-        if (first?.Id != CurrentDialog?.Id) CurrentDialog = first is null ? null : new DialogViewModel(first, AnswerDialogAsync, _approvalActions);
+        if (first?.Id != CurrentDialog?.Id)
+        {
+            var owner = _open;
+            CurrentDialog = first is null ? null : new DialogViewModel(first, AnswerDialogAsync, _approvalActions) { PreserveReply = s.SigningIn is null };
+            if (CurrentDialog is { } created) created.DraftChanged += () => SaveDraft(owner);
+        }
         if (CurrentDialog is { } d) d.QueueText = s.Dialogs.Count > 1 ? Loc.F("{0} of {1}", 1, s.Dialogs.Count) : "";
         UpdateDialogTimer();
 
         // Core copies the same widget records into every snapshot: the lines are joined again only when one changed
         if (_open.Last is not { } last || !s.Widgets.SequenceEqual(last.Widgets, ReferenceEqualityComparer.Instance))
         {
-            var widgets = string.Join("\n", s.Widgets.SelectMany(w => w.Lines));
+            var widgets = WidgetText(s.Widgets);
             if (widgets != WidgetsText) WidgetsText = widgets;
         }
 
         // Separate counters: both requests can land in one apply, in either order.
         if (s.EditorText is { } et && et.Seq > _open.LastEditorSeq)
         {
-            ComposerText = et.Text;
+            // An extension must not replace text typed while its request was in flight.
+            ComposerText = ComposerText.Length == 0 ? et.Text : ComposerText + "\n\n" + et.Text;
             _open.LastEditorSeq = et.Seq;
         }
         if (s.OpenUrl is { } ou && ou.Seq > _open.LastUrlSeq)
         {
-            PendingUrl = ou.Target;
-            PendingUrlInstructions = ou.Instructions ?? "";
             _open.LastUrlSeq = ou.Seq;
+            if (!OpenOwnSignInPage(ou))
+            {
+                PendingUrl = ou.Target;
+                PendingUrlInstructions = ou.Instructions ?? "";
+            }
         }
+        if (!s.McpAuthRequests.SequenceEqual(McpAuthRequests)) McpAuthRequests = s.McpAuthRequests;
         SigningIn = s.SigningIn;
     }
 
@@ -607,20 +712,27 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     private void UpdateStatus()
     {
         if (_open.Last is not { } s) return;
+        if (IsReadOnly)
+        {
+            IsWaitingOnUser = false;
+            StatusText = Loc.T("Read only");
+            StatusDetail = Ombra.App.Controls.VisibleText.FromUntrustedOutput(ReadOnlyExplanation);
+            return;
+        }
         // The shown phase (an optimistic Send or Stop sets it before omp confirms): a first frame said "Ready" while running
         if (Phase != SessionPhase.Running) IsWaitingOnUser = false;
-        StatusText = Phase switch
+        StatusText = Ombra.App.Controls.VisibleText.FromUntrustedOutput(Phase switch
         {
-            SessionPhase.Starting => Loc.T("Starting omp…"),
+            SessionPhase.Starting => IsOpeningSession ? Loc.T("Opening…") : Loc.T("Starting omp…"),
             SessionPhase.Ready => Loc.T("Ready"),
             SessionPhase.Running => $"{Activity(s)} · {Elapsed(s)}",
             SessionPhase.Aborting => Loc.T("Stopping…"),
             SessionPhase.Stopping => Loc.T("Shutting down…"),
             SessionPhase.Stopped => Loc.T("Stopped"),
-            SessionPhase.Faulted => Loc.T("omp stopped: ") + (s.LastError?.Split('\n')[0] ?? Loc.T("unknown error")),
+            SessionPhase.Faulted => Loc.T("omp stopped: ") + (FailureHeadline(s) ?? Loc.T("unknown error")),
             _ => Loc.T("Starting…"),
-        };
-        StatusDetail = string.Join("  ·  ", new[]
+        });
+        StatusDetail = Ombra.App.Controls.VisibleText.FromUntrustedOutput(string.Join("  ·  ", new[]
         {
             s.Model ?? Loc.T("no model"),
             s.ExtensionStatus.Count > 0 ? string.Join("  ", s.ExtensionStatus.Values) : null,
@@ -628,8 +740,12 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             Loc.F("{0:N0} events", s.FramesReceived),
             s.ContextPercent is { } pct ? Loc.F("context {0:0}%", pct) : null,
             s.LastFrameAt is { } at ? Loc.F("last {0:HH:mm:ss}", at.ToLocalTime()) : null,
-        }.Where(x => x is not null));
+        }.Where(x => x is not null)));
     }
+
+    /// <summary>Why omp stopped, in one line: the client's own words in the UI's language, omp's as omp wrote them.</summary>
+    internal static string? FailureHeadline(SessionSnapshot s) =>
+        (s.LastErrorText is { } text ? Loc.F(text.Format, text.Args) : s.LastError)?.Split('\n')[0];
 
     /// <summary>What the run is doing right now (Claude Code's spinner verb), from the newest rows of this turn.</summary>
     private string Activity(SessionSnapshot s)
@@ -649,10 +765,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>How long the run has gone, as Claude Code writes it: "4s", "1m 05s", "1h 02m".</summary>
-    private static string Elapsed(SessionSnapshot s)
+    internal static string Elapsed(SessionSnapshot s)
     {
-        var t = s.RunStartedAt is { } started ? DateTimeOffset.UtcNow - started : TimeSpan.Zero;
-        if (t < TimeSpan.Zero) t = TimeSpan.Zero;
+        var t = s.RunTime.Elapsed;
         return t.TotalHours >= 1 ? Loc.F("{0}h {1:00}m", (int)t.TotalHours, t.Minutes)
             : t.TotalMinutes >= 1 ? Loc.F("{0}m {1:00}s", (int)t.TotalMinutes, t.Seconds)
             : Loc.F("{0}s", t.Seconds);
@@ -662,6 +777,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     {
         UpdateStatus();
         UpdateElapsedTimer();
+        ApplyHistory();
     }
 
     /// <summary>Cosmetic once-a-second tick for the elapsed time while running. Nothing depends on it.</summary>
@@ -751,6 +867,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task DisposeCoreAsync()
     {
+        DisposePowerNotifications();
+        FlushDrafts();
+        if (_settings is not null) _settings.WarningsChanged -= OnSettingsWarningsChanged;
         // Timers and watchers first: none may fire into the window after it is gone (a pet's mood change on a closed
         // window made Avalonia lay it out and fail in Grid.ArrangeOverride)
         _elapsedTimer?.Stop();
@@ -758,6 +877,12 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _cardTimer?.Stop();
         _pets?.Shutdown();
         _files?.Shutdown();
+        try { await Documents.FlushRecoveryAsync(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            ComposerMessage = Loc.F("Editor recovery could not be saved: {0}", e.Message);
+            Console.Error.WriteLine(ComposerMessage);
+        }
         if (_tasksCreated) Tasks.Shutdown();
         _visible.TrySetResult();
         await DisposeDictationAsync();
@@ -765,9 +890,20 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         // at once (MainViewModel.OpenSessions.cs).
         _cts.Cancel();
         await _host.DisposeAsync();
+        EditorLanguageService.Dispose();
+        try { await Documents.DisposeAsync(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        { Console.Error.WriteLine("Editor recovery save failed; retained journal: " + e.Message); }
         var pumps = _opens.Values.Select(o => o.Pump).OfType<Task>().ToArray();
         try { await Task.WhenAll(pumps).WaitAsync(TimeSpan.FromSeconds(2)); }
         catch (Exception e) when (e is TimeoutException or OperationCanceledException) { }
+        foreach (var open in _opens.Values) { open.Controller.QueueCheckpoint = null; open.Controller.SubmissionDelivered = null; open.Controller.PrepareLaunch = null; }
+        try
+        {
+            if (_ownsDraftStore) _draftStore.Dispose();
+            else _draftStore.Flush(); // Program retains application admission until all desktop shutdown handlers finish.
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Console.Error.WriteLine("Draft save failed: " + e.Message); }
         _cts.Dispose();
         ApplyUpdateOnQuit();
     }

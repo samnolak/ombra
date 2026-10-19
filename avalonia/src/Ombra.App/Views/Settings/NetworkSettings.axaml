@@ -26,7 +26,7 @@
             </StackPanel>
           </Border>
         </Grid>
-        <SelectableTextBlock x:Name="NetworkTrustStatus" Text="{Binding StatusText}" TextWrapping="Wrap" FontSize="13" />
+        <SelectableTextBlock x:Name="NetworkTrustStatus" Text="{Binding StatusText}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
         <TextBlock x:Name="NetworkTrustUserSettings" Classes="muted" Text="{Binding UserSettingsText}" TextWrapping="Wrap"
                    IsVisible="{Binding HasUserSettingsText}" />
         <WrapPanel ItemSpacing="8" LineSpacing="8" IsVisible="{Binding !IsExplaining}">
@@ -39,22 +39,22 @@
           <StackPanel Spacing="10">
             <TextBlock Classes="ws-title" Text="{Binding ExplainTitle}" TextWrapping="Wrap" />
             <StackPanel Spacing="6" IsVisible="{Binding IsExplainingSystem}">
-              <TextBlock TextWrapping="Wrap" FontSize="13"
+              <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}"
                          Text="{loc:T '• omp’s engine will trust the certificate authorities that macOS trusts: those in your Keychain, with their trust settings. macOS evaluates them; nothing is copied or read by the app.'}" />
             </StackPanel>
             <StackPanel Spacing="6" IsVisible="{Binding IsExplainingPem}">
-              <TextBlock TextWrapping="Wrap" FontSize="13"
+              <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}"
                          Text="{loc:T '• omp’s engine will also trust the certificate authorities in a file you choose (PEM, .crt or .cer, from your IT department). The app checks it first: certificate authorities only, no private keys, not expired.'}" />
-              <TextBlock TextWrapping="Wrap" FontSize="13"
+              <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}"
                          Text="{loc:T '• The app keeps its own copy, readable only by you, and points NODE_EXTRA_CA_CERTS at it. Your file is not changed.'}" />
             </StackPanel>
-            <TextBlock TextWrapping="Wrap" FontSize="13" Text="{loc:T '• Certificate checks stay on: only connections signed by a trusted authority are accepted.'}" />
-            <TextBlock TextWrapping="Wrap" FontSize="13"
+            <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" Text="{loc:T '• Certificate checks stay on: only connections signed by a trusted authority are accepted.'}" />
+            <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}"
                        Text="{loc:T '• Applies to omp’s HTTPS connections and to the Bun and Node.js programs omp starts (they inherit its environment): every chat, and omp terminal tabs opened from now on.'}" />
-            <TextBlock TextWrapping="Wrap" FontSize="13" Text="{loc:T '• Unchanged: the system’s trust store, VPN, proxies and network routes.'}" />
-            <TextBlock TextWrapping="Wrap" FontSize="13"
+            <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" Text="{loc:T '• Unchanged: the system’s trust store, VPN, proxies and network routes.'}" />
+            <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}"
                        Text="{loc:T '• Not covered: the built-in browser, and tools with their own network stack, such as curl, git or Python.'}" />
-            <TextBlock TextWrapping="Wrap" FontSize="13" Classes="muted"
+            <TextBlock TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" Classes="muted"
                        Text="{loc:T 'Open chats restart omp to use it: idle ones now, working ones when their run ends.'}" />
 
             <!-- The file: chosen, then checked locally -->
@@ -65,12 +65,12 @@
                   <ctl:Icon Classes="ok-mark" Data="{StaticResource IconCheckCircle}" Size="16" IsVisible="{Binding ChosenFileOk}" />
                   <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" IsVisible="{Binding !ChosenFileOk}" />
                 </Panel>
-                <TextBlock x:Name="NetworkTrustFileCheck" Grid.Column="1" Text="{Binding ChosenFileText}" TextWrapping="Wrap" FontSize="13" />
+                <TextBlock x:Name="NetworkTrustFileCheck" Grid.Column="1" Text="{Binding ChosenFileText}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
               </Grid>
             </StackPanel>
 
             <Border Classes="ws-note warning" IsVisible="{Binding HasBlocker}">
-              <TextBlock x:Name="NetworkTrustBlocker" Text="{Binding Blocker}" TextWrapping="Wrap" FontSize="13" />
+              <TextBlock x:Name="NetworkTrustBlocker" Text="{Binding Blocker}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
             </Border>
             <WrapPanel ItemSpacing="8" LineSpacing="8">
               <Button x:Name="NetworkTrustEnable" Classes="md accent" Content="{loc:T 'Enable'}" Command="{Binding EnableCommand}" IsEnabled="{Binding CanEnable}" />
@@ -91,8 +91,8 @@
 
         <Border x:Name="NetworkTrustMessage" Classes="ws-note" Classes.ok="{Binding !MessageIsError}" Classes.error="{Binding MessageIsError}" IsVisible="{Binding HasMessage}">
           <StackPanel Spacing="4">
-            <TextBlock Text="{Binding Message}" TextWrapping="Wrap" FontSize="13" />
-            <TextBlock x:Name="NetworkTrustRestartNote" Classes="muted" Text="{Binding RestartNote}" TextWrapping="Wrap" FontSize="13" IsVisible="{Binding HasRestartNote}" />
+            <TextBlock Text="{Binding Message}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+            <TextBlock x:Name="NetworkTrustRestartNote" Classes="muted" Text="{Binding RestartNote}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" IsVisible="{Binding HasRestartNote}" />
           </StackPanel>
         </Border>
 
@@ -129,7 +129,7 @@
               </ctl:Icon.IsVisible>
             </ctl:Icon>
           </Panel>
-          <SelectableTextBlock x:Name="NetworkCheckResult" Grid.Column="1" Text="{Binding CheckResult}" TextWrapping="Wrap" FontSize="13" />
+          <SelectableTextBlock x:Name="NetworkCheckResult" Grid.Column="1" Text="{Binding CheckResult}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
         </Grid>
       </StackPanel>
     </Border>

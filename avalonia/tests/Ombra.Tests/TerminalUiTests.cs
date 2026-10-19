@@ -50,6 +50,11 @@ public sealed class TerminalUiTests
         var term = w.TerminalOf(tab)!;
         await Until(() => term.IsLive || tab.HasExited, "shell started");
         Assert.False(tab.HasExited, tab.Status);
+        var title = w.GetVisualDescendants().OfType<Border>().Single(b => b.Classes.Contains("tab"))
+            .GetVisualDescendants().OfType<TextBlock>().Single(t => t.Text == tab.Title);
+        Assert.Equal(160, title.MaxWidth);
+        Assert.Equal(Avalonia.Media.TextTrimming.CharacterEllipsis, title.TextTrimming);
+        Assert.Equal(tab.Title, ToolTip.GetTip(title));
         var pid = term.Pid;
 
         // cmd.exe and POSIX shells both print the result of this line.
@@ -185,7 +190,7 @@ public sealed class TerminalUiTests
         w.Close();
     }
 
-    [Fact]
+    [AvaloniaFact] // makes a MainViewModel: on the UI thread (see ConnectorsFlowTests)
     public void The_omp_tui_gets_the_users_environment_not_the_rpc_hints()
     {
         // Regression (review round 4): the TUI inherited NO_COLOR and a forced C.UTF-8 locale meant for the RPC process,

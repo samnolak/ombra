@@ -1,0 +1,56 @@
+<!-- The goal bar above the message box (goal mode, omp's /goal; MainViewModel.BtwGoal.cs): the objective omp works
+     toward across turns, its status, the time and tokens it took, and Pause/Resume, Edit, Clear. The editor sets a
+     new objective or changes this one. -->
+<UserControl xmlns:loc="using:Ombra.App.Localization"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
+             x:Class="Ombra.App.Views.Session.GoalBar"
+             x:DataType="vm:MainViewModel">
+  <Border x:Name="GoalCard" Classes="banner goal-bar" AutomationProperties.Name="{loc:T 'Goal'}">
+    <StackPanel Spacing="8">
+      <Grid ColumnDefinitions="Auto,*,Auto" IsVisible="{Binding !IsEditingGoal}">
+        <Panel Width="16" Height="16" VerticalAlignment="Top" Margin="0,2,10,0">
+          <Ellipse Classes="state-dot running" IsVisible="{Binding IsGoalActive}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          <ctl:Icon Data="{StaticResource IconCheckCircle}" Size="16" IsVisible="{Binding IsGoalComplete}" />
+          <ctl:Icon Data="{StaticResource IconPulse}" Size="16" IsVisible="{Binding IsGoalPaused}" TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
+        </Panel>
+        <StackPanel Grid.Column="1" Spacing="2">
+          <SelectableTextBlock x:Name="GoalObjectiveText" Text="{Binding GoalObjective}" FontWeight="Medium" TextWrapping="Wrap" MaxLines="3" />
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <TextBlock x:Name="GoalStatusLabel" Classes="tertiary" Text="{Binding GoalStatusText}" />
+            <TextBlock Classes="tertiary" Text="·" />
+            <TextBlock x:Name="GoalElapsedLabel" Classes="tertiary" Text="{Binding GoalElapsedText}"
+                       ToolTip.Tip="{loc:T 'Time spent on the goal while it was active'}" />
+            <TextBlock Classes="tertiary" Text="·" IsVisible="{Binding !!GoalUsageText.Length}" />
+            <TextBlock x:Name="GoalUsageLabel" Classes="tertiary" Text="{Binding GoalUsageText}" IsVisible="{Binding !!GoalUsageText.Length}" />
+          </StackPanel>
+        </StackPanel>
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Top" Margin="12,0,0,0">
+          <Button x:Name="GoalPauseButton" Classes="sm" Content="{loc:T 'Pause'}" Command="{Binding PauseGoalCommand}" IsVisible="{Binding IsGoalActive}"
+                  ToolTip.Tip="{loc:T 'Stop working toward the goal for now (it stays)'}" />
+          <Button x:Name="GoalResumeButton" Classes="sm accent" Content="{loc:T 'Resume'}" Command="{Binding ResumeGoalCommand}" IsVisible="{Binding IsGoalPaused}" />
+          <Button x:Name="GoalEditButton" Classes="icon" Command="{Binding StartGoalEditCommand}" IsVisible="{Binding !IsGoalComplete}"
+                  ToolTip.Tip="{loc:T 'Change the objective'}" AutomationProperties.Name="{loc:T 'Edit goal'}">
+            <ctl:Icon Data="{StaticResource IconPencil}" Size="16" />
+          </Button>
+          <Button x:Name="GoalClearButton" Classes="icon" Command="{Binding ClearGoalCommand}"
+                  ToolTip.Tip="{loc:T 'End the goal'}" AutomationProperties.Name="{loc:T 'Clear goal'}">
+            <ctl:Icon Data="{StaticResource IconClose}" Size="16" />
+          </Button>
+        </StackPanel>
+      </Grid>
+      <!-- The editor: a new objective, or this goal's changed -->
+      <StackPanel Spacing="8" IsVisible="{Binding IsEditingGoal}">
+        <TextBlock Classes="tertiary" Text="{loc:T 'Goal: omp keeps working toward it across turns until it is achieved'}" TextWrapping="Wrap" />
+        <TextBox x:Name="GoalDraftBox" Classes="sm" Text="{Binding GoalDraft}" PlaceholderText="{loc:T 'What should omp achieve?'}"
+                 AcceptsReturn="False" TextWrapping="Wrap" AutomationProperties.Name="{loc:T 'Goal objective'}" />
+        <WrapPanel ItemSpacing="8" LineSpacing="8">
+          <Button x:Name="GoalSaveButton" Classes="accent" Content="{loc:T 'Set goal'}" Command="{Binding SaveGoalCommand}" />
+          <Button x:Name="GoalCancelEditButton" Classes="flat" Content="{loc:T 'Cancel'}" Command="{Binding CancelGoalEditCommand}" />
+        </WrapPanel>
+      </StackPanel>
+    </StackPanel>
+  </Border>
+</UserControl>

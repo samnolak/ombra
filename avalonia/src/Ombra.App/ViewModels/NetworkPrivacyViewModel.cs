@@ -53,14 +53,12 @@ public sealed partial class NetworkPrivacyViewModel : ObservableObject
     public bool HasGateWarning => GateWarning.Length > 0;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(StrictStatus), nameof(StrictButtonLabel))]
+    [NotifyPropertyChangedFor(nameof(StrictStatus))]
     private bool _isStrict;
 
     public string StrictStatus => IsStrict
         ? Loc.T("On: omp and the tools it runs reach only the addresses below. Anything else is refused and listed here.")
         : Loc.T("Off: omp reaches the providers you added, and whatever its tools and your connectors need.");
-
-    public string StrictButtonLabel => IsStrict ? Loc.T("Turn off") : Loc.T("Turn on strict network privacy");
 
     public ObservableCollection<PrivacyProviderRow> Providers { get; } = [];
 
@@ -140,7 +138,11 @@ public sealed partial class NetworkPrivacyViewModel : ObservableObject
         Busy = true;
         try
         {
-            if (!Save(o => o with { StrictNetworkPrivacy = on ? true : null })) return;
+            if (!Save(o => o with { StrictNetworkPrivacy = on ? true : null }))
+            {
+                OnPropertyChanged(nameof(IsStrict)); // the switch flipped itself on click: put it back
+                return;
+            }
             IsStrict = on;
             Say((on ? Loc.T("Strict network privacy is on.") : Loc.T("Strict network privacy is off.")) + Loc.T(" Restarting omp…"));
             await _main.RestartEnginesAsync();

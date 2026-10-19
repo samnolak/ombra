@@ -1,4 +1,5 @@
 using Avalonia.Headless.XUnit;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore;
 
@@ -25,16 +26,16 @@ public sealed class WorkspaceSettingsTests
         await page.LoadAsync();
         Assert.False(page.Enabled);
         Assert.True(page.CanToggle);
-        Assert.Equal("Off in this session", page.SessionLabel);
+        Assert.Equal(Loc.T("Off in this session"), page.SessionLabel);
         Assert.Equal(CheckState.Ok, page.Requirements[0].State); // eval is active ("* eval")
 
         page.Enabled = true;
         await Until(() => page.SessionOn, "on in the session"); // from what /computer on printed
-        Assert.Equal("On in this session", page.SessionLabel);
+        Assert.Equal(Loc.T("On in this session"), page.SessionLabel);
         Assert.Contains("config set computer.enabled true --json", f.CliCalls());
         Assert.Equal(["/computer status", "/tools", "/computer on"], f.SentCommands());
         Assert.False(page.MessageIsError);
-        Assert.Contains("on", page.Message);
+        Assert.Contains(Loc.T("Computer use is on, saved for the next sessions too."), page.Message);
         await vm.DisposeAsync();
     }
 
@@ -52,12 +53,12 @@ public sealed class WorkspaceSettingsTests
         await page.LoadAsync();
         var eval = page.Requirements[0];
         Assert.Equal(CheckState.Failed, eval.State);
-        Assert.Equal("Turn on JavaScript eval", eval.ActionLabel);
+        Assert.Equal(Loc.T("Turn on JavaScript eval"), eval.ActionLabel);
 
         page.Enabled = true;
         await Until(() => page.HasMessage, "a message");
         Assert.True(page.MessageIsError);
-        Assert.Contains("eval tool, which is off here", page.Message);
+        Assert.Contains(Loc.T("Saved, but omp can't use the computer in this session: it runs through omp's eval tool, which is off here. "), page.Message);
 
         await page.RunCheckActionCommand.ExecuteAsync(eval);
         Assert.Contains("config set eval.js true --json", f.CliCalls());
@@ -75,7 +76,7 @@ public sealed class WorkspaceSettingsTests
         var page = vm.ComputerSettings;
         await page.LoadAsync();
         Assert.Equal("deny", page.Policy);
-        Assert.Contains("can't use the computer", page.PolicyDescription);
+        Assert.Contains(Loc.T("omp can't use the computer at all, even with computer use on."), page.PolicyDescription);
 
         await page.SetPolicyCommand.ExecuteAsync("prompt");
         Assert.Equal("prompt", page.Policy);
@@ -84,7 +85,13 @@ public sealed class WorkspaceSettingsTests
 
         await page.SetPolicyCommand.ExecuteAsync("default");
         Assert.Contains("""config set tools.approval {"bash":"allow"} --json""", f.CliCalls());
-        Assert.Contains("permission mode", page.PolicyDescription);
+        Assert.Contains(page.PolicyDescription, new[]
+        {
+            Loc.T("Follows the permission mode. Now “Bypass permissions”: omp clicks and types without asking."),
+            Loc.T("Follows the permission mode. Now “Ask permissions”: screenshots and reading run, clicks and typing ask first."),
+            Loc.T("Follows the permission mode. Now “Accept edits”: screenshots and reading run, clicks and typing ask first."),
+            Loc.T("Follows the permission mode by the message box: screenshots and reading run; clicks and typing ask first, unless it is “Bypass permissions”."),
+        });
         // Nothing of this goes over RPC: omp reads tools.approval when it starts
         Assert.DoesNotContain(f.SentCommands(), c => c.Contains("approval", StringComparison.Ordinal));
         await vm.DisposeAsync();
@@ -130,7 +137,7 @@ public sealed class WorkspaceSettingsTests
         Assert.Equal(CheckState.Ok, page.Requirements[0].State); // eval on in the settings
         page.Enabled = true;
         await Until(() => page.HasMessage, "a message");
-        Assert.Contains("this project's own omp settings", page.Message);
+        Assert.Contains(Loc.F("Saved, but this project's own omp settings (.omp/config.yml in the project) set {0} differently, and they win.", Loc.T("computer use")), page.Message);
         Assert.Empty(f.SentCommands());
         await vm.DisposeAsync();
     }
@@ -151,17 +158,17 @@ public sealed class WorkspaceSettingsTests
         Assert.True(page.IsRepo, page.RepoError);
         Assert.Equal("main", page.BranchLabel);
         Assert.False(page.IsLinkedWorktree);
-        Assert.Equal("3 files changed · 1 staged · 1 untracked", page.ChangesLabel);
-        Assert.Equal("1 commit ahead of origin/main", page.UpstreamLabel);
+        Assert.Equal(Loc.Plural(3, "{0} file changed", "{0} files changed") + " · " + Loc.F("{0} staged", 1) + " · " + Loc.F("{0} untracked", 1), page.ChangesLabel);
+        Assert.Equal(Loc.Plural(1, "{0} commit ahead of {1}", "{0} commits ahead of {1}", "origin/main"), page.UpstreamLabel);
         Assert.StartsWith("origin  ", page.RemoteLabel);
         Assert.Equal(2, page.Worktrees.Count);
         Assert.True(page.Worktrees[0].IsMain && page.Worktrees[0].IsCurrent);
         Assert.Equal("feature/x", page.Worktrees[1].Title);
         Assert.True(SessionCatalog.SamePath(worktree, page.Worktrees[1].Path));
         Assert.True(page.GhSignedIn);
-        Assert.Equal("Signed in as octocat", page.GhLabel);
+        Assert.Equal(Loc.F("Signed in as {0}", "octocat"), page.GhLabel);
         Assert.True(page.SettingsLoaded);
-        Assert.Contains("no separate environments", GitSettingsViewModel.EnvironmentsNote);
+        Assert.Contains(Loc.T("omp has no separate environments: a session works in a folder on this computer (the project, or one of its worktrees), and its SSH hosts are the other machines it can reach."), GitSettingsViewModel.EnvironmentsNote);
         await vm.DisposeAsync();
     }
 
@@ -180,17 +187,17 @@ public sealed class WorkspaceSettingsTests
 
         await row.AskRemoveCommand.ExecuteAsync(null);
         Assert.False(row.IsConfirming);
-        Assert.Equal("It has 1 uncommitted change. Commit or discard it first.", row.Problem);
+        Assert.Equal(Loc.Plural(1, "It has {0} uncommitted change. Commit or discard it first.", "It has {0} uncommitted changes. Commit or discard them first."), row.Problem);
         Assert.True(Directory.Exists(worktree));
 
         File.Delete(Path.Combine(worktree, "wip.txt"));
         await row.AskRemoveCommand.ExecuteAsync(null);
         Assert.True(row.IsConfirming);
-        Assert.Contains("Branch feature/x stays", row.ConfirmText);
+        Assert.Contains(Loc.F(" Branch {0} stays.", "feature/x"), row.ConfirmText);
         await row.ConfirmRemoveCommand.ExecuteAsync(null);
         Assert.False(Directory.Exists(worktree));
         Assert.Single(page.Worktrees);
-        Assert.Contains("Branch feature/x is still there", page.Message);
+        Assert.Contains(Loc.F(" Branch {0} is still there.", "feature/x"), page.Message);
         // git names the worktree with links resolved (macOS: /var is /private/var): the same folder either way
         Assert.Contains(f.ToolLog, c => c.StartsWith("git worktree remove ", StringComparison.Ordinal) && SessionCatalog.SamePath(c["git worktree remove ".Length..], worktree));
         await vm.DisposeAsync();
@@ -212,16 +219,17 @@ public sealed class WorkspaceSettingsTests
         page.StartNewWorktree();
         page.NewBranch = "bad name";
         Assert.True(page.HasNewBranchProblem);
+        Assert.Equal(Loc.T("Use letters, digits, / - _ . and no spaces (not ~ ^ : ? * [ \\ or ..)."), page.NewBranchProblem);
         await page.CreateWorktreeCommand.ExecuteAsync(null);
         Assert.DoesNotContain(f.SentCommands(), c => c.StartsWith("/wt", StringComparison.Ordinal));
 
         page.NewBranch = "feature/y";
-        Assert.Contains("branch feature/y", page.CreateHint);
+        Assert.Contains(Loc.F("omp makes branch {0} from the current commit in a new folder under {1}, copies your uncommitted changes there, and moves this conversation into it.", "feature/y", "\0").Split('\0')[0], page.CreateHint);
         await page.CreateWorktreeCommand.ExecuteAsync(null);
         Assert.Contains("/wt feature/y", f.SentCommands());
         Assert.False(page.IsCreating);
         Assert.False(page.MessageIsError, page.Message);
-        Assert.Contains("on branch feature/y", page.Message);
+        Assert.Contains(Loc.F("This conversation now works in {0}, on branch {1}.", "\0", "feature/y").Split('\0')[1], page.Message);
         // A later restart (recovery, approval mode) starts omp in the worktree, where omp moved the session
         Assert.Equal(worktree, f.LastSession!.CurrentLaunch.WorkingDirectory);
 
@@ -253,7 +261,7 @@ public sealed class WorkspaceSettingsTests
             Assert.Empty(page.Worktrees);
         }
         Assert.True(page.GhSignedOut);
-        Assert.Equal("Not signed in", page.GhLabel);
+        Assert.Equal(Loc.T("Not signed in"), page.GhLabel);
 
         page.GithubEnabled = true;
         await Until(() => page.NeedsRestart, "saved for the next start");
@@ -317,7 +325,7 @@ public sealed class WorkspaceSettingsTests
         Assert.True(vm.BranchChip.IsVisible);
 
         string? copied = null;
-        vm.CopyTextRequested += s => copied = s;
+        vm.CopyTextRequested += s => { copied = s; return Task.FromResult(true); };
         vm.BranchChip.CopyBranchCommand.Execute(null);
         Assert.Equal("main", copied);
 
@@ -330,20 +338,55 @@ public sealed class WorkspaceSettingsTests
         var inWorktree = await f.StartAsync(worktree);
         await Until(() => inWorktree.BranchChip.Branch == "feature/x", "worktree branch read");
         Assert.True(inWorktree.BranchChip.IsWorktree);
-        Assert.Contains("In a worktree of", inWorktree.BranchChip.Tooltip);
-        Assert.Contains("worktree", inWorktree.BranchChip.AccessibleName);
+        Assert.Contains(Loc.F("In a worktree of {0}", "\0").Split('\0')[0], inWorktree.BranchChip.Tooltip);
+        Assert.Contains(Loc.T(", worktree"), inWorktree.BranchChip.AccessibleName);
 
         // A detached HEAD shows the commit
         WorkspaceFixture.Git(worktree, "checkout", "-q", "--detach");
         await inWorktree.BranchChip.RefreshNowAsync();
         Assert.True(inWorktree.BranchChip.IsDetached);
-        Assert.Equal("Copy commit", inWorktree.BranchChip.CopyLabel);
+        Assert.Equal(Loc.T("Copy commit"), inWorktree.BranchChip.CopyLabel);
         await inWorktree.DisposeAsync();
 
         var outside = await f.StartAsync(TestProcesses.TempDir("ws-plain"));
         await outside.BranchChip.RefreshNowAsync();
         Assert.False(outside.BranchChip.IsVisible);
         await outside.DisposeAsync();
+    }
+
+    [AvaloniaFact]
+    public async Task A_branch_read_finishing_after_disposal_does_not_publish_a_late_result()
+    {
+        var fixture = new WorkspaceFixture();
+        var folder = TestProcesses.TempDir("ws-closing");
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finish = new TaskCompletionSource<ToolResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reads = 0;
+        await using var vm = new MainViewModel(fixture.Session(folder), new Ombra.App.AppArgs())
+        {
+            RunTool = (command, _) =>
+            {
+                if (!command.ToString().StartsWith("git rev-parse --show-toplevel", StringComparison.Ordinal))
+                    return Task.FromResult(new ToolResult(0, "late-branch\n", ""));
+                if (Interlocked.Increment(ref reads) == 2) entered.TrySetResult();
+                return finish.Task; // a tool result already in flight can finish after cancellation
+            },
+        };
+        var chip = vm.BranchChip; // its automatic read and the explicitly awaited read share the gate
+        var read = chip.RefreshNowAsync();
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await vm.DisposeAsync();
+            finish.SetResult(new ToolResult(0, $"{folder}\n{folder}/.git\n{folder}/.git\n", ""));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read);
+            Assert.Null(chip.Branch);
+            Assert.False(chip.IsVisible);
+        }
+        finally
+        {
+            finish.TrySetCanceled();
+        }
     }
 
     // ── SSH hosts ──
@@ -364,19 +407,19 @@ public sealed class WorkspaceSettingsTests
         await page.LoadAsync();
         Assert.False(page.ReadOnly);
         Assert.Equal(["pbox", "box"], page.Hosts.Select(h => h.Name));
-        Assert.Equal("This project", page.Hosts[0].ScopeLabel);
-        Assert.Equal("me@example.com:2222 · key ~/.ssh/box", page.Hosts[1].Detail);
+        Assert.Equal(Loc.T("This project"), page.Hosts[0].ScopeLabel);
+        Assert.Equal(Loc.F("{0} · key {1}", "me@example.com:2222", "~/.ssh/box"), page.Hosts[1].Detail);
 
         page.BeginAddCommand.Execute(null);
         page.NewName = "new box";
         await page.AddCommand.ExecuteAsync(null);
-        Assert.Contains("letters, digits", page.FormError);
+        Assert.Contains(Loc.T("The name can only use letters, digits, - _ and . (no spaces)."), page.FormError);
         page.NewName = "new-box";
         page.NewHost = "build.example.com";
         page.NewUser = "ci";
         page.NewPort = "70000";
         await page.AddCommand.ExecuteAsync(null);
-        Assert.Contains("1 to 65535", page.FormError);
+        Assert.Contains(Loc.T("The port is a number from 1 to 65535."), page.FormError);
         page.NewPort = "2200";
         page.NewKey = "/keys/my key";
         await page.AddCommand.ExecuteAsync(null);
@@ -388,7 +431,7 @@ public sealed class WorkspaceSettingsTests
         Assert.True(pbox.IsConfirming);
         await pbox.ConfirmRemoveCommand.ExecuteAsync(null);
         Assert.Contains("/ssh remove pbox --scope project", f.SentCommands());
-        Assert.Equal("Removed pbox.", page.Message);
+        Assert.Equal(Loc.F("Removed {0}.", "pbox"), page.Message);
         await vm.DisposeAsync();
     }
 
@@ -414,16 +457,16 @@ public sealed class WorkspaceSettingsTests
         await page.LoadAsync();
         await page.Hosts[0].TestCommand.ExecuteAsync(null);
         Assert.True(page.Hosts[0].TestOk);
-        Assert.StartsWith("Connected in", page.Hosts[0].TestResult);
+        Assert.StartsWith(Loc.F("Connected{0} in {1} ms.", "", "\0").Split('\0')[0], page.Hosts[0].TestResult);
         await page.Hosts[1].TestCommand.ExecuteAsync(null);
         Assert.False(page.Hosts[1].TestOk);
         Assert.Contains("Permission denied (publickey,password).", page.Hosts[1].TestResult);
-        Assert.Contains("keys only", page.Hosts[1].TestResult);
+        Assert.Contains(Loc.T("omp signs in with keys only (no passwords): put your public key on the server, or choose the key file."), page.Hosts[1].TestResult);
 
         // No ssh client at all
         f.Tools.Clear();
         await page.Hosts[0].TestCommand.ExecuteAsync(null);
-        Assert.Contains("ssh was not found", page.Hosts[0].TestResult);
+        Assert.Contains(Loc.T("ssh was not found on this computer. omp needs the OpenSSH client too."), page.Hosts[0].TestResult);
         await vm.DisposeAsync();
     }
 

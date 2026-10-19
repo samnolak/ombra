@@ -81,7 +81,7 @@ internal sealed class WorkspaceFixture
             var spec = TestProcesses.Fake(scenario);
             return spec with
             {
-                Arguments = req.ResumeSessionFile is { } r ? [.. spec.Arguments, "--resume", r] : spec.Arguments,
+                SessionArguments = req.ResumeSessionFile is { } r ? [.. spec.SessionArguments, "--resume", r] : spec.SessionArguments,
                 WorkingDirectory = req.WorkingDirectory,
                 Environment = new Dictionary<string, string?>
                 {

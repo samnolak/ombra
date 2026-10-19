@@ -5,6 +5,7 @@
              xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
              x:Class="Ombra.App.Views.Session.ProviderUsageGroupView"
              x:DataType="vm:ProviderUsageGroupViewModel">
   <UserControl.Styles>
@@ -35,6 +36,10 @@
             <ProgressBar Classes="usage-bar" Classes.high="{Binding IsHigh}" Classes.full="{Binding IsFull}"
                          Value="{Binding Value}" Maximum="100" IsVisible="{Binding HasBar}" />
             <TextBlock Classes="tertiary" Text="{Binding Resets}" IsVisible="{Binding HasResets}" />
+            <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding ShowAdvice}">
+              <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
+              <TextBlock Grid.Column="1" Classes="warning" TextWrapping="Wrap" Text="{Binding Advice}" />
+            </Grid>
           </StackPanel>
         </DataTemplate>
       </ItemsControl.ItemTemplate>
@@ -52,7 +57,7 @@
         <TextBlock Classes="muted" Text="{Binding ConfirmText}" TextWrapping="Wrap" />
         <StackPanel Orientation="Horizontal" Spacing="8">
           <Button x:Name="SpendResetButton" Classes="accent" Content="{loc:T 'Use reset'}" Command="{Binding SpendResetCommand}" />
-          <Button Content="{loc:T 'Cancel'}" Command="{Binding CancelSpendResetCommand}" />
+          <Button Classes="outline" Content="{loc:T 'Cancel'}" Command="{Binding CancelSpendResetCommand}" />
         </StackPanel>
       </StackPanel>
     </StackPanel>

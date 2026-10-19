@@ -17,17 +17,20 @@ public sealed record BunBuild(string Key, string Integrity, string Exe)
 }
 
 /// <summary>
-/// The pinned runtime pack (<c>runtime/packs/omp-18.8.0-bun-1.4.2</c>): Original OMP Core 18.8.0 from its published npm
-/// package, run by Bun 1.4.2. Nothing floats: Bun is checked against the npm registry integrity recorded here, and omp
-/// with every dependency comes from the pack's lockfile (<c>bun install --frozen-lockfile</c>, which checks each
-/// package's integrity). No lifecycle scripts run; omp is not patched.
+/// The complete owned Ombra engine runs on pinned Bun with integrity-locked npm dependencies.
+/// Canonical sources are embedded byte-for-byte and installed beside the unmodified npm tree.
 /// </summary>
-public static class RuntimePack
+public static partial class RuntimePack
 {
-    public const string Name = "omp-18.8.0-bun-1.4.2";
+    public const string Name = "ombra-engine-18.8.0-bun-1.4.2-v1";
+    public const string SourceDirectoryName = "ombra-engine-18.8.0-bun-1.4.2-v1";
+    public const string SourceIdentity = "ombra-engine-v1";
     public const string OmpVersion = "18.8.0";
+    public const string OmpIntegrity = "sha512-i0m5z+sljos+Fb7GwKhtXimAbvZ3EOiulyN9RiDeVy0yl1UtNlErgp2O376EurT263rD7C/CAbVOp9EyK7saOQ==";
     public const string BunVersion = "1.4.2";
-    public const string CliEntry = "node_modules/@oh-my-pi/pi-coding-agent/src/cli.ts";
+    public const string CliEntry = "engine/coding-agent/src/cli.ts";
+    public const string HostEntry = "engine/host.ts";
+    public const string HistoricalCliEntry = "node_modules/@oh-my-pi/pi-coding-agent/src/cli.ts";
     public const string DefaultRegistry = "https://registry.npmjs.org";
     public static readonly IReadOnlyList<string> PackFiles = ["package.json", "bun.lock", "bunfig.toml"];
 
@@ -45,7 +48,7 @@ public static class RuntimePack
         new BunBuild("windows-aarch64", "sha512-8EJ1ST7339WJE3poPW5nBgVW/lWf9HBz4W27ZUNhburKmcBLOByPyE6DP9fHD8FQGm5c+ilUN2hX1mrW0jxq9Q==", "bin/bun.exe"),
     }.ToDictionary(b => b.Key);
 
-    /// <summary>A pack file (package.json, bun.lock, bunfig.toml) as built into the client from <c>runtime/packs</c>.</summary>
+    /// <summary>An integrity-pinned install input or complete canonical engine source embedded in the client.</summary>
     public static Stream OpenPackFile(string name) =>
         typeof(RuntimePack).Assembly.GetManifestResourceStream("runtime-pack/" + name)
         ?? throw new FileNotFoundException("runtime pack file not built into the client", name);
@@ -56,7 +59,7 @@ public static class RuntimePack
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify), "Ombra", "runtimes");
 }
 
-/// <summary>An installed pack: omp is started as <c>bun --no-install cli.ts …</c>.</summary>
+/// <summary>An installed owned engine; standalone CLI is reserved for explicit management/terminal actions.</summary>
 public sealed record InstalledRuntime(string Directory, string Bun, string Cli, string Platform)
 {
     /// <summary>
@@ -68,6 +71,7 @@ public sealed record InstalledRuntime(string Directory, string Bun, string Cli, 
 
     /// <summary>The pack's own <c>bunfig.toml</c>, next to its <c>package.json</c>.</summary>
     public string BunConfig => Path.Combine(Directory, "omp", "bunfig.toml");
+    public string Host => Path.Combine(Directory, "omp", RuntimePack.HostEntry.Replace('/', Path.DirectorySeparatorChar));
 
     /// <summary>The settings with this runtime filled in where the user left the command empty.</summary>
     public OmpRuntimeOptions ApplyTo(OmpRuntimeOptions o)
@@ -78,7 +82,13 @@ public sealed record InstalledRuntime(string Directory, string Bun, string Cli, 
         // Bun reads bunfig.toml (preload scripts) and .env from its working directory, which is the opened project:
         // a folder could run code in omp or redirect its provider traffic. Bun gets the pack's config and no env file;
         // omp still loads its own .env from the profile.
-        return o with { Command = Bun, PrefixArgs = ["--config=" + BunConfig, "--no-env-file", "--no-install", Cli], Environment = env };
+        return o with
+        {
+            Command = Bun,
+            PrefixArgs = ["--config=" + BunConfig, "--no-env-file", "--no-install", Host],
+            ManagementPrefixArgs = ["--config=" + BunConfig, "--no-env-file", "--no-install", Cli],
+            Environment = env,
+        };
     }
 }
 
@@ -87,12 +97,12 @@ public sealed record PreviousRuntime(InstalledRuntime Runtime, string Pack, stri
 
 public sealed record RuntimeInstallProgress(string Stage, long Done = 0, long Total = 0);
 
-/// <summary>Result of a child process the installer runs (bun install, omp --version).</summary>
+/// <summary>Result of a child process the installer runs (bun install, owned host --self-check).</summary>
 public sealed record ProcessResult(int ExitCode, string Output);
 
 /// <summary>
 /// Installs <see cref="RuntimePack"/> under <c>root/&lt;pack name&gt;</c>. Everything happens in a staging folder that
-/// replaces the target only once omp answered with the pinned version; a failure or cancel leaves the previous
+/// replaces the target only once the owned host imports successfully and reports its pinned protocol/version; a failure or cancel leaves the previous
 /// state as it was and no partial files. Only folders this installer created are ever removed.
 /// </summary>
 public sealed class RuntimeInstaller
@@ -135,9 +145,13 @@ public sealed class RuntimeInstaller
             if (!File.Exists(marker)) return null;
             using var doc = JsonDocument.Parse(File.ReadAllText(marker));
             if (doc.RootElement.GetProperty("pack").GetString() != RuntimePack.Name) return null;
+            if (doc.RootElement.GetProperty("packManifestSha256").GetString() != RuntimePack.ManifestSha256 ||
+                doc.RootElement.GetProperty("sourceArtifact").GetProperty("identity").GetString() != RuntimePack.SourceIdentity ||
+                doc.RootElement.GetProperty("sourceArtifact").GetProperty("sha256").GetString() != RuntimePack.SourceSha256)
+                return null;
             var platform = doc.RootElement.GetProperty("platform").GetString() ?? "";
             var rt = Layout(TargetDirectory, platform);
-            return rt is not null && File.Exists(rt.Bun) && File.Exists(rt.Cli) ? rt : null;
+            return rt is not null && File.Exists(rt.Bun) && File.Exists(rt.Cli) && File.Exists(rt.Host) ? rt : null;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException)
         {
@@ -146,10 +160,19 @@ public sealed class RuntimeInstaller
     }
 
     /// <summary>
-    /// A pack an earlier version of the client installed (another pack name): after an update that brings a new omp,
-    /// omp keeps running from it until the new pack is installed. The newest one when there are several.
+    /// A pack an earlier version of the client installed (another pack name), retained for migration and cleanup.
+    /// It is not a compatible fallback: this client requires the shared engine protocol.
     /// </summary>
     public PreviousRuntime? FindPrevious() => Previous().OrderByDescending(p => p.InstalledAt).FirstOrDefault();
+
+    /// <summary>Only the owned pack is a default runtime. A missing pack enters the normal install recovery path,
+    /// never an unpatched earlier pack or an arbitrary omp found on PATH. Explicit commands remain user-owned.</summary>
+    public OmpRuntimeOptions ApplyDefaultTo(OmpRuntimeOptions options)
+    {
+        if (options.Command is not null || options.PrefixArgs.Length > 0) return options;
+        return FindInstalled() is { } runtime ? runtime.ApplyTo(options)
+            : options with { Command = Path.Combine(TargetDirectory, "install-required") };
+    }
 
     /// <summary>Removes the packs earlier versions installed, once this version's pack is installed; returns how many.</summary>
     public int RemovePrevious()
@@ -182,7 +205,7 @@ public sealed class RuntimeInstaller
                 using var doc = JsonDocument.Parse(File.ReadAllText(marker));
                 var root = doc.RootElement;
                 if (root.GetProperty("pack").GetString() != name) continue;
-                var rt = Layout(dir, root.GetProperty("platform").GetString() ?? "");
+                var rt = Layout(dir, root.GetProperty("platform").GetString() ?? "", historical: true);
                 if (rt is null || !File.Exists(rt.Bun) || !File.Exists(rt.Cli)) continue;
                 var at = root.TryGetProperty("installedAt", out var t) && t.TryGetDateTimeOffset(out var d) ? d : DateTimeOffset.MinValue;
                 found = new PreviousRuntime(rt, name, root.TryGetProperty("omp", out var o) ? o.GetString() ?? "?" : "?", at);
@@ -192,13 +215,36 @@ public sealed class RuntimeInstaller
         }
     }
 
-    private InstalledRuntime? Layout(string dir, string platform) =>
+    private InstalledRuntime? Layout(string dir, string platform, bool historical = false) =>
         _builds.TryGetValue(platform, out var b)
-            ? new InstalledRuntime(dir, Path.Combine(dir, "bun", Path.GetFileName(b.Exe)), Path.Combine(dir, "omp", RuntimePack.CliEntry.Replace('/', Path.DirectorySeparatorChar)), platform)
+            ? new InstalledRuntime(dir, Path.Combine(dir, "bun", Path.GetFileName(b.Exe)),
+                Path.Combine(dir, "omp", (historical && !File.Exists(Path.Combine(dir, "omp", RuntimePack.CliEntry))
+                    ? RuntimePack.HistoricalCliEntry : RuntimePack.CliEntry).Replace('/', Path.DirectorySeparatorChar)), platform)
             : null;
 
+    /// <summary>Ownership is the pack marker, not completeness; an owned incomplete pack can be repaired.</summary>
+    private bool ValidateInstallTarget()
+    {
+        FileAttributes attributes;
+        try { attributes = File.GetAttributes(TargetDirectory); }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
+        if ((attributes & FileAttributes.ReparsePoint) != 0 || (attributes & FileAttributes.Directory) == 0)
+            throw new IOException(Loc.F("Cannot replace runtime target '{0}': it is not an owned directory.", TargetDirectory));
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(TargetDirectory, Marker)));
+            if (doc.RootElement.GetProperty("pack").GetString() == RuntimePack.Name) return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            throw new IOException(Loc.F("Cannot replace runtime target '{0}': its ownership marker is missing or invalid.", TargetDirectory), e);
+        }
+        throw new IOException(Loc.F("Cannot replace runtime target '{0}': its ownership marker names another pack.", TargetDirectory));
+    }
+
     /// <exception cref="NotSupportedException">No pinned Bun build for this platform.</exception>
-    /// <exception cref="InvalidDataException">The download did not match its pinned integrity, or omp did not report the pinned version.</exception>
+    /// <exception cref="InvalidDataException">An integrity check failed, or the owned host did not report its pinned protocol/version.</exception>
     /// <exception cref="IOException">bun install failed (the message carries the end of its output).</exception>
     public async Task<InstalledRuntime> InstallAsync(IProgress<RuntimeInstallProgress>? progress, CancellationToken ct)
     {
@@ -210,6 +256,7 @@ public sealed class RuntimeInstaller
         try { installLock = new FileStream(Path.Combine(Root, ".install.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
         catch (IOException) { throw new IOException(Loc.T("Another installation of the omp runtime is running; try again when it has finished.")); }
         using var _ = installLock;
+        ValidateInstallTarget();
         // Leftovers of an earlier attempt that could not be removed then (a file still in use on Windows) — only
         // folders this installer made (they carry its marker; the root may be a folder the user shares with other things).
         foreach (var stale in Directory.EnumerateDirectories(Root)
@@ -235,7 +282,10 @@ public sealed class RuntimeInstaller
             }
             var cache = Path.Combine(staging, "cache");
             var install = new ProcessStartInfo(layout.Bun) { WorkingDirectory = ompDir };
-            foreach (var a in new[] { "install", "--frozen-lockfile", "--ignore-scripts", "--no-progress" }) install.ArgumentList.Add(a);
+            // Bun's default 48 concurrent requests stalled on the large ONNX tarballs during cold installs;
+            // the same pinned inputs completed with four. Bound transfer fan-out, not integrity or the deadline.
+            foreach (var a in new[] { "install", "--frozen-lockfile", "--ignore-scripts", "--no-progress", "--network-concurrency=4" })
+                install.ArgumentList.Add(a);
             install.Environment["BUN_INSTALL_CACHE_DIR"] = cache; // no writes to the user's global Bun cache
             install.Environment[InstalledRuntime.TranspilerCacheVariable] = InstalledRuntime.TranspilerCacheIn(staging);
             install.Environment["DO_NOT_TRACK"] = "1";
@@ -245,14 +295,25 @@ public sealed class RuntimeInstaller
                 throw new IOException($"bun install failed (exit {result.ExitCode}):\n{Tail(result.Output, 12)}");
             TryDelete(cache);
 
-            progress?.Report(new RuntimeInstallProgress(Loc.T("Checking omp")));
+            progress?.Report(new RuntimeInstallProgress(Loc.T("Installing verified owned engine")));
+            var sourceArtifact = await RuntimeSourceArtifact.ApplyAsync(staging, ct).ConfigureAwait(false);
+
+            progress?.Report(new RuntimeInstallProgress(Loc.T("Checking owned engine")));
             var version = new ProcessStartInfo(layout.Bun) { WorkingDirectory = ompDir };
-            foreach (var a in new[] { "--no-install", layout.Cli, "--version" }) version.ArgumentList.Add(a);
-            // Running omp fills Bun's transpiler cache: in the pack (it moves with it), never in ~/.bun.
+            foreach (var a in new[] { "--config=" + layout.BunConfig, "--no-env-file", "--no-install", layout.Host, "--self-check" })
+                version.ArgumentList.Add(a);
             version.Environment[InstalledRuntime.TranspilerCacheVariable] = InstalledRuntime.TranspilerCacheIn(staging);
             var v = await Run(version, TimeSpan.FromMinutes(2), ct).ConfigureAwait(false);
-            if (v.ExitCode != 0 || !v.Output.Contains(RuntimePack.OmpVersion, StringComparison.Ordinal))
-                throw new InvalidDataException($"omp did not report version {RuntimePack.OmpVersion} (exit {v.ExitCode}):\n{Tail(v.Output, 6)}");
+            var valid = false;
+            try
+            {
+                using var check = JsonDocument.Parse(v.Output.Trim());
+                valid = check.RootElement.GetProperty("engineProtocolVersion").GetInt32() == 1 &&
+                    check.RootElement.GetProperty("ompVersion").GetString() == RuntimePack.OmpVersion;
+            }
+            catch (Exception e) when (e is JsonException or KeyNotFoundException or InvalidOperationException or FormatException) { }
+            if (v.ExitCode != 0 || !valid)
+                throw new InvalidDataException($"Owned engine did not report protocol 1 / omp {RuntimePack.OmpVersion} (exit {v.ExitCode}):\n{Tail(v.Output, 6)}");
 
             var marker = JsonSerializer.Serialize(new
             {
@@ -262,15 +323,18 @@ public sealed class RuntimeInstaller
                 platform = Platform,
                 bunPackage = build.Package,
                 bunIntegrity = build.Integrity,
+                packManifestSha256 = RuntimePack.ManifestSha256,
+                sourceArtifact,
+                ompIntegrity = RuntimePack.OmpIntegrity,
                 installedAt = DateTimeOffset.UtcNow,
             }, new JsonSerializerOptions { WriteIndented = true });
             await File.WriteAllTextAsync(Path.Combine(staging, Marker), marker, ct).ConfigureAwait(false);
             ct.ThrowIfCancellationRequested();
 
-            // Swap in: the old install (ours, by construction of TargetDirectory) moves aside first, so a failed move
-            // can be undone, and is deleted only once the new one is in place.
+            // Recheck ownership after staging, before moving any existing target. Keep the old install
+            // until the new one is in place, so a failed move can be undone.
             string? old = null;
-            if (Directory.Exists(TargetDirectory))
+            if (ValidateInstallTarget())
             {
                 old = Path.Combine(Root, ".old-" + Guid.NewGuid().ToString("N")[..8]);
                 Directory.Move(TargetDirectory, old);
@@ -322,13 +386,13 @@ public sealed class RuntimeInstaller
             {
                 stall.CancelAfter(StallTimeout);
                 written += n;
-                if (written > MaxTarballBytes) throw new InvalidDataException($"{build.Package} is larger than {MaxTarballBytes >> 20} MB");
+                if (written > MaxTarballBytes) throw new InvalidDataException(Loc.F("{0} is larger than {1} MB", build.Package, MaxTarballBytes >> 20));
                 sha.AppendData(buffer, 0, n);
                 await output.WriteAsync(buffer.AsMemory(0, n), ct).ConfigureAwait(false);
                 progress?.Report(new RuntimeInstallProgress(stage, written, total));
             }
             if (!CryptographicOperations.FixedTimeEquals(sha.GetHashAndReset(), expected))
-                throw new InvalidDataException($"{build.Package}@{RuntimePack.BunVersion} does not match its pinned integrity.");
+                throw new InvalidDataException(Loc.F("{0}@{1} does not match its pinned integrity.", build.Package, RuntimePack.BunVersion));
         }
         catch (Exception e) when (e is OperationCanceledException or IOException && stall.IsCancellationRequested && !ct.IsCancellationRequested)
         {

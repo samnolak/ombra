@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Ombra.ClientCore;
@@ -13,37 +16,120 @@ public enum ApprovalScope
     Always,
 }
 
+/// <summary>What a tool call is allowed to do: read, change files, or run programs (the engine's tool tier).</summary>
+public enum ApprovalRisk { Read, Write, Exec }
+
 /// <summary>
-/// What one approval request asks for, read from omp's prompt (tools/approval.ts formatApprovalPrompt):
-/// "Allow tool: bash", then optional "Origin: …" / "Reason: …" lines, then the tool's details (bash: "Command: …").
+/// The engine's typed approval request (<c>extension_ui_request.approval</c>, tools/approval.ts <c>ToolApprovalRequest</c>).
+/// An omp without structured approval sends only text: then there is no request, the card offers Allow and Deny, and no
+/// rule may answer for the user.
 /// </summary>
-/// <param name="Command">bash's command (everything after "Command: "); null for other tools.</param>
-/// <param name="Truncated">omp shortened the command for the prompt ("[…Nch elided…]"): what runs is not all shown.</param>
-/// <param name="SafetyChecks">The provider asked for its own safety checks: only a person may confirm those.</param>
+/// <param name="Command">bash's complete command; null for other tools, and for a command too long to send whole.</param>
+/// <param name="Truncated">A bash command the engine did not send whole: what runs is not all shown.</param>
+/// <param name="SafetyChecks">The answer may not be kept at all (provider safety checks, or the engine offers only "once").</param>
 public sealed record ApprovalRequest(string Tool, string? Command, bool Truncated, bool SafetyChecks)
 {
-    private const string ToolPrefix = "Allow tool: ";
-    private const string CommandLabel = "Command: ";
-    // truncateForPrompt's mark at the end of a shortened value
-    private static readonly Regex Elided = new(@"\[…\d+ch elided…\]", RegexOptions.CultureInvariant);
+    public string? ToolCallId { get; init; }
+    public ApprovalRisk Risk { get; init; } = ApprovalRisk.Exec;
+    /// <summary>The tool's own reason for asking.</summary>
+    public string? Reason { get; init; }
+    /// <summary>A tool of an MCP server; <see cref="McpServer"/> names it when the engine does.</summary>
+    public bool FromMcp { get; init; }
+    public string? McpServer { get; init; }
+    /// <summary>The tool's argument summary lines ("Command: …", "File: …"), bounded by the engine.</summary>
+    public IReadOnlyList<string> Details { get; init; } = [];
+    /// <summary>The provider's safety checks, which only a person may confirm.</summary>
+    public IReadOnlyList<string> SafetyCheckLines { get; init; } = [];
+    /// <summary>The engine offers "session": a rule kept for this session may answer it.</summary>
+    public bool AllowsSession { get; init; } = true;
+    /// <summary>The engine offers "always": a saved rule (this project, every project) may answer it.</summary>
+    public bool AllowsSaved { get; init; } = true;
+    /// <summary>bash's <c>cwd</c> argument as the model gave it: the command runs there instead of the session's folder.</summary>
+    public string? Cwd { get; init; }
 
-    public static ApprovalRequest? From(PendingDialog dialog)
+    /// <summary>
+    /// Whether a "don't ask again" rule may answer this request or be kept from it. Never with provider safety checks;
+    /// never when the engine insists a person answers (a critical command, a bash pattern with <c>approval: prompt</c> —
+    /// also from an engine that still offered every scope for those); never for a command run in another folder, whose
+    /// scripts and build files the rule's folder never vouched for.
+    /// </summary>
+    public bool RulesMayAnswer =>
+        !SafetyChecks
+        && Reason?.StartsWith("Critical pattern", StringComparison.Ordinal) != true
+        && Reason?.StartsWith("Prompt required by bash pattern", StringComparison.Ordinal) != true
+        && Cwd is null or "." or "./";
+
+    /// <summary>A rule kept for <paramref name="scope"/> may answer this request (the engine's offered scopes).</summary>
+    public bool Allows(ApprovalScope scope) => RulesMayAnswer && (scope == ApprovalScope.Session ? AllowsSession : AllowsSaved);
+
+    public static ApprovalRequest? From(PendingDialog dialog) => dialog.Kind == DialogKind.Approval ? dialog.Approval : null;
+
+    /// <summary>Reads the wire object; null when it is not a usable request (then the dialog is treated as text only).</summary>
+    public static ApprovalRequest? Parse(JsonElement approval)
     {
-        if (dialog.Kind != DialogKind.Approval || !dialog.Headline.StartsWith(ToolPrefix, StringComparison.Ordinal)) return null;
-        var tool = dialog.Headline[ToolPrefix.Length..].Trim();
-        if (tool.Length == 0) return null;
-        var details = dialog.Details;
-        var safety = details.Contains("Provider safety checks:", StringComparison.Ordinal);
-        string? command = null;
-        if (tool == "bash")
+        if (approval.ValueKind != JsonValueKind.Object || Text(approval, "tool") is not { Length: > 0 } tool) return null;
+        var risk = Text(approval, "risk") switch { "read" => ApprovalRisk.Read, "write" => ApprovalRisk.Write, "exec" => ApprovalRisk.Exec, _ => (ApprovalRisk?)null };
+        if (risk is null) return null;
+        var scopes = Strings(approval, "scopes");
+        var checks = Strings(approval, "safetyChecks");
+        var command = tool == "bash" ? Text(approval, "command") : null;
+        return new ApprovalRequest(tool, command is { Length: > 0 } ? command : null, tool == "bash" && command is null,
+            checks.Count > 0 || !scopes.Contains("session") && !scopes.Contains("always"))
         {
-            // bash.ts formatApprovalDetails: one "Command: …" detail, after omp's own Origin/Reason lines
-            var at = details.StartsWith(CommandLabel, StringComparison.Ordinal) ? 0
-                : details.IndexOf("\n" + CommandLabel, StringComparison.Ordinal) is var i and >= 0 ? i + 1 : -1;
-            if (at >= 0) command = details[(at + CommandLabel.Length)..].Trim();
+            ToolCallId = Text(approval, "toolCallId"),
+            Risk = risk.Value,
+            Reason = Text(approval, "reason"),
+            FromMcp = Text(approval, "origin") == "mcp",
+            McpServer = Text(approval, "server"),
+            Details = Strings(approval, "details"),
+            SafetyCheckLines = checks,
+            Cwd = Text(approval, "cwd"),
+            AllowsSession = scopes.Contains("session"),
+            AllowsSaved = scopes.Contains("always"),
+        };
+
+        static string? Text(JsonElement e, string name) =>
+            e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        static List<string> Strings(JsonElement e, string name) =>
+            e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Array
+                ? [.. v.EnumerateArray().Where(i => i.ValueKind == JsonValueKind.String).Select(i => i.GetString()!)]
+                : [];
+    }
+}
+
+/// <summary>Visible approval text only. Never use this representation as a command or a saved rule.</summary>
+public static class ApprovalDisplay
+{
+    internal static bool Hidden(Rune rune) =>
+        Rune.GetUnicodeCategory(rune) is UnicodeCategory.Control or UnicodeCategory.Format
+            or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator
+        || Rune.GetUnicodeCategory(rune) == UnicodeCategory.SpaceSeparator && rune.Value != ' '
+        || rune.Value is 0x034F or 0x115F or 0x1160 or 0x17B4 or 0x17B5 or 0x2800 or 0x3164 or 0xFFA0
+            or >= 0xFE00 and <= 0xFE0F or >= 0xE0100 and <= 0xE01EF;
+
+    public static bool HasHiddenCharacters(string text, bool preserveNewlines = false)
+    {
+        foreach (var rune in text.EnumerateRunes())
+            if (Hidden(rune) && !(preserveNewlines && rune.Value == '\n')) return true;
+        return false;
+    }
+
+    public static string Format(string text, bool preserveNewlines = false)
+    {
+        StringBuilder? visible = null;
+        var offset = 0;
+        foreach (var rune in text.EnumerateRunes())
+        {
+            if (Hidden(rune) && !(preserveNewlines && rune.Value == '\n'))
+            {
+                visible ??= new StringBuilder(text.Length + 16).Append(text.AsSpan(0, offset));
+                visible.Append("[U+").Append(rune.Value.ToString("X4", CultureInfo.InvariantCulture)).Append(']');
+                if (rune.Value == '\n') visible.Append('\n');
+            }
+            else if (visible is not null) visible.Append(text.AsSpan(offset, rune.Utf16SequenceLength));
+            offset += rune.Utf16SequenceLength;
         }
-        var truncated = command is not null && Elided.IsMatch(command);
-        return new ApprovalRequest(tool, command is { Length: > 0 } ? command : null, truncated, safety);
+        return visible?.ToString() ?? text;
     }
 }
 
@@ -56,14 +142,21 @@ public sealed record ApprovalRule(string Tool, string? Command, bool Prefix)
     private static readonly Regex Syntax = new(@"^\s*([A-Za-z0-9_.\-]+)\s*(?:\((.*)\))?\s*$", RegexOptions.Singleline | RegexOptions.CultureInvariant);
 
     /// <summary>
-    /// Commands offered as exact rules only, never as a prefix: wrappers (sudo, env, bash -c…), where whatever follows is a
-    /// program of its own, and destructive ones, where "rm" for <c>rm -rf build</c> would also cover <c>rm -rf ~</c>.
+    /// Commands that require a fresh approval every time: wrappers may hide another program,
+    /// and destructive commands must not inherit either exact or prefix grants.
     /// </summary>
-    private static readonly HashSet<string> ExactOnly = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> NeverAutomatic = new(StringComparer.OrdinalIgnoreCase)
     {
         "sudo", "doas", "su", "env", "xargs", "exec", "eval", "command", "builtin", "nohup", "time", "timeout", "nice", "watch",
         "bash", "sh", "zsh", "fish", "dash", "ksh", "pwsh", "powershell", "cmd", "source", ".",
         "rm", "rmdir", "mv", "dd", "shred", "mkfs", "chmod", "chown", "chgrp", "kill", "killall", "pkill", "shutdown", "reboot",
+        "del", "erase", "rd", "move", "ren", "rename", "format", "diskpart", "Remove-Item", "Clear-Content",
+        "Stop-Process", "Stop-Computer", "Restart-Computer", "Clear-Disk", "Format-Volume", "Remove-Partition",
+        // Remote shells and raw sockets run whatever their arguments say; disks, boot and services change the machine.
+        "ssh", "scp", "sftp", "rsync", "nc", "ncat", "netcat", "socat", "telnet",
+        "cryptsetup", "wipefs", "fdisk", "sfdisk", "gdisk", "parted", "diskutil", "mount", "umount", "losetup",
+        "poweroff", "halt", "init", "telinit", "systemctl", "launchctl", "service", "crontab", "at",
+        "iptables", "ip6tables", "nft", "ufw", "pfctl",
     };
 
     /// <summary>Tools whose second word is a subcommand (<c>git status</c>, <c>npm test</c>): a prefix rule keeps it.</summary>
@@ -78,22 +171,40 @@ public sealed record ApprovalRule(string Tool, string? Command, bool Prefix)
 
     private static readonly Regex Subcommand = new("^[a-z][a-z0-9_:-]*$", RegexOptions.CultureInvariant);
 
+    // Only direct, known Git subcommands get prefixes. Global options and aliases are not parsed here.
+    private static readonly HashSet<string> GitPrefixSubcommands = new(StringComparer.Ordinal)
+    {
+        "status", "log", "diff", "show", "ls-files", "ls-tree", "rev-parse", "rev-list", "describe", "blame", "grep",
+    };
+
     /// <summary>The rule as text (what the settings file and the Settings page show).</summary>
-    public string Text => Command is null ? Tool : $"{Tool}({Command}{(Prefix ? ":*" : "")})";
+    public string Text => Command is null ? Tool
+        // The legacy :* suffix denotes a prefix. An exact command ending in those characters must not share its text.
+        : !Prefix && Command.EndsWith(":*", StringComparison.Ordinal) ? $"{Tool}={System.Text.Json.JsonSerializer.Serialize(Command)}"
+        : $"{Tool}({Command}{(Prefix ? ":*" : "")})";
 
     public override string ToString() => Text;
 
     /// <summary>Reads <see cref="Text"/>; null for anything else (an argument on a tool other than bash, an empty command).</summary>
     public static ApprovalRule? Parse(string? text)
     {
+        if (text is not null && text.StartsWith("bash=", StringComparison.Ordinal))
+        {
+            try
+            {
+                return System.Text.Json.JsonSerializer.Deserialize<string>(text.AsSpan(5)) is { Length: > 0 } exact
+                    ? new ApprovalRule("bash", exact, false) : null;
+            }
+            catch (System.Text.Json.JsonException) { return null; }
+        }
         if (text is null || Syntax.Match(text) is not { Success: true } m) return null;
         var tool = m.Groups[1].Value;
         if (!m.Groups[2].Success) return new ApprovalRule(tool, null, false);
         if (tool != "bash") return null;
-        var inner = m.Groups[2].Value.Trim();
+        var inner = m.Groups[2].Value;
         var prefix = inner.EndsWith(":*", StringComparison.Ordinal);
-        if (prefix) inner = inner[..^2].TrimEnd();
-        return inner.Length == 0 ? null : new ApprovalRule(tool, inner, prefix);
+        if (prefix) inner = inner[..^2];
+        return inner.Length == 0 || prefix && !IsSafePrefix(inner) ? null : new ApprovalRule(tool, inner, prefix);
     }
 
     /// <summary>
@@ -104,38 +215,66 @@ public sealed record ApprovalRule(string Tool, string? Command, bool Prefix)
     /// </summary>
     public bool Matches(ApprovalRequest request)
     {
-        if (request.SafetyChecks || !string.Equals(Tool, request.Tool, StringComparison.Ordinal)) return false;
-        if (Command is null) return true;
+        if (!request.RulesMayAnswer || !string.Equals(Tool, request.Tool, StringComparison.Ordinal)) return false;
+        if (request.Command is { } source && ApprovalDisplay.HasHiddenCharacters(source)) return false;
+        // Apply before tool-wide and exact matches too, including rules saved by older clients.
+        if (Tool == "bash" && (request.Truncated || request.Command is not { } candidate || !IsSafePrefix(candidate))) return false;
+        if (Command is null) return !Prefix;
         if (request.Command is not { } command || request.Truncated) return false;
         if (!Prefix) return command == Command;
-        return IsPlainCommand(command) && (command == Command || command.StartsWith(Command + " ", StringComparison.Ordinal));
+        return IsSafePrefix(Command) && IsSafePrefix(command)
+            && (command == Command || command.StartsWith(Command, StringComparison.Ordinal)
+                && command.Length > Command.Length && command[Command.Length] == ' ');
     }
 
-    /// <summary>One simple command: no chaining, pipes, redirection, substitution, subshells, or more than one line.</summary>
-    public static bool IsPlainCommand(string command) =>
-        command.Length > 0
-        && command.IndexOfAny([';', '&', '|', '<', '>', '`', '(', ')', '\n', '\r', '\t']) < 0
-        && !command.Contains("$(", StringComparison.Ordinal)
-        && !command.Contains("${", StringComparison.Ordinal);
+    /// <summary>
+    /// A deliberately narrow ASCII token alphabet, not a shell parser. Quotes, escapes, expansions, globbing,
+    /// comments, operators and non-ASCII text require fresh approval even when quoted syntax could be harmless.
+    /// </summary>
+    public static bool IsPlainCommand(string command)
+    {
+        if (command.Length == 0 || command[0] == ' ' || command[^1] == ' ') return false;
+        foreach (var c in command)
+            if (!(char.IsAsciiLetterOrDigit(c) || c is ' ' or '_' or '-' or '.' or '/' or ':' or '=' or '+' or ',' or '@' or '%'))
+                return false;
+        return true;
+    }
+
+    private static bool IsSafePrefix(string command)
+    {
+        if (!IsPlainCommand(command)) return false;
+        var end = command.IndexOf(' ');
+        var executable = end < 0 ? command.AsSpan() : command.AsSpan(0, end);
+        var name = executable[(executable.LastIndexOf('/') + 1)..];
+        if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) name = name[..^4];
+        if (executable.Contains('=') || NeverAutomatic.GetAlternateLookup<ReadOnlySpan<char>>().Contains(name) || name.StartsWith("mkfs.", StringComparison.OrdinalIgnoreCase)) return false;
+        if (name.Equals("git", StringComparison.OrdinalIgnoreCase))
+        {
+            if (end < 0) return false;
+            var arguments = command.AsSpan(end + 1).TrimStart();
+            var boundary = arguments.IndexOf(' ');
+            var subcommand = boundary < 0 ? arguments : arguments[..boundary];
+            if (!GitPrefixSubcommands.GetAlternateLookup<ReadOnlySpan<char>>().Contains(subcommand)) return false;
+        }
+        return true;
+    }
 
     /// <summary>
     /// The rule offered on the card: for a plain command its first word (and the subcommand of tools that have one:
-    /// <c>git status:*</c>, <c>npm run build:*</c>); for anything else — chained, an environment assignment, a wrapper
-    /// or a destructive command (<see cref="ExactOnly"/>) — exactly that command; for other tools the tool.
+    /// <c>git status:*</c>, <c>npm run build:*</c>). Chaining, environment assignments, wrappers,
+    /// destructive commands and ambiguous syntax never receive reusable grants; other tools use the tool name.
     /// Null when no rule fits: omp shortened the command, or the provider's own safety checks are part of the request.
     /// </summary>
     public static ApprovalRule? Suggest(ApprovalRequest? request)
     {
-        if (request is null || request.SafetyChecks) return null;
+        if (request is null || !request.RulesMayAnswer) return null;
         if (request.Tool != "bash") return new ApprovalRule(request.Tool, null, false);
-        if (request.Command is not { } command || request.Truncated) return null;
-        if (!IsPlainCommand(command)) return new ApprovalRule("bash", command, false);
+        if (request.Command is not { } command || request.Truncated || ApprovalDisplay.HasHiddenCharacters(command)) return null;
+        if (!IsSafePrefix(command)) return null;
         var words = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        // An environment assignment, a wrapper (sudo, env, bash -c…) or a destructive command (rm): that command only
-        if (words[0].Contains('=', StringComparison.Ordinal) || words[0].Contains('$', StringComparison.Ordinal) || ExactOnly.Contains(words[0]))
-            return new ApprovalRule("bash", command, false);
         var take = 1;
-        if (words.Length > 1 && WithSubcommands.Contains(words[0]) && Subcommand.IsMatch(words[1]))
+        var name = words[0][(words[0].LastIndexOf('/') + 1)..];
+        if (words.Length > 1 && WithSubcommands.Contains(name) && Subcommand.IsMatch(words[1]))
         {
             take = 2;
             if (words.Length > 2 && ScriptRunners.Contains(words[1]) && Subcommand.IsMatch(words[2])) take = 3;
@@ -145,7 +284,7 @@ public sealed record ApprovalRule(string Tool, string? Command, bool Prefix)
 
     /// <summary>The rule in words: "commands starting with “npm test”", "writing files".</summary>
     public string Description => Command is { } c
-        ? Prefix ? $"commands starting with “{c}”" : $"the command “{Shorten(c)}”"
+        ? Prefix ? $"commands starting with “{ApprovalDisplay.Format(c)}”" : $"the command “{Shorten(ApprovalDisplay.Format(c))}”"
         : Tool switch
         {
             "bash" => "every command",
@@ -163,7 +302,7 @@ public sealed record ApprovalRule(string Tool, string? Command, bool Prefix)
     private static string Shorten(string s)
     {
         var line = s.Split('\n')[0];
-        return line.Length > 60 || line.Length < s.Length ? line[..Math.Min(line.Length, 60)].TrimEnd() + "…" : line;
+        return line.Length > 60 || line.Length < s.Length ? line[..GraphemeText.PrefixLength(line, 60, trimEnd: true)] + "…" : line;
     }
 }
 
@@ -246,7 +385,7 @@ public sealed class ApprovalRuleSet
     {
         if (request is null) return null;
         lock (_gate)
-            return _session.Concat(_saved.OrderBy(g => g.Scope)).FirstOrDefault(g => g.AppliesTo(cwd, session) && g.Rule.Matches(request));
+            return _session.Concat(_saved.OrderBy(g => g.Scope)).FirstOrDefault(g => g.AppliesTo(cwd, session) && request.Allows(g.Scope) && g.Rule.Matches(request));
     }
 
     /// <summary>
@@ -257,6 +396,8 @@ public sealed class ApprovalRuleSet
     /// <see cref="InvalidDataException"/>).</exception>
     public ApprovalGrant Add(ApprovalRule rule, ApprovalScope scope, string? cwd, string? session)
     {
+        if (ApprovalRule.Parse(rule.Text) != rule)
+            throw new ArgumentException("The rule must round-trip without changing its tool, command or prefix scope.", nameof(rule));
         var grant = scope switch
         {
             ApprovalScope.Session => new ApprovalGrant(rule, scope, Session: session ?? throw new ArgumentException("no session to keep the rule for", nameof(session))),

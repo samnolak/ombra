@@ -1,5 +1,6 @@
 <!-- Settings page "Permissions": the "don't ask again" rules given on approval cards (MainViewModel.Approvals.cs,
-     ClientCore ApprovalRules.cs), each with Remove. -->
+     ClientCore ApprovalRules.cs), each with Remove; and the trusted project folders (ClientCore WorkspaceTrust.cs), each
+     with Revoke. -->
 <UserControl xmlns:loc="using:Ombra.App.Localization"
         xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -11,13 +12,15 @@
     <StackPanel x:DataType="vm:PermissionRulesViewModel" Spacing="16">
 
       <Border x:Name="PermissionsMessageBar" Classes="ws-note" Classes.ok="{Binding !MessageIsError}" Classes.error="{Binding MessageIsError}" IsVisible="{Binding HasMessage}">
-        <Grid ColumnDefinitions="Auto,*,Auto">
+        <Grid ColumnDefinitions="Auto,*,Auto,Auto">
           <Panel Margin="0,0,10,0" VerticalAlignment="Top">
             <ctl:Icon Classes="ok-mark" Data="{StaticResource IconCheckCircle}" Size="16" IsVisible="{Binding !MessageIsError}" />
             <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" IsVisible="{Binding MessageIsError}" />
           </Panel>
-          <SelectableTextBlock x:Name="PermissionsMessage" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" />
-          <Button Grid.Column="2" Classes="icon" Width="24" Height="24" Margin="8,-4,-6,-4" VerticalAlignment="Top" Command="{Binding DismissMessageCommand}"
+          <SelectableTextBlock x:Name="PermissionsMessage" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" VerticalAlignment="Center" />
+          <Button x:Name="UndoRemoveRuleButton" Grid.Column="2" Classes="flat" Content="{loc:T 'Undo'}"
+                  Command="{Binding UndoRemoveCommand}" IsVisible="{Binding CanUndoRemove}" Margin="8,0,0,0" />
+          <Button Grid.Column="3" Classes="icon" Width="24" Height="24" Margin="8,-4,-6,-4" VerticalAlignment="Top" Command="{Binding DismissMessageCommand}"
                   ToolTip.Tip="{loc:T 'Dismiss'}" AutomationProperties.Name="{loc:T 'Dismiss'}">
             <ctl:Icon Data="{StaticResource IconClose}" Size="16" />
           </Button>
@@ -30,7 +33,7 @@
           <TextBlock Classes="muted" TextWrapping="Wrap"
                      Text="{loc:T 'When omp asks for permission and a rule here covers the request, this app answers Allow for you and notes it in the conversation. A command rule covers that command and longer ones starting with it — never commands chained with ; &amp;&amp; or |, redirected, or on several lines.'}" />
           <Border Classes="ws-note error" IsVisible="{Binding HasLoadError}">
-            <SelectableTextBlock x:Name="PermissionsLoadError" Text="{Binding LoadError}" TextWrapping="Wrap" FontSize="13" />
+            <SelectableTextBlock x:Name="PermissionsLoadError" Text="{Binding LoadError}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
           </Border>
           <Border Classes="ws-note" IsVisible="{Binding IsEmpty}">
             <TextBlock x:Name="PermissionsEmpty" TextWrapping="Wrap"
@@ -57,7 +60,41 @@
                       <TextBlock Classes="tertiary" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Detail}" />
                     </StackPanel>
                     <Button Grid.Column="2" Classes="flat" Content="{loc:T 'Remove'}" Command="{Binding RemoveCommand}" Margin="12,0,0,0" VerticalAlignment="Center"
-                            ToolTip.Tip="{loc:T 'omp asks again for these requests'}" AutomationProperties.Name="{Binding Description, StringFormat='Remove rule: {0}'}" />
+                            ToolTip.Tip="{loc:T 'omp asks again for these requests'}" AutomationProperties.Name="{Binding Description, StringFormat={loc:T 'Remove rule: {0}'}}" />
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+
+      <Border Classes="section-card">
+        <StackPanel Spacing="12">
+          <TextBlock Classes="section" Text="{loc:T 'Trusted folders'}" />
+          <TextBlock Classes="muted" TextWrapping="Wrap"
+                     Text="{loc:T 'A project folder can bring its own MCP servers, hooks, extensions, commands, tools and language servers, which omp runs on this computer. In a folder you have not trusted, omp starts without them and the chat asks you first. When what a trusted folder would run changes, it asks again.'}" />
+          <Border Classes="ws-note" IsVisible="{Binding !HasTrustedFolders}">
+            <TextBlock x:Name="TrustedFoldersEmpty" TextWrapping="Wrap"
+                       Text="{loc:T 'No trusted folders yet. Choose “Trust and restart” on a chat’s trust card to add one.'}" />
+          </Border>
+
+          <ItemsControl x:Name="TrustedFolderList" ItemsSource="{Binding TrustedFolders}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:TrustedFolderRowViewModel">
+                <Border Classes="ws-row">
+                  <Grid ColumnDefinitions="Auto,*,Auto">
+                    <ctl:Icon Data="{StaticResource IconShield}" Size="16" Margin="0,0.5,12,0" VerticalAlignment="Top" TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
+                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                      <TextBlock Classes="ws-title" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Classes="mono tertiary" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Folder.Path}" />
+                      <TextBlock Classes="tertiary" Text="{Binding TrustedLabel}" />
+                    </StackPanel>
+                    <Button Grid.Column="2" Classes="flat" Content="{loc:T 'Revoke'}" Command="{Binding RevokeCommand}" Margin="12,0,0,0" VerticalAlignment="Center"
+                            ToolTip.Tip="{loc:T 'omp runs here without the folder’s own tools and asks again'}" AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Revoke trust: {0}'}}" />
                   </Grid>
                 </Border>
               </DataTemplate>

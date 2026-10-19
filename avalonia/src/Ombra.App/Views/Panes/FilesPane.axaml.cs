@@ -5,6 +5,8 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Avalonia.Platform.Storage;
+using Ombra.App.Controls;
 using Ombra.App.ViewModels;
 
 namespace Ombra.App.Views.Panes;
@@ -168,5 +170,67 @@ public partial class FilesPane : UserControl
             e.Handled = true;
             row.CancelCommentCommand.Execute(null);
         }
+    }
+
+    private void OnEditorAttached(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        if (sender is DocumentEditor editor)
+        {
+            editor.NavigateRequested += OnEditorNavigate;
+            editor.MarkRequested += OnEditorMark;
+        }
+    }
+
+    private void OnEditorDetached(object? sender, VisualTreeAttachmentEventArgs e)
+    {
+        if (sender is DocumentEditor editor)
+        {
+            editor.NavigateRequested -= OnEditorNavigate;
+            editor.MarkRequested -= OnEditorMark;
+        }
+    }
+
+    private void OnEditorMark(EditorMarkRequest request)
+    {
+        if (ViewerHost.GetVisualDescendants().OfType<DocumentEditor>().FirstOrDefault(v => v.WorkspaceDocument?.Uri == request.DocumentUri)
+            ?.DataContext is FileViewerViewModel viewer) viewer.AddEditorMark(request);
+    }
+
+    private async void OnEditorNavigate(string path, int line)
+    {
+        if (_vm is not null) await _vm.OpenFileAsync(path, line, reveal: true);
+    }
+
+    private void OnAddEditorSelection(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is not FileViewerViewModel { Document: { } document } viewer) return;
+        var editor = ViewerHost.GetVisualDescendants().OfType<DocumentEditor>()
+            .FirstOrDefault(view => ReferenceEquals(view.WorkspaceDocument, document))?.Editor;
+        if (editor is null || editor.SelectionLength == 0)
+        {
+            viewer.DocumentError = "Select the code to attach first.";
+            return;
+        }
+        var firstLine = document.Buffer.GetLineByOffset(editor.SelectionStart).LineNumber;
+        var lastLine = document.Buffer.GetLineByOffset(editor.SelectionStart + editor.SelectionLength).LineNumber;
+        viewer.Owner.Owner.AddEditorContext(document, editor.SelectedText, firstLine, lastLine);
+    }
+
+    private async void OnSaveDocumentCopy(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is not FileViewerViewModel { Document: { } document } viewer
+            || TopLevel.GetTopLevel(this)?.StorageProvider is not { } storage) return;
+        try
+        {
+            var file = await storage.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Save unsaved document copy",
+                SuggestedFileName = Path.GetFileNameWithoutExtension(document.FullPath) + ".recovered" + Path.GetExtension(document.FullPath),
+                ShowOverwritePrompt = true,
+            });
+            if (file?.TryGetLocalPath() is { } path) await document.SaveCopyAsync(path);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or NotSupportedException)
+        { viewer.DocumentError = error.Message; }
     }
 }

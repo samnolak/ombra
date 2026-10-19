@@ -21,14 +21,20 @@ public sealed class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var args = Program.Args;
-            // Everything this app starts carries its mark, and ends with it (OwnedProcesses). First what an app that is
-            // gone left running — an earlier version's omp daemon broker and its dev servers among them — so no omp
-            // started below joins a broker of that app; before any process of ours starts.
+            if (Program.StartupRefused)
+            {
+                ShowStartupRefusal(desktop);
+                base.OnFrameworkInitializationCompleted();
+                return;
+            }
+            // Establish Windows kernel job ownership before any engine, terminal or detached broker can start;
+            // failure aborts startup rather than launching unprotected processes. On Unix retain the marked-process
+            // reaper, including old brokers, before a new engine can join one left by an earlier app.
             OwnedProcesses.MarkThisProcess();
             var owned = new OwnedProcesses(RuntimePack.DefaultRoot);
             owned.Stop(OwnedProcesses.Moment.Start);
             desktop.Exit += (_, _) => owned.Stop(OwnedProcesses.Moment.Quit);
-            var store = new ClientSettingsStore(args.ConfigPath ?? Environment.GetEnvironmentVariable(OmpRuntimeOptions.ConfigEnvVar) ?? OmpRuntimeOptions.DefaultConfigPath);
+            var store = new ClientSettingsStore(Program.SettingsPath);
             OmpRuntimeOptions options;
             string? configError = null;
             try
@@ -44,15 +50,14 @@ public sealed class App : Application
             MainViewModel.ApplyTheme(options.Theme);
             var platform = Ombra.App.Platform.RuntimePlatform.Key(out _);
             var installer = new RuntimeInstaller(new HttpClient { Timeout = Timeout.InfiniteTimeSpan }, RuntimePack.DefaultRoot, platform);
-            // Every launch reads the settings again, so a restart applies what the user saved. An empty command means
-            // the pinned runtime the client installed, else omp on PATH.
+            // Every launch reads settings again. An empty command requires this client's owned runtime;
+            // older unpatched packs and omp on PATH are not compatible default fallbacks.
             OmpRuntimeOptions Current()
             {
                 OmpRuntimeOptions o;
                 try { o = store.Load(); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) { o = options; }
-                // After an update that brought a new pack, omp runs from the earlier one until the new one is installed.
-                return (installer.FindInstalled() ?? installer.FindPrevious()?.Runtime) is { } rt ? rt.ApplyTo(o) : o;
+                return installer.ApplyDefaultTo(o);
             }
             // omp's browser tool drives the preview panel — over Tern (TernHost: tabs with trusted native input) or cmux
             // (AgentBrowserBridge, also the fallback a Tern-less omp finds) — and is made the agent's default for every omp
@@ -67,12 +72,15 @@ public sealed class App : Application
             var privacy = new Ombra.ClientCore.Network.NetworkPrivacy(Ombra.ClientCore.Network.NetworkPrivacy.DirectoryFor(store.Path));
             // Chats get names from omp's own title generator, as in omp's terminal (SessionTitles)
             var titles = new SessionTitles(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(store.Path))!, "session-titles"));
+            // A folder with its own tools omp would run (MCP servers, hooks, extensions…) starts restricted until trusted (WorkspaceTrust)
+            var trust = new WorkspaceTrust(WorkspaceTrust.PathFor(store.Path));
             async Task<OmpLaunchSpec> Launch(LaunchRequest request, CancellationToken ct)
             {
                 var o = Current();
-                return await privacy.ApplyAsync(titles.Apply(browserDefaults?.ForSession(o, request) ?? o.ToLaunchSpec(request)), o, ct);
+                return await privacy.ApplyAsync(titles.Apply(trust.Apply(browserDefaults?.ForSession(o, request) ?? o.ToLaunchSpec(request))), o, ct);
             }
-            configError ??= options.ApprovalModeWarning;
+            if (configError is null && options.ApprovalModeWarning is { } approvalWarning)
+                configError = Loc.T(approvalWarning);
             // The project used last, when it still exists; else a new chat outside any project, in a folder of its own (not
             // the home folder, which the agent would roam and the Files pane list; an app opened from Finder runs in "/").
             // A chat used last is not taken up again: its folder holds that chat, and the window starts on a new one.
@@ -82,22 +90,24 @@ public sealed class App : Application
             // "Bypass permissions" was chosen explicitly before; say so at every start, not only in the chip.
             if (initial.ApprovalMode == "yolo")
                 configError = (configError is null ? "" : configError + "\n") + Loc.T("Bypass permissions is on: omp runs every tool, including shell commands, without asking. Change it under the message box.");
-            installer.RemovePrevious(); // packs of earlier versions, once this version's is installed (before omp starts)
-            var session = new SessionController(Launch, initial);
+            // A crash restarts the chats on their sessions by themselves (backoff, attempt limit); siblings inherit it.
+            var session = new SessionController(Launch, initial) { AutoRecover = AutoRecoverPolicy.Default };
             var updater = Ombra.App.Services.UpdateInstaller.ForThisApp(out var noInstall);
-            var vm = new MainViewModel(session, args, configError, store)
+            var vm = new MainViewModel(session, args, configError, store, Program.Drafts)
             {
                 Chats = chats,
                 Privacy = privacy,
+                WorkspaceTrust = trust,
                 OmpTuiLaunch = async (dir, ct) =>
                 {
                     var o = Current();
-                    return await privacy.ApplyAsync(browserDefaults?.ForTui(o, dir) ?? o.ToTuiLaunchSpec(dir), o, ct);
+                    return await privacy.ApplyAsync(trust.ApplyToTerminal(browserDefaults?.ForTui(o, dir) ?? o.ToTuiLaunchSpec(dir)), o, ct);
                 },
                 OmpCliLaunch = (cliArgs, dir) =>
                 {
                     var o = Current();
-                    return privacy.ApplyStrict(o.ToCliLaunchSpec(cliArgs, dir), o);
+                    // Subcommands that load extensions run outside a folder that is not trusted (WorkspaceTrust.ApplyToCli)
+                    return privacy.ApplyStrict(trust.ApplyToCli(o.ToCliLaunchSpec(cliArgs, dir), cliArgs.FirstOrDefault()), o);
                 },
                 RuntimeInstaller = installer,
                 Updates = new Ombra.App.Services.UpdateChecker(new HttpClient { Timeout = TimeSpan.FromMinutes(30) },
@@ -127,15 +137,89 @@ public sealed class App : Application
                 tern.Browser = new TernPreviewHost(vm);
                 desktop.Exit += (_, _) => tern.Dispose();
             }
-            var window = new MainWindow { DataContext = vm, Notifier = CreateNotifier() };
+            var window = new MainWindow
+            {
+                DockAttention = OperatingSystem.IsMacOS() ? new Ombra.App.Platform.MacDockAttention() : null,
+                DataContext = vm,
+                Notifier = CreateNotifier()
+            };
             desktop.MainWindow = window;
             Ombra.App.Services.PerfLog.Attach(window); // OMBRA_PERF=1: frame-rate and layout graphs, slow applies on stderr
             window.Opened += (_, _) => vm.OnWindowOpened();
             vm.NotificationsEnabled = options.Notifications ?? true;
+            vm.WatchGitRemotes = options.WatchGitRemotes ?? true;
             vm.SendKey = options.SendKey == "mod-enter" ? "mod-enter" : "enter";
+            vm.LoadAgentBrowserEngine(options.AgentBrowserEngine);
             SetUpMenus(desktop, window, vm);
+            if (OperatingSystem.IsMacOS()) Ombra.App.Nightly.NightlyAcceptance.StartIfRequested(window, vm); // OMBRA_NIGHTLY_ACCEPTANCE: development check only
+            if (OperatingSystem.IsMacOS()) Ombra.App.Nightly.NightlyTeamLink.Start(new Ombra.App.Nightly.TeamViewModelNightlySource(() => vm.Team)); // B1/B2: Nightly shares through this Ombra
         }
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private static void ShowStartupRefusal(IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        // Settings and translations may be read without acquiring writer ownership; never save from this window.
+        try
+        {
+            var settings = new ClientSettingsStore(Program.SettingsPath).Load();
+            Loc.Load(Loc.Resolve(settings.Language, Program.SettingsPath), Program.SettingsPath);
+            MainViewModel.ApplyTheme(settings.Theme);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException) { }
+        var title = Program.AlreadyRunning ? Loc.T("Ombra is already running") : Loc.T("Draft storage is unavailable");
+        var message = Program.AlreadyRunning
+            ? Loc.T("Another Ombra instance is using this configuration. Return to that window, or close it before opening another. Your drafts were not changed.")
+            : Loc.F("Ombra could not get exclusive access to its draft storage, so it did not open a chat. Your drafts were not changed.\n\n{0}", Program.StartupError?.Message);
+        desktop.Exit += (_, e) => e.ApplicationExitCode = 1;
+        desktop.MainWindow = CreateStartupRefusalWindow(title, message, Program.SettingsPath);
+    }
+
+    internal static Window CreateStartupRefusalWindow(string title, string message, string settingsPath)
+    {
+        var close = new Button
+        {
+            Name = "StartupRefusalClose", Content = Loc.T("Close"), IsDefault = true, IsCancel = true,
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right, Margin = new Thickness(0, 16, 0, 0),
+        };
+        var body = new StackPanel { Spacing = 16 };
+        body.Children.Add(new TextBlock { Text = title, FontSize = 20, FontWeight = Avalonia.Media.FontWeight.SemiBold, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+        body.Children.Add(new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+        body.Children.Add(new SelectableTextBlock { Text = settingsPath, TextWrapping = Avalonia.Media.TextWrapping.Wrap });
+        var scroll = new ScrollViewer
+        {
+            Name = "StartupRefusalScroll", Content = body,
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+        };
+        var layout = new Grid { Margin = new Thickness(24), RowDefinitions = new RowDefinitions("*,Auto") };
+        layout.Children.Add(scroll);
+        Grid.SetRow(close, 1);
+        layout.Children.Add(close);
+        var window = new Window
+        {
+            Title = title, Width = 520, Height = 360, CanResize = true,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen, Content = layout,
+        };
+        void ConstrainToScreen()
+        {
+            if ((window.Screens.ScreenFromWindow(window) ?? window.Screens.Primary) is not { } screen) return;
+            // Work area excludes the Dock/taskbar; leave room for native frame decorations as well.
+            window.MaxWidth = Math.Max(1, screen.WorkingArea.Width / screen.Scaling - 64);
+            window.MaxHeight = Math.Max(1, screen.WorkingArea.Height / screen.Scaling - 64);
+            window.Width = Math.Min(window.Width, window.MaxWidth);
+            window.Height = Math.Min(window.Height, window.MaxHeight);
+        }
+        ConstrainToScreen();
+        window.Opened += (_, _) => { ConstrainToScreen(); close.Focus(); };
+        close.Click += (_, _) => window.Close();
+        window.KeyDown += (_, e) =>
+        {
+            if (e.Key != Avalonia.Input.Key.Escape) return;
+            e.Handled = true;
+            window.Close();
+        };
+        return window;
     }
 
     private static string? ProjectToResume(string? path, ChatFolders chats) =>

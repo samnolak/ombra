@@ -1,3 +1,5 @@
+using System.Text;
+using Ombra.ClientCore;
 using Avalonia.Controls.Documents;
 using Avalonia.Media;
 
@@ -80,7 +82,7 @@ public static class DiffWords
         return (old, @new);
     }
 
-    /// <summary>A line as words (letters, digits, '_'), runs of spaces, and single other characters.</summary>
+    /// <summary>A line as words, runs of spaces, and individual grapheme clusters, with UTF-16 offsets.</summary>
     private static List<Span> Tokens(string s)
     {
         var list = new List<Span>();
@@ -88,14 +90,20 @@ public static class DiffWords
         while (i < s.Length)
         {
             var start = i;
-            if (IsWord(s[i])) while (i < s.Length && IsWord(s[i])) i++;
-            else if (char.IsWhiteSpace(s[i])) while (i < s.Length && char.IsWhiteSpace(s[i])) i++;
-            else i++;
+            var kind = Kind(s, i);
+            i += GraphemeText.ElementLength(s.AsSpan(i));
+            if (kind != 0)
+                while (i < s.Length && Kind(s, i) == kind)
+                    i += GraphemeText.ElementLength(s.AsSpan(i));
             list.Add(new Span(start, i - start));
         }
         return list;
 
-        static bool IsWord(char c) => char.IsLetterOrDigit(c) || c == '_';
+        static int Kind(string text, int offset)
+        {
+            Rune.DecodeFromUtf16(text.AsSpan(offset), out var rune, out _);
+            return Rune.IsLetterOrDigit(rune) || rune.Value == '_' ? 1 : Rune.IsWhiteSpace(rune) ? 2 : 0;
+        }
     }
 
     private static bool Same(Span x, Span y, string a, string b) =>
@@ -149,10 +157,11 @@ public static class DiffWords
         }
         var at = 0;
         var m = 0;
+        var boundary = 0;
         foreach (var (kind, text) in SyntaxHighlighter.Tokenize(line, lang, ref inBlock))
         {
             var brush = SyntaxHighlighter.BrushFor(kind);
-            var offset = 0;
+            var offset = Math.Max(0, boundary - at);
             while (offset < text.Length)
             {
                 var pos = at + offset;
@@ -161,7 +170,11 @@ public static class DiffWords
                 // Up to where this token ends, or the mark starts or ends
                 var end = at + text.Length;
                 if (m < marks.Count) end = Math.Min(end, marked ? marks[m].Start + marks[m].Length : marks[m].Start);
-                var run = new Run(text.Substring(offset, end - pos));
+                // Syntax tokens may end inside a cluster; keep its first token's style for the whole glyph.
+                // Marks from Compare already use cluster boundaries. Advance once through the original line.
+                while (boundary < end) boundary += GraphemeText.ElementLength(line.AsSpan(boundary));
+                end = boundary;
+                var run = new Run(line.Substring(pos, end - pos));
                 if (brush is not null) run.Foreground = brush;
                 if (kind == SyntaxHighlighter.Token.Comment) run.FontStyle = FontStyle.Italic;
                 if (marked) run.Background = markBrush;

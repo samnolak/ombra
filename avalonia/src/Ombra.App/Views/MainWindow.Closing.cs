@@ -37,6 +37,7 @@ public sealed partial class MainWindow
             return;
         }
         _quitAccepted = true;
+        SaveWindowLayout();
         KillAllTerminals();
         if (IsEnabled)
         {

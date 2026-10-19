@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Threading;
 using Ombra.App;
 using Ombra.App.Controls;
+using Ombra.App.Localization;
 using Ombra.App.Services.Speech;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore;
@@ -34,7 +35,8 @@ public sealed class DictationModeTests
     private sealed class CountingTranscriber(string text = "dictated text") : ITranscriber
     {
         public int Calls;
-        public string Transcribe(float[] samples) { Interlocked.Increment(ref Calls); return text; }
+        public float[]? Samples;
+        public string Transcribe(float[] samples) { Samples = samples; Interlocked.Increment(ref Calls); return text; }
         public void Dispose() { }
     }
 
@@ -117,6 +119,9 @@ public sealed class DictationModeTests
         Assert.InRange(meter.Take(), 0.70, 0.71); // nothing new: held
         meter.Add(new float[800]);
         Assert.Equal(0, meter.Take());
+        meter.Add(Sine(0.5, 800));
+        meter.Reset();
+        Assert.Equal(0, meter.Take()); // neither a pending peak nor the last take survives reuse
     }
 
     [Fact]
@@ -124,7 +129,7 @@ public sealed class DictationModeTests
     {
         // The stand-in writes a 440 Hz sine at 0.5 as raw float32: RMS ≈ 0.354.
         var spec = TestProcesses.Fake("recorder");
-        using var mic = new CommandMicrophone(spec.FileName, spec.Arguments);
+        using var mic = new CommandMicrophone(spec.FileName, [.. spec.Arguments, .. spec.SessionArguments]);
         mic.Start();
         var deadline = DateTime.UtcNow.AddSeconds(15);
         while (mic.Recorded < TimeSpan.FromMilliseconds(200) && DateTime.UtcNow < deadline) await Task.Delay(50);
@@ -190,7 +195,7 @@ public sealed class DictationModeTests
 
         // Cancelled while transcribing: the late result is dropped too.
         var gated = new GatedTranscriber();
-        var vm2 = NewVm(() => new LevelMic(new float[16_000]), gated);
+        var vm2 = NewVm(() => new LevelMic(Sine(0.3, 16_000)), gated);
         vm2.ComposerText = "draft";
         await vm2.StartDictationCommand.ExecuteAsync(null);
         var finishing = vm2.FinishDictationCommand.ExecuteAsync(null);
@@ -209,7 +214,7 @@ public sealed class DictationModeTests
     {
         var s = new SessionController(TestProcesses.FakeFactory("normal", TestProcesses.TempDir("dm-sessions")), new LaunchRequest(TestProcesses.TempDir("dm-project")));
         var transcriber = new CountingTranscriber("dictated text");
-        var vm = NewVm(() => new LevelMic(new float[16_000]), transcriber, s);
+        var vm = NewVm(() => new LevelMic(Sine(0.3, 16_000)), transcriber, s);
         vm.OnWindowOpened();
         await Until(() => vm.Phase == SessionPhase.Ready, "ready");
         var rows = vm.Rows.Count;
@@ -241,12 +246,12 @@ public sealed class DictationModeTests
     [AvaloniaFact]
     public async Task No_speech_and_failures_stay_in_the_bar_until_dismissed()
     {
-        var vm = NewVm(() => new LevelMic(new float[16_000]), new CountingTranscriber(""));
+        var vm = NewVm(() => new LevelMic(Sine(0.3, 16_000)), new CountingTranscriber(""));
         vm.ComposerText = "x";
         await vm.StartDictationCommand.ExecuteAsync(null);
         await vm.FinishDictationCommand.ExecuteAsync(null);
         Assert.False(vm.IsDictating);
-        Assert.Equal("No speech recognized.", vm.DictationError);
+        Assert.Equal(Loc.T("No speech recognized."), vm.DictationError);
         Assert.True(vm.IsDictationBarVisible);
         Assert.Equal("x", vm.ComposerText);
         vm.CancelDictationCommand.Execute(null); // X / Esc dismisses
@@ -256,12 +261,12 @@ public sealed class DictationModeTests
         var broken = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs())
         {
             SpeechModelInstalled = _ => true,
-            MicrophoneFactory = () => new LevelMic(new float[16_000]),
+            MicrophoneFactory = () => new LevelMic(Sine(0.3, 16_000)),
             TranscriberFactory = _ => throw new InvalidOperationException("model file missing"),
         };
         await broken.StartDictationCommand.ExecuteAsync(null);
         await broken.FinishDictationCommand.ExecuteAsync(null);
-        Assert.Equal("Dictation failed: model file missing", broken.DictationError);
+        Assert.Equal(Loc.T("Dictation failed: ") + "model file missing", broken.DictationError);
 
         // Without the model, starting asks to download it (no microphone, no bar).
         var noModel = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs())
@@ -272,6 +277,55 @@ public sealed class DictationModeTests
         await noModel.ToggleDictationCommand.ExecuteAsync(null);
         Assert.True(noModel.IsDictationOfferOpen);
         Assert.False(noModel.IsDictationBarVisible);
+    }
+
+    [AvaloniaTheory]
+    [InlineData(0, "The microphone delivered no audio. Check the input device and microphone permission, then try again.")]
+    [InlineData(16_000, "The microphone recorded only silence. Check the input device and mute settings, then try again.")]
+    public async Task Empty_or_digital_silence_keeps_the_draft_and_explains_the_input_problem(int count, string reason)
+    {
+        var samples = new float[count];
+        if (count > 0) samples[^1] = -0.0f;
+        var mic = new LevelMic(samples);
+        var vm = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs())
+        {
+            SpeechModelInstalled = _ => true,
+            MicrophoneFactory = () => mic,
+            TranscriberFactory = _ => throw new InvalidOperationException("The decoder must not be created for absent audio"),
+        };
+        vm.ComposerText = "keep this draft";
+        await vm.StartDictationCommand.ExecuteAsync(null);
+        await vm.FinishDictationCommand.ExecuteAsync(null);
+        Assert.False(vm.IsDictating);
+        Assert.True(mic.Stopped && mic.Disposed);
+        Assert.Equal("keep this draft", vm.ComposerText);
+        Assert.Contains(Loc.T(reason), vm.DictationError);
+        Assert.True(vm.IsDictationBarVisible);
+        vm.CancelDictationCommand.Execute(null);
+        Assert.False(vm.IsDictationBarVisible);
+        await vm.DisposeAsync();
+    }
+
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Nonzero_signal_below_the_waveform_floor_is_decoded_without_changing_the_pcm(bool smallestSignal)
+    {
+        var samples = smallestSignal ? new float[16_000] : Sine(0.00000001, 16_000);
+        if (smallestSignal) samples[^1] = float.Epsilon;
+        var rms = LevelMeter.Rms(samples);
+        Assert.True(rms > 0);
+        Assert.Equal(0, LevelMeter.ToDisplay(rms));
+        var decoder = new CountingTranscriber("");
+        var vm = NewVm(() => new LevelMic(samples), decoder);
+        vm.ComposerText = "draft";
+        await vm.StartDictationCommand.ExecuteAsync(null);
+        await vm.FinishDictationCommand.ExecuteAsync(null);
+        Assert.Equal(1, decoder.Calls);
+        Assert.Same(samples, decoder.Samples);
+        Assert.Equal(Loc.T("No speech recognized."), vm.DictationError);
+        Assert.Equal("draft", vm.ComposerText);
+        await vm.DisposeAsync();
     }
 
     private static (Window w, DictationBar bar) Host(MainViewModel vm)
@@ -301,7 +355,7 @@ public sealed class DictationModeTests
     public async Task The_bar_renders_recording_transcribing_and_error_states()
     {
         var gated = new GatedTranscriber();
-        var mic = new LevelMic(new float[16_000]) { Level = 0.05 };
+        var mic = new LevelMic(Sine(0.3, 16_000)) { Level = 0.05 };
         var vm = NewVm(() => mic, gated);
         var (w, bar) = Host(vm);
         Assert.False(bar.IsVisible);
@@ -360,7 +414,7 @@ public sealed class DictationModeTests
     [AvaloniaFact]
     public async Task Keys_toggle_finish_and_cancel_and_enter_never_reaches_the_composer()
     {
-        var mic = new LevelMic(new float[16_000]);
+        var mic = new LevelMic(Sine(0.3, 16_000));
         var transcriber = new CountingTranscriber("spoken");
         var vm = NewVm(() => mic, transcriber);
         var composer = new TextBox { AcceptsReturn = false };

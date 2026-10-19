@@ -9,6 +9,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
 using Ombra.App.Controls;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore;
 
@@ -264,7 +265,7 @@ public sealed class PreviewTests
         Assert.False(Named<Border>(panel, "FallbackCard").IsVisible);
         Assert.False(Named<Panel>(panel, "WebHost").IsVisible);
         Assert.False(Named<ItemsControl>(panel, "SuggestionRow").IsVisible);
-        Assert.Contains(panel.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "Start a dev server and its address shows up here");
+        Assert.Contains(panel.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == Loc.T("Start a dev server and its address shows up here"));
         // The toolbar is 48 high; back, forward and reload share one pill (the ChatGPT app's grouped toolbar)
         var back = Named<Button>(panel, "BackButton");
         Assert.Equal(48, back.GetVisualAncestors().OfType<Border>().First(b => b.Classes.Contains("preview-toolbar")).Height);
@@ -275,7 +276,7 @@ public sealed class PreviewTests
         Dispatcher.UIThread.RunJobs();
         Assert.True(Named<ItemsControl>(panel, "SuggestionRow").IsVisible);
         // With a server found, the empty page points at it instead of asking for one
-        Assert.Contains(panel.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "Open the address found above, or type one");
+        Assert.Contains(panel.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == Loc.T("Open the address found above, or type one"));
         var chips = panel.GetVisualDescendants().OfType<Button>().Where(b => b.Classes.Contains("chip")).ToList();
         Assert.Equal(2, chips.Count);
         Assert.Equal("http://127.0.0.1:8000", chips[0].CommandParameter);
@@ -315,7 +316,7 @@ public sealed class PreviewTests
         var tabs = PanelTabs(panel);
         Assert.Equal(2, tabs.Count);
         Assert.Equal([false, true], tabs.Select(x => x.Classes.Contains("active")));
-        var closers = tabs.Select(x => x.GetVisualDescendants().OfType<Button>().Any(c => c.IsVisible && AutomationProperties.GetName(c) == "Close tab")).ToList();
+        var closers = tabs.Select(x => x.GetVisualDescendants().OfType<Button>().Any(c => c.IsVisible && AutomationProperties.GetName(c) == Loc.T("Close tab"))).ToList();
         Assert.Equal([true, true], closers);
         Assert.Contains(tabs[0].GetVisualDescendants().OfType<TextBlock>(), t => t.Text == "localhost:3000");
 
@@ -325,7 +326,7 @@ public sealed class PreviewTests
         Dispatcher.UIThread.RunJobs();
         Assert.Same(a, vm.ActiveTab);
         Assert.Equal("http://localhost:3000", vm.Address);
-        var close = tabs[1].GetVisualDescendants().OfType<Button>().First(c => AutomationProperties.GetName(c) == "Close tab");
+        var close = tabs[1].GetVisualDescendants().OfType<Button>().First(c => AutomationProperties.GetName(c) == Loc.T("Close tab"));
         close.Command!.Execute(close.CommandParameter);
         Dispatcher.UIThread.RunJobs();
         Assert.True(b.IsClosed);
@@ -439,6 +440,100 @@ public sealed class PreviewTests
     }
 
     /// <summary>
+    /// The Nightly runtime emulates more of a device: each preset brings its pixel ratio and, for a phone or tablet,
+    /// touch; the platform turns touch on or off and the bar's toggle overrides it; leaving device mode resets both and
+    /// the toggle brings them back. What the runtime gets (EmbedDevice) follows.
+    /// </summary>
+    [AvaloniaFact]
+    public void Device_presets_bring_their_pixel_ratio_and_touch()
+    {
+        var (w, _, vm) = Show();
+        Assert.Null(vm.EmbedDevice);
+        Assert.Equal([2, 3, 2.625, 2, 2, 2, 1], PreviewViewModel.DevicePresets.Select(p => p.PixelRatio));
+
+        vm.ChooseDeviceCommand.Execute(PreviewViewModel.DevicePresets.Single(p => p.Name == "Pixel 8"));
+        Assert.Equal((2.625, true), (vm.DevicePixelRatio, vm.DeviceTouch));
+        Assert.Equal(new Ombra.App.Nightly.NightlyProtocol.Device(true, 2.625, vm.DeviceUserAgent!, true, false), vm.EmbedDevice);
+        vm.RotateDeviceCommand.Execute(null);
+        Assert.True(vm.EmbedDevice!.Value.Landscape);
+
+        // A desktop preset: its ratio, no touch, Nightly's own user agent; the toggle gives it touch
+        vm.ChooseDeviceCommand.Execute(PreviewViewModel.DevicePresets.Single(p => p.Name == "Laptop"));
+        Assert.Equal(new Ombra.App.Nightly.NightlyProtocol.Device(false, 2, "", false, false), vm.EmbedDevice);
+        vm.ToggleTouchCommand.Execute(null);
+        Assert.True(vm.EmbedDevice!.Value.Touch);
+        vm.ChoosePlatformCommand.Execute(DevicePlatform.IPad);
+        Assert.Equal((true, true), (vm.EmbedDevice!.Value.Mobile, vm.DeviceTouch));
+        vm.ChoosePlatformCommand.Execute(DevicePlatform.Desktop);
+        Assert.False(vm.DeviceTouch);
+        vm.DevicePixelRatio = 3;
+
+        // Off: nothing emulated; on again: the same ratio and touch
+        vm.ToggleDeviceCommand.Execute(null);
+        Assert.Equal((0d, false), (vm.DevicePixelRatio, vm.DeviceTouch));
+        Assert.Null(vm.EmbedDevice);
+        vm.ToggleDeviceCommand.Execute(null);
+        Assert.Equal((3d, false, new PixelSize(1280, 800)), (vm.DevicePixelRatio, vm.DeviceTouch, vm.DeviceViewport!.Value));
+        Assert.Equal("3×", PreviewViewModel.PixelRatioName(3));
+        Assert.Equal(Loc.T("Display’s"), PreviewViewModel.PixelRatioName(0));
+        w.Close();
+    }
+
+    /// <summary>
+    /// A Nightly pane gives the page the device's size even where the panel is smaller: the pane is the device's size
+    /// where it fits (1:1) and otherwise the largest that fits with the device's aspect, the frame scaled into it (as a
+    /// browser's device toolbar does); without a device it takes the room it gets.
+    /// </summary>
+    [AvaloniaFact]
+    public void A_nightly_pane_keeps_the_devices_size_and_scales_down_where_the_panel_is_smaller()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        var room = new Size(480, 681);
+        Size Measured(Size? viewport)
+        {
+            var pane = new NightlyPane { Viewport = viewport };
+            pane.Measure(room);
+            return pane.DesiredSize;
+        }
+        Assert.Equal(room, Measured(null));
+        Assert.Equal(new Size(375, 667), Measured(new Size(375, 667))); // iPhone SE fits: 1:1
+        Assert.Equal(new Size(480, 300), Measured(new Size(1440, 900))); // Desktop: a third
+        // Layout rounds the scaled size up to a whole device pixel (here 1 DIP).
+        var phone = Measured(new Size(393, 852)); // iPhone 15 Pro: as tall as the room
+        Assert.Equal(681, phone.Height, 6);
+        Assert.InRange(phone.Width, 393 * 681 / 852d, 393 * 681 / 852d + 1);
+        var landscape = Measured(new Size(852, 393)); // turned: as wide as the room
+        Assert.Equal(480, landscape.Width, 6);
+        Assert.InRange(landscape.Height, 393 * 480 / 852d, 393 * 480 / 852d + 1);
+    }
+
+    /// <summary>The agent's browser.set_device: a preset by name (any case), then what it asks over it; checked before anything changes.</summary>
+    [AvaloniaFact]
+    public void The_agent_sets_the_device_as_the_bar_would()
+    {
+        var (w, _, vm) = Show();
+        var state = vm.ApplyAgentDevice(new AgentDeviceRequest(Preset: "iphone se", Landscape: true));
+        Assert.Equal(new AgentDeviceState("iPhone SE", 667, 375, 2, true, "iphone", true, false), state);
+        Assert.Equal(new PixelSize(667, 375), vm.DeviceViewport);
+
+        state = vm.ApplyAgentDevice(new AgentDeviceRequest(Width: 500, Height: 700, PixelRatio: 1.5, Touch: false));
+        Assert.Equal(new AgentDeviceState(null, 500, 700, 1.5, false, "iphone", false, false), state);
+        Assert.Equal("ipad", vm.ApplyAgentDevice(new AgentDeviceRequest(Platform: "iPad")).Platform);
+
+        var unknown = Assert.Throws<AgentBrowserException>(() => vm.ApplyAgentDevice(new AgentDeviceRequest(Preset: "Nokia 3310", PixelRatio: 3)));
+        Assert.Equal("invalid_params", unknown.Code);
+        Assert.Contains("Pixel 8", unknown.Message);
+        Assert.Throws<AgentBrowserException>(() => vm.ApplyAgentDevice(new AgentDeviceRequest(Width: 50, Height: 700)));
+        Assert.Throws<AgentBrowserException>(() => vm.ApplyAgentDevice(new AgentDeviceRequest(Platform: "windows phone")));
+        Assert.Equal((1.5, new PixelSize(500, 700)), (vm.DevicePixelRatio, vm.DeviceViewport!.Value)); // the refused requests changed nothing
+
+        Assert.Equal(new AgentDeviceState(null, null, null, 0, false, "desktop", false, false), vm.ApplyAgentDevice(null));
+        Assert.Throws<AgentBrowserException>(() => vm.ApplyAgentDevice(new AgentDeviceRequest(Landscape: true)));
+        Assert.Contains(PreviewViewModel.AgentDevicePresets, p => p == new AgentDevicePreset("Pixel 8", 412, 915, 2.625, "android"));
+        w.Close();
+    }
+
+    /// <summary>
     /// Regression: with many tabs the strip was wider than the pane, so most close buttons lay out of sight, and its
     /// scroll bar was drawn over the tabs. Now long titles shrink to share the width, every tab keeps its close button,
     /// and past the narrowest the strip scrolls without a bar, keeping the active tab in view.
@@ -452,7 +547,7 @@ public sealed class PreviewTests
         Dispatcher.UIThread.RunJobs();
         var scroller = Named<ScrollViewer>(panel, "PanelTabScroller");
         Assert.Equal(ScrollBarVisibility.Hidden, scroller.HorizontalScrollBarVisibility);
-        Button? CloseOf(Border tab) => tab.GetVisualDescendants().OfType<Button>().FirstOrDefault(c => c.IsVisible && AutomationProperties.GetName(c) == "Close tab");
+        Button? CloseOf(Border tab) => tab.GetVisualDescendants().OfType<Button>().FirstOrDefault(c => c.IsVisible && AutomationProperties.GetName(c) == Loc.T("Close tab"));
         double Left(Visual v) => v.TranslatePoint(default, scroller)!.Value.X;
 
         // They fit: the long titles shrink alike (but no further than needed), the short one keeps its width, nothing scrolls
@@ -481,7 +576,7 @@ public sealed class PreviewTests
         vm.SelectTabCommand.Execute(vm.Tabs[0]);
         Dispatcher.UIThread.RunJobs();
         Assert.Equal(0, scroller.Offset.X);
-        Assert.Equal("Merchant Dashboard — Orders and refunds\nOpened by omp", main.PanelTabs[^1].ToolTip); // the whole title, trimmed in the strip
+        Assert.Equal("Merchant Dashboard — Orders and refunds\n" + Loc.T("Opened by omp"), main.PanelTabs[^1].ToolTip); // the whole title, trimmed in the strip
         w.Close();
         await main.DisposeAsync();
     }
@@ -504,7 +599,7 @@ public sealed class PreviewTests
         Assert.False(Named<StackPanel>(panel, "EmptyState").IsVisible);
         Assert.False(Named<Panel>(panel, "WebHost").IsVisible);
         Assert.True(Named<Border>(panel, "FallbackCard").IsEffectivelyVisible);
-        Assert.StartsWith("The embedded browser needs ", vm.FallbackText);
+        Assert.StartsWith(Loc.F("The embedded browser needs {0} on this system", "\0").Split('\0')[0], vm.FallbackText);
         Assert.Contains(panel.GetVisualDescendants().OfType<TextBlock>(), t => t.Text == vm.FallbackText);
         Assert.True(Named<Button>(panel, "FallbackOpenButton").Command!.CanExecute(null));
         using var frame = w.CaptureRenderedFrame();

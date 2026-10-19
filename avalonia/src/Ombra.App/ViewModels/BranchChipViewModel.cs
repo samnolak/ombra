@@ -73,6 +73,11 @@ public sealed partial class BranchChipViewModel : ObservableObject
     public void Refresh()
     {
         if (Interlocked.Increment(ref _requests) != 1) return;
+        if (_main.IsClosing)
+        {
+            Interlocked.Exchange(ref _requests, 0);
+            return;
+        }
         _ = Task.Run(async () =>
         {
             try
@@ -93,14 +98,16 @@ public sealed partial class BranchChipViewModel : ObservableObject
 
     private async Task ReadAsync()
     {
-        var folder = await Dispatcher.UIThread.InvokeAsync(() => _main.ProjectFolder);
-        if (folder is null)
+        var ct = _main.Lifetime;
+        ct.ThrowIfCancellationRequested();
+        var folder = await _main.UiDispatcher.InvokeAsync(() => _main.ProjectFolder, DispatcherPriority.Normal, ct);
+        ct.ThrowIfCancellationRequested();
+        var head = folder is null ? null : (await GitProbe.ReadHeadAsync(_main.RunTool, folder, ct).ConfigureAwait(false)).Head;
+        ct.ThrowIfCancellationRequested();
+        await _main.UiDispatcher.InvokeAsync(() =>
         {
-            await Dispatcher.UIThread.InvokeAsync(() => Set(null));
-            return;
-        }
-        var (_, head, _) = await GitProbe.ReadHeadAsync(_main.RunTool, folder, _main.Lifetime).ConfigureAwait(false);
-        await Dispatcher.UIThread.InvokeAsync(() => Set(head));
+            if (!_main.IsClosing) Set(head);
+        }, DispatcherPriority.Normal, ct);
     }
 
     private void Set(GitHead? head)

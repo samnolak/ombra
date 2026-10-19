@@ -17,7 +17,7 @@
             <ctl:Icon Classes="ok-mark" Data="{StaticResource IconCheckCircle}" Size="16" IsVisible="{Binding !MessageIsError}" />
             <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" IsVisible="{Binding MessageIsError}" />
           </Panel>
-          <SelectableTextBlock x:Name="GitMessage" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" />
+          <SelectableTextBlock x:Name="GitMessage" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" VerticalAlignment="Center" />
           <Button Grid.Column="2" Classes="icon" Width="24" Height="24" Margin="8,-4,-6,-4" VerticalAlignment="Top" Command="{Binding DismissMessageCommand}"
                   ToolTip.Tip="{loc:T 'Dismiss'}" AutomationProperties.Name="{loc:T 'Dismiss'}">
             <ctl:Icon Data="{StaticResource IconClose}" Size="16" />
@@ -85,7 +85,7 @@
               <TextBlock TextWrapping="Wrap" Text="{loc:T 'git was not found on this computer. Install git, then refresh.'}" />
             </Border>
             <Border Classes="ws-note error" IsVisible="{Binding HasRepoError}">
-              <SelectableTextBlock Text="{Binding RepoError}" TextWrapping="Wrap" FontSize="13" />
+              <SelectableTextBlock Text="{Binding RepoError}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
             </Border>
           </StackPanel>
           <Border Classes="ws-sep" />
@@ -106,7 +106,7 @@
               <Border Classes="status done" IsVisible="{Binding GhSignedIn}">
                 <StackPanel Orientation="Horizontal" Spacing="6">
                   <Ellipse />
-                  <TextBlock Text="{loc:T 'Connected'}" VerticalAlignment="Center" />
+                  <TextBlock Text="{loc:T 'Connected'}" />
                 </StackPanel>
               </Border>
               <Button x:Name="GitHubSignIn" Classes="accent" Content="{loc:T 'Sign in…'}" Command="{Binding SignInToGitHubCommand}" IsVisible="{Binding GhSignedOut}"
@@ -154,7 +154,7 @@
               </StackPanel>
               <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasNewBranchProblem}">
                 <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" Margin="0,0,8,0" VerticalAlignment="Top" />
-                <TextBlock Grid.Column="1" Text="{Binding NewBranchProblem}" TextWrapping="Wrap" FontSize="13" />
+                <TextBlock Grid.Column="1" Text="{Binding NewBranchProblem}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
               </Grid>
               <TextBlock x:Name="NewWorktreeHint" Classes="muted" Text="{Binding CreateHint}" TextWrapping="Wrap" />
               <StackPanel Orientation="Horizontal" Spacing="8">
@@ -183,23 +183,23 @@
                       </StackPanel>
                       <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0" VerticalAlignment="Center">
                         <Button Content="{loc:T 'Open'}" Command="{Binding OpenCommand}" IsEnabled="{Binding CanOpen}" IsVisible="{Binding !IsCurrent}"
-                                ToolTip.Tip="{loc:T 'A new session in this worktree'}" AutomationProperties.Name="{Binding Title, StringFormat='Open {0} in a new session'}" />
+                                ToolTip.Tip="{loc:T 'A new session in this worktree'}" AutomationProperties.Name="{Binding Title, StringFormat={loc:T 'Open {0} in a new session'}}" />
                         <Button Classes="flat" Content="{Binding RemoveLabel}" Command="{Binding AskRemoveCommand}" IsVisible="{Binding CanRemove}"
-                                IsEnabled="{Binding !Busy}" AutomationProperties.Name="{Binding Title, StringFormat='Remove worktree {0}'}" />
+                                IsEnabled="{Binding !Busy}" AutomationProperties.Name="{Binding Title, StringFormat={loc:T 'Remove worktree {0}'}}" />
                       </StackPanel>
                     </Grid>
                     <Border Classes="ws-note warning" IsVisible="{Binding IsConfirming}">
                       <Grid ColumnDefinitions="*,Auto">
                         <TextBlock Text="{Binding ConfirmText}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0" />
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                          <Button Content="{Binding RemoveLabel}" Command="{Binding ConfirmRemoveCommand}" IsEnabled="{Binding !Busy}" />
+                          <Button Classes="danger" Content="{Binding RemoveLabel}" Command="{Binding ConfirmRemoveCommand}" IsEnabled="{Binding !Busy}" />
                           <Button Content="{loc:T 'Cancel'}" Classes="flat" Command="{Binding CancelRemoveCommand}" />
                         </StackPanel>
                       </Grid>
                     </Border>
                     <Border Classes="ws-note error" IsVisible="{Binding HasProblem}">
                       <Grid ColumnDefinitions="*,Auto">
-                        <SelectableTextBlock Text="{Binding Problem}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" Margin="0,0,12,0" />
+                        <SelectableTextBlock Text="{Binding Problem}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" VerticalAlignment="Center" Margin="0,0,12,0" />
                         <Button Grid.Column="1" Content="{loc:T 'OK'}" Classes="flat" Command="{Binding CancelRemoveCommand}" VerticalAlignment="Center" />
                       </Grid>
                     </Border>
@@ -290,7 +290,7 @@
           </Grid>
           <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasSettingsError}">
             <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" Margin="0,0,8,0" VerticalAlignment="Top" />
-            <SelectableTextBlock Grid.Column="1" Text="{Binding SettingsError}" TextWrapping="Wrap" FontSize="13" />
+            <SelectableTextBlock Grid.Column="1" Text="{Binding SettingsError}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
           </Grid>
         </StackPanel>
       </Border>

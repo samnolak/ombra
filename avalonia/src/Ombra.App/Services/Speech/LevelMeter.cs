@@ -11,6 +11,16 @@ public sealed class LevelMeter
     private double _last;
     private bool _fresh;
 
+    /// <summary>A new recording must not inherit the last level from a previous take.</summary>
+    public void Reset()
+    {
+        lock (_gate)
+        {
+            _peak = _last = 0;
+            _fresh = false;
+        }
+    }
+
     /// <summary>Adds a chunk of PCM (float, −1..1): its RMS counts towards the next <see cref="Take"/>.</summary>
     public void Add(ReadOnlySpan<float> samples)
     {

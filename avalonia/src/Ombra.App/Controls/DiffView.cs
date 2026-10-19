@@ -6,6 +6,8 @@ using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Input;
+using Avalonia.VisualTree;
 using Ombra.ClientCore;
 
 namespace Ombra.App.Controls;
@@ -37,10 +39,13 @@ public sealed partial class DiffView : ContentControl
         AvaloniaProperty.Register<DiffView, System.Windows.Input.ICommand?>(nameof(OpenFileCommand));
     public static readonly StyledProperty<System.Windows.Input.ICommand?> CollapseCommandProperty =
         AvaloniaProperty.Register<DiffView, System.Windows.Input.ICommand?>(nameof(CollapseCommand));
+    public static readonly StyledProperty<System.Windows.Input.ICommand?> CommentCommandProperty =
+        AvaloniaProperty.Register<DiffView, System.Windows.Input.ICommand?>(nameof(CommentCommand));
 
     /// <summary>Rows shown before "Show N more lines".</summary>
     public const int FoldAt = 16;
     private const int MaxRows = 1500;
+    private const int MaxLineChars = 4096;
     private const double RowHeight = 20;
     private const double HeaderHeight = 32;
     private const double BarWidth = 3;
@@ -54,6 +59,8 @@ public sealed partial class DiffView : ContentControl
     public System.Windows.Input.ICommand? OpenFileCommand { get => GetValue(OpenFileCommandProperty); set => SetValue(OpenFileCommandProperty, value); }
     /// <summary>Folds the card away (its tool row's line); a chevron at the header's end while set.</summary>
     public System.Windows.Input.ICommand? CollapseCommand { get => GetValue(CollapseCommandProperty); set => SetValue(CollapseCommandProperty, value); }
+    /// <summary>Leaves a comment (a local mark) on a line: right-click a line, "Comment on this line…"; its parameter is a <see cref="DiffLineComment"/>.</summary>
+    public System.Windows.Input.ICommand? CommentCommand { get => GetValue(CommentCommandProperty); set => SetValue(CommentCommandProperty, value); }
 
     private bool _unfolded;
     private Avalonia.Styling.ThemeVariant? _builtTheme;
@@ -184,6 +191,8 @@ public sealed partial class DiffView : ContentControl
         // The command arrives with the row's other bindings: the path turns into a link without building it all again
         else if (change.Property == OpenFileCommandProperty && _link is not null) _link.IsHitTestVisible = OpenFileCommand is not null;
         else if (change.Property == CollapseCommandProperty && _collapse is not null) _collapse.IsVisible = CollapseCommand is not null;
+        // Lines get their "Comment on this line…" menu only where a comment can be left
+        else if (change.Property == CommentCommandProperty && Content is not null && (change.OldValue is null) != (change.NewValue is null)) Rebuild();
     }
 
     private Button? _link;
@@ -199,8 +208,13 @@ public sealed partial class DiffView : ContentControl
                 if (OpenFileCommand is { } command && command.CanExecute(link)) command.Execute(link);
             }
             : null;
+        // Like the link, the comment command is read when a comment is made
+        Action<DiffLineComment>? comment = CommentCommand is null ? null : c2 => { if (CommentCommand is { } command && command.CanExecute(c2)) command.Execute(c2); };
         Content = Change is { } change
-            ? Build(change, _unfolded, () => { _unfolded = !_unfolded; Rebuild(); }, open, () => CollapseCommand?.Execute(null), out _link, out _collapse)
+            ? Build(change, _unfolded, () => { _unfolded = !_unfolded; Rebuild(); }, open, () =>
+            {
+                if (CollapseCommand is { } command && command.CanExecute(null)) command.Execute(null);
+            }, out _link, out _collapse, comment)
             : null;
         if (_link is not null) _link.IsHitTestVisible = OpenFileCommand is not null;
         if (_collapse is not null) _collapse.IsVisible = CollapseCommand is not null;
@@ -212,7 +226,8 @@ public sealed partial class DiffView : ContentControl
         Build(change, unfolded, toggleFold, openFile, null, out _, out _);
 
     /// <param name="collapse">Folds the card away: a chevron at the header's end.</param>
-    private static Control Build(FileChange change, bool unfolded, Action? toggleFold, Action<int?>? openFile, Action? collapse, out Button? pathLink, out Button? collapseButton)
+    private static Control Build(FileChange change, bool unfolded, Action? toggleFold, Action<int?>? openFile, Action? collapse, out Button? pathLink, out Button? collapseButton,
+        Action<DiffLineComment>? comment = null)
     {
         var rows = string.IsNullOrEmpty(change.Diff) ? new List<Line>() : Parse(change.Diff);
         var deleted = change.Kind == FileChangeKind.Deleted;
@@ -222,7 +237,7 @@ public sealed partial class DiffView : ContentControl
             // A deleted file's lines are gone: its card is the header until asked
             var shown = deleted ? (unfolded ? Math.Min(rows.Count, MaxRows) : 0)
                 : unfolded ? Math.Min(rows.Count, MaxRows) : Math.Min(rows.Count, FoldAt);
-            if (shown > 0) card.Children.Add(Body(rows, shown, change, openFile));
+            if (shown > 0) card.Children.Add(Body(rows, shown, change, openFile, comment));
             var foldable = deleted || rows.Count > FoldAt;
             if (foldable && toggleFold is not null)
             {
@@ -276,6 +291,7 @@ public sealed partial class DiffView : ContentControl
             var link = new Button { Classes = { "diff-path-link" }, Content = pathText, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center };
             ToolTip.SetTip(link, Loc.T("Open in the Files pane"));
             Avalonia.Automation.AutomationProperties.SetName(link, Loc.F("Open {0}", change.Path));
+            ContextMenus.SetPathMenu(link, change.Path); // right-click: the path's menu
             link.Click += (_, _) => openFile(first);
             path = link;
             pathLink = link;
@@ -310,6 +326,34 @@ public sealed partial class DiffView : ContentControl
         // The bar draws the card's top (hairline and rounded corners) itself, so held at the top of the view it is still
         // the top of a rounded card; what it moves in shows the window around those corners (diff-head.stuck)
         var bar = new Border { Classes = { "diff-head" }, Child = new Border { Classes = { "diff-head-bar" }, Child = header } };
+        if (collapse is not null)
+        {
+            // Only the background: path/copy/menu buttons retain their own click and right-click behavior.
+            var backgroundPressed = false;
+            bar.PointerPressed += (_, e) =>
+            {
+                backgroundPressed = e.GetCurrentPoint(bar).Properties.IsLeftButtonPressed
+                    && !InsideButton(e.Source as Visual);
+            };
+            bar.PointerReleased += (_, e) =>
+            {
+                var activate = backgroundPressed && e.InitialPressMouseButton == MouseButton.Left
+                    && bar.Bounds.Contains(e.GetPosition(bar) + bar.Bounds.Position)
+                    && !InsideButton(e.Source as Visual);
+                backgroundPressed = false;
+                if (!activate) return;
+                collapse();
+                e.Handled = true;
+            };
+            bar.PointerCaptureLost += (_, _) => backgroundPressed = false;
+
+            bool InsideButton(Visual? source)
+            {
+                for (var current = source; current is not null && current != bar; current = current.GetVisualParent())
+                    if (current is Button) return true;
+                return false;
+            }
+        }
         StickyHeader.SetIsSticky(bar, true);
         return bar;
     }
@@ -341,11 +385,20 @@ public sealed partial class DiffView : ContentControl
         return (path[..cut], path[cut..]);
     }
 
-    private static SideScroller Body(List<Line> rows, int shown, FileChange change, Action<int?>? openFile)
+    private static SideScroller Body(List<Line> rows, int shown, FileChange change, Action<int?>? openFile, Action<DiffLineComment>? comment = null)
     {
         var lang = SyntaxHighlighter.ForName(change.Path);
-        var texts = rows.Select(r => r.Text.Replace("\t", "    ")).ToArray();
-        var marks = DiffWords.Mark(shown, i => rows[i].Kind switch { Kind.Removed => -1, Kind.Added => 1, _ => 0 }, i => texts[i]);
+        // Only visible prefixes reach tab expansion, word comparison, syntax highlighting and layout.
+        var texts = new (string Text, bool Truncated)[shown];
+        for (var i = 0; i < shown; i++)
+        {
+            var original = rows[i].Text;
+            var prefix = original[..GraphemeText.PrefixLength(original, MaxLineChars)];
+            var expanded = prefix.Replace("\t", "    ");
+            var length = GraphemeText.PrefixLength(expanded, MaxLineChars);
+            texts[i] = (expanded[..length], prefix.Length < original.Length || length < expanded.Length);
+        }
+        var marks = DiffWords.Mark(shown, i => rows[i].Kind switch { Kind.Removed => -1, Kind.Added => 1, _ => 0 }, i => texts[i].Text);
         var gutters = new Gutters(
             rows.Any(r => r.Old is not null) ? GutterWidth(rows.Max(r => r.Old ?? 0)) : 0,
             rows.Any(r => r.New is not null) ? GutterWidth(rows.Max(r => r.New ?? 0)) : 0,
@@ -355,7 +408,21 @@ public sealed partial class DiffView : ContentControl
         for (var i = 0; i < shown; i++)
         {
             var r = rows[i];
-            var row = Row(r, texts[i], marks[i], lang, gutters, ref inBlock);
+            var row = Row(r, texts[i].Text, texts[i].Truncated, marks[i], lang, gutters, ref inBlock);
+            if (texts[i].Truncated)
+            {
+                // The omitted suffix may contain a comment delimiter. Do not propagate guessed syntax state.
+                inBlock = false;
+            }
+            if (r.Kind != Kind.Gap)
+            {
+                var at = i;
+                var actions = new List<MenuAction?>();
+                if (texts[i].Truncated) actions.Add(new MenuAction(Loc.T("Copy code"), "IconCopy", target => _ = ContextMenus.CopyAsync(target, r.Text, Loc.T("Code copied"))));
+                if (comment is not null && r.Number is not null)
+                    actions.Add(new MenuAction(Loc.T("Comment on this line…"), "IconComment", target => BeginComment(target, change, rows, at, comment)));
+                if (actions.Count > 0) row.ContextFlyout = ContextMenus.Menu([.. actions]);
+            }
             // A double click on a line opens the file there (a removed line: where it was)
             if (openFile is not null && r.Number is { } n) row.DoubleTapped += (_, _) => openFile(n);
             body.Children.Add(row);
@@ -366,12 +433,51 @@ public sealed partial class DiffView : ContentControl
         return scroller;
     }
 
+    /// <summary>The comment box under a line: a short note, Enter leaves it as a mark (with two lines around the line), Esc cancels.</summary>
+    private static void BeginComment(Control row, FileChange change, List<Line> rows, int at, Action<DiffLineComment> comment)
+    {
+        var r = rows[at];
+        string[] Around(int from, int to) => [.. rows.Skip(Math.Max(0, from)).Take(Math.Max(0, to - Math.Max(0, from))).Where(x => x.Kind != Kind.Gap).Select(x => x.Text)];
+        var box = new TextBox
+        {
+            Name = "DiffCommentNote", Width = 320, MinHeight = 56, MaxHeight = 160, AcceptsReturn = false, TextWrapping = TextWrapping.Wrap,
+            PlaceholderText = Loc.T("Comment on this line"),
+        };
+        Avalonia.Automation.AutomationProperties.SetName(box, Loc.T("Comment"));
+        var where = new TextBlock
+        {
+            Classes = { "tertiary" }, FontSize = 11,
+            Text = $"{Split(change.Path).Name}:{r.Number?.ToString(CultureInfo.InvariantCulture)}{(r.Kind == Kind.Removed ? " (" + Loc.T("removed") + ")" : "")}",
+        };
+        var save = new Button { Classes = { "accent" }, Content = Loc.T("Comment"), HorizontalAlignment = HorizontalAlignment.Right };
+        var flyout = new Flyout
+        {
+            Placement = PlacementMode.BottomEdgeAlignedLeft,
+            Content = new StackPanel { Spacing = 8, Margin = new Thickness(4), Children = { where, box, save } },
+        };
+        void Submit()
+        {
+            var note = box.Text?.Trim() ?? "";
+            if (note.Length == 0) return;
+            flyout.Hide();
+            comment(new DiffLineComment(change.Path, r.Number, r.Kind == Kind.Removed, r.Text, Around(at - 2, at), Around(at + 1, at + 3), note));
+        }
+        save.Click += (_, _) => Submit();
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key == Avalonia.Input.Key.Enter && e.KeyModifiers == Avalonia.Input.KeyModifiers.None) { e.Handled = true; Submit(); }
+            else if (e.Key == Avalonia.Input.Key.Escape) { e.Handled = true; flyout.Hide(); }
+        };
+        flyout.Opened += (_, _) => box.Focus();
+        flyout.ShowAt(row);
+    }
+
     private static double GutterWidth(int largest) =>
         Math.Max(2, largest.ToString(CultureInfo.InvariantCulture).Length) * DigitWidth + GutterPadding;
 
     private sealed record Gutters(double Old, double New, IBrush? AddedMark, IBrush? RemovedMark);
 
-    private static Control Row(Line r, string text, IReadOnlyList<DiffWords.Span>? marks, SyntaxHighlighter.Language? lang, Gutters gutters, ref bool inBlock)
+    private static Control Row(Line r, string text, bool truncated, IReadOnlyList<DiffWords.Span>? marks, SyntaxHighlighter.Language? lang, Gutters gutters, ref bool inBlock)
     {
         var columns = string.Create(CultureInfo.InvariantCulture, $"{BarWidth},{gutters.Old},{gutters.New},{SignWidth},*");
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions(columns), Height = RowHeight, Classes = { "diff-row" } };
@@ -399,6 +505,7 @@ public sealed partial class DiffView : ContentControl
         grid.Children.Add(sign);
         var code = new SelectableTextBlock { Classes = { "mono", "diff-code" }, TextWrapping = TextWrapping.NoWrap, VerticalAlignment = VerticalAlignment.Center, Padding = new Thickness(0, 0, 12, 0) };
         DiffWords.AddRuns(code.Inlines!, text, lang, ref inBlock, marks, r.Kind == Kind.Added ? gutters.AddedMark : gutters.RemovedMark);
+        if (truncated) code.Inlines!.Add(new Run(Loc.T("… (line truncated; right-click to copy original)")));
         Grid.SetColumn(code, 4);
         grid.Children.Add(code);
         return grid;
@@ -422,3 +529,7 @@ public sealed partial class DiffView : ContentControl
     private static IBrush? Res(string key) =>
         Application.Current?.TryGetResource(key, Application.Current.ActualThemeVariant, out var v) == true ? v as IBrush : null;
 }
+
+/// <summary>A comment left on a line of a change shown in the conversation: the file as the tool named it, the line (a removed
+/// line: its number before the change), its text, two lines around it, and the note.</summary>
+public sealed record DiffLineComment(string Path, int? Line, bool Removed, string Text, string[] Before, string[] After, string Note);

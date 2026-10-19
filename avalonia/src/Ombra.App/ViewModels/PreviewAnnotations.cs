@@ -6,158 +6,89 @@ using System.Text;
 using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Ombra.ClientCore;
+using Ombra.ClientCore.Teams;
 
 namespace Ombra.App.ViewModels;
 
-/// <summary>The element that holds a mark, as the page reported it (Controls/Preview/annotate.js); its box in the viewport.</summary>
-public sealed record PageElement(string Selector, string Tag, string Html, string Text, string Source, int X, int Y, int Width, int Height);
-
-public enum PageMarkKind { Point, Area }
-
-/// <summary>
-/// Where the user marked the page: a point (no size) or an area, at <see cref="X"/>,<see cref="Y"/> in the viewport
-/// and <see cref="PageX"/>,<see cref="PageY"/> on the page; <see cref="OffsetX"/>,<see cref="OffsetY"/> from the
-/// holding element's corner (the pin follows that element).
-/// </summary>
-public sealed record PageMark(PageMarkKind Kind, int X, int Y, int Width, int Height, int PageX, int PageY, int OffsetX, int OffsetY,
-    int ViewportWidth, int ViewportHeight);
-
-/// <summary>An element an area shows (one of a few the page found under it).</summary>
-public sealed record PageInsideElement(string Selector, string Tag, string Text);
-
-/// <summary>A comment left on a point or an area of the previewed page, numbered like its pin on the page.</summary>
-public sealed partial class AnnotationViewModel(string id, Uri page, string pageTitle, PageMark mark, PageElement element,
-    IReadOnlyList<PageInsideElement> inside, string comment, PreviewViewModel owner) : ObservableObject
-{
-    public string Id { get; } = id;
-    public Uri Page { get; } = page;
-    public string PageTitle { get; } = pageTitle;
-    public PageMark Mark { get; } = mark;
-    /// <summary>The element under the point, or the smallest one holding the whole area.</summary>
-    public PageElement Element { get; } = element;
-    /// <summary>For an area: elements under it (at most a few); empty for a point.</summary>
-    public IReadOnlyList<PageInsideElement> Inside { get; } = inside;
-    /// <summary>What the user wrote; changed from the chip's editor or from the pin on the page.</summary>
-    [ObservableProperty] private string _comment = comment;
-
-    [ObservableProperty] private int _number;
-
-    /// <summary>The chip's editor is open (<see cref="EditText"/> is what it shows).</summary>
-    [ObservableProperty] private bool _isEditing;
-    [ObservableProperty] private string _editText = "";
-
-    /// <summary>The mark in a few words: "Point on button — Sign in", "Area 240×120 in section".</summary>
-    public string TargetLabel
-    {
-        get
-        {
-            var on = Element.Text.Length > 0 ? $"{Element.Tag} — {Element.Text}" : Element.Selector;
-            return Mark.Kind == PageMarkKind.Area ? Loc.F("Area {0}×{1} in {2}", Mark.Width, Mark.Height, on) : Loc.F("Point on {0}", on);
-        }
-    }
-
-    /// <summary>The page it was left on, as the chip shows it: "localhost:5173/about".</summary>
-    public string PageLabel => Page.Authority + (Page.AbsolutePath == "/" ? "" : Page.AbsolutePath.TrimEnd('/'));
-
-    /// <summary>The chip's tooltip: where (page and mark) and what was written.</summary>
-    public string Tooltip => $"{(PageTitle.Length > 0 ? $"{PageTitle} — " : "")}{PageLabel}\n{TargetLabel}\n\n{Comment}";
-
-    partial void OnCommentChanged(string value) => OnPropertyChanged(nameof(Tooltip));
-
-    [RelayCommand]
-    private void Remove() => owner.RemoveAnnotation(this);
-
-    [RelayCommand]
-    private void BeginEdit()
-    {
-        EditText = Comment;
-        IsEditing = true;
-    }
-
-    /// <summary>Keeps the edited text (an empty one changes nothing: × removes a comment).</summary>
-    [RelayCommand]
-    private void SaveEdit()
-    {
-        IsEditing = false;
-        owner.EditAnnotation(this, EditText);
-    }
-
-    [RelayCommand]
-    private void CancelEdit() => IsEditing = false;
-
-    /// <summary>Opens the page it was left on in the preview (its tab, if one shows it), where its pin is.</summary>
-    [RelayCommand]
-    private void Show() => owner.ShowAnnotation(this);
-}
-
 /// <summary>
 /// Annotations (Codex's page comments): in annotate mode the user clicks a point of the previewed page or drags over an
-/// area and comments on it; the comments go with the next message, each with where the mark is and what finds the
-/// element holding it in the code (selector, opening tag, text, box, the source file where the dev build says it) and,
-/// for an area, the elements it shows. The page reports through the web view's message bridge; only messages with this
-/// panel's token count, and only as many and as long as <see cref="MaxAnnotations"/> and the field limits allow.
+/// area and comments on it; each becomes a local page mark in the chat's one mark list (<see cref="Marks"/>, shared with
+/// the message box) and goes with the next message with where the mark is and what finds the element holding it in the
+/// code (selector, opening tag, text, box, the source file where the dev build says it) and, for an area, the elements
+/// it shows. The page reports through the web view's message bridge; only messages with this panel's token count, and
+/// only as many and as long as <see cref="LocalMarks.MaxMarks"/> and the field limits allow.
 /// </summary>
 public sealed partial class PreviewViewModel
 {
-    public const int MaxAnnotations = 20;
-
-    /// <summary>How the comments block begins in a sent message (the conversation shows it as a chip).</summary>
-    public const string PromptMarker = "Comments on the page ";
-
-    /// <summary>The first line when the comments go without words of the user's own.</summary>
-    public const string CommentsOnlyLine = "Please make the changes my comments on the page ask for.";
-    private const int MaxComment = 2000, MaxField = 400, MaxInside = 6;
+    private const int MaxField = 400, MaxInside = 6;
 
     /// <summary>Shared with the injected script; a message without it did not come from our script.</summary>
     internal string AnnotationToken { get; } = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
 
-    public ObservableCollection<AnnotationViewModel> Annotations { get; } = [];
+    /// <summary>The chat's marks (the main view model passes its own); the page's pins are its page marks.</summary>
+    public MarkCollection Marks { get; init; } = new();
 
     /// <summary>Clicking the page marks a point, dragging marks an area, to comment on instead of using the page.</summary>
     [ObservableProperty] private bool _isAnnotating;
-
-    public bool HasAnnotations => Annotations.Count > 0;
-    public string AnnotationsTitle => Annotations.Count == 1 ? "1 comment" : $"{Annotations.Count} comments";
 
     private bool CanAnnotate() => HasPage && !IsEngineUnavailable;
 
     [RelayCommand(CanExecute = nameof(CanAnnotate))]
     private void ToggleAnnotate() => IsAnnotating = !IsAnnotating;
 
+    /// <summary>Removes the page marks (marks on code stay).</summary>
     [RelayCommand]
-    private void ClearAnnotations() => Annotations.Clear();
-
-    private void OnAnnotationsChanged()
+    private void ClearAnnotations()
     {
-        for (var i = 0; i < Annotations.Count; i++) Annotations[i].Number = i + 1;
-        OnPropertyChanged(nameof(HasAnnotations));
-        OnPropertyChanged(nameof(AnnotationsTitle));
+        foreach (var m in Marks.Items.Where(m => m.IsPage).ToList()) Marks.Remove(m);
     }
 
-    internal void RemoveAnnotation(AnnotationViewModel a) => Annotations.Remove(a);
-
-    /// <summary>The page or the chip changed a comment's text; the pins follow (<see cref="AnnotationEdited"/>).</summary>
-    internal void EditAnnotation(AnnotationViewModel a, string text)
-    {
-        var comment = text.Trim();
-        if (comment.Length == 0 || comment == a.Comment) return;
-        a.Comment = comment.Length <= MaxComment ? comment : comment[..MaxComment] + "…";
-        AnnotationEdited?.Invoke();
-    }
-
-    /// <summary>A comment's text changed (the page's pins show it as their tooltip).</summary>
-    public event Action? AnnotationEdited;
-
-    /// <summary>The preview should be shown (a comment's page was asked for).</summary>
+    /// <summary>The preview should be shown (a mark's page was asked for).</summary>
     public event Action? ShowRequested;
 
-    internal void ShowAnnotation(AnnotationViewModel a)
+    /// <summary>Opens the page a mark was left on (its tab, if one shows it), where its pin is.</summary>
+    internal void ShowMark(MarkViewModel m)
+    {
+        if (m.PageUri is { } page) ShowPage(page);
+    }
+
+    /// <summary>Shows <paramref name="page"/>: the tab already on it, else the shown tab goes there.</summary>
+    internal void ShowPage(Uri page)
     {
         ShowRequested?.Invoke();
-        if (CurrentUrl is { } now && SamePage(now, a.Page)) return;
-        if (Tabs.FirstOrDefault(t => !t.IsClosed && t.Url is { } u && SamePage(u, a.Page)) is { } tab) SelectTabCommand.Execute(tab);
-        else NavigateCommand.Execute(a.Page.AbsoluteUri);
+        if (CurrentUrl is { } now && SamePage(now, page)) return;
+        if (Tabs.FirstOrDefault(t => !t.IsClosed && t.Url is { } u && SamePage(u, page)) is { } tab) SelectTabCommand.Execute(tab);
+        else NavigateCommand.Execute(page.AbsoluteUri);
     }
+
+    /// <summary>Team members' page marks addressed to this member (MainViewModel.SharedMarks.cs): drawn as their own pins, not editable.</summary>
+    public IReadOnlyList<SharedMark> SharedPins { get; private set; } = [];
+
+    /// <summary>The pins to draw changed without the chat's marks changing (<see cref="SharedPins"/>, <see cref="PendingReveal"/>).</summary>
+    public event Action? PinsChanged;
+
+    /// <summary>A shared pin to scroll to when the page has it (the panel clears it once shown).</summary>
+    public string? PendingReveal { get; set; }
+
+    internal void SetSharedPins(IReadOnlyList<SharedMark> pins)
+    {
+        SharedPins = pins;
+        PinsChanged?.Invoke();
+    }
+
+    /// <summary>Opens a team member's page mark at its pin.</summary>
+    internal void RevealShared(SharedMark mark)
+    {
+        if (mark.Mark.Page is not { } p || !Uri.TryCreate(p.Url, UriKind.Absolute, out var page)) return;
+        PendingReveal = SharedPinId(mark);
+        ShowPage(page);
+        PinsChanged?.Invoke();
+    }
+
+    internal static string SharedPinId(SharedMark m) => "team-" + m.Item.AuthorMemberId + "-" + m.Item.ItemId;
+
+    private MarkViewModel? PageMark(string? id) => id is null ? null : Marks.Items.FirstOrDefault(m => m.IsPage && m.Id == id);
 
     /// <summary>
     /// A message from the page's script. Returns what it was: "annotation", "annotation-update", "annotation-remove",
@@ -188,17 +119,17 @@ public sealed partial class PreviewViewModel
                     IsAnnotating = false;
                     return "annotate-exit";
                 case "annotation-update":
-                    if (Annotations.FirstOrDefault(a => a.Id == Str(j, "id")) is not { } edited || Str(j, "comment") is not { } text) return null;
-                    EditAnnotation(edited, text);
+                    if (PageMark(Str(j, "id")) is not { } edited || Str(j, "comment") is not { } text) return null;
+                    Marks.Edit(edited, text);
                     return "annotation-update";
                 case "annotation-remove":
-                    if (Annotations.FirstOrDefault(a => a.Id == Str(j, "id")) is not { } removed) return null;
-                    Annotations.Remove(removed);
+                    if (PageMark(Str(j, "id")) is not { } removed) return null;
+                    Marks.Remove(removed);
                     return "annotation-remove";
                 case "annotation":
-                    if (Annotations.Count >= MaxAnnotations)
+                    if (Marks.Items.Count >= LocalMarks.MaxMarks)
                     {
-                        Message = Loc.F("At most {0} comments at a time: send or clear some first.", MaxAnnotations);
+                        Message = Loc.F("At most {0} comments at a time: send or clear some first.", LocalMarks.MaxMarks);
                         return null;
                     }
                     var comment = Str(j, "comment")?.Trim() ?? "";
@@ -215,14 +146,14 @@ public sealed partial class PreviewViewModel
                         Cap(Str(e, "selector")), Cap(Str(e, "tag"), 40), Cap(Str(e, "html")), Cap(Str(e, "text")), Cap(Str(e, "source")),
                         Int(e, "x"), Int(e, "y"), Int(e, "width"), Int(e, "height"));
                     if (element.Selector.Length == 0) return null;
-                    IReadOnlyList<PageInsideElement> inside = k == PageMarkKind.Area && j.TryGetProperty("inside", out var ins) && ins.ValueKind == JsonValueKind.Array
+                    PageInsideElement[] inside = k == PageMarkKind.Area && j.TryGetProperty("inside", out var ins) && ins.ValueKind == JsonValueKind.Array
                         ? [.. ins.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.Object)
                             .Select(x => new PageInsideElement(Cap(Str(x, "selector")), Cap(Str(x, "tag"), 40), Cap(Str(x, "text"))))
                             .Where(x => x.Selector.Length > 0).Take(MaxInside)]
                         : [];
                     var id = Cap(Str(j, "id"), 40);
-                    if (id.Length == 0 || Annotations.Any(a => a.Id == id)) return null;
-                    Annotations.Add(new AnnotationViewModel(id, page, Cap(Str(j, "title"), 200), mark, element, inside, Cap(comment, MaxComment), this));
+                    if (id.Length == 0 || Marks.Items.Any(a => a.Id == id)) return null;
+                    if (!Marks.Add(new LocalMark(id, comment, Page: new PageAnchor(page.AbsoluteUri, Cap(Str(j, "title"), 200), mark, element, inside)))) return null;
                     return "annotation";
             }
         }
@@ -231,7 +162,7 @@ public sealed partial class PreviewViewModel
         }
         return null;
 
-        static string Cap(string? s, int max = MaxField) => s is null ? "" : s.Length <= max ? s : s[..max] + "…";
+        static string Cap(string? s, int max = MaxField) => s is null ? "" : s.Length <= max ? s : s[..GraphemeText.PrefixLength(s, max)] + "…";
         static string? Str(JsonElement o, string name) => o.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
         static int Int(JsonElement o, string name) =>
             o.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var d) && double.IsFinite(d)
@@ -245,9 +176,14 @@ public sealed partial class PreviewViewModel
     /// </summary>
     internal string PinsJson(Uri? page)
     {
-        var pins = Annotations.Where(a => page is not null && SameSite(a.Page, page))
-            .Select(a => new PinDto(a.Id, a.Number, a.Page.AbsoluteUri, a.Mark.Kind == PageMarkKind.Area ? "area" : "point", a.Element.Selector,
-                a.Mark.OffsetX, a.Mark.OffsetY, a.Mark.Width, a.Mark.Height, a.Mark.PageX, a.Mark.PageY, a.Comment)).ToArray();
+        var pins = Marks.Items.Where(a => page is not null && a.PageUri is { } u && SameSite(u, page))
+            .Select(a => new PinDto(a.Id, a.Number, a.PageUri!.AbsoluteUri, a.Page!.Mark.Kind == PageMarkKind.Area ? "area" : "point", a.Page.Element.Selector,
+                a.Page.Mark.OffsetX, a.Page.Mark.OffsetY, a.Page.Mark.Width, a.Page.Mark.Height, a.Page.Mark.PageX, a.Page.Mark.PageY, a.Note, false))
+            .Concat(SharedPins.Select((s, i) => (s, i)).Where(x => page is not null && Uri.TryCreate(x.s.Mark.Page!.Url, UriKind.Absolute, out var u) && SameSite(u, page))
+                .Select(x => new PinDto(SharedPinId(x.s), x.i + 1, x.s.Mark.Page!.Url, x.s.Mark.Page.Mark.Kind == PageMarkKind.Area ? "area" : "point",
+                    x.s.Mark.Page.Element.Selector, x.s.Mark.Page.Mark.OffsetX, x.s.Mark.Page.Mark.OffsetY, x.s.Mark.Page.Mark.Width, x.s.Mark.Page.Mark.Height,
+                    x.s.Mark.Page.Mark.PageX, x.s.Mark.Page.Mark.PageY, x.s.Mark.Note, true)))
+            .ToArray();
         return JsonSerializer.Serialize(pins, PreviewAnnotationsJson.Default.PinDtoArray);
     }
 
@@ -261,44 +197,10 @@ public sealed partial class PreviewViewModel
         && RouteOf(a) == RouteOf(b);
 
     private static string RouteOf(Uri u) => u.Fragment is ['#', '/', ..] or ['#', '!', '/', ..] ? u.Fragment : "";
-
-    /// <summary>The comments as a message for the agent: per page, each comment with its mark and what finds it in the code.</summary>
-    public static string BuildPrompt(IReadOnlyList<AnnotationViewModel> annotations)
-    {
-        if (annotations.Count == 0) return "";
-        var sb = new StringBuilder();
-        foreach (var page in annotations.GroupBy(a => a.Page.GetLeftPart(UriPartial.Query)))
-        {
-            if (sb.Length > 0) sb.Append('\n');
-            var title = page.First().PageTitle;
-            sb.Append(CultureInfo.InvariantCulture, $"{PromptMarker}{page.Key}{(title.Length > 0 ? $" (\"{title}\")" : "")}, left in the preview.");
-            sb.Append(" Each marks a point or an area of the page; the element details are quoted from the page:\n");
-            foreach (var a in page)
-            {
-                var (m, e) = (a.Mark, a.Element);
-                sb.Append(CultureInfo.InvariantCulture, $"\n{a.Number}. {a.Comment}\n");
-                var onPage = m.PageX != m.X || m.PageY != m.Y ? string.Create(CultureInfo.InvariantCulture, $" ({m.PageX},{m.PageY} on the page)") : "";
-                if (m.Kind == PageMarkKind.Area)
-                    sb.Append(CultureInfo.InvariantCulture, $"   Area: {m.Width}×{m.Height} at {m.X},{m.Y} in a {m.ViewportWidth}×{m.ViewportHeight} viewport{onPage}\n");
-                else
-                    sb.Append(CultureInfo.InvariantCulture, $"   Point: {m.X},{m.Y} in a {m.ViewportWidth}×{m.ViewportHeight} viewport{onPage}\n");
-                sb.Append(CultureInfo.InvariantCulture, $"   {(m.Kind == PageMarkKind.Area ? "Within" : "On")}: {e.Html}");
-                if (e.Text.Length > 0) sb.Append(CultureInfo.InvariantCulture, $" with the text \"{e.Text}\"");
-                sb.Append('\n');
-                sb.Append(CultureInfo.InvariantCulture, $"   Selector: {e.Selector}\n");
-                if (e.Source.Length > 0) sb.Append(CultureInfo.InvariantCulture, $"   Source: {e.Source}\n");
-                sb.Append(CultureInfo.InvariantCulture, $"   Element box: {e.Width}×{e.Height} at {e.X},{e.Y}\n");
-                if (a.Inside.Count > 0)
-                    sb.Append("   Inside the area: ").AppendJoin("; ", a.Inside.Select(i => i.Text.Length > 0 ? $"{i.Tag} \"{i.Text}\" ({i.Selector})" : i.Selector)).Append('\n');
-            }
-        }
-        sb.Append("\nFind these places in the project's source and make the changes the comments ask for.");
-        return sb.ToString();
-    }
 }
 
 internal sealed record PinDto(string id, int number, string url, string kind, string selector, int offsetX, int offsetY, int width, int height,
-    int pageX, int pageY, string comment);
+    int pageX, int pageY, string comment, bool shared);
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(PinDto[]))]
 internal sealed partial class PreviewAnnotationsJson : System.Text.Json.Serialization.JsonSerializerContext;

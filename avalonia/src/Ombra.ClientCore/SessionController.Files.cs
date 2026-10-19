@@ -25,13 +25,8 @@ public sealed partial class SessionController
     {
         try
         {
-            if (path.StartsWith('~')) path = Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path[1..]);
-            if (!Path.IsPathRooted(path))
-            {
-                if (cwd is not { Length: > 0 }) return false;
-                path = Path.Combine(cwd, path);
-            }
-            return !File.Exists(path) && !Directory.Exists(path);
+            if (LocalFilePaths.Resolve(cwd, path) is not { } local) return false;
+            return !File.Exists(local) && !Directory.Exists(local);
         }
         catch (Exception e) when (e is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException)
         {

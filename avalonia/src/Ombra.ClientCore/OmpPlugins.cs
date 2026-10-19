@@ -8,13 +8,27 @@ namespace Ombra.ClientCore;
 /// <param name="Marketplace">null for npm plugins.</param>
 /// <param name="Scope">user or project (marketplace plugins); null for npm plugins.</param>
 /// <param name="Shadowed">A user install hidden by a project install of the same plugin.</param>
-public sealed record InstalledPluginInfo(string Id, string Name, string? Marketplace, string Version, string? Description, bool Enabled, string? Scope, bool Shadowed);
+/// <param name="Path">The plugin's folder on this computer (npm <c>path</c>, a marketplace entry's <c>installPath</c>).</param>
+/// <param name="Manifest">What an npm plugin's manifest declares; null for marketplace plugins (their folder says).</param>
+public sealed record InstalledPluginInfo(string Id, string Name, string? Marketplace, string Version, string? Description, bool Enabled, string? Scope, bool Shadowed,
+    string? Path = null, PluginManifestParts? Manifest = null);
+
+/// <summary>The parts an npm plugin's omp manifest declares (<c>tools</c>, <c>hooks</c>, <c>extensions</c>, <c>commands</c>).</summary>
+public readonly record struct PluginManifestParts(bool Tools, bool Hooks, int Extensions, int Commands);
+
+/// <summary>One of a plugin's settings (<c>omp plugin config list &lt;plugin&gt; --json</c>: its schema and value).</summary>
+public sealed record PluginSettingInfo(string Key, string Type, string? Description, bool Secret, string? Value, IReadOnlyList<string> Choices);
 
 /// <summary>A configured marketplace (<c>omp plugin marketplace list</c>).</summary>
 public sealed record MarketplaceInfo(string Name, string Source);
 
 /// <summary>A plugin a marketplace offers (<c>omp plugin discover &lt;marketplace&gt;</c>).</summary>
 public sealed record MarketplacePluginInfo(string Name, string? Version, string? Description);
+
+/// <summary>What a marketplace's own catalog says of a plugin that omp's <c>discover</c> leaves out.</summary>
+/// <param name="Category">Its <c>category</c> ("" when none).</param>
+/// <param name="Featured">The catalog marks it <c>featured</c> or <c>popular</c>.</param>
+public readonly record struct MarketplacePluginMeta(string Category, bool Featured);
 
 /// <summary>
 /// omp's plugin command line as it prints (omp 18.2.0, cli/plugin-cli.ts) and the settings the Plugins and skills page
@@ -34,7 +48,9 @@ public static class OmpPlugins
             if (name is null) continue;
             var manifest = p["manifest"] as JsonObject;
             list.Add(new(name, name, null, Str(p, "version") ?? Str(manifest, "version") ?? "", Str(manifest, "description"),
-                p["enabled"] is not JsonValue e || !e.TryGetValue<bool>(out var on) || on, null, false));
+                p["enabled"] is not JsonValue e || !e.TryGetValue<bool>(out var on) || on, null, false, Str(p, "path"),
+                new PluginManifestParts(Str(manifest, "tools") is not null, Str(manifest, "hooks") is not null,
+                    (manifest?["extensions"] as JsonArray)?.Count ?? 0, (manifest?["commands"] as JsonArray)?.Count ?? 0)));
         }
         foreach (var p in market.OfType<JsonObject>())
         {
@@ -45,7 +61,7 @@ public static class OmpPlugins
             // omp reads the first entry for version and state (/plugins list); "enabled" absent means enabled.
             var enabled = entry?["enabled"] is not JsonValue e || !e.TryGetValue<bool>(out var on) || on;
             list.Add(new(id, at > 0 ? id[..at] : id, at > 0 ? id[(at + 1)..] : null, Str(entry, "version") ?? "", null, enabled,
-                Str(p, "scope"), Str(p, "shadowedBy") is not null));
+                Str(p, "scope"), Str(p, "shadowedBy") is not null, Str(entry, "installPath")));
         }
         return list;
     }
@@ -101,6 +117,19 @@ public static class OmpPlugins
         return list;
     }
 
+    /// <summary>A marketplace.json's <c>plugins[]</c>: name → category and featured mark; empty when it is not that JSON.</summary>
+    public static IReadOnlyDictionary<string, MarketplacePluginMeta> ParseCatalogMeta(string json)
+    {
+        var map = new Dictionary<string, MarketplacePluginMeta>(StringComparer.Ordinal);
+        if (ParseObject(json)?["plugins"] is not JsonArray entries) return map;
+        foreach (var e in entries.OfType<JsonObject>())
+            if (Str(e, "name") is { Length: > 0 } name)
+                map[name] = new(Str(e, "category")?.Trim() ?? "", True(e, "featured") || True(e, "popular"));
+        return map;
+    }
+
+    private static bool True(JsonObject o, string key) => o[key] is JsonValue v && v.TryGetValue<bool>(out var b) && b;
+
     /// <summary>The values of <c>omp config list --json</c> (key → value); null when it is not that JSON.</summary>
     public static IReadOnlyDictionary<string, JsonNode?>? ParseConfigList(string stdout)
     {
@@ -109,6 +138,28 @@ public static class OmpPlugins
         foreach (var (k, v) in root)
             if (v is JsonObject o && o.ContainsKey("type")) values[k] = o["value"]?.DeepClone();
         return values;
+    }
+
+    /// <summary><c>{ settings: {key: value}, schema: {key: {type, description, secret, values?}} }</c>; null when it is not that JSON.</summary>
+    public static IReadOnlyList<PluginSettingInfo>? ParsePluginSettings(string stdout)
+    {
+        if (ParseObject(stdout) is not { } root || root["schema"] is not JsonObject schema) return null;
+        var values = root["settings"] as JsonObject;
+        var list = new List<PluginSettingInfo>();
+        foreach (var (key, node) in schema)
+        {
+            if (node is not JsonObject s) continue;
+            var secret = s["secret"] is JsonValue sv && sv.TryGetValue<bool>(out var isSecret) && isSecret;
+            var raw = values?[key] ?? s["default"];
+            var value = raw switch
+            {
+                null => null,
+                JsonValue v when v.TryGetValue<string>(out var text) => text,
+                _ => raw.ToJsonString(),
+            };
+            list.Add(new(key, Str(s, "type") ?? "string", Str(s, "description"), secret, value, Strings(s["values"])));
+        }
+        return list;
     }
 
     /// <summary>The value of <c>omp config get &lt;key&gt; --json</c> (<c>{key, value, type, description}</c>).</summary>

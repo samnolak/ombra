@@ -16,7 +16,7 @@
             <ctl:Icon Classes="ok-mark" Data="{StaticResource IconCheckCircle}" Size="16" IsVisible="{Binding !MessageIsError}" />
             <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" IsVisible="{Binding MessageIsError}" />
           </Panel>
-          <SelectableTextBlock x:Name="SshMessage" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" />
+          <SelectableTextBlock x:Name="SshMessage" Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" VerticalAlignment="Center" />
           <Button Grid.Column="2" Classes="icon" Width="24" Height="24" Margin="8,-4,-6,-4" VerticalAlignment="Top" Command="{Binding DismissMessageCommand}"
                   ToolTip.Tip="{loc:T 'Dismiss'}" AutomationProperties.Name="{loc:T 'Dismiss'}">
             <ctl:Icon Data="{StaticResource IconClose}" Size="16" />
@@ -77,7 +77,7 @@
               </Grid>
               <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasFormError}">
                 <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" Margin="0,0,8,0" VerticalAlignment="Top" />
-                <SelectableTextBlock x:Name="SshFormError" Grid.Column="1" Text="{Binding FormError}" TextWrapping="Wrap" FontSize="13" />
+                <SelectableTextBlock x:Name="SshFormError" Grid.Column="1" Text="{Binding FormError}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
               </Grid>
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button x:Name="SshAddConfirm" Classes="accent" Content="{loc:T 'Add host'}" Command="{Binding AddCommand}" IsEnabled="{Binding !Adding}" />
@@ -88,7 +88,7 @@
 
           <TextBlock Classes="muted" Text="{loc:T 'Loading…'}" IsVisible="{Binding IsLoading}" />
           <Border Classes="ws-note error" IsVisible="{Binding HasLoadError}">
-            <SelectableTextBlock x:Name="SshLoadError" Text="{Binding LoadError}" TextWrapping="Wrap" FontSize="13" />
+            <SelectableTextBlock x:Name="SshLoadError" Text="{Binding LoadError}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
           </Border>
           <Border Classes="ws-note" IsVisible="{Binding IsEmpty}">
             <TextBlock x:Name="SshEmpty" TextWrapping="Wrap" Text="{Binding EmptyText}" />
@@ -112,10 +112,10 @@
                       </StackPanel>
                       <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="12,0,0,0" VerticalAlignment="Center">
                         <Button Content="{loc:T 'Test'}" Command="{Binding TestCommand}" IsEnabled="{Binding !Testing}"
-                                ToolTip.Tip="{loc:T 'Connects without a password prompt and exits'}" AutomationProperties.Name="{Binding Name, StringFormat='Test {0}'}" />
+                                ToolTip.Tip="{loc:T 'Connects without a password prompt and exits'}" AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Test {0}'}}" />
                         <Button Classes="flat" Content="{loc:T 'Remove'}" Command="{Binding AskRemoveCommand}"
                                 IsEnabled="{Binding $parent[ItemsControl].((vm:SshSettingsViewModel)DataContext).CanChange}"
-                                AutomationProperties.Name="{Binding Name, StringFormat='Remove {0}'}" />
+                                AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Remove {0}'}}" />
                       </StackPanel>
                     </Grid>
                     <TextBlock Classes="muted" Text="{loc:T 'Connecting…'}" IsVisible="{Binding Testing}" Margin="28,0,0,0" />
@@ -125,20 +125,20 @@
                           <ctl:Icon Classes="ok-mark" Data="{StaticResource IconCheckCircle}" Size="16" IsVisible="{Binding TestOk}" />
                           <ctl:Icon Classes="error-mark" Data="{StaticResource IconCrossCircle}" Size="16" IsVisible="{Binding !TestOk}" />
                         </Panel>
-                        <SelectableTextBlock Grid.Column="1" Text="{Binding TestResult}" TextWrapping="Wrap" FontSize="13" />
+                        <SelectableTextBlock Grid.Column="1" Text="{Binding TestResult}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
                       </Grid>
                     </Border>
                     <Border Classes="ws-note warning" IsVisible="{Binding IsConfirming}">
                       <Grid ColumnDefinitions="*,Auto">
                         <TextBlock Text="{Binding RemoveQuestion}" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,12,0" />
                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                          <Button Content="{loc:T 'Remove'}" Command="{Binding ConfirmRemoveCommand}" />
+                          <Button Classes="danger" Content="{loc:T 'Remove'}" Command="{Binding ConfirmRemoveCommand}" />
                           <Button Content="{loc:T 'Cancel'}" Classes="flat" Command="{Binding CancelRemoveCommand}" />
                         </StackPanel>
                       </Grid>
                     </Border>
                     <Border Classes="ws-note error" IsVisible="{Binding HasProblem}">
-                      <SelectableTextBlock Text="{Binding Problem}" TextWrapping="Wrap" FontSize="13" />
+                      <SelectableTextBlock Text="{Binding Problem}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
                     </Border>
                   </StackPanel>
                 </Border>

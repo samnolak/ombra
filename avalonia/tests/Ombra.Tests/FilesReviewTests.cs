@@ -8,6 +8,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.Services;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
@@ -148,7 +149,7 @@ public sealed class FilesReviewTests
         await Settle();
         var revert = Named<Button>(w, "RevertFileButton");
         Assert.True(revert.IsEffectivelyVisible);
-        Assert.Equal("Revert file…", revert.Content);
+        Assert.Equal(Loc.T("Revert file…"), revert.Content);
         Assert.True(Named<Border>(w, "ViewerReviewBar").IsEffectivelyVisible);
         Shot(w, "files-review-changes");
 
@@ -156,10 +157,10 @@ public sealed class FilesReviewTests
         ClickAt(w, revert);
         await Settle(100);
         Assert.True(Named<Border>(w, "RevertConfirm").IsEffectivelyVisible);
-        Assert.Contains("can't be undone", v.RevertQuestion);
+        Assert.Contains(Loc.F("Discard every change to {0} since the last commit? This can't be undone.", "app.py"), v.RevertQuestion);
         Shot(w, "files-review-revert-confirm");
         Assert.Contains("print('changed')", File.ReadAllText(app));
-        ClickAt(w, Named<Border>(w, "RevertConfirm").GetVisualDescendants().OfType<Button>().Single(b => b.Content as string == "Cancel"));
+        ClickAt(w, Named<Border>(w, "RevertConfirm").GetVisualDescendants().OfType<Button>().Single(b => b.Content as string == Loc.T("Cancel")));
         Assert.False(v.IsConfirmingRevert);
         Assert.Contains("print('changed')", File.ReadAllText(app));
 
@@ -178,7 +179,7 @@ public sealed class FilesReviewTests
         await Settle();
         Assert.Equal(GitMark.Untracked, v.GitMark);
         Assert.False(v.CanRevertHunks);
-        Assert.Equal("Delete file…", Named<Button>(w, "RevertFileButton").Content);
+        Assert.Equal(Loc.T("Delete file…"), Named<Button>(w, "RevertFileButton").Content);
         ClickAt(w, Named<Button>(w, "RevertFileButton"));
         await Settle(100);
         Assert.True(File.Exists(added));
@@ -223,7 +224,7 @@ public sealed class FilesReviewTests
         await v.RevertHunkCommand.ExecuteAsync(v.DiffRows.First(r => r.IsHunk));
         Assert.True(File.Exists(added));
         Assert.Equal("A  added.py\n", GitOut(root, "status", "--porcelain", "--", "added.py"));
-        Assert.Contains("added since the last commit", v.RevertQuestion);
+        Assert.Contains(Loc.F("Discard {0}? It was added since the last commit, so it is deleted. This can't be undone.", "added.py"), v.RevertQuestion);
 
         // Renamed (git mv) and edited: Revert file puts the old name back as committed, the new one goes
         FileTestRepo.Git(root, "mv", "old_name.py", "new_name.py");
@@ -233,7 +234,7 @@ public sealed class FilesReviewTests
         Assert.Equal(GitMark.Renamed, v.GitMark);
         Assert.False(v.CanRevertHunks);
         Assert.Equal("old_name.py", v.RenamedFrom);
-        Assert.Contains("goes back to old_name.py", v.RevertQuestion);
+        Assert.Contains(Loc.F("Discard every change to {0} since the last commit? It goes back to {1}. This can't be undone.", "new_name.py", "old_name.py"), v.RevertQuestion);
         await v.ConfirmRevertFileCommand.ExecuteAsync(null);
         Assert.Equal("", f.Notice);
         Assert.Equal(original, File.ReadAllText(Path.Combine(root, "old_name.py")));
@@ -262,7 +263,7 @@ public sealed class FilesReviewTests
         await v.RevertHunkCommand.ExecuteAsync(v.DiffRows.Single(r => r.IsHunk));
         Assert.Equal(edited, File.ReadAllText(file));
         Assert.Contains("line 3 staged\n", GitOut(root, "show", ":calc.py"));
-        Assert.Contains("staged and was changed again", f.Notice);
+        Assert.Contains(Loc.T("part of it is staged and was changed again since. Stage the file or unstage it in git first."), f.Notice);
         await vm.DisposeAsync();
     }
 
@@ -282,7 +283,13 @@ public sealed class FilesReviewTests
         var v = await OpenChangesAsync(f, "data.txt");
         Assert.Equal(FileViewerViewModel.MaxDiffRows, v.DiffRows.Count);
         Assert.Equal("+1601 −1601", v.DiffStats);
-        Assert.Contains("Showing the first", v.DiffMessage);
+        Assert.Contains(Loc.F("Showing the first {0:N0} lines of the changes.", FileViewerViewModel.MaxDiffRows), v.DiffMessage);
+        // Show more reads on past the cap instead of a hard cut
+        Assert.True(v.CanShowMoreDiff);
+        v.ShowMoreDiffCommand.Execute(null);
+        Assert.False(v.CanShowMoreDiff);
+        Assert.Equal(1601, v.DiffRows.Count(r => r.IsAdded)); // every change shown now, the far one too
+        Assert.Equal("", v.DiffMessage);
 
         // A file git does not have, larger than what is read of a diff: a short message instead of its lines
         File.WriteAllText(Path.Combine(root, "big.log"), string.Concat(Enumerable.Repeat(new string('x', 99) + "\n", GitReview.MaxDiffChars / 100 + 1000)));
@@ -291,7 +298,7 @@ public sealed class FilesReviewTests
         await FileTestRepo.Until(() => f.Results.Any(n => n.RelativePath == "big.log"), "big.log listed as changed");
         await f.ActivateCommand.ExecuteAsync(f.Results.First(n => n.RelativePath == "big.log"));
         v = f.Viewer!;
-        await FileTestRepo.Until(() => v.ShowChanges && v.DiffMessage == "These changes are too large to show here.", "too large");
+        await FileTestRepo.Until(() => v.ShowChanges && v.DiffMessage == Loc.T("These changes are too large to show here."), "too large");
         Assert.Empty(v.DiffRows);
         Assert.False(v.CanRevertHunks);
         await vm.DisposeAsync();
@@ -324,11 +331,12 @@ public sealed class FilesReviewTests
         w.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
         Dispatcher.UIThread.RunJobs();
         Assert.False(row.IsCommenting);
-        var chip = Assert.Single(vm.CodeComments);
+        var chip = Assert.Single(vm.Marks.Items);
         Assert.Equal("app.py:41", chip.Where);
-        Assert.Equal("log this instead of printing", chip.Comment);
+        Assert.Equal("log this instead of printing", chip.Note);
+        Assert.Equal(Ombra.ClientCore.CodeMarkOrigin.Review, chip.Code!.Origin);
         await Settle();
-        Assert.True(w.FindControl<ItemsControl>("CodeCommentsChip")!.IsEffectivelyVisible);
+        Assert.True(w.FindControl<ItemsControl>("MarksList")!.IsEffectivelyVisible);
         Assert.True(vm.SendCommand.CanExecute(null)); // comments alone are a message
         Shot(w, "files-review-comment-chip");
 
@@ -339,18 +347,18 @@ public sealed class FilesReviewTests
         w.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
         Dispatcher.UIThread.RunJobs();
         Assert.False(row.IsCommenting);
-        Assert.Single(vm.CodeComments);
+        Assert.Single(vm.Marks.Items);
 
         // Sent alone: a first line says what to do, the comment follows with its file, line and the line's text; the
         // conversation shows it as a chip
         vm.SendCommand.Execute(null);
         await FileTestRepo.Until(() => vm.Rows.OfType<UserRowViewModel>().Any(), "sent");
-        Assert.Empty(vm.CodeComments);
+        Assert.Empty(vm.Marks.Items);
         var sent = vm.Rows.OfType<UserRowViewModel>().First();
-        Assert.StartsWith(MainViewModel.CodeCommentsOnlyLine + "\n\n" + MainViewModel.CodeCommentsMarker, sent.Text);
+        Assert.StartsWith(Ombra.ClientCore.LocalMarks.CodeOnlyLine + "\n\n" + Ombra.ClientCore.LocalMarks.CodeMarker, sent.Text);
         Assert.Contains("1. src/app.py, line 41: log this instead of printing\n   > print('changed')", sent.Text);
         Assert.True(sent.HasComments);
-        Assert.Equal("1 comment on the code", sent.CommentsLabel);
+        Assert.Equal(Loc.F("{0} on the code", Loc.T("1 comment")), sent.CommentsLabel);
         Assert.False(sent.HasOwnText);
         await vm.DisposeAsync();
         w.Close();

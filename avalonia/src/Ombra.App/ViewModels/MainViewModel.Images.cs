@@ -92,7 +92,6 @@ public sealed partial class MainViewModel
         _viewerShown++;
         SetViewerImage(null);
         _viewerImages = [];
-        FocusComposerRequested?.Invoke();
     }
 
     /// <summary>"Open in default app": the image as a file in the temp folder, opened by the system.</summary>

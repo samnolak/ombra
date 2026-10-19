@@ -27,6 +27,9 @@ internal sealed class TernPreviewHost(MainViewModel main) : ITernBrowser
         {
             var p = main.Preview;
             if (p.IsEngineUnavailable) throw new TernException(TernException.NoWindow, Unavailable(p));
+            // Tern tabs are driven through their WKWebView; a Nightly pane has none (it serves omp's cmux browser tools).
+            if (p.UseNightly)
+                throw new TernException(TernException.NoWindow, "The Ombra browser pane shows pages with Nightly, which serves omp's browser over cmux, not Tern.");
             p.NoteAgentActivity();
             main.IsPreviewOpen = true;
             var tab = p.OpenAgentTab("tern-" + block.Id);

@@ -8,6 +8,7 @@ using System.Text.Json;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.Services;
 using Ombra.App.Services.Runtime;
 using Ombra.App.ViewModels;
@@ -47,6 +48,26 @@ public sealed class UpdateInstallTests
 
     private static UpdateChecker Checker(Dictionary<string, byte[]> files, string? key = null) =>
         new(new HttpClient(new Server(files)), Feed, "0.1.0", "linux-x64", key ?? TestSigning.PublicKey);
+
+    [Fact]
+    public void Apply_propagates_independent_launcher_failure_without_retrying_as_an_owned_child()
+    {
+        var request = HelperFixture("update-independent-launch");
+        var launches = 0;
+        var failure = new System.ComponentModel.Win32Exception(5, "job breakaway denied");
+        var installer = new UpdateInstaller(request.Target, request.Executable, request.State);
+        var staged = new StagedUpdate(request.To, request.Staging, request.NewRoot);
+        Assert.Same(failure, Assert.Throws<System.ComponentModel.Win32Exception>(() =>
+            UpdateApplyHelper.Prepare(installer, staged, request.From, Environment.ProcessId, true, [], _ =>
+            {
+                launches++;
+                throw failure;
+            })));
+        Assert.Equal(1, launches);
+        Assert.True(Directory.Exists(staged.NewRoot));
+        Assert.Equal("old", File.ReadAllText(Path.Combine(request.Target, "marker.txt")));
+        Assert.Single(Directory.GetDirectories(request.State)); // only the fixture helper, not the failed launch's copy
+    }
 
     [Fact]
     public async Task A_manifest_signed_with_the_release_key_is_trusted()
@@ -105,7 +126,7 @@ public sealed class UpdateInstallTests
     public async Task Plain_http_only_on_this_computer(string feed, bool allowed)
     {
         var checker = new UpdateChecker(new HttpClient(new Server([])), feed, "0.1.0", "linux-x64", TestSigning.PublicKey);
-        if (allowed) Assert.Equal("No release is published yet.", (await checker.CheckAsync(CancellationToken.None)).Message);
+        if (allowed) Assert.Equal(Loc.T("No release is published yet."), (await checker.CheckAsync(CancellationToken.None)).Message);
         else await Assert.ThrowsAsync<InvalidDataException>(() => checker.CheckAsync(CancellationToken.None));
     }
 
@@ -157,7 +178,7 @@ public sealed class UpdateInstallTests
     [Fact]
     public async Task A_verified_package_replaces_the_app_after_it_quits_and_keeps_the_previous_version()
     {
-        if (OperatingSystem.IsWindows()) return; // the PowerShell script is not run by the tests (not verified on Windows)
+        if (OperatingSystem.IsWindows()) return; // Unix package/script fixture; app-owned helper behavior is covered separately below.
         var (installer, root, state) = Installed("upd-apply");
         Assert.True(installer.CanWrite());
         var package = Package(Path.GetDirectoryName(root)!, "0.2.0");
@@ -235,9 +256,6 @@ public sealed class UpdateInstallTests
         Assert.Contains("'/a b/it'\\''s here'", sh);
         Assert.Contains("'--config' '/x y/c.json'", sh);
         Assert.Contains("kill -0 42", sh);
-        var ps = UpdateInstaller.PowerShellScript(v);
-        Assert.Contains("'/a b/it''s here'", ps);
-        Assert.Contains("Wait-Process -Id 42", ps);
     }
 
     [Fact]
@@ -248,6 +266,259 @@ public sealed class UpdateInstallTests
         Assert.Contains("development build", why);
     }
 
+    private static UpdateApplyHelper.Request HelperFixture(string name)
+    {
+        var root = TestProcesses.TempDir(name);
+        // Darwin's /var and /tmp aliases are symlinks; production admission intentionally rejects aliases.
+        if (OperatingSystem.IsMacOS() && root.StartsWith("/var/", StringComparison.Ordinal)) root = "/private" + root;
+        if (OperatingSystem.IsMacOS() && root.StartsWith("/tmp/", StringComparison.Ordinal)) root = "/private" + root;
+        var target = Path.Combine(root, "installed");
+        var staging = Path.Combine(root, ".installed.update-2");
+        var newRoot = Path.Combine(staging, "package", "new");
+        var state = Path.Combine(root, "state");
+        var helper = Path.Combine(state, "apply-helper-fixture");
+        WriteApp(target, "1", "old");
+        WriteApp(newRoot, "2", "new");
+        Directory.CreateDirectory(helper);
+        File.WriteAllText(Path.Combine(staging, ".ombra-update-staging"), "fixture");
+        File.WriteAllText(Path.Combine(staging, UpdateApplyHelper.ReadyMarker), JsonSerializer.Serialize(new StagedUpdate("2", staging, newRoot)));
+        var token = new string('a', 64);
+        File.WriteAllText(Path.Combine(helper, ".ombra-update-helper"), token);
+        return new(token, helper, int.MaxValue, null, target, newRoot, staging, Path.Combine(root, ".installed.previous"),
+            state, "Ombra", "1", "2", false, []);
+    }
+
+    private sealed class RetryClock
+    {
+        internal long Ticks;
+        internal int Delays;
+        internal Task Delay(TimeSpan delay) { Ticks += delay.Ticks; Delays++; return Task.CompletedTask; }
+        internal UpdateApplyHelper.Operations Operations(Action<string, string>? move = null, Func<int, long?, Task<bool>>? wait = null) => new()
+        {
+            Timestamp = () => Ticks, Frequency = TimeSpan.TicksPerSecond, Delay = Delay,
+            Move = move ?? Directory.Move, WaitForParent = wait ?? ((_, _) => Task.FromResult(true)),
+        };
+    }
+
+    [Fact]
+    public async Task Helper_retries_transient_locks_then_commits_and_keeps_old_version()
+    {
+        var r = HelperFixture("helper-retry");
+        var attempts = 0;
+        var clock = new RetryClock();
+        var operations = clock.Operations((source, target) =>
+        {
+            if (++attempts <= 3) throw new IOException("sharing violation", unchecked((int)0x80070020));
+            Directory.Move(source, target);
+        });
+        Assert.Equal(0, await UpdateApplyHelper.ApplyAsync(r, operations));
+        Assert.Equal(3, clock.Delays);
+        Assert.Equal("new", File.ReadAllText(Path.Combine(r.Target, "marker.txt")));
+        Assert.Equal("old", File.ReadAllText(Path.Combine(r.Previous, "marker.txt")));
+        Assert.False(Directory.Exists(r.Staging));
+        var result = UpdateInstaller.TakeLastResult(r.State);
+        Assert.True(result!.Ok);
+        Assert.Equal(("1", "2", r.Previous), (result.From, result.To, result.Previous));
+        Assert.Null(UpdateInstaller.TakeLastResult(r.State));
+    }
+
+    [Fact]
+    public async Task Helper_exhausts_sixty_second_lock_window_without_changing_current_version()
+    {
+        var r = HelperFixture("helper-lock-timeout");
+        var clock = new RetryClock();
+        Assert.Equal(1, await UpdateApplyHelper.ApplyAsync(r, clock.Operations((_, _) =>
+            throw new IOException("sharing violation", unchecked((int)0x80070020)))));
+        Assert.Equal(TimeSpan.FromSeconds(60).Ticks, clock.Ticks);
+        Assert.Equal("old", File.ReadAllText(Path.Combine(r.Target, "marker.txt")));
+        Assert.False(Directory.Exists(r.Previous));
+        Assert.False(UpdateInstaller.TakeLastResult(r.State)!.Ok);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Helper_reports_whether_rollback_really_restored_the_previous_version(bool failRollback)
+    {
+        var r = HelperFixture("helper-rollback");
+        var clock = new RetryClock();
+        var rollbackAttempts = 0;
+        Assert.Equal(1, await UpdateApplyHelper.ApplyAsync(r, clock.Operations((source, target) =>
+        {
+            if (source == r.NewRoot) throw new IOException("new app disappeared");
+            if (source == r.Previous && (++rollbackAttempts <= 2 || failRollback))
+                throw new IOException("rollback sharing violation", unchecked((int)0x80070020));
+            Directory.Move(source, target);
+        })));
+        var result = UpdateInstaller.TakeLastResult(r.State)!;
+        Assert.False(result.Ok);
+        Assert.Contains(failRollback ? "rollback failed" : "was put back", result.Error);
+        Assert.Equal("old", File.ReadAllText(Path.Combine(failRollback ? r.Previous : r.Target, "marker.txt")));
+        Assert.Equal(failRollback, Directory.Exists(r.Previous));
+        Assert.True(Directory.Exists(r.NewRoot));
+        Assert.Equal(failRollback ? TimeSpan.FromSeconds(60).Ticks : TimeSpan.FromMilliseconds(500).Ticks, clock.Ticks);
+    }
+
+    [Fact]
+    public async Task Helper_waits_before_deleting_previous_or_moving_either_app()
+    {
+        var r = HelperFixture("helper-parent");
+        WriteApp(r.Previous, "0", "earlier");
+        var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clock = new RetryClock();
+        var apply = UpdateApplyHelper.ApplyAsync(r, clock.Operations(wait: (_, _) => gate.Task));
+        Assert.False(apply.IsCompleted);
+        Assert.Equal("earlier", File.ReadAllText(Path.Combine(r.Previous, "marker.txt")));
+        Assert.Equal("old", File.ReadAllText(Path.Combine(r.Target, "marker.txt")));
+        Assert.True(Directory.Exists(r.NewRoot));
+        gate.SetResult(false);
+        Assert.Equal(1, await apply);
+        Assert.Equal("earlier", File.ReadAllText(Path.Combine(r.Previous, "marker.txt")));
+        Assert.Contains("nothing was changed", UpdateInstaller.TakeLastResult(r.State)!.Error);
+    }
+
+    [Fact]
+    public async Task Helper_revalidates_prepared_payload_after_wait_before_deleting_backup()
+    {
+        var r = HelperFixture("helper-revalidation");
+        WriteApp(r.Previous, "0", "earlier");
+        var clock = new RetryClock();
+        Assert.Equal(1, await UpdateApplyHelper.ApplyAsync(r, clock.Operations(wait: (_, _) =>
+        {
+            File.Delete(Path.Combine(r.Staging, UpdateApplyHelper.ReadyMarker));
+            return Task.FromResult(true);
+        })));
+        Assert.Equal("earlier", File.ReadAllText(Path.Combine(r.Previous, "marker.txt")));
+        Assert.Equal("old", File.ReadAllText(Path.Combine(r.Target, "marker.txt")));
+        Assert.False(UpdateInstaller.TakeLastResult(r.State)!.Ok);
+    }
+
+    [Theory]
+    [InlineData("state-inside-target")]
+    [InlineData("unrelated-previous")]
+    [InlineData("outside-new-root")]
+    [InlineData("unverified-stage")]
+    [InlineData("wrong-version")]
+    [InlineData("executable-traversal")]
+    [InlineData("unowned-previous")]
+    public async Task Helper_refuses_unsafe_admission_without_touching_installed_data(string kind)
+    {
+        var original = HelperFixture("helper-admission");
+        var r = kind switch
+        {
+            "state-inside-target" => original with { State = Path.Combine(original.Target, "state") },
+            "unrelated-previous" => original with { Previous = original.Target },
+            "outside-new-root" => original with { NewRoot = original.Target },
+            "wrong-version" => original with { To = "3" },
+            "executable-traversal" => original with { Executable = "../Ombra" },
+            _ => original,
+        };
+        if (kind == "unverified-stage") File.Delete(Path.Combine(r.Staging, UpdateApplyHelper.ReadyMarker));
+        if (kind == "unowned-previous")
+        {
+            Directory.CreateDirectory(r.Previous);
+            File.WriteAllText(Path.Combine(r.Previous, "unrelated"), "keep");
+        }
+        var clock = new RetryClock();
+        if (kind is "unverified-stage" or "wrong-version" or "unowned-previous")
+        {
+            Assert.Equal(1, await UpdateApplyHelper.ApplyAsync(r, clock.Operations()));
+            Assert.False(UpdateInstaller.TakeLastResult(original.State)!.Ok);
+        }
+        else
+            await Assert.ThrowsAsync<InvalidDataException>(() => UpdateApplyHelper.ApplyAsync(r, clock.Operations()));
+        Assert.Equal("old", File.ReadAllText(Path.Combine(original.Target, "marker.txt")));
+        Assert.True(Directory.Exists(original.NewRoot));
+        Assert.Null(UpdateInstaller.TakeLastResult(original.State));
+        if (kind == "unowned-previous") Assert.Equal("keep", File.ReadAllText(Path.Combine(r.Previous, "unrelated")));
+    }
+
+    [Fact]
+    public async Task Helper_refuses_symlink_cleanup_targets()
+    {
+        if (OperatingSystem.IsWindows()) return; // creating symlinks requires privileges on Windows
+        var r = HelperFixture("helper-symlink");
+        var unrelated = Path.Combine(Path.GetDirectoryName(r.Target)!, "unrelated");
+        Directory.CreateDirectory(unrelated);
+        File.WriteAllText(Path.Combine(unrelated, "keep"), "keep");
+        Directory.CreateSymbolicLink(Path.Combine(r.Staging, "linked"), unrelated);
+        Assert.Equal(1, await UpdateApplyHelper.ApplyAsync(r, new RetryClock().Operations()));
+        Assert.False(UpdateInstaller.TakeLastResult(r.State)!.Ok);
+        Assert.Equal("keep", File.ReadAllText(Path.Combine(unrelated, "keep")));
+        Assert.Equal("old", File.ReadAllText(Path.Combine(r.Target, "marker.txt")));
+    }
+
+    [Fact]
+    public async Task Helper_relaunches_with_exact_arguments_without_shell_interpretation()
+    {
+        if (OperatingSystem.IsWindows()) return; // actual Unix executable fixture, not Windows-native proof
+        var r = HelperFixture("helper-relaunch") with { Relaunch = true, Args = ["--config", "a b/\"quoted\";$HOME.json", ""] };
+        File.WriteAllText(Path.Combine(r.NewRoot, r.Executable), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.args\"\n");
+        Assert.Equal(0, await UpdateApplyHelper.ApplyAsync(r, new UpdateApplyHelper.Operations
+        {
+            WaitForParent = (_, _) => Task.FromResult(true),
+            Launch = start =>
+            {
+                using var child = OwnedProcesses.StartIndependent(start)!;
+                Assert.True(child.WaitForExit(10_000));
+                Assert.Equal(0, child.ExitCode);
+            },
+        }));
+        Assert.Equal(r.Args, File.ReadAllLines(Path.Combine(r.Target, r.Executable + ".args")));
+        Assert.True(UpdateInstaller.TakeLastResult(r.State)!.Ok);
+    }
+
+    [Fact]
+    public async Task Helper_reports_relaunch_failure_without_claiming_a_committed_install_was_rolled_back()
+    {
+        var r = HelperFixture("helper-relaunch-failure") with { Relaunch = true };
+        var launches = 0;
+        Assert.Equal(1, await UpdateApplyHelper.ApplyAsync(r, new UpdateApplyHelper.Operations
+        {
+            WaitForParent = (_, _) => Task.FromResult(true),
+            Launch = _ => { launches++; throw new System.ComponentModel.Win32Exception(5, "job breakaway denied"); },
+        }));
+        Assert.Equal(1, launches);
+        Assert.Equal("new", File.ReadAllText(Path.Combine(r.Target, "marker.txt")));
+        var result = UpdateInstaller.TakeLastResult(r.State)!;
+        Assert.True(result.Ok);
+        Assert.NotNull(result.Error);
+    }
+
+    [Fact]
+    public async Task Helper_command_rejects_mixed_options_and_foreign_request_origin()
+    {
+        Assert.Equal(1, await UpdateApplyHelper.RunAsync(["--version", "--apply-update", "missing", "token"]));
+        var r = HelperFixture("helper-origin");
+        var request = Path.Combine(r.Helper, "request.json");
+        File.WriteAllText(request, JsonSerializer.Serialize(r));
+        Assert.Equal(1, await UpdateApplyHelper.RunAsync(["--apply-update", request, "wrong token"]));
+        Assert.Equal(1, await UpdateApplyHelper.RunAsync(["--apply-update", request, r.Token])); // testhost is not the copied helper
+        Assert.True(File.Exists(request));
+        Assert.Equal("old", File.ReadAllText(Path.Combine(r.Target, "marker.txt")));
+        Assert.Null(UpdateInstaller.TakeLastResult(r.State));
+    }
+
+    [Fact]
+    public void Helper_cleanup_requires_completion_and_defers_while_the_helper_owns_its_lease()
+    {
+        var r = HelperFixture("helper-cleanup");
+        var unrelated = Path.Combine(r.State, "apply-helper-unrelated");
+        Directory.CreateDirectory(unrelated);
+        File.WriteAllText(Path.Combine(unrelated, "keep"), "keep");
+        UpdateApplyHelper.CleanupCompleted(r.State);
+        Assert.True(Directory.Exists(r.Helper)); // not yet completed
+        File.WriteAllText(Path.Combine(r.Helper, ".completed"), r.Token);
+        using (new FileStream(Path.Combine(r.Helper, ".running"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            UpdateApplyHelper.CleanupCompleted(r.State);
+            Assert.True(Directory.Exists(r.Helper));
+        }
+        UpdateApplyHelper.CleanupCompleted(r.State);
+        Assert.False(Directory.Exists(r.Helper));
+        Assert.Equal("keep", File.ReadAllText(Path.Combine(unrelated, "keep")));
+    }
+
     // ───────────── omp moves with the client ─────────────
 
     private static void FakePack(string root, string name, string omp, string platform = "linux-x64", DateTimeOffset? at = null)
@@ -255,10 +526,17 @@ public sealed class UpdateInstallTests
         var dir = Path.Combine(root, name);
         Directory.CreateDirectory(Path.Combine(dir, "bun"));
         File.WriteAllText(Path.Combine(dir, "bun", "bun"), "");
-        var cli = Path.Combine(dir, "omp", RuntimePack.CliEntry.Replace('/', Path.DirectorySeparatorChar));
+        var cli = Path.Combine(dir, "omp", (name == RuntimePack.Name ? RuntimePack.CliEntry : RuntimePack.HistoricalCliEntry).Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(cli)!);
         File.WriteAllText(cli, "");
-        File.WriteAllText(Path.Combine(dir, "installed.json"), JsonSerializer.Serialize(new { pack = name, omp, bun = "1.4.0", platform, installedAt = at ?? DateTimeOffset.UtcNow }));
+        if (name == RuntimePack.Name)
+            File.WriteAllText(Path.Combine(dir, "omp", RuntimePack.HostEntry.Replace('/', Path.DirectorySeparatorChar)), "");
+        File.WriteAllText(Path.Combine(dir, "installed.json"), JsonSerializer.Serialize(new
+        {
+            pack = name, omp, bun = "1.4.0", platform, installedAt = at ?? DateTimeOffset.UtcNow,
+            packManifestSha256 = name == RuntimePack.Name ? RuntimePack.ManifestSha256 : null,
+            sourceArtifact = name == RuntimePack.Name ? new { identity = RuntimePack.SourceIdentity, sha256 = RuntimePack.SourceSha256 } : null,
+        }));
     }
 
     [Fact]
@@ -312,8 +590,8 @@ public sealed class UpdateInstallTests
         vm.OnWindowOpened();
         await Until(() => vm.UpdateAvailable, "automatic check offered the update");
         Assert.True(vm.ShowUpdatePill);
-        Assert.Equal("Update available: 0.2.0", vm.UpdatePill);
-        Assert.Contains("moves omp to 19.0.0", vm.UpdateOmpText);
+        Assert.Equal(Loc.F("Update available: {0}", "0.2.0"), vm.UpdatePill);
+        Assert.Contains(Loc.F("This version moves omp to {0} (Bun {1}). After the restart it installs by itself (about 1.3 GB, verified like the first install); until then omp {2} keeps working.", "19.0.0", "\0", "\0").Split('\0')[0], vm.UpdateOmpText);
 
         vm.OpenUpdatesCommand.Execute(null);
         await Until(() => vm.IsSettingsOpen, "settings open");
@@ -340,9 +618,9 @@ public sealed class UpdateInstallTests
         };
         vm.OnWindowOpened();
         await Until(() => vm.ShowUpdatePill, "outcome shown");
-        Assert.Equal("Updated to 0.2.0", vm.UpdatePill);
-        Assert.Contains("Updated from 0.1.0 to 0.2.0", vm.UpdateText);
-        Assert.Equal("Download and install", vm.UpdateActionLabel);
+        Assert.Equal(Loc.F("Updated to {0}", "0.2.0"), vm.UpdatePill);
+        Assert.Contains(Loc.F("Updated from {0} to {1}. The version before is kept in {2} until the next update.", "0.1.0", "0.2.0", "\0").Split('\0')[0], vm.UpdateText);
+        Assert.Equal(Loc.T("Download and install"), vm.UpdateActionLabel);
         vm.OpenUpdatesCommand.Execute(null);
         await Until(() => !vm.ShowUpdatePill, "outcome dismissed once seen");
         await vm.DisposeAsync();

@@ -1,0 +1,26 @@
+<!-- The header's bell: a badge with what is new (teammates' pushes to the open projects' remotes, the team Inbox's
+     waiting items) and the list in a popover (Views/GitBellList). DataContext: GitBellViewModel (MainViewModel.Bell). -->
+<UserControl xmlns:loc="using:Ombra.App.Localization"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
+             xmlns:views="using:Ombra.App.Views"
+             x:Class="Ombra.App.Views.GitBellButton"
+             x:DataType="vm:GitBellViewModel">
+  <Button x:Name="BellButton" Classes="icon" Classes.on="{Binding IsOpen}"
+          ToolTip.Tip="{Binding Tip}" AutomationProperties.Name="{Binding Tip}">
+    <Panel>
+      <ctl:Icon Data="{StaticResource IconBell}" Size="16" />
+      <Border x:Name="BellBadge" IsVisible="{Binding HasBadge}" Background="{DynamicResource GuiAccent}" CornerRadius="{DynamicResource GuiRadiusFull}" IsHitTestVisible="False"
+              MinWidth="14" Height="14" Padding="3,0" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-8,0">
+        <TextBlock Text="{Binding BadgeText}" FontSize="9" FontWeight="SemiBold" Foreground="{DynamicResource GuiTextOnAccent}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+      </Border>
+    </Panel>
+    <Button.Flyout>
+      <Flyout Placement="BottomEdgeAlignedRight">
+        <views:GitBellList x:Name="BellPopupList" />
+      </Flyout>
+    </Button.Flyout>
+  </Button>
+</UserControl>

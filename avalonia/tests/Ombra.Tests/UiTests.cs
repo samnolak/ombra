@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.ClientCore;
@@ -91,7 +92,7 @@ public sealed class UiTests
 
         w.KeyPress(Key.Escape, RawInputModifiers.None, PhysicalKey.Escape, null);
         await Until(() => vm.Phase == SessionPhase.Ready, "aborted");
-        Assert.Equal("Interrupted", vm.Rows.OfType<AssistantRowViewModel>().Last().Footer);
+        Assert.Equal(Loc.T("Interrupted"), vm.Rows.OfType<AssistantRowViewModel>().Last().Footer);
         Shot(w, "ui-after-abort");
         await CloseAsync(w, vm);
     }
@@ -99,12 +100,17 @@ public sealed class UiTests
     [AvaloniaFact]
     public async Task Start_failure_is_shown_and_sending_stays_disabled()
     {
-        var (w, vm, _) = await OpenAsync("crash-before-ready");
+        var (w, vm, s) = await OpenAsync("crash-before-ready");
         Assert.Equal(SessionPhase.Faulted, vm.Phase);
         Assert.True(vm.HasError);
-        Assert.StartsWith("omp stopped:", vm.StatusText);
+        // The whole line in the UI's language (regression, ru: "omp остановлен: omp exited with code 3 before the …");
+        // only omp's own error after the colon stays as omp wrote it
+        const string english = "omp exited with code 3 before the session was ready: ";
+        var error = s.Snapshot().LastError!.Split('\n')[0];
+        Assert.StartsWith(english, error);
+        Assert.Equal(Loc.T("omp stopped: ") + Loc.F("omp exited with code {0} before the session was ready: {1}", 3, error[english.Length..]), vm.StatusText);
         Assert.True(vm.CanRecover);
-        Assert.Equal("omp didn't start", vm.RecoverTitle);
+        Assert.Equal(Loc.T("omp didn't start"), vm.RecoverTitle);
         // Said once (design review G1): the setup screen, with the error under Show details; not in the conversation,
         // not in the activity line; no message box on the setup screen
         Assert.True(vm.ShowSetupScreen);
@@ -114,6 +120,24 @@ public sealed class UiTests
         Assert.True(vm.HasErrorDetail);
         Assert.False(vm.SendCommand.CanExecute(null));
         Shot(w, "ui-start-failure");
+        await CloseAsync(w, vm);
+    }
+
+    [AvaloniaFact]
+    public async Task A_crash_mid_run_is_told_in_the_ui_language_in_the_conversation_and_the_status()
+    {
+        // Regression (ru): the crash notice and the status line read "omp exited unexpectedly (exit code 137)…" in English.
+        var (w, vm, s) = await OpenAsync("slow-stream");
+        vm.ComposerText = "go";
+        vm.SendCommand.Execute(null);
+        await Until(() => vm.Rows.OfType<AssistantRowViewModel>().Any(a => a.Text.Length > 20), "streaming");
+        System.Diagnostics.Process.GetProcessById(s.ProcessId!.Value).Kill();
+        await Until(() => vm.Phase == SessionPhase.Faulted, "fault");
+        var notice = Assert.Single(vm.Rows.OfType<NoticeRowViewModel>(), n => n.IsError);
+        var line = notice.Text.Split('\n')[0];
+        // Every form ("… (exit code N)", "…: reason", or neither) starts with the same words
+        Assert.StartsWith(Loc.T("omp exited unexpectedly"), line);
+        Assert.Equal(Loc.T("omp stopped: ") + line, vm.StatusText);
         await CloseAsync(w, vm);
     }
 

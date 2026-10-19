@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageDescription>TextMate integration for AvaloniaEdit.</PackageDescription>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AvaloniaEdit\AvaloniaEdit.csproj" />
+    <ProjectReference Include="..\..\..\TextMateSharp\src\TextMateSharp\TextMateSharp.csproj" />
+    <ProjectReference Include="..\..\..\TextMateSharp\src\TextMateSharp.Grammars\TextMateSharp.Grammars.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.3" />
+  </ItemGroup>
+
+</Project>

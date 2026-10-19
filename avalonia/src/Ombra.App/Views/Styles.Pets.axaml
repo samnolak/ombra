@@ -12,9 +12,7 @@
   </Style>
   <!-- While the model menu is open over the message box the pet steps out of its way -->
   <Style Selector="ctl|PetPerch">
-    <Setter Property="Transitions">
-      <Transitions><DoubleTransition Property="Opacity" Duration="0:0:0.12" /></Transitions>
-    </Setter>
+    <Setter Property="ctl:Motion.Kind" Value="FadeFast" />
   </Style>
   <Style Selector="ctl|PetPerch.under-menu">
     <Setter Property="Opacity" Value="0" />

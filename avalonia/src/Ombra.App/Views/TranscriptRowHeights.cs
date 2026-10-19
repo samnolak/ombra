@@ -43,7 +43,9 @@ public static class TranscriptRowHeights
             TurnFoldRowViewModel => 8 + 22 + 11 + 16,
             // The change card: 12 above and 6 below, its hairline, the 62 px header, 32 px rows and "Show N more files"
             TurnEndRowViewModel e => e.HasFiles ? 18 + 2 + 62 + (e.HasFileRows ? e.ShownFiles.Count * 32 + (e.HasMoreFiles ? 32 : 0) : 0) : 0,
-            CommandOutputRowViewModel c => c.IsMarker ? 28 + 18 : 8 + 16 + Lines(c.Text, (column - 24) / (Code * MonoCharWidth)) * CodeLine,
+            CommandOutputRowViewModel c => c.IsContext
+                ? 48 + MarkdownHeight.Estimate(c.Text, column - 24) + (c.HasImages ? 90 * Math.Ceiling(c.Previews.Count / Math.Max(1, Math.Floor((column - 24) / 82))) : 0)
+                : c.IsMarker ? 28 + 18 : 8 + 16 + Lines(c.Text, (column - 24) / (Code * MonoCharWidth)) * CodeLine,
             NoticeRowViewModel n => 28 + Lines(n.Text, 440 / (Caption * CharWidth)) * 18,
             // A message between agents: 8 above and 8 below, its bar, then two preview lines or the message, 8 and 10 inside
             AgentMessageRowViewModel m => 16 + CardHeader + 18 + (m.IsExpanded ? MarkdownHeight.Estimate(m.Text, column - 24) : 2 * 20),

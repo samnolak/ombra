@@ -113,17 +113,20 @@ public sealed class TernHost : IDisposable
     /// Unchanged when the user's settings environment names their own Tern socket; a <c>PI_BROWSER_TERN</c> they set
     /// stays as they set it.
     /// </summary>
-    public OmpLaunchSpec AddTo(OmpLaunchSpec spec)
+    public OmpLaunchSpec AddTo(OmpLaunchSpec spec, string? paneId = null)
     {
         if (spec.Environment.ContainsKey(SocketVariable)) return spec;
         var env = new Dictionary<string, string?>(spec.Environment)
         {
             [SocketVariable] = Endpoint,
-            [PaneVariable] = Interlocked.Increment(ref _nextPane).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            [PaneVariable] = paneId ?? CreatePaneId(),
         };
         env.TryAdd(TernFlagVariable, "1");
         return spec with { Environment = env };
     }
+
+    internal string CreatePaneId() =>
+        Interlocked.Increment(ref _nextPane).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>The open tab omp addresses as <paramref name="id"/>, for the app (null when there is none).</summary>
     public TernBlock? Block(int id)
@@ -276,7 +279,8 @@ public sealed class TernHost : IDisposable
         if (TernBlock.Num(p, "block") is not { } id) throw new TernException(TernException.Invalid, $"The {op} op needs a block.");
         TernBlock? block;
         lock (_gate) block = _blocks.GetValueOrDefault((int)id);
-        if (block is null) throw new TernException(TernException.NotFound, $"No Tern block {id} is open.");
+        if (block is null || !connection.Owns(block))
+            throw new TernException(TernException.NotFound, $"No Tern block {id} is open.");
         if (op == "close")
         {
             await CloseAsync(connection, block, ct).ConfigureAwait(false);
@@ -299,6 +303,11 @@ public sealed class TernHost : IDisposable
         public void Disown(TernBlock block)
         {
             lock (_owned) _owned.Remove(block);
+        }
+
+        public bool Owns(TernBlock block)
+        {
+            lock (_owned) return _owned.Contains(block);
         }
 
         public async Task RunAsync(CancellationToken appClosing)

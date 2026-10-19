@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Ombra.App.Controls;
 using Ombra.App.Services;
+using Ombra.App.Services.Documents;
 
 namespace Ombra.App.ViewModels;
 
@@ -37,7 +38,7 @@ public sealed partial class FilesViewModel : ObservableObject
 
     private FileNodeViewModel? _rootNode;
     private GitSnapshot? _git;
-    private List<string>? _index;
+    private ProjectFiles.SearchIndex? _index;
     private bool _indexTruncated;
     private string? _loadedRoot;
     private Task _rootLoad = Task.CompletedTask;
@@ -63,6 +64,10 @@ public sealed partial class FilesViewModel : ObservableObject
         };
         owner.SessionGroups.CollectionChanged += (_, _) => RebuildRecentProjects();
         RebuildRecentProjects();
+        Owner.Documents.Changed += DocumentStateChanged;
+        DocumentStateChanged();
+        LanguageService.Changed += LanguageStateChanged;
+        LanguageService.Attach(Owner.Session, Owner.ProjectFolder);
         _ = DetectEditorsAsync();
         FollowTab(); // made while the Changes tab is shown: its list
         if (IsActive) Activate(); // shown before anything asked for this
@@ -173,7 +178,7 @@ public sealed partial class FilesViewModel : ObservableObject
 
     /// <summary>What the project menu calls the file manager ("Show in Finder").</summary>
     public string FileManagerLabel => OperatingSystem.IsMacOS() ? Loc.T("Show in Finder") : OperatingSystem.IsWindows() ? Loc.T("Show in Explorer") : Loc.T("Open in file manager");
-    public string RevealLabel => OperatingSystem.IsMacOS() ? Loc.T("Reveal in Finder") : OperatingSystem.IsWindows() ? Loc.T("Reveal in Explorer") : Loc.T("Reveal in file manager");
+    public string RevealLabel => FileOpeners.RevealLabel;
 
     /// <summary>The projects of the sidebar, newest first (at most 6), to start a new session in.</summary>
     public ObservableCollection<SessionGroupViewModel> RecentProjects { get; } = [];
@@ -200,6 +205,7 @@ public sealed partial class FilesViewModel : ObservableObject
 
     private void OnOwnerChanged(object? sender, PropertyChangedEventArgs e)
     {
+        LanguageService.Attach(Owner.Session, Owner.ProjectFolder);
         switch (e.PropertyName)
         {
             case nameof(MainViewModel.ActivePane):
@@ -208,6 +214,7 @@ public sealed partial class FilesViewModel : ObservableObject
                 else Deactivate();
                 break;
             case nameof(MainViewModel.ProjectPath):
+            case nameof(MainViewModel.ProjectFolder):
                 if (IsActive && !SamePath(Owner.ProjectFolder, _loadedRoot)) _rootLoad = LoadRootAsync(Owner.ProjectFolder);
                 break;
         }
@@ -459,6 +466,10 @@ public sealed partial class FilesViewModel : ObservableObject
     /// <summary>The window is closing: no watcher or timer may reach a window that is gone.</summary>
     internal void Shutdown()
     {
+        Owner.PropertyChanged -= OnOwnerChanged;
+        Owner.Documents.Changed -= DocumentStateChanged;
+        LanguageService.Changed -= LanguageStateChanged;
+        Viewer?.Release();
         _refreshTimer?.Stop();
         foreach (var w in _watchers.Values) w.Dispose();
         _watchers.Clear();
@@ -634,7 +645,10 @@ public sealed partial class FilesViewModel : ObservableObject
                 w.Deleted += OnDiskChange;
                 w.Renamed += OnDiskChange;
                 w.Changed += OnDiskChange;
-                w.Error += (_, _) => Dispatcher.UIThread.Post(ScheduleRefresh);
+                w.Error += (_, _) =>
+                {
+                    if (!Owner.IsClosing) Owner.UiDispatcher.Post(ScheduleRefresh);
+                };
                 w.EnableRaisingEvents = true;
                 _watchers[dir] = w;
             }
@@ -648,8 +662,8 @@ public sealed partial class FilesViewModel : ObservableObject
     // A build writes hundreds of files a second: one job on the UI thread per burst, not one per event
     private void OnDiskChange(object sender, FileSystemEventArgs e)
     {
-        if (Interlocked.Exchange(ref _diskChangePosted, 1) != 0) return;
-        Dispatcher.UIThread.Post(() =>
+        if (Owner.IsClosing || Interlocked.Exchange(ref _diskChangePosted, 1) != 0) return;
+        Owner.UiDispatcher.Post(() =>
         {
             Volatile.Write(ref _diskChangePosted, 0);
             if (IsActive) ScheduleRefresh();
@@ -694,6 +708,8 @@ public sealed partial class FilesViewModel : ObservableObject
             if (delay > TimeSpan.Zero) await Task.Delay(delay, ct);
             if (Root is not { } root) return;
             var query = Filter.Trim();
+            string[] words = Mode == FilesMode.All ? [] :
+                ProjectFiles.NormalizeSearchKey(query).Split(' ', StringSplitOptions.RemoveEmptyEntries);
             IsSearching = true;
             List<FileNodeViewModel> list;
             var note = "";
@@ -704,8 +720,9 @@ public sealed partial class FilesViewModel : ObservableObject
                     if (_index is null)
                     {
                         var (paths, truncated) = await ProjectFiles.IndexAsync(root, useGit: true, ct);
+                        var searchIndex = await Task.Run(() => new ProjectFiles.SearchIndex(paths), ct);
                         if (ct.IsCancellationRequested) return;
-                        _index = paths;
+                        _index = searchIndex;
                         _indexTruncated = truncated;
                     }
                     var index = _index;
@@ -717,7 +734,7 @@ public sealed partial class FilesViewModel : ObservableObject
                     var changes = _git?.Changes.ToList() ?? [];
                     list = await Task.Run(() => changes
                         .Select(c => (c, rel: ProjectFiles.Relative(root, c.Path.TrimEnd(Path.DirectorySeparatorChar))))
-                        .Where(x => x.rel is { Length: > 0 } && Matches(x.rel, query))
+                        .Where(x => x.rel is { Length: > 0 } && Matches(x.rel, words))
                         .OrderBy(x => x.rel, Comparer<string?>.Create((a, b) => ProjectFiles.NaturalCompare(a!, b!)))
                         .Select(x => FileNodeViewModel.Result(root, x.rel!, isDirectory: x.c.Path.EndsWith(Path.DirectorySeparatorChar)))
                         .ToList(), ct);
@@ -727,7 +744,7 @@ public sealed partial class FilesViewModel : ObservableObject
                     var files = _sessionChanged.ToList();
                     list = await Task.Run(() => files
                         .Select(f => (f, rel: ProjectFiles.Relative(root, f)))
-                        .Where(x => Matches(x.rel ?? x.f, query))
+                        .Where(x => Matches(x.rel ?? x.f, words))
                         .OrderBy(x => x.rel ?? x.f, Comparer<string>.Create(ProjectFiles.NaturalCompare))
                         .Select(x => x.rel is { Length: > 0 } rel ? FileNodeViewModel.Result(root, rel) : FileNodeViewModel.Outside(x.f))
                         .ToList(), ct);
@@ -748,8 +765,12 @@ public sealed partial class FilesViewModel : ObservableObject
         }
     }
 
-    private static bool Matches(string path, string query) =>
-        query.Length == 0 || query.Split(' ', StringSplitOptions.RemoveEmptyEntries).All(w => path.Contains(w, StringComparison.OrdinalIgnoreCase));
+    private static bool Matches(string path, string[] words)
+    {
+        if (words.Length == 0) return true;
+        var key = ProjectFiles.NormalizeSearchKey(path);
+        return words.All(w => key.Contains(w, StringComparison.OrdinalIgnoreCase));
+    }
 
     // ───────────────────────── The viewer ─────────────────────────
 
@@ -767,8 +788,10 @@ public sealed partial class FilesViewModel : ObservableObject
             return;
         }
         var root = Root ?? Owner.ProjectFolder;
-        if (Viewer is { } open && SamePath(open.FullPath, fullPath))
+        if (Viewer is { } open && (SamePath(open.FullPath, fullPath)
+            || open.Document is { } current && Owner.Documents.TryGet(fullPath, out var requested) && ReferenceEquals(current, requested)))
         {
+            fullPath = open.FullPath; // retain the project's visible alias for tree selection and relative paths
             open.JumpTo(line);
             if (open.State != ViewerState.Loading) await ReloadIfChangedAsync(open);
         }
@@ -802,15 +825,55 @@ public sealed partial class FilesViewModel : ObservableObject
         var cts = _viewerCts = new CancellationTokenSource();
         try
         {
+            if (Owner.Documents.TryGet(v.FullPath, out var existing))
+            {
+                await Owner.Documents.ObserveExternalChangeAsync(v.FullPath, cts.Token);
+                if (ReferenceEquals(Viewer, v) && !cts.IsCancellationRequested) v.AttachDocument(existing);
+                return;
+            }
+            if (Owner.Documents.RecoverablePaths.Contains(v.FullPath, ProjectFiles.PathComparer))
+            {
+                var recovered = await Owner.Documents.OpenAsync(v.FullPath, cts.Token);
+                if (ReferenceEquals(Viewer, v) && !cts.IsCancellationRequested) v.AttachDocument(recovered);
+                return;
+            }
             var loaded = await Task.Run(() => FileViewerViewModel.Load(v.FullPath, head, cts.Token), cts.Token);
-            if (ReferenceEquals(Viewer, v) && !cts.IsCancellationRequested) v.Apply(loaded);
-            else loaded.Image?.Dispose(); // never shown
+            if (!ReferenceEquals(Viewer, v) || cts.IsCancellationRequested)
+            {
+                loaded.Image?.Dispose();
+                return;
+            }
+            v.Apply(loaded);
+            if (loaded.State == ViewerState.Text && !loaded.Head)
+            {
+                try
+                {
+                    var document = await Owner.Documents.OpenAsync(v.FullPath, cts.Token);
+                    if (ReferenceEquals(Viewer, v) && !cts.IsCancellationRequested) v.AttachDocument(document);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or NotSupportedException)
+                {
+                    v.Notice = Loc.F("Read-only preview — {0}", e.Message);
+                }
+            }
         }
         catch (OperationCanceledException) { }
+        // The window closed while the file was being opened: its documents are disposed, there is nothing to show it in
+        catch (ObjectDisposedException) when (Owner.IsClosing) { }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            if (ReferenceEquals(Viewer, v) && !cts.IsCancellationRequested)
+                v.Apply(new(ViewerState.Error, Title: Loc.T("Can't open this document"), Detail: e.Message));
+        }
     }
 
     private async Task ReloadIfChangedAsync(FileViewerViewModel v)
     {
+        if (v.Document is not null)
+        {
+            await Owner.Documents.ObserveExternalChangeAsync(v.FullPath);
+            return;
+        }
         var (exists, size, stamp) = await Task.Run(() =>
         {
             var fi = new FileInfo(v.FullPath);
@@ -886,6 +949,8 @@ public sealed partial class FilesViewModel : ObservableObject
     private void AddToMessage(object? target)
     {
         if (PathOf(target) is not { } full) return;
+        if (Owner.Documents.TryGet(full, out var document) && document.IsDirty)
+            Report(Loc.T("This reference sends the disk version, not your unsaved editor text. Save first, or explicitly copy the unsaved text."));
         Owner.InsertFileMention(Mention(Display(full)));
     }
 
@@ -929,6 +994,10 @@ public sealed partial class FilesViewModel : ObservableObject
         await StartAsync(editor.Open(full, line), Loc.F("open {0}", editor.Name));
     }
 
+    /// <summary>A path from the conversation (its menu) in <paramref name="editor"/>, at its line.</summary>
+    internal Task OpenPathInEditorAsync(EditorApp editor, string full, int? line) =>
+        StartAsync(editor.Open(full, line), Loc.F("open {0}", editor.Name));
+
     private async Task StartAsync(ProcessStartInfo psi, string what)
     {
         Notice = "";
@@ -950,20 +1019,20 @@ public sealed partial class FilesViewModel : ObservableObject
     [RelayCommand(AllowConcurrentExecutions = true)]
     private async Task OpenProjectInFileManagerAsync()
     {
-        if (Owner.ProjectFolder is { } root) await StartAsync(FileOpeners.OpenWithSystem(root), "open the folder");
+        if (Owner.ProjectFolder is { } root) await StartAsync(FileOpeners.OpenWithSystem(root), Loc.T("open the folder"));
     }
 
     /// <summary>Any folder (a sidebar project's) in Finder / Explorer / the file manager.</summary>
     [RelayCommand(AllowConcurrentExecutions = true)]
     private async Task OpenFolderInFileManagerAsync(string? folder)
     {
-        if (folder is { Length: > 0 }) await StartAsync(FileOpeners.OpenWithSystem(folder), "open the folder");
+        if (folder is { Length: > 0 }) await StartAsync(FileOpeners.OpenWithSystem(folder), Loc.T("open the folder"));
     }
 
     [RelayCommand(AllowConcurrentExecutions = true)]
     private async Task OpenProjectInEditorAsync(EditorApp? editor)
     {
-        if (editor is not null && Owner.ProjectFolder is { } root) await StartAsync(editor.Open(root), "open " + editor.Name);
+        if (editor is not null && Owner.ProjectFolder is { } root) await StartAsync(editor.Open(root), Loc.F("open {0}", editor.Name));
     }
 
     /// <summary>A shell in the project folder, in the terminal panel.</summary>

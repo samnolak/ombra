@@ -16,6 +16,19 @@ public sealed partial class MainViewModel
     internal QuitWarning? QuitWarning(int liveTerminals)
     {
         if (IsClosing) return null;
+        var warning = WorkQuitWarning(liveTerminals);
+        var drafts = _opens.Values.Count(o => !HasNoDraft(o) || o.Controller.Snapshot().Queued.Count > 0 ||
+            (o == _open ? CurrentDialog : o.Dialog)?.ReplyForRecovery.Length > 0);
+        if (!FlushDrafts()) return new(Loc.T("Drafts could not be saved"), ComposerMessage);
+        if (drafts == 0) return warning;
+        var saved = Loc.F("Drafts in {0} chats are saved locally. Recovered input is never sent automatically.", drafts);
+        return warning is null ? new(Loc.F("Drafts in {0} chats", drafts), saved)
+            : warning with { Message = warning.Message + "\n\n" + saved };
+    }
+
+    private QuitWarning? WorkQuitWarning(int liveTerminals)
+    {
+        if (IsClosing) return null;
         var tabs = liveTerminals switch
         {
             0 => "",
@@ -64,6 +77,7 @@ public sealed partial class MainViewModel
     {
         IsSettingsOpen = false;
         IsShortcutsOpen = false;
+        ClosePalette();
         if (IsImageViewerOpen) CloseImageViewerCommand.Execute(null);
         if (SessionCard is { Kind: "quit" } asking)
         {
@@ -79,7 +93,7 @@ public sealed partial class MainViewModel
             if (previous is not null) SessionCard = previous;
             else CloseSessionCard();
         });
-        card.Primary = new SessionCardAction(Loc.T("Quit"), new RelayCommand(quit));
+        card.Primary = new SessionCardAction(Loc.T("Quit"), new RelayCommand(() => { if (FlushDrafts()) quit(); }));
         card.Secondary = new SessionCardAction(Loc.T("Keep working"), keep);
         card.DismissCommand = keep;
         ShowCard(card);

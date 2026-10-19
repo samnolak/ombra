@@ -19,6 +19,7 @@
   </Application.Resources>
   <Application.Styles>
     <FluentTheme />
+    <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml" />
     <!-- The terminal's own theme, included here rather than injected by the library on first use: its injection is
          guarded by a process-wide flag, so an Application created later in the same process (the test host) never got it. -->
     <StyleInclude Source="avares://Iciclecreek.Avalonia.Terminal/Themes/Generic.axaml" />

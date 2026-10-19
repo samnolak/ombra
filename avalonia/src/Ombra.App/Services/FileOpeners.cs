@@ -82,6 +82,10 @@ public static class FileOpeners
     public static string FileManagerName =>
         OperatingSystem.IsMacOS() ? "Finder" : OperatingSystem.IsWindows() ? "Explorer" : Loc.T("file manager");
 
+    /// <summary>"Reveal in Finder" / "Reveal in Explorer" / "Reveal in file manager".</summary>
+    public static string RevealLabel =>
+        OperatingSystem.IsMacOS() ? Loc.T("Reveal in Finder") : OperatingSystem.IsWindows() ? Loc.T("Reveal in Explorer") : Loc.T("Reveal in file manager");
+
     /// <summary>Opens <paramref name="path"/> (file or folder) with the app the system uses for it.</summary>
     public static ProcessStartInfo OpenWithSystem(string path)
     {
@@ -126,9 +130,8 @@ public static class FileOpeners
     {
         try
         {
-            // An editor or file manager the user opens is theirs: it stays when the app quits (OwnedProcesses)
-            if (!psi.UseShellExecute) psi.Environment.Remove(Ombra.ClientCore.OwnedProcesses.OwnerVariable);
-            using var p = Process.Start(psi);
+            // User-owned editors/file managers survive the app: remove the Unix mark and escape its Windows job.
+            using var p = Ombra.ClientCore.OwnedProcesses.StartIndependent(psi);
             if (p is null) return psi.UseShellExecute; // the shell opened it in an app already running
             if (!waitForSuccess) return true;
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));

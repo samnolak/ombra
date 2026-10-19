@@ -46,7 +46,7 @@ public sealed class InteractionStatesTests
         var spec = TestProcesses.Fake("normal");
         var s = new SessionController(req => spec with
         {
-            Arguments = [.. spec.Arguments, "--resume", file],
+            SessionArguments = [.. spec.SessionArguments, "--resume", file],
             WorkingDirectory = req.WorkingDirectory,
             Environment = new Dictionary<string, string?> { ["FAKE_SESSION_DIR"] = root, ["FAKE_MODEL"] = "local/coder" },
         }, new LaunchRequest(cwd, ResumeSessionFile: file, ApprovalMode: "write"));

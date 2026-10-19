@@ -190,10 +190,6 @@
     <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
-  <!-- The pill's dot on the middle of its capitals (the text's box centre is lower than its letters' middle) -->
-  <Style Selector="Border.task-card Border.status Ellipse">
-    <Setter Property="Margin" Value="0,0,0,3" />
-  </Style>
   <Style Selector="Border.status.stopped Ellipse">
     <Setter Property="Fill" Value="{DynamicResource GuiStatusWarning}" />
   </Style>

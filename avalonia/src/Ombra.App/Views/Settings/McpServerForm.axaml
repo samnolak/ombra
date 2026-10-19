@@ -1,0 +1,86 @@
+<!-- The Plugins page's MCP tab: add or edit an MCP server (ViewModels/ConnectorsViewModel.cs). -->
+<UserControl xmlns:loc="using:Ombra.App.Localization"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
+             x:Class="Ombra.App.Views.Settings.McpServerForm"
+             x:DataType="vm:ConnectorsViewModel"
+             IsVisible="{Binding IsFormOpen}">
+  <Border x:Name="ConnectorForm" Classes="conn-form">
+    <StackPanel Spacing="12">
+      <TextBlock Classes="ws-title" Text="{Binding FormTitle}" TextTrimming="CharacterEllipsis" />
+      <StackPanel Spacing="4" IsVisible="{Binding CanEditName}">
+        <TextBlock Classes="label" Text="{loc:T 'Name'}" />
+        <TextBox x:Name="ConnectorNameBox" Text="{Binding FormName}" PlaceholderText="github" AutomationProperties.Name="{loc:T 'MCP server name'}" />
+      </StackPanel>
+      <StackPanel Spacing="4">
+        <TextBlock Classes="label" Text="{loc:T 'Type'}" />
+        <Border Classes="segmented" HorizontalAlignment="Left">
+          <StackPanel Orientation="Horizontal" Spacing="2">
+            <Button x:Name="TransportStdio" Classes="segment" Classes.selected="{Binding FormIsStdio}" Content="{loc:T 'Local command'}"
+                    Command="{Binding SetTransportCommand}" CommandParameter="stdio" AutomationProperties.Name="{loc:T 'Type: local command (stdio)'}" />
+            <Button x:Name="TransportHttp" Classes="segment" Classes.selected="{Binding FormIsHttp}" Content="HTTP"
+                    Command="{Binding SetTransportCommand}" CommandParameter="http" AutomationProperties.Name="{loc:T 'Type: HTTP'}" />
+            <Button x:Name="TransportSse" Classes="segment" Classes.selected="{Binding FormIsSse}" Content="SSE"
+                    Command="{Binding SetTransportCommand}" CommandParameter="sse" AutomationProperties.Name="{loc:T 'Type: SSE'}" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+      <StackPanel Spacing="4">
+        <TextBlock Classes="label" Text="{loc:T 'Available in'}" />
+        <Border Classes="segmented" HorizontalAlignment="Left" IsVisible="{Binding CanEditName}">
+          <StackPanel Orientation="Horizontal" Spacing="2">
+            <Button x:Name="ScopeUser" Classes="segment" Classes.selected="{Binding FormIsUser}" Content="{loc:T 'All projects'}"
+                    Command="{Binding SetScopeCommand}" CommandParameter="user" AutomationProperties.Name="{loc:T 'Available in all projects'}" />
+            <Button x:Name="ScopeProject" Classes="segment" Classes.selected="{Binding FormIsProject}" Content="{loc:T 'This project'}"
+                    Command="{Binding SetScopeCommand}" CommandParameter="project" AutomationProperties.Name="{loc:T 'Available in this project'}" />
+          </StackPanel>
+        </Border>
+        <TextBlock Classes="tertiary" Text="{Binding FormScopeLabel}" TextWrapping="Wrap" />
+      </StackPanel>
+
+      <StackPanel Spacing="12" IsVisible="{Binding FormIsStdio}">
+        <StackPanel Spacing="4">
+          <TextBlock Classes="label" Text="{loc:T 'Command'}" />
+          <TextBox x:Name="ConnectorCommandBox" Text="{Binding FormCommand}" PlaceholderText="npx" AutomationProperties.Name="{loc:T 'Command'}" />
+        </StackPanel>
+        <StackPanel Spacing="4">
+          <TextBlock Classes="label" Text="{loc:T 'Arguments, one per line'}" />
+          <TextBox x:Name="ConnectorArgsBox" Classes="conn-lines" Text="{Binding FormArgs}" PlaceholderText="-y&#x0a;@modelcontextprotocol/server-github" AutomationProperties.Name="{loc:T 'Arguments'}" />
+        </StackPanel>
+        <StackPanel Spacing="4">
+          <TextBlock Classes="label" Text="{loc:T 'Environment variables, NAME=value per line'}" />
+          <TextBox x:Name="ConnectorEnvBox" Classes="conn-lines" Text="{Binding FormEnv}" PlaceholderText="GITHUB_TOKEN=…" AutomationProperties.Name="{loc:T 'Environment variables'}" />
+        </StackPanel>
+      </StackPanel>
+
+      <StackPanel Spacing="12" IsVisible="{Binding FormIsRemote}">
+        <StackPanel Spacing="4">
+          <TextBlock Classes="label" Text="URL" />
+          <TextBox x:Name="ConnectorUrlBox" Text="{Binding FormUrl}" PlaceholderText="https://example.com/mcp" AutomationProperties.Name="URL" />
+        </StackPanel>
+        <StackPanel Spacing="4">
+          <TextBlock Classes="label" Text="{loc:T 'Bearer token (optional)'}" />
+          <TextBox x:Name="ConnectorTokenBox" Text="{Binding FormToken}" PasswordChar="•" AutomationProperties.Name="{loc:T 'Bearer token'}" />
+        </StackPanel>
+        <StackPanel Spacing="4">
+          <TextBlock Classes="label" Text="{loc:T 'Other headers, Name: value per line (optional)'}" />
+          <TextBox x:Name="ConnectorHeadersBox" Classes="conn-lines" Text="{Binding FormHeaders}" PlaceholderText="X-Api-Key: …" AutomationProperties.Name="{loc:T 'Headers'}" />
+        </StackPanel>
+      </StackPanel>
+
+      <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasFormError}">
+        <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
+        <SelectableTextBlock Grid.Column="1" x:Name="ConnectorFormError" Classes="error" Text="{Binding FormError}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+      </Grid>
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <Button x:Name="SubmitConnectorButton" Classes="accent" Content="{Binding FormSubmitLabel}" Command="{Binding SubmitFormCommand}"
+                IsEnabled="{Binding !IsSubmitting}" AutomationProperties.Name="{Binding FormSubmitLabel}" />
+        <Button x:Name="CancelConnectorButton" Classes="flat" Content="{loc:T 'Cancel'}" Command="{Binding CancelFormCommand}" />
+      </StackPanel>
+      <TextBlock Classes="tertiary" TextWrapping="Wrap"
+                 Text="{loc:T 'omp checks the server and saves it in its own settings. It connects to it the next time it starts.'}" />
+    </StackPanel>
+  </Border>
+</UserControl>

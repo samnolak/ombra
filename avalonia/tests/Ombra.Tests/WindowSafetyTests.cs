@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.Services;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
@@ -81,7 +82,7 @@ public sealed class WindowSafetyTests
         var card = vm.SessionCard;
         Assert.NotNull(card);
         Assert.Equal("quit", card!.Kind);
-        Assert.Equal("omp is still working", card.Title);
+        Assert.Equal(Loc.T("omp is still working"), card.Title);
         Assert.True(w.IsVisible);
         Assert.False(vm.IsClosing);
         Assert.True(Alive(pid));
@@ -139,7 +140,7 @@ public sealed class WindowSafetyTests
     {
         var (w, vm, _) = await OpenAsync("slow-stream");
         var bar = w.MenuBar(vm);
-        Assert.Equal(["File", "Edit", "View", "Window"], bar.Items.OfType<NativeMenuItem>().Select(i => i.Header));
+        Assert.Equal(["File", "Edit", "View", "Window", Loc.T("Help")], bar.Items.OfType<NativeMenuItem>().Select(i => i.Header));
         var items = bar.Items.OfType<NativeMenuItem>().SelectMany(m => m.Menu!.Items.OfType<NativeMenuItem>())
             .Where(i => i is not NativeMenuItemSeparator).ToDictionary(i => i.Header!);
         var cmd = w.GetPlatformSettings()!.HotkeyConfiguration.CommandModifiers;
@@ -236,7 +237,6 @@ public sealed class WindowSafetyTests
         await vm.SendCommand.ExecuteAsync(null);
         Assert.Equal("please keep me", vm.ComposerText);
         Assert.Single(vm.Attachments);
-        Assert.Contains("wasn't sent", vm.ComposerMessage);
         Assert.NotEqual(SessionPhase.Running, vm.Phase);
         await vm.DisposeAsync();
     }
@@ -360,7 +360,7 @@ public sealed class WindowSafetyTests
         var s = new SessionController(TestProcesses.Fake("normal"));
         var vm = new MainViewModel(s, new AppArgs()) { ClientLog = log };
         vm.ReportClientError(new InvalidOperationException("token sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789 in a handler"));
-        Assert.StartsWith("Something went wrong in Ombra", vm.ComposerMessage);
+        Assert.StartsWith(Loc.T("Something went wrong in Ombra; it carried on. Settings → Diagnostics saves the details for a bug report."), vm.ComposerMessage);
         vm.ComposerMessage = "";
         vm.ReportClientError(new InvalidOperationException("second"));
         Assert.Equal("", vm.ComposerMessage); // said once

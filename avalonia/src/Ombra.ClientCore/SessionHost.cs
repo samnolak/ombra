@@ -1,201 +1,261 @@
+using Ombra.Rpc;
+
 namespace Ombra.ClientCore;
 
 /// <summary>
-/// The omp processes of one window: one <see cref="SessionController"/> per open chat, each its own omp that keeps
-/// working while another chat is shown. omp holds a lock on the session file it writes, so a chat is never started in a
-/// second process: <see cref="Find"/> returns the one that has it open. Opening one more than <see cref="MaxProcesses"/>
-/// closes the chats used longest ago that may go (<c>canClose</c>: idle, nothing typed in it); a chat that is working
-/// or waiting for the user never is, even when that leaves more processes than the limit. Besides the open chats the
-/// host may keep one <see cref="Spare"/>: an omp started ahead for the next new chat (an omp takes seconds to start; a
-/// new chat that takes over a ready one can be used at once). Used on the UI thread.
+/// One window's shared engine and private logical chats. Closing a chat never stops its peers or the engine;
+/// the engine stays owned by the window until disposal. Used on the UI thread except asynchronous shutdown.
 /// </summary>
 public sealed class SessionHost : IAsyncDisposable
 {
-    public const int DefaultMaxProcesses = 4;
-
-    /// <summary>The open chats, the one used longest ago first.</summary>
     private readonly List<SessionController> _open = [];
-    private readonly Func<SessionController, bool> _canClose;
-    private int _maxProcesses = DefaultMaxProcesses;
-    private int _launchGeneration;
-    private int _spareGeneration;
-    private CancellationTokenSource? _spareCancel;
-    private Task _spareStart = Task.CompletedTask;
+    private readonly OmpEngine _engine;
+    private readonly SemaphoreSlim _engineChange = new(1, 1);
+    private readonly HashSet<SessionController> _restartAfterStop = [];
+    private readonly object _admissionLock = new();
+    private TaskCompletionSource? _startsDeferred;
+    private OmpLaunchSpec? _launchConfiguration;
+    private int _disposed;
+    private readonly CancellationTokenSource _powerLifetime = new();
+    private CancellationTokenSource? _resumeLifetime;
+    private Task _resume = Task.CompletedTask;
+    private long? _lastResume;
 
-    /// <param name="first">The chat the window starts with (shown, not started yet).</param>
-    /// <param name="canClose">Whether a chat that is not shown may be closed to stay under the limit; by default when
-    /// its omp is <see cref="IsIdle"/>.</param>
-    public SessionHost(SessionController first, Func<SessionController, bool>? canClose = null)
+    /// <summary>Called on the owning UI thread. Invalidates reconciliation from an earlier sleep cycle.</summary>
+    public void NotifySuspending()
     {
+        if (Volatile.Read(ref _disposed) != 0) return;
+        _resumeLifetime?.Cancel();
+        _lastResume = null;
+    }
+
+    /// <summary>Reconciles every hosted live chat, not just Active. Repeated native wake signals coalesce.</summary>
+    public Task ReconcileAfterResumeAsync()
+    {
+        if (Volatile.Read(ref _disposed) != 0) return Task.CompletedTask;
+        var clock = Active.Clock;
+        if (_lastResume is { } last && (!_resume.IsCompleted || clock.GetElapsedTime(last) < TimeSpan.FromSeconds(2))) return _resume;
+        _lastResume = clock.GetTimestamp();
+        _resumeLifetime?.Cancel();
+        _resumeLifetime?.Dispose();
+        _resumeLifetime = CancellationTokenSource.CreateLinkedTokenSource(_powerLifetime.Token);
+        var token = _resumeLifetime.Token;
+        var chats = _open.ToArray(); // UI-owned list; never enumerate it after an await.
+        return _resume = Task.WhenAll(chats.Select(chat => chat.ReconcileAfterResumeAsync(token)));
+    }
+
+    public SessionHost(SessionController first)
+    {
+        _engine = first.TransferEngineOwnership(this);
+        _launchConfiguration = first.EngineLaunchSpec;
         _open.Add(first);
         Active = first;
-        _canClose = canClose ?? (c => IsIdle(c.Snapshot()));
     }
 
-    /// <summary>How many omp processes may run at once before idle ones are closed (at least 1).</summary>
-    public int MaxProcesses
-    {
-        get => _maxProcesses;
-        set => _maxProcesses = Math.Max(1, value);
-    }
-
-    /// <summary>The chat the window shows.</summary>
     public SessionController Active { get; private set; }
-
-    /// <summary>Every open chat, the one used longest ago first.</summary>
     public IReadOnlyList<SessionController> All => _open;
-
-    /// <summary>Raised (on the caller's thread) when a chat leaves the host: closed by the user, or to stay under the limit.</summary>
+    public int? EngineProcessId => _engine.ProcessId;
     public event Action<SessionController>? Closed;
-
-    /// <summary>Raised once the omp of a chat that left the host (or of a dropped spare) has stopped, on whichever thread
-    /// that happened: what it left on disk can be looked at now without omp writing to it.</summary>
+    /// <summary>A removed chat has finished closing and no longer writes its session file.</summary>
     public event Action<SessionController>? Stopped;
 
-    /// <summary>The omp started ahead for the next new chat: not an open chat (never in <see cref="All"/>, never counted
-    /// against <see cref="MaxProcesses"/>), nothing sent to it until a new chat takes it over.</summary>
-    public SessionController? Spare { get; private set; }
-
-    /// <summary>The open chat whose omp has <paramref name="sessionFile"/> open, or was started to resume it and has not
-    /// reported its file yet; null when none.</summary>
     public SessionController? Find(string sessionFile) =>
         _open.FirstOrDefault(c => (c.SessionFile ?? c.CurrentLaunch.ResumeSessionFile) is { } f && SessionCatalog.SamePath(f, sessionFile));
 
-    /// <summary>
-    /// A new chat, shown at once (the caller starts it): another omp launched like the others with
-    /// <paramref name="request"/>. Chats over the limit that may go are closed (their omp stops in the background).
-    /// </summary>
-    public SessionController Open(LaunchRequest request) => Add(Active.Sibling(request));
-
-    /// <summary>
-    /// Starts the <see cref="Spare"/> with <paramref name="request"/> (its own folder, the permission mode a new chat would
-    /// get), unless there is one. The returned task ends when the spare is ready or failed to start; a spare that fails
-    /// is dropped by the next <see cref="TakeSpare"/>, without a word: nobody asked for it.
-    /// </summary>
-    public Task PrepareSpareAsync(LaunchRequest request, CancellationToken ct)
+    public async Task DeleteSessionAsync(string path, CancellationToken ct = default)
     {
-        if (Spare is not null) return _spareStart;
-        var spare = Active.Sibling(request);
-        Spare = spare;
-        _spareGeneration = _launchGeneration;
-        _spareCancel = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var token = _spareCancel.Token;
-        // Off the caller's thread: building omp's launch starts processes, and the caller is the UI's
-        return _spareStart = Task.Run(() => StartSpareAsync(spare, token));
+        await EnterSessionStartAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var spec = _launchConfiguration ?? UseEngineConfiguration(await Active.BuildEngineLaunchAsync(ct).ConfigureAwait(false));
+            await _engine.DeleteSessionAsync(path, spec, Active.EngineReadyTimeout, ct).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is OmpStartException or RpcProtocolException or Network.NetworkPrivacyException)
+        {
+            throw new IOException("The session was not deleted: " + error.Message, error);
+        }
+        finally { ExitSessionStart(); }
     }
 
-    private static async Task StartSpareAsync(SessionController spare, CancellationToken ct)
+    internal async Task<OmpMessagesPage> ReadSessionPageAsync(SessionController reader, string path, string? cursor,
+        int limit, CancellationToken ct)
     {
-        try { await spare.StartAsync(ct).ConfigureAwait(false); }
-        catch (Exception)
+        // Reader holds startup admission before taking its private lifecycle, matching StartAsync lock order.
+        var spec = _launchConfiguration ?? UseEngineConfiguration(await reader.BuildEngineLaunchAsync(ct).ConfigureAwait(false));
+        return await _engine.ReadSessionPageAsync(path, spec, reader.EngineReadyTimeout, cursor, limit, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Creates a private logical chat in the existing engine; the caller starts it.</summary>
+    public SessionController Open(LaunchRequest request)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        var chat = Active.Sibling(request);
+        _open.Add(chat);
+        Active = chat;
+        return chat;
+    }
+
+    public void Activate(SessionController chat)
+    {
+        if (!_open.Contains(chat)) throw new InvalidOperationException("Not an open chat of this window.");
+        Active = chat;
+    }
+
+    public Task CloseAsync(SessionController chat)
+    {
+        if (chat == Active) throw new InvalidOperationException("The chat shown cannot be closed; show another one first.");
+        if (!_open.Remove(chat)) return Task.CompletedTask;
+        _restartAfterStop.Remove(chat);
+        Closed?.Invoke(chat);
+        return CloseSessionAsync(chat);
+    }
+
+    private async Task CloseSessionAsync(SessionController chat)
+    {
+        await chat.DisposeAsync().ConfigureAwait(false);
+        Stopped?.Invoke(chat);
+    }
+
+    /// <summary>No engine work or unanswered user interaction would be interrupted by a coordinated restart.</summary>
+    public static bool IsIdle(SessionSnapshot snapshot) =>
+        snapshot.Phase is SessionPhase.NotStarted or SessionPhase.Ready or SessionPhase.Stopped or SessionPhase.Faulted
+        && snapshot.Dialogs.Count == 0 && snapshot.Queued.All(q => q.Recovered) && snapshot.SigningIn is null;
+
+    /// <summary>
+    /// Holds new logical starts while a process-settings change waits for busy chats. Existing chats keep running;
+    /// waiting controllers have not entered Starting and do not prevent the coordinated idle restart.
+    /// </summary>
+    public void SetRestartPending(bool pending)
+    {
+        // A coordinated settings restart supersedes automatic recovery: an attempt already holding admission would
+        // otherwise finish starting an engine on the configuration being replaced.
+        if (pending) CancelAutoRecovery();
+        lock (_admissionLock)
         {
-            // Its snapshot says it did not start (or it was dropped meanwhile): TakeSpare drops it
+            if (pending)
+            {
+                ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+                _startsDeferred ??= new(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+            else
+            {
+                _startsDeferred?.TrySetResult();
+                _startsDeferred = null;
+            }
+        }
+    }
+
+    internal async Task EnterSessionStartAsync(CancellationToken ct)
+    {
+        while (true)
+        {
+            Task? deferred;
+            lock (_admissionLock)
+            {
+                ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+                deferred = _startsDeferred?.Task;
+            }
+            if (deferred is not null) await deferred.WaitAsync(ct).ConfigureAwait(false);
+            await _engineChange.WaitAsync(ct).ConfigureAwait(false);
+            lock (_admissionLock)
+            {
+                if (_startsDeferred is null && Volatile.Read(ref _disposed) == 0)
+                {
+                    if (_engine.ProcessId is null) _launchConfiguration = null;
+                    return;
+                }
+            }
+            _engineChange.Release();
+        }
+    }
+
+    internal void ExitSessionStart() => _engineChange.Release();
+
+    // Guarded by startup admission (_engineChange): the clock timestamp of the last automatic recovery whose shared
+    // engine did not come back. Chats that crashed with it adopt that outcome instead of each starting a process.
+    private long? _engineRecoveryFailedAt;
+
+    /// <summary>Caller holds startup admission. True when another chat's automatic engine restart failed after
+    /// <paramref name="scheduledAt"/>: this chat counts the same failed attempt and backs off without a start of its own.</summary>
+    internal bool EngineRecoveryFailedSince(long scheduledAt) => _engine.ProcessId is null && _engineRecoveryFailedAt > scheduledAt;
+
+    /// <summary>Caller holds startup admission.</summary>
+    internal void NoteEngineRecoveryFailed(long at) => _engineRecoveryFailedAt = at;
+
+    internal OmpLaunchSpec UseEngineConfiguration(OmpLaunchSpec spec)
+    {
+        lock (_admissionLock)
+        {
+            // A settings save may arrive between independent launch factories. The root generation stays
+            // immutable until StopEngineCoreAsync; only cwd and session arguments vary between its chats.
+            if (_launchConfiguration is not { } active) return _launchConfiguration = spec;
+            if (spec.FileName == active.FileName && ReferenceEquals(spec.Arguments, active.Arguments)
+                && ReferenceEquals(spec.Environment, active.Environment)) return spec;
+            return spec with { FileName = active.FileName, Arguments = active.Arguments, Environment = active.Environment };
         }
     }
 
     /// <summary>
-    /// The spare, out of the host's hands, when it can be a new chat launched like <paramref name="request"/> (whose own
-    /// folder does not matter): ready, idle, untouched, and started with the same launch since the last
-    /// <see cref="InvalidateSpare"/>. Null otherwise; a spare that never could be (another permission mode, crashed,
-    /// started before a change) is dropped, and one still starting the right way is kept for the next new chat.
-    /// Shown with <see cref="Adopt"/>.
+    /// Applies process-wide runtime/environment changes only after every chat is idle. Sessions stopped for an
+    /// installation are reopened too; already faulted sessions remain faulted until the user explicitly recovers them.
     /// </summary>
-    public SessionController? TakeSpare(LaunchRequest request)
+    public async Task RestartEngineAsync(CancellationToken ct = default)
     {
-        if (Spare is not { } spare) return null;
-        var s = spare.Snapshot();
-        var same = _spareGeneration == _launchGeneration && request with { WorkingDirectory = spare.CurrentLaunch.WorkingDirectory } == spare.CurrentLaunch;
-        if (same && s.Phase is SessionPhase.NotStarted or SessionPhase.Starting) return null;
-        if (!same || s.Phase != SessionPhase.Ready || !IsIdle(s) || s.Items.Any(i => i is not NoticeItem))
+        CancelAutoRecovery();
+        await _engineChange.WaitAsync(ct);
+        try
         {
-            _ = DropSpareAsync();
-            return null;
+            await StopEngineCoreAsync(ct);
+            var resume = _restartAfterStop.Where(_open.Contains).ToArray();
+            _restartAfterStop.Clear();
+            await Task.WhenAll(resume.Select(chat => chat.RecoverAfterEngineRestartAsync(ct)));
         }
-        Spare = null;
-        _spareCancel?.Dispose();
-        _spareCancel = null;
-        return spare;
+        finally { _engineChange.Release(); }
     }
 
-    /// <summary>Something that changes how omp starts changed (settings, runtime, network privacy): the spare, started
-    /// the old way, stops, and one prepared from now on is started the new way.</summary>
-    public void InvalidateSpare()
+    /// <summary>Closes all idle logical sessions and releases the engine's immutable launch configuration.</summary>
+    public async Task StopEngineAsync(CancellationToken ct = default)
     {
-        _launchGeneration++;
-        _ = DropSpareAsync();
+        CancelAutoRecovery();
+        await _engineChange.WaitAsync(ct);
+        try { await StopEngineCoreAsync(ct); }
+        finally { _engineChange.Release(); }
     }
 
-    /// <summary>Stops the spare: a start under way is cancelled first, so no omp is left starting with nobody to stop it.</summary>
-    private async Task DropSpareAsync()
+    private async Task StopEngineCoreAsync(CancellationToken ct)
     {
-        if (Spare is not { } spare) return;
-        Spare = null;
-        var start = _spareStart;
-        var cancel = _spareCancel;
-        _spareCancel = null;
-        cancel?.Cancel();
-        await start.ConfigureAwait(false); // never throws (StartSpareAsync)
-        cancel?.Dispose();
-        await StopAsync(spare).ConfigureAwait(false);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        ct.ThrowIfCancellationRequested();
+        var chats = _open.ToArray();
+        if (chats.Any(chat => !IsIdle(chat.Snapshot())))
+            throw new InvalidOperationException("The shared engine can restart only after all chats and sign-ins are idle.");
+        foreach (var chat in chats)
+            if (chat.Snapshot().Phase == SessionPhase.Ready) _restartAfterStop.Add(chat);
+        await Task.WhenAll(chats.Select(chat => chat.StopAsync()));
+        await _engine.StopAsync(ct);
+        lock (_admissionLock) _launchConfiguration = null;
     }
 
-    /// <summary>A started omp (the spare <see cref="TakeSpare"/> returned) as a new chat, shown at once.</summary>
-    public SessionController Adopt(SessionController started) => Add(started);
-
-    private SessionController Add(SessionController c)
+    /// <summary>Owner-thread only. Cancels every chat's pending or running automatic restart, including one holding
+    /// startup admission, so an engine-wide change or window close never waits for its engine start.</summary>
+    private void CancelAutoRecovery()
     {
-        _open.Add(c);
-        Active = c;
-        Trim();
-        return c;
+        foreach (var chat in _open.ToArray()) chat.CancelAutoRecover();
     }
 
-    /// <summary>Shows an open chat: it becomes the one used last.</summary>
-    public void Activate(SessionController c)
-    {
-        if (!_open.Remove(c)) throw new InvalidOperationException("Not an open chat of this window.");
-        _open.Add(c);
-        Active = c;
-    }
-
-    /// <summary>Closes the chats used longest ago, while there are more than the limit and one of them may go.</summary>
-    public void Trim()
-    {
-        var over = _open.Count - MaxProcesses;
-        foreach (var c in _open.ToList())
-        {
-            if (over <= 0) return;
-            if (c == Active || !_canClose(c)) continue;
-            over--;
-            _ = CloseAsync(c);
-        }
-    }
-
-    /// <summary>Takes a chat that is not shown out of the host and stops its omp (stdin EOF, then the process tree).</summary>
-    public Task CloseAsync(SessionController c)
-    {
-        if (c == Active) throw new InvalidOperationException("The chat shown cannot be closed; show another one first.");
-        if (!_open.Remove(c)) return Task.CompletedTask;
-        Closed?.Invoke(c);
-        return StopAsync(c);
-    }
-
-    private async Task StopAsync(SessionController c)
-    {
-        await c.DisposeAsync().ConfigureAwait(false);
-        Stopped?.Invoke(c);
-    }
-
-    /// <summary>Nothing would be lost by stopping this omp: not starting, running or stopping, and nothing waits on the user.</summary>
-    public static bool IsIdle(SessionSnapshot s) =>
-        s.Phase is SessionPhase.Ready or SessionPhase.Stopped or SessionPhase.Faulted
-        && s.Dialogs.Count == 0 && s.Queued.Count == 0 && s.SigningIn is null;
-
-    /// <summary>Stops every omp at once, the spare's too (each closes its stdin, then its process tree is killed after a
-    /// grace period).</summary>
     public async ValueTask DisposeAsync()
     {
-        var all = _open.Select(StopAsync).Append(DropSpareAsync()).ToList();
-        await Task.WhenAll(all).ConfigureAwait(false);
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        _powerLifetime.Cancel();
+        _resumeLifetime?.Dispose();
+        SetRestartPending(false);
+        CancelAutoRecovery();
+        await _engineChange.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            try { await Task.WhenAll(_open.Select(CloseSessionAsync)).ConfigureAwait(false); }
+            finally { await _engine.DisposeAsync().ConfigureAwait(false); }
+        }
+        finally { _engineChange.Release(); }
     }
 }

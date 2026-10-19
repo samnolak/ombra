@@ -5,19 +5,21 @@ using System.Text.RegularExpressions;
 namespace Ombra.ClientCore;
 
 /// <summary>
-/// Everything the app started stops with the app. omp does not stop with the omp process the app talks to: its daemon
-/// broker (<c>cli.ts __omp_worker_daemon_broker</c>) runs detached, keeps the background jobs omp starts with mode
+/// App-owned work stops with the app; explicit independent launches (updates and user-owned apps) are excluded.
+/// omp does not stop with the omp process the app talks to: its daemon broker (<c>cli.ts __omp_worker_daemon_broker</c>)
+/// runs detached, keeps the background jobs omp starts with mode
 /// "persist" or "detached" (dev servers, watchers), and lives on as long as one of them does — across quitting the app
 /// and across updates. A broker started by an earlier version then served the chats of the new one, and macOS charged
 /// its file access to the earlier version's app (asking again for permissions given to the new one).
 /// <para>
-/// So the app marks every process it starts: <see cref="OwnerVariable"/> (the app's own process id) is set in its own
+/// So the app marks its processes: <see cref="OwnerVariable"/> (the app's own process id) is set in its own
 /// environment, which every child inherits — omp, the broker omp spawns, the jobs the broker spawns, terminal tabs.
-/// At quit <see cref="Stop"/> ends every process carrying this app's mark, with all its descendants. At start it ends
+/// On Unix at quit <see cref="Stop"/> ends every process carrying this app's mark, with all its descendants. At start it ends
 /// what an app that is gone left behind: processes marked by a process id that is no longer a running Ombra, and
 /// (from versions before the mark) processes running the app's own omp runtime while no other Ombra runs.
 /// </para>
-/// macOS and Linux; on Windows nothing is listed (NOT VERIFIED — PLATFORM UNAVAILABLE).
+/// Windows uses an unnamed, non-inheritable Job Object: the app joins before launching children, and the kernel ends
+/// the job when the app's last handle closes, including after a crash. No Windows process enumeration or PID adoption.
 /// </summary>
 public sealed partial class OwnedProcesses(string runtimeRoot, Func<IReadOnlyList<OwnedProcesses.Info>>? list = null)
 {
@@ -30,9 +32,13 @@ public sealed partial class OwnedProcesses(string runtimeRoot, Func<IReadOnlyLis
 
     private static readonly TimeSpan Grace = TimeSpan.FromSeconds(3);
 
-    /// <summary>Marks this process: every process it starts from now on carries the mark.</summary>
-    public static void MarkThisProcess() =>
+    /// <summary>Establishes crash ownership before any child starts, then marks this process for the Unix reaper.
+    /// A Windows Job Object failure aborts startup; launching unprotected children is never a fallback.</summary>
+    public static void MarkThisProcess()
+    {
+        if (OperatingSystem.IsWindows()) EnsureWindowsJob();
         Environment.SetEnvironmentVariable(OwnerVariable, Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
+    }
 
     private readonly Func<IReadOnlyList<Info>> _list = list ?? ListProcesses;
     private readonly string _runtimeRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(runtimeRoot)) + Path.DirectorySeparatorChar;
@@ -66,6 +72,9 @@ public sealed partial class OwnedProcesses(string runtimeRoot, Func<IReadOnlyLis
     /// Returns how many processes were asked to end. Never throws.</summary>
     public int Stop(Moment moment)
     {
+        // The Windows job includes this app. Closing it here would terminate the remaining shutdown handlers;
+        // leave its sole handle to the kernel at process exit (normal exit and forced termination alike).
+        if (OperatingSystem.IsWindows()) return 0;
         try
         {
             var pids = Select(moment, Environment.ProcessId);
@@ -90,13 +99,16 @@ public sealed partial class OwnedProcesses(string runtimeRoot, Func<IReadOnlyLis
         }
     }
 
-    /// <summary>An Ombra app process (its executable is Ombra), not a process it started. The command line may go on
-    /// with arguments and, from ps -E, the environment.</summary>
-    private static bool IsApp(Info p) => AppCommand().IsMatch(p.Command);
+    /// <summary>An Ombra apphost, an older OmpGui apphost, or a development launch through dotnet. Independent
+    /// configurations may run together: startup cleanup must not mistake any of their live owners for dead apps.</summary>
+    private static bool IsApp(Info p) => AppCommand().IsMatch(p.Command) || DotnetAppCommand().IsMatch(p.Command);
 
-    /// <summary>The executable (spaces allowed, up to an argument or a NAME=value) ends in Ombra / Ombra.exe.</summary>
-    [GeneratedRegex(@"^(?:\S|\s(?!-|\w+=))*?(?:^|[/\\])Ombra(?:\.exe)?(?:\s|$)")]
+    /// <summary>The executable (spaces allowed, up to an argument or a NAME=value) has a current or legacy app name.</summary>
+    [GeneratedRegex(@"^(?:\S|\s(?!-|\w+=))*?(?:^|[/\\])(?:Ombra|OmpGui)(?:\.exe)?(?:\s|$)")]
     private static partial Regex AppCommand();
+
+    [GeneratedRegex(@"^(?:(?:\S|\s(?!-|\w+=))*?[/\\])?dotnet(?:\.exe)?\s+(?:exec\s+)?(?:(?:\S|\s(?!-|\w+=))*?[/\\])?(?:Ombra|OmpGui)\.dll(?:\s|$)")]
+    private static partial Regex DotnetAppCommand();
 
     private static void Signal(string signal, IReadOnlyList<int> pids)
     {
@@ -112,7 +124,7 @@ public sealed partial class OwnedProcesses(string runtimeRoot, Func<IReadOnlyLis
     private static partial Regex OwnerMark();
 
     /// <summary>This user's processes. macOS: <c>ps -E</c> appends each process's environment to its command line;
-    /// Linux: /proc. Windows: none.</summary>
+    /// Linux: /proc. Windows: none; ownership is the kernel job, never an inferred process list.</summary>
     public static IReadOnlyList<Info> ListProcesses()
     {
         if (OperatingSystem.IsMacOS()) return FromPs();

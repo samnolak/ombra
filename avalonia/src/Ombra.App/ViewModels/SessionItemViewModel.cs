@@ -40,6 +40,17 @@ public sealed partial class SessionItemViewModel(SessionSummary model) : Observa
     /// <summary>omp has given it an id yet (a chat not yet saved has none to copy).</summary>
     public bool HasId => !string.IsNullOrEmpty(Model.Id);
 
+    /// <summary>Found by the sidebar search in its messages, not its title: the matching words, shown under the title.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSnippet), nameof(SnippetBefore), nameof(SnippetMatch), nameof(SnippetAfter), nameof(SnippetText))]
+    private SessionContentMatch? _contentMatch;
+    public bool HasSnippet => ContentMatch is not null;
+    public string SnippetBefore => ContentMatch?.Before ?? "";
+    /// <summary>The searched words as the message has them, highlighted between the rest.</summary>
+    public string SnippetMatch => ContentMatch?.Match ?? "";
+    public string SnippetAfter => ContentMatch?.After ?? "";
+    public string SnippetText => ContentMatch?.Text ?? "";
+
     /// <summary>The row menu's commands (MainViewModel's, set when the row is made): a menu opens in a popup, outside
     /// the window's visual tree, so it cannot reach the window's DataContext.</summary>
     public System.Windows.Input.ICommand? OpenCommand { get; init; }
@@ -51,6 +62,14 @@ public sealed partial class SessionItemViewModel(SessionSummary model) : Observa
     /// <summary>Export as HTML and Share act on the chat shown (omp's /export, /share): offered on its row only.</summary>
     public System.Windows.Input.ICommand? ExportCommand { get; init; }
     public System.Windows.Input.ICommand? ShareCommand { get; init; }
+    public System.Windows.Input.ICommand? ToggleArchiveCommand { get; init; }
+    public System.Windows.Input.ICommand? ToggleReadCommand { get; init; }
+    public System.Windows.Input.ICommand? MarkAllReadCommand { get; init; }
+    public System.Windows.Input.ICommand? RevealCommand { get; init; }
+    public System.Windows.Input.ICommand? OpenTerminalCommand { get; init; }
+
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ReadLabel))] private bool _isMarkedUnread;
+    public string ReadLabel => IsMarkedUnread ? Loc.T("Mark as read") : Loc.T("Mark as unread");
 
     [ObservableProperty] private bool _isCurrent;
 
@@ -58,6 +77,10 @@ public sealed partial class SessionItemViewModel(SessionSummary model) : Observa
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(PinLabel), nameof(PinTooltip))] private bool _isPinned;
     public string PinLabel => IsPinned ? Loc.T("Unpin") : Loc.T("Pin");
     public string PinTooltip => IsPinned ? Loc.T("Unpin") : Loc.T("Pin to the top");
+
+    /// <summary>Archived from the sidebar (the client's settings, nothing on disk changes): listed under Archived.</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ArchiveLabel))] private bool _isArchived;
+    public string ArchiveLabel => IsArchived ? Loc.T("Unarchive") : Loc.T("Archive");
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsActive), nameof(IsWaiting), nameof(IsUnread), nameof(IsFailed), nameof(HasStatus), nameof(HasDot), nameof(StatusText))]

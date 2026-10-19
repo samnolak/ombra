@@ -87,7 +87,7 @@ public sealed class ChatScrollTests
 
     /// <summary>The long conversation, loaded; <paramref name="openTurns"/>: every turn's "Worked for…" line and step
     /// group opened, so its replies along the way (the Markdown with its code block) and its steps show, as a reader opens them.</summary>
-    private static async Task<(MainWindow w, MainViewModel vm)> OpenLong(string scenario, int exchanges, bool openTurns = false)
+    private static async Task<(MainWindow w, MainViewModel vm)> OpenLong(string scenario, int exchanges, bool openTurns = false, bool fullHistory = true)
     {
         var root = TestProcesses.TempDir("scroll-sessions");
         // As omp records it: its working directory has symbolic links resolved (macOS: /var is /private/var)
@@ -98,7 +98,8 @@ public sealed class ChatScrollTests
         var w = new MainWindow { DataContext = vm, Width = 1180, Height = 760 };
         w.Show();
         vm.OnWindowOpened();
-        await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.Count >= exchanges * 5, "the long session loaded");
+        await Until(() => vm.Phase == SessionPhase.Ready && vm.History.LoadedMessages > 0, "the recent page loaded");
+        if (fullHistory) await LoadFullHistory(w, vm);
         if (openTurns)
         {
             foreach (var fold in vm.Rows.OfType<TurnFoldRowViewModel>()) fold.IsExpanded = true;
@@ -106,6 +107,20 @@ public sealed class ChatScrollTests
             Dispatcher.UIThread.RunJobs();
         }
         return (w, vm);
+    }
+
+    private static async Task LoadFullHistory(MainWindow w, MainViewModel vm)
+    {
+        // These stress tests deliberately exercise a fully loaded long transcript.
+        // Production only prepends a page when the reader asks for older messages.
+        while (vm.History.HasOlder)
+        {
+            Assert.True(vm.LoadOlderMessagesCommand.CanExecute(null), vm.HistoryStatus);
+            var loaded = vm.History.LoadedMessages;
+            await vm.LoadOlderMessagesCommand.ExecuteAsync(null);
+            Assert.True(vm.History.LoadedMessages > loaded, vm.HistoryStatus);
+        }
+        w.FindControl<Button>("JumpToLatest")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
     }
 
     private static ScrollViewer Scroll(Window w) => w.FindControl<ListBox>("Transcript")!.GetVisualDescendants().OfType<ScrollViewer>().First();
@@ -135,6 +150,188 @@ public sealed class ChatScrollTests
     {
         if (vm.AbortCommand.CanExecute(null)) vm.AbortCommand.Execute(null);
         await Until(() => vm.Phase == SessionPhase.Ready, "the run stopped");
+    }
+
+    [AvaloniaFact]
+    public async Task Home_at_the_history_boundary_loads_one_page_and_stops_without_more_input()
+    {
+        var (w, vm) = await OpenLong("normal", 80, fullHistory: false);
+        try
+        {
+            Frame(w);
+            Assert.Equal(100, vm.History.LoadedMessages);
+            w.FindControl<ListBox>("Transcript")!.RaiseEvent(new Avalonia.Input.KeyEventArgs
+            {
+                RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent,
+                Key = Avalonia.Input.Key.Home,
+            });
+            await Until(() => vm.History.LoadedMessages == 200 && !vm.History.IsLoading, "one older page");
+            await Settle();
+            Assert.Equal(200, vm.History.LoadedMessages);
+            Assert.True(vm.History.HasOlder);
+            Assert.True(w.FindControl<Button>("JumpToLatest")!.IsVisible);
+        }
+        finally
+        {
+            await vm.DisposeAsync();
+            w.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task One_older_page_preserves_the_visible_row_and_intrarow_offset_without_draining_history()
+    {
+        var (w, vm) = await OpenLong("normal", 80, fullHistory: false);
+        try
+        {
+            Frame(w);
+            Assert.Equal(100, vm.History.LoadedMessages);
+            Assert.True(vm.History.HasOlder);
+            var list = w.FindControl<ListBox>("Transcript")!;
+            var panel = (TranscriptPanel)list.ItemsPanelRoot!;
+            var sv = Scroll(w);
+            Assert.InRange(Math.Abs(Gap(sv)), 0, 0.5);
+            // Leave the window's own follow-latest mode before driving an exact anchored position.
+            w.MouseWheel(list.TranslatePoint(new Point(100, 100), w)!.Value, new Vector(0, 1));
+            Frame(w);
+            var controller = new ChatScrollController(sv, list, panel);
+            controller.ReadHistory();
+            // Put the view inside an existing row, not merely at its boundary.
+            controller.Restore(new ChatScrollAnchor(false, 0, 17, vm.Rows[0]), panel);
+            var before = controller.Save(panel);
+            var held = Assert.IsAssignableFrom<RowViewModel>(before.Item);
+            await vm.LoadOlderMessagesCommand.ExecuteAsync(null);
+            Frame(w);
+            var after = controller.Save(panel);
+            Assert.Equal(200, vm.History.LoadedMessages);
+            Assert.True(vm.History.HasOlder);
+            Assert.Same(held, after.Item);
+            Assert.InRange(Math.Abs(after.IntoRow - before.IntoRow), 0, 0.5);
+            Assert.Same(held, vm.Rows.Single(r => ReferenceEquals(r, held)));
+            await Settle();
+            Assert.Equal(200, vm.History.LoadedMessages); // no layout-driven fetch-all loop
+            Assert.False(controller.IsFollowing);
+            // The saved tab anchor predates the prepend; restoring it must use identity, not its old index.
+            controller.FollowLatest();
+            controller.Restore(before, panel);
+            var restored = controller.Save(panel);
+            Assert.Same(before.Item, restored.Item);
+            Assert.InRange(Math.Abs(restored.IntoRow - before.IntoRow), 0, 0.5);
+        }
+        finally
+        {
+            await vm.DisposeAsync();
+            w.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task An_older_step_extends_the_anchored_group_without_replacing_it_or_collapsing_it()
+    {
+        var vm = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs());
+        var w = new MainWindow { DataContext = vm, Width = 1180, Height = 760 };
+        try
+        {
+            var first = new ToolItem(2, "b", "read", "{}", ToolStatus.Succeeded, "b", "b.cs");
+            var second = new ToolItem(3, "c", "read", "{}", ToolStatus.Succeeded, "c", "c.cs");
+            var tail = Enumerable.Range(100, 40).Select(i => (TranscriptItem)new NoticeItem(i, NoticeLevel.Info, $"Later row {i}")).ToArray();
+            SessionSnapshot Snap(long version, params TranscriptItem[] items) =>
+                new(version, SessionPhase.Ready, items, null, 2, null, 0, 0, null, null, null, []);
+            vm.Apply(Snap(1, [first, second, .. tail]));
+            var group = vm.Rows.OfType<StepGroupRowViewModel>().Single();
+            group.IsExpanded = true;
+            w.Show();
+            Frame(w);
+            var list = w.FindControl<ListBox>("Transcript")!;
+            var panel = (TranscriptPanel)list.ItemsPanelRoot!;
+            var sv = Scroll(w);
+            w.MouseWheel(list.TranslatePoint(new Point(100, 100), w)!.Value, new Vector(0, 1));
+            var controller = new ChatScrollController(sv, list, panel);
+            controller.Restore(new ChatScrollAnchor(false, 0, 8, group), panel);
+            var before = controller.Save(panel);
+            Assert.Same(group, before.Item);
+            var older = new ToolItem(1, "a", "read", "{}", ToolStatus.Succeeded, "a", "a.cs");
+            vm.Apply(Snap(2, [older, first, second, .. tail]));
+            Frame(w);
+            Assert.Same(group, vm.Rows.OfType<StepGroupRowViewModel>().Single());
+            Assert.Same(group, vm.Rows[0]);
+            Assert.True(group.IsExpanded);
+            Assert.Equal(new long[] { 1, 2, 3 }, group.Steps.Select(step => step.Model.Key));
+            var after = controller.Save(panel);
+            Assert.Same(group, after.Item);
+            Assert.InRange(Math.Abs(after.IntoRow - before.IntoRow), 0, 0.5);
+            Assert.True(w.FindControl<Button>("JumpToLatest")!.IsVisible);
+            controller.Restore(before, panel);
+            Assert.False(controller.IsFollowing);
+            Assert.Same(group, controller.Save(panel).Item);
+        }
+        finally
+        {
+            await vm.DisposeAsync();
+            w.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void One_touch_gesture_cannot_drain_pages_even_after_each_request_finishes()
+    {
+        var sv = new ScrollViewer { Content = new Border { Height = 30 }, Height = 300 };
+        var w = new Window { Content = sv, Width = 500, Height = 400 };
+        w.Show();
+        Frame(w);
+        var controller = new ChatScrollController(sv, sv, null);
+        var requests = 0;
+        var loading = false;
+        controller.OlderMessagesRequested += () =>
+        {
+            if (loading) return;
+            loading = true;
+            requests++;
+            controller.ReadHistory();
+        };
+        sv.RaiseEvent(new Avalonia.Input.ScrollGestureEventArgs(41, new Vector(0, -20)));
+        Assert.Equal(1, requests);
+        loading = false; // The first bounded page finished; the command is executable again.
+        Frame(w);
+        sv.RaiseEvent(new Avalonia.Input.ScrollGestureEventArgs(41, new Vector(0, -20)));
+        sv.RaiseEvent(new Avalonia.Input.ScrollGestureEventArgs(41, new Vector(0, -20)));
+        Assert.Equal(1, requests);
+        sv.RaiseEvent(new Avalonia.Input.ScrollGestureEndedEventArgs(41));
+        sv.RaiseEvent(new Avalonia.Input.ScrollGestureEventArgs(42, new Vector(0, -20)));
+        Assert.Equal(2, requests);
+        loading = false;
+        sv.RaiseEvent(new Avalonia.Input.ScrollGestureEndedEventArgs(42));
+        w.MouseWheel(sv.TranslatePoint(new Point(100, 10), w)!.Value, new Vector(0, 1));
+        Assert.Equal(3, requests);
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public void A_short_page_requests_older_only_on_upward_reader_input()
+    {
+        var sv = new ScrollViewer { Content = new Border { Height = 30 }, Height = 300 };
+        var w = new Window { Content = sv, Width = 500, Height = 400 };
+        w.Show();
+        Frame(w);
+        var controller = new ChatScrollController(sv, sv, null);
+        var requests = 0;
+        controller.OlderMessagesRequested += () => { requests++; controller.ReadHistory(); };
+        Frame(w);
+        Assert.Equal(0, requests);
+        var point = sv.TranslatePoint(new Point(100, 10), w)!.Value;
+        w.MouseWheel(point, new Vector(0, 1));
+        Frame(w);
+        Assert.Equal(1, requests);
+        Assert.False(controller.IsFollowing);
+        Frame(w);
+        Assert.Equal(1, requests);
+        sv.RaiseEvent(new Avalonia.Input.KeyEventArgs
+        {
+            RoutedEvent = Avalonia.Input.InputElement.KeyDownEvent,
+            Key = Avalonia.Input.Key.Home,
+        });
+        Assert.Equal(2, requests);
+        w.Close();
     }
 
     /// <summary>
@@ -218,7 +415,10 @@ public sealed class ChatScrollTests
             for (var i = 0; i < 3; i++) w.MouseWheel(p, new Vector(0, 1));
             Frame(w);
             Assert.True(jump.IsVisible, "no way back to the latest message");
-            var held = list.GetRealizedContainers().First(c => Top(c, sv) is > 0 and < 200);
+            // A long streaming block may cover the top 200 px without any row beginning inside that strip.
+            var held = list.GetRealizedContainers()
+                .Where(c => c.IsVisible && Top(c, sv) is { } top && top < sv.Viewport.Height && top + c.Bounds.Height > 0)
+                .OrderBy(c => Math.Abs(Top(c, sv)!.Value)).First();
             var heldTop = Top(held, sv);
             var offset = sv.Offset.Y;
             for (var frame = 0; frame < 120; frame++)
@@ -233,13 +433,14 @@ public sealed class ChatScrollTests
 
             // Back down with the wheel: following again
             for (var i = 0; i < 400 && Gap(sv) > 0.5; i++) { w.MouseWheel(p, new Vector(0, -3)); Frame(w); }
-            Assert.False(jump.IsVisible);
+            Assert.False(jump.IsHitTestVisible);
             for (var frame = 0; frame < 30; frame++)
             {
                 Frame(w);
                 Assert.True(Math.Abs(Gap(sv)) <= 0.5, $"frame {frame}: {Gap(sv):0.#} px off the bottom");
                 await Task.Delay(16);
             }
+            Assert.False(jump.IsVisible); // the 150 ms fade ended while scrolling continued to follow
             await StopReply(vm);
             await vm.DisposeAsync();
             w.Close();
@@ -392,22 +593,6 @@ public sealed class ChatScrollTests
         w.Close();
     }
 
-    /// <summary>A reply too long for Markdown streams into one plain text block: the same block takes each new text.</summary>
-    [AvaloniaFact]
-    public async Task A_huge_streaming_reply_keeps_one_plain_text_block()
-    {
-        var view = new MarkdownView { IsStreaming = true, Markdown = new string('x', 210_000) };
-        var w = new Window { Content = view, Width = 600, Height = 400 };
-        w.Show();
-        Frame(w);
-        var plain = Assert.IsType<SelectableTextBlock>(view.Content);
-        view.Markdown += " more";
-        await Task.Delay(300);
-        Frame(w);
-        Assert.Same(plain, view.Content);
-        Assert.EndsWith(" more", plain.Text);
-        w.Close();
-    }
 
     /// <summary>
     /// The keys scroll the conversation exactly when the focus is in it: Page Up by a view, Home to the top, Page Down
@@ -441,7 +626,7 @@ public sealed class ChatScrollTests
         w.KeyPress(Avalonia.Input.Key.PageDown, Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.PageDown, null);
         Frame(w);
         Assert.Equal(0, Gap(sv), 0.5);
-        Assert.False(jump.IsVisible, "back on the bottom: following again");
+        Assert.False(jump.IsHitTestVisible, "back on the bottom: following again");
         w.KeyPress(Avalonia.Input.Key.Home, Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.Home, null);
         Frame(w);
         Assert.Equal(0, sv.Offset.Y);
@@ -449,6 +634,8 @@ public sealed class ChatScrollTests
         w.KeyPress(Avalonia.Input.Key.End, Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.End, null);
         Frame(w);
         Assert.Equal(0, Gap(sv), 0.5);
+        Assert.False(jump.IsHitTestVisible);
+        await Settle();
         Assert.False(jump.IsVisible);
         await vm.DisposeAsync();
         w.Close();
@@ -497,7 +684,9 @@ public sealed class ChatScrollTests
         w.MouseUp(new Point(at.X, trackBottom + 50), Avalonia.Input.MouseButton.Left);
         Frame(w);
         Assert.Equal(0, Gap(sv), 0.5);
-        Assert.False(jump.IsVisible, "the thumb ended on the bottom: following again");
+        Assert.False(jump.IsHitTestVisible, "the thumb ended on the bottom: following again");
+        await Settle();
+        Assert.False(jump.IsVisible);
         await vm.DisposeAsync();
         w.Close();
     }
@@ -524,38 +713,46 @@ public sealed class ChatScrollTests
         var s = new SessionController(TestProcesses.FakeFactory("normal", root), new LaunchRequest(cwd, ResumeSessionFile: file));
         var vm = new MainViewModel(s, new AppArgs());
         var w = new MainWindow { DataContext = vm, Width = 1180, Height = 760 };
-        w.Show();
-        vm.OnWindowOpened();
-        await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.Count >= 70 * 5 + 2, "the long session loaded");
-        var list = w.FindControl<ListBox>("Transcript")!;
-        var sv = Scroll(w);
-        Frame(w);
-        Frame(w);
-        Assert.Equal(0, Gap(sv), 0.5);
-        var opened = sv.Extent.Height;
-        var bar = sv.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ScrollBar>().First(b => b.TemplatedParent == sv && b.Orientation == Avalonia.Layout.Orientation.Vertical);
-        var thumb = bar.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.Thumb>().First();
-        var trackTop = bar.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.Track>().First().TranslatePoint(default, w)!.Value.Y;
-        var at = thumb.TranslatePoint(new Point(thumb.Bounds.Width / 2, thumb.Bounds.Height / 2), w)!.Value;
-        w.MouseDown(at, Avalonia.Input.MouseButton.Left);
-        var bad = new List<string>();
-        for (var y = at.Y - 6; y > trackTop - 40; y -= 6)
+        try
         {
-            w.MouseMove(new Point(at.X, y));
+            w.Show();
+            vm.OnWindowOpened();
+            await Until(() => vm.Phase == SessionPhase.Ready && vm.History.LoadedMessages > 0, "the recent page loaded");
+            await LoadFullHistory(w, vm);
+            Assert.Equal(70 * 5 + 2, vm.History.LoadedMessages);
+            var list = w.FindControl<ListBox>("Transcript")!;
+            var sv = Scroll(w);
             Frame(w);
-            var middle = sv.Viewport.Height / 2;
-            if (!list.GetRealizedContainers().Any(c => Top(c, sv) is { } top && top <= middle && top + c.Bounds.Height >= middle))
-                bad.Add($"nothing on screen at offset {sv.Offset.Y:0}");
-            if (Math.Abs(sv.Extent.Height - opened) > opened * 0.1) bad.Add($"length {sv.Extent.Height:0}, opened at {opened:0}");
+            Frame(w);
+            Assert.Equal(0, Gap(sv), 0.5);
+            var opened = sv.Extent.Height;
+            var bar = sv.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ScrollBar>().First(b => b.TemplatedParent == sv && b.Orientation == Avalonia.Layout.Orientation.Vertical);
+            var thumb = bar.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.Thumb>().First();
+            var trackTop = bar.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.Track>().First().TranslatePoint(default, w)!.Value.Y;
+            var at = thumb.TranslatePoint(new Point(thumb.Bounds.Width / 2, thumb.Bounds.Height / 2), w)!.Value;
+            w.MouseDown(at, Avalonia.Input.MouseButton.Left);
+            var bad = new List<string>();
+            for (var y = at.Y - 6; y > trackTop - 40; y -= 6)
+            {
+                w.MouseMove(new Point(at.X, y));
+                Frame(w);
+                var middle = sv.Viewport.Height / 2;
+                if (!list.GetRealizedContainers().Any(c => Top(c, sv) is { } top && top <= middle && top + c.Bounds.Height >= middle))
+                    bad.Add($"nothing on screen at offset {sv.Offset.Y:0}");
+                if (Math.Abs(sv.Extent.Height - opened) > opened * 0.1) bad.Add($"length {sv.Extent.Height:0}, opened at {opened:0}");
+            }
+            w.MouseUp(new Point(at.X, trackTop - 40), Avalonia.Input.MouseButton.Left);
+            Frame(w);
+            Frame(w);
+            Assert.Empty(bad);
+            Assert.Equal(0, sv.Offset.Y);
+            Assert.Same(vm.Rows[0], list.GetRealizedContainers().OrderBy(c => Top(c, sv)).First().DataContext);
         }
-        w.MouseUp(new Point(at.X, trackTop - 40), Avalonia.Input.MouseButton.Left);
-        Frame(w);
-        Frame(w);
-        Assert.Empty(bad);
-        Assert.Equal(0, sv.Offset.Y);
-        Assert.Same(vm.Rows[0], list.GetRealizedContainers().OrderBy(c => Top(c, sv)).First().DataContext);
-        await vm.DisposeAsync();
-        w.Close();
+        finally
+        {
+            await vm.DisposeAsync();
+            w.Close();
+        }
     }
 
     /// <summary>

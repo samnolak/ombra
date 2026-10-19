@@ -1,10 +1,12 @@
+using Ombra.App.Localization;
 using Ombra.ClientCore;
 
 namespace Ombra.App.ViewModels;
 
 /// <summary>
 /// The approval card's "Don't ask again" (a rule in <see cref="ApprovalRules"/>, answered by the session from then on) and
-/// "Deny and say why" (a steering message to omp), and Settings → Permissions, where the rules are listed and removed.
+/// "Deny and say why" (the reason goes with the Deny into the tool result), and Settings → Permissions, where the rules are
+/// listed and removed.
 /// </summary>
 public partial class MainViewModel
 {
@@ -19,6 +21,13 @@ public partial class MainViewModel
 
     /// <summary>The project folder and session a rule given now would be for.</summary>
     internal (string? Cwd, string? Session) RuleContext => (_open.Last?.Cwd ?? Session.Snapshot().Cwd, Session.RuleSessionKey);
+
+    public void ExplainApprovalKeyboardGuard()
+    {
+        var message = Loc.T("Release the approval key, then press it again to confirm. You can also click Allow.");
+        if (SessionCard is null or { Kind: "brief" }) ShowUrgentBrief("IconShield", Loc.T("Permission needed"), message);
+        else StatusText = message; // Do not replace another action's card or its unsubmitted input.
+    }
 
     private async Task AllowWithRuleAsync(string id, ApprovalRule rule, ApprovalScope scope)
     {

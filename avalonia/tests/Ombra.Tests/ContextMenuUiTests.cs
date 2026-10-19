@@ -13,6 +13,8 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
 using Ombra.App.Controls;
+using Ombra.App.Localization;
+using Ombra.App.Services.Documents;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.ClientCore;
@@ -96,8 +98,9 @@ public sealed class ContextMenuUiTests
     private static FlyoutBase? OpenMenu(Control c) =>
         c.GetSelfAndVisualAncestors().OfType<Control>().Select(x => x.ContextFlyout).FirstOrDefault(f => f is { IsOpen: true });
 
+    /// <summary>The row named by its English key, as the menu shows it in the current language.</summary>
     private static Button Item(FlyoutBase menu, string name) =>
-        ((Control)((Flyout)menu).Content!).GetLogicalDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == name);
+        ((Control)((Flyout)menu).Content!).GetLogicalDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == Loc.T(name));
 
     /// <summary>Chooses a menu row the way assistive technology does (its command and Click).</summary>
     private static async Task Choose(Control item)
@@ -123,9 +126,10 @@ public sealed class ContextMenuUiTests
     {
         var (w, vm) = await OpenAsync("markdown", height: 2400);
         var copied = new List<string>();
-        vm.CopyTextRequested += copied.Add;
+        vm.CopyTextRequested += text => { copied.Add(text); return Task.FromResult(true); };
         var replies = new List<string>();
-        AssistantRowViewModel.CopyRequested += replies.Add;
+        void CopyReply(AssistantRowViewModel _, string text) => replies.Add(text);
+        AssistantRowViewModel.CopyRequested += CopyReply;
         try
         {
             await SendAsync(w, vm, "first message");
@@ -218,7 +222,7 @@ public sealed class ContextMenuUiTests
             var textMenu = Assert.IsType<MenuFlyout>(OpenMenu(composer));
             Save(w, "text-field-menu-" + Avalonia.Application.Current!.ActualThemeVariant);
             var items = textMenu.Items.OfType<MenuItem>().ToList();
-            Assert.Equal(["Cut", "Copy", "Paste", "Select all"], items.Select(i => (string)i.Header!));
+            Assert.Equal(new[] { "Cut", "Copy", "Paste", "Select all" }.Select(Loc.T), items.Select(i => (string)i.Header!));
             var selectAll = Center(items[^1], w);
             w.MouseMove(selectAll);
             w.MouseDown(selectAll, MouseButton.Left);
@@ -229,7 +233,7 @@ public sealed class ContextMenuUiTests
         }
         finally
         {
-            AssistantRowViewModel.CopyRequested -= replies.Add;
+            AssistantRowViewModel.CopyRequested -= CopyReply;
             w.Close();
         }
     }
@@ -239,7 +243,7 @@ public sealed class ContextMenuUiTests
     {
         var (w, vm) = await OpenAsync("normal");
         var copied = new List<string>();
-        vm.CopyTextRequested += copied.Add;
+        vm.CopyTextRequested += text => { copied.Add(text); return Task.FromResult(true); };
         await SendAsync(w, vm, "first topic");
         await Until(() => vm.Sessions.Any(x => x.Title == "first topic"), "first listed");
         await vm.NewChatCommand.ExecuteAsync(null);
@@ -280,7 +284,7 @@ public sealed class ContextMenuUiTests
         var label = Within<TextBlock>(Within<Grid>(list, g => g.Classes.Contains("group-header") && g.DataContext == group), t => t.Classes.Contains("group-label"));
         await RightClick(w, label);
         menu = OpenMenu(label);
-        await Choose(((Control)((Flyout)menu!).Content!).GetLogicalDescendants().OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Copy path"));
+        await Choose(Item(menu!, "Copy path"));
         Assert.Equal(group.Cwd, copied[^1]);
         w.Close();
     }
@@ -291,7 +295,7 @@ public sealed class ContextMenuUiTests
         var root = FileTestRepo.Create(git: false);
         var (w, vm) = await OpenAsync("normal", root);
         var copied = new List<string>();
-        vm.CopyTextRequested += copied.Add;
+        vm.CopyTextRequested += text => { copied.Add(text); return Task.FromResult(true); };
         var f = await FileTestRepo.Shown(vm, git: false);
         await Settle(300);
         var tree = Within<ListBox>(w, l => l.Name == "Tree");
@@ -336,20 +340,116 @@ public sealed class ContextMenuUiTests
         Assert.Equal("docs/guide.md", copied[^1]);
         f.Filter = "";
 
-        // The code viewer: Copy when something is selected, and Select all
-        await f.OpenFileAsync(Path.Combine(root, "src", "app.py"), line: 1);
+        // The visible editor: an empty selection cannot copy; Select all includes the entire original document.
+        var path = Path.Combine(root, "src", "app.py");
+        var original = await File.ReadAllTextAsync(path);
+        await f.OpenFileAsync(path, line: 1);
         await Settle(400);
-        var surface = w.GetVisualDescendants().OfType<CodeView>().Single().Surface;
+        var editor = w.GetVisualDescendants().OfType<DocumentEditor>().Single(e => e.IsEffectivelyVisible).Editor;
+        var surface = editor.TextArea.TextView;
         await RightClick(w, surface);
         menu = OpenMenu(surface);
-        Assert.False(Item(menu!, "Copy").IsEnabled);
-        await Choose(Item(menu!, "Select all"));
-        Assert.StartsWith("def step_1(x)", surface.SelectedText);
-        Assert.Contains("# step 40", surface.SelectedText);
+        Assert.NotNull(menu);
+        Assert.False(Item(menu, "Copy").IsEnabled);
+        await Choose(Item(menu, "Select all"));
+        Assert.False(menu.IsOpen);
+        Assert.Equal(original, editor.SelectedText);
+        Assert.Same(editor.TextArea, w.FocusManager!.GetFocusedElement());
         await RightClick(w, surface);
-        Assert.True(Item(OpenMenu(surface)!, "Copy").IsEnabled);
-        OpenMenu(surface)!.Hide();
+        menu = OpenMenu(surface);
+        Assert.NotNull(menu);
+        Assert.True(Item(menu, "Copy").IsEnabled);
+        Assert.Equal(original, editor.SelectedText);
+        await Choose(Item(menu, "Copy"));
+        Assert.Equal(original.ReplaceLineEndings("\n"), (await w.Clipboard!.TryGetTextAsync())?.ReplaceLineEndings("\n"));
+        Assert.Equal(original, editor.Text);
+
+        if (OperatingSystem.IsMacOS())
+        {
+            var caret = editor.CaretOffset;
+            await ControlClick(w, surface);
+            menu = OpenMenu(surface);
+            Assert.NotNull(menu);
+            Assert.Equal(original, editor.SelectedText);
+            Assert.Equal(caret, editor.CaretOffset);
+            Assert.True(Item(menu, "Copy").IsEnabled);
+            await Choose(Item(menu, "Copy"));
+            Assert.Equal(original.ReplaceLineEndings("\n"), (await w.Clipboard!.TryGetTextAsync())?.ReplaceLineEndings("\n"));
+            Assert.Same(editor.TextArea, w.FocusManager!.GetFocusedElement());
+        }
         w.Close();
+    }
+
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Editor_menu_preserves_readonly_and_clipboard_edit_boundaries(bool readOnly)
+    {
+        var path = Path.Combine(TestProcesses.TempDir("editor-menu"), "text.txt");
+        const string original = "alpha\nbeta\n";
+        await File.WriteAllTextAsync(path, original);
+        var attributes = File.GetAttributes(path);
+        if (readOnly) File.SetAttributes(path, attributes | FileAttributes.ReadOnly);
+        await using var documents = new WorkspaceDocumentService(watchFiles: false);
+        var w = new Window { Width = 720, Height = 480 };
+        try
+        {
+            var document = await documents.OpenAsync(path);
+            var view = new DocumentEditor { WorkspaceDocument = document };
+            var editor = view.Editor;
+            var surface = editor.TextArea.TextView;
+            w.Content = view;
+            w.Show();
+            await Settle();
+            await RightClick(w, surface);
+            var menu = OpenMenu(surface);
+            Assert.NotNull(menu);
+            Assert.False(Item(menu, "Copy").IsEnabled);
+            Assert.False(Item(menu, "Cut").IsEnabled);
+            Assert.Equal(!readOnly, Item(menu, "Paste").IsEnabled);
+            await Choose(Item(menu, "Select all"));
+            Assert.Equal(original, editor.SelectedText);
+            await RightClick(w, surface);
+            menu = OpenMenu(surface)!;
+            Assert.True(Item(menu, "Copy").IsEnabled);
+            Assert.Equal(!readOnly, Item(menu, "Cut").IsEnabled);
+            Assert.Equal(!readOnly, Item(menu, "Paste").IsEnabled);
+            await Choose(Item(menu, "Copy"));
+            Assert.Equal(original, (await w.Clipboard!.TryGetTextAsync())?.ReplaceLineEndings("\n"));
+            Assert.Same(editor.TextArea, w.FocusManager!.GetFocusedElement());
+            if (readOnly)
+            {
+                w.KeyTextInput("blocked");
+                Assert.Equal(original, document.Buffer.Text);
+                Assert.False(document.IsDirty);
+            }
+            else
+            {
+                await RightClick(w, surface);
+                await Choose(Item(OpenMenu(surface)!, "Cut"));
+                Assert.Equal("", document.Buffer.Text);
+                Assert.True(document.IsDirty);
+                Assert.Equal(original, (await w.Clipboard!.TryGetTextAsync())?.ReplaceLineEndings("\n"));
+                await RightClick(w, surface);
+                await Choose(Item(OpenMenu(surface)!, "Paste"));
+                Assert.Equal(original, document.Buffer.Text);
+                Assert.Same(editor.TextArea, w.FocusManager!.GetFocusedElement());
+
+                // Paste must use the native transaction and reject text the document cannot save.
+                await RightClick(w, surface);
+                await Choose(Item(OpenMenu(surface)!, "Select all"));
+                await w.Clipboard!.SetTextAsync("invalid\0text");
+                await RightClick(w, surface);
+                await Choose(Item(OpenMenu(surface)!, "Paste"));
+                Assert.Equal(original, document.Buffer.Text);
+            }
+            Assert.Equal(original, await File.ReadAllTextAsync(path));
+        }
+        finally
+        {
+            w.Close();
+            File.SetAttributes(path, attributes);
+        }
     }
 
     [AvaloniaTheory]
@@ -369,6 +469,7 @@ public sealed class ContextMenuUiTests
             await RightClick(w, block);
             var menu = OpenMenu(block)!;
             Save(w, "code-menu-" + theme);
+            Assert.False(Item(menu, "Insert into message").IsEnabled); // no composer in this standalone window
             await Choose(Item(menu, "Copy code"));
             Assert.False(menu.IsOpen);
             Assert.Equal("print('hi')", await w.Clipboard!.TryGetTextAsync());
@@ -385,5 +486,56 @@ public sealed class ContextMenuUiTests
             w.Close();
             MainViewModel.ApplyTheme("light");
         }
+    }
+
+    [AvaloniaFact]
+    public async Task Queue_context_edit_withdraws_the_clicked_item_not_the_last_item()
+    {
+        var (w, vm) = await OpenAsync("queue-stream-3");
+        try
+        {
+            vm.ComposerText = "long task";
+            vm.SendCommand.Execute(null);
+            await Until(() => vm.Phase == SessionPhase.Running, "running");
+            foreach (var text in new[] { "edit the first", "keep the second" })
+            {
+                vm.ComposerText = text;
+                await vm.SendCommand.ExecuteAsync(null);
+            }
+            await Until(() => vm.QueuedMessages.Count == 2, "two queued messages");
+            await Settle();
+            var first = vm.QueuedMessages[0];
+            var target = Within<Grid>(w, c => c.DataContext == first && ConversationMenus.GetKind(c) == ConversationMenuKind.Queue);
+            await RightClick(w, target);
+            await Choose(Item(OpenMenu(target)!, "Edit"));
+            await Until(() => vm.ComposerText == "edit the first" && vm.QueuedMessages.Count == 1, "clicked message recovered");
+            Assert.Equal("keep the second", vm.QueuedMessages[0].Text);
+        }
+        finally { await vm.DisposeAsync(); w.Close(); }
+    }
+
+    [AvaloniaFact]
+    public async Task An_inactive_window_copies_its_reply_once_and_reports_clipboard_failures()
+    {
+        var (w, vm) = await OpenAsync("normal");
+        var other = new Window { Width = 200, Height = 100 };
+        var write = ContextMenus.WriteClipboard;
+        try
+        {
+            await SendAsync(w, vm, "copy this");
+            var reply = vm.Rows.OfType<AssistantRowViewModel>().Last();
+            other.Show();
+            other.Activate();
+            var writes = 0;
+            ContextMenus.WriteClipboard = (_, _) => { writes++; return Task.CompletedTask; };
+            reply.CopyCommand.Execute(null);
+            Assert.Equal(1, writes);
+            Assert.Equal(Loc.T("Copied"), vm.SessionCard!.Title);
+            ContextMenus.WriteClipboard = (_, _) => Task.FromException(new IOException("clipboard unavailable"));
+            reply.CopyCommand.Execute(null);
+            Assert.Equal(Loc.T("Couldn't copy"), vm.SessionCard!.Title);
+            Assert.Equal("clipboard unavailable", vm.SessionCard.Message);
+        }
+        finally { ContextMenus.WriteClipboard = write; other.Close(); await vm.DisposeAsync(); w.Close(); }
     }
 }

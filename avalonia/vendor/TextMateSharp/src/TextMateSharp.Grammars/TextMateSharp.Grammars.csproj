@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <Description>A set of grammars and Themes that can be used by TextMateSharp</Description>
+    <PackageProjectUrl>https://github.com/danipen/TextMateSharp</PackageProjectUrl>
+    <Authors>Daniel Peñalba</Authors>
+    <Company />
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\Themes\*.json" />
+    <EmbeddedResource Include="Resources\Grammars\**\*.json" />
+    <EmbeddedResource Include="Resources\Grammars\**\snippets\*.code-snippets" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\TextMateSharp\TextMateSharp.csproj" />
+  </ItemGroup>
+</Project>

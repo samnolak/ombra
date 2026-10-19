@@ -4,4 +4,7 @@
     <OutputType>Exe</OutputType>
     <RootNamespace>Ombra.FakeOmp</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Ombra.ClientCore\Ombra.ClientCore.csproj" />
+  </ItemGroup>
 </Project>

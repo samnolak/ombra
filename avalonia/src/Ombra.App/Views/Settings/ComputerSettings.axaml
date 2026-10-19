@@ -17,7 +17,7 @@
             <ctl:Icon Classes="ok-mark" Data="{StaticResource IconCheckCircle}" Size="16" IsVisible="{Binding !MessageIsError}" />
             <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" IsVisible="{Binding MessageIsError}" />
           </Panel>
-          <SelectableTextBlock Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="13" VerticalAlignment="Center" />
+          <SelectableTextBlock Grid.Column="1" Text="{Binding Message}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" VerticalAlignment="Center" />
           <Button Grid.Column="2" Classes="icon" Width="24" Height="24" Margin="8,-4,-6,-4" VerticalAlignment="Top" Command="{Binding DismissMessageCommand}"
                   ToolTip.Tip="{loc:T 'Dismiss'}" AutomationProperties.Name="{loc:T 'Dismiss'}">
             <ctl:Icon Data="{StaticResource IconClose}" Size="16" />
@@ -39,7 +39,7 @@
             <Border Grid.Column="1" Classes="status" Classes.done="{Binding SessionOn}" Classes.failed="{Binding SessionBlocked}" IsVisible="{Binding HasSessionStatus}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <Ellipse />
-                <TextBlock x:Name="ComputerSessionLabel" Text="{Binding SessionLabel}" VerticalAlignment="Center" />
+                <TextBlock x:Name="ComputerSessionLabel" Text="{Binding SessionLabel}" />
               </StackPanel>
             </Border>
           </Grid>
@@ -67,7 +67,7 @@
           <TextBlock Classes="muted" Text="{loc:T 'Loading…'}" IsVisible="{Binding IsLoading}" />
           <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasLoadError}">
             <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" Margin="0,0,8,0" VerticalAlignment="Top" />
-            <SelectableTextBlock Grid.Column="1" Text="{Binding LoadError}" TextWrapping="Wrap" FontSize="13" />
+            <SelectableTextBlock Grid.Column="1" Text="{Binding LoadError}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
           </Grid>
         </StackPanel>
       </Border>
@@ -135,7 +135,7 @@
       <Border Classes="section-card">
         <StackPanel Spacing="12">
           <Grid ColumnDefinitions="*,Auto">
-            <TextBlock Classes="section" Text="{Binding PlatformName, StringFormat='What omp needs on {0}'}" VerticalAlignment="Center" />
+            <TextBlock Classes="section" Text="{Binding PlatformName, StringFormat={loc:T 'What omp needs on {0}'}}" VerticalAlignment="Center" />
             <Button Grid.Column="1" x:Name="ComputerCheckAgain" Classes="flat" Content="{loc:T 'Check again'}" Command="{Binding CheckAgainCommand}" IsEnabled="{Binding !Checking}" />
           </Grid>
           <ItemsControl x:Name="ComputerRequirements" ItemsSource="{Binding Requirements}">

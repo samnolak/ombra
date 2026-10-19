@@ -13,6 +13,7 @@ RID=${1:?rid}; PUB=${2:?publish dir}; OUT=${3:?out dir}; VERSION=${4:?version}
 HERE=$(cd "$(dirname "$0")/../.." && pwd)          # avalonia/
 PKG="$HERE/packaging"
 ROOT=$(cd "$HERE/.." && pwd)
+python3 "$ROOT/runtime/generate-engine-artifact.py" --check
 mkdir -p "$OUT"; OUT=$(cd "$OUT" && pwd)
 NAME="ombra-$VERSION-$RID"
 SIGNING="$OUT/$NAME.signing.txt"

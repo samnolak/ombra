@@ -160,7 +160,8 @@ public sealed class RealOmpTests
 
         // omp writes the session files; the catalog reads them back (read-only).
         var catalog = await SessionCatalog.ScanAsync(SessionCatalog.SessionsRootOf(s.Snapshot().SessionFile)!);
-        var entry = Assert.Single(catalog, c => c.Path == one.SessionFile);
+        Assert.True(catalog.IsAuthoritative);
+        var entry = Assert.Single(catalog.Sessions, c => c.Path == one.SessionFile);
         Assert.Equal("Session One", entry.Title);
         Assert.True(SessionCatalog.SamePath(one.Cwd, entry.Cwd));
 
@@ -258,7 +259,7 @@ public sealed class RealOmpTests
         Assert.Equal(png, Assert.Single(user.Images).Data);
         // omp returns the image's bytes with the session's messages (it may re-encode it): history shows it again
         var history = new ConversationState();
-        history.Hydrate(await Ombra.Rpc.OmpCommands.GetMessagesAsync(s.Connection!));
+        history.Hydrate((await Ombra.Rpc.OmpCommands.GetMessagesPageAsync(s.Connection!)).Messages);
         Assert.NotEmpty(Assert.Single(history.Snapshot().Items.OfType<UserItem>().Single().Images).Data);
     }
 
@@ -280,12 +281,12 @@ public sealed class RealOmpTests
     }
 
     [Fact]
-    public async Task History_survives_a_restart_of_the_view_via_get_messages()
+    public async Task History_survives_a_restart_of_the_view_via_a_recent_message_page()
     {
         await using var s = await StartAsync();
         await s!.PromptAsync("remember this");
         await TestProcesses.Eventually(s.Snapshot, x => x.Phase == SessionPhase.Ready && x.MessagesCompleted >= 1, Wait, "run end");
-        var messages = await Ombra.Rpc.OmpCommands.GetMessagesAsync(s.Connection!);
+        var messages = (await Ombra.Rpc.OmpCommands.GetMessagesPageAsync(s.Connection!)).Messages;
         var rebuilt = new ConversationState();
         rebuilt.Hydrate(messages);
         var items = rebuilt.Snapshot().Items;

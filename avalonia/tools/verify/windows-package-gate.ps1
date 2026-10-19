@@ -125,7 +125,7 @@ public struct RECT { public int Left, Top, Right, Bottom; }
 '@
   Add-Type -AssemblyName System.Windows.Forms, System.Drawing
   $rtProfile = Join-Path $work 'profile-clean'                  # the runtime the clean self-test installed
-  $rt = Join-Path $rtProfile 'runtimes\omp-18.8.0-bun-1.4.2'
+  $rt = Join-Path $rtProfile 'runtimes\ombra-engine-18.8.0-bun-1.4.2-v1'
   $home2 = Join-Path $work 'profile-run'
   $agent = Join-Path $home2 '.omp\profiles\standin\agent'
   New-Item -ItemType Directory -Force -Path $agent, (Join-Path $home2 'Roaming'), (Join-Path $home2 'Local'), (Join-Path $work 'proj') | Out-Null
@@ -146,7 +146,8 @@ providers:
         contextWindow: 131072
 "@
   $cfg = Join-Path $work 'run.json'
-  @{ command = (Join-Path $rt 'bun\bun.exe'); prefixArgs = @('--no-install', (Join-Path $rt 'omp\node_modules\@oh-my-pi\pi-coding-agent\src\cli.ts'))
+  @{ command = (Join-Path $rt 'bun\bun.exe'); prefixArgs = @(('--config=' + (Join-Path $rt 'omp\bunfig.toml')), '--no-env-file', '--no-install', (Join-Path $rt 'omp\engine\host.ts'))
+     managementPrefixArgs = @(('--config=' + (Join-Path $rt 'omp\bunfig.toml')), '--no-env-file', '--no-install', (Join-Path $rt 'omp\engine\coding-agent\src\cli.ts'))
      profile = 'standin'; workingDirectory = (Join-Path $work 'proj')
      environment = @{ USERPROFILE = $home2; HOME = $home2; LOCAL_MODEL_API_KEY = 'none' } } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $cfg
   $mock = Start-Process -FilePath node -ArgumentList @((Join-Path $Source 'tools\mock-model\server.mjs'), $port) -PassThru -WindowStyle Hidden `

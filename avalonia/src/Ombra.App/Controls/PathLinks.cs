@@ -15,7 +15,8 @@ public enum PathKind { File, Folder, Image }
 /// <summary>A path named in the conversation that exists: its full path, the line it points at, what it is.</summary>
 public sealed record PathTarget(string FullPath, int? Line, PathKind Kind);
 
-/// <summary>What a window does with paths in its conversation: finds them, opens them (MainViewModel).</summary>
+/// <summary>What a window does with paths in its conversation (MainViewModel): finds them, opens them, and the rest of
+/// the path menu (<see cref="ContextMenus.ForPath"/>); and how it tells the user a copy happened or failed.</summary>
 public interface IPathLinkHandler
 {
     /// <summary>The project the paths are relative to (the preview shows them relative to it); null without one.</summary>
@@ -27,6 +28,24 @@ public interface IPathLinkHandler
 
     /// <summary>Opens it: an image in the image viewer, a file in the Files pane (at its line), a folder in the tree.</summary>
     void OpenPath(PathTarget target);
+
+    /// <summary>The editor "Open in …" uses (the first one found on PATH); null when there is none.</summary>
+    string? EditorName { get; }
+
+    /// <summary>Opens the file (at its line) in <see cref="EditorName"/>; a failure is said to the user.</summary>
+    void OpenInEditor(PathTarget target);
+
+    /// <summary>Adds an <c>@path</c> reference to the message being written.</summary>
+    void AddToMessage(PathTarget target);
+
+    /// <summary>Shows it in Finder / Explorer / the file manager; a failure is said to the user.</summary>
+    void Reveal(PathTarget target);
+
+    /// <summary>A shell in <paramref name="folder"/>, in the terminal panel.</summary>
+    void OpenTerminal(string folder);
+
+    /// <summary>A brief that goes away by itself ("Path copied", "Couldn't copy").</summary>
+    void Notify(string iconKey, string title, string message);
 }
 
 /// <summary>
@@ -121,6 +140,8 @@ public static partial class PathLinks
 
     private static async Task FillAsync(PathTarget target, TextBlock detail, ContentControl content)
     {
+        if (Services.ProjectFiles.Resolve(null, target.FullPath) is not { } local) return;
+        target = target with { FullPath = local };
         try
         {
             switch (target.Kind)
@@ -129,7 +150,7 @@ public static partial class PathLinks
                 {
                     var data = await Task.Run(() => new FileInfo(target.FullPath) is { Length: <= 40 * 1024 * 1024 } ? File.ReadAllBytes(target.FullPath) : null);
                     var thumb = data is null ? null : await Task.Run(() => Services.ImageAttachments.DecodeThumbnail(data, ThumbnailPixels));
-                    detail.Text = Services.ProjectFiles.Size(data?.LongLength ?? new FileInfo(target.FullPath).Length) + (thumb is null ? "" : $" · {thumb.PixelSize.Width}×{thumb.PixelSize.Height} preview");
+                    detail.Text = Services.ProjectFiles.Size(data?.LongLength ?? new FileInfo(target.FullPath).Length) + (thumb is null ? "" : " · " + Loc.F("{0}×{1} preview", thumb.PixelSize.Width, thumb.PixelSize.Height));
                     if (thumb is not null)
                         content.Content = new Image { Source = thumb, MaxWidth = 400, MaxHeight = 260, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left };
                     break;
@@ -140,7 +161,7 @@ public static partial class PathLinks
                     detail.Text = entries.Count == 1 ? Loc.T("Folder · 1 item") : Loc.F("Folder · {0} items", entries.Count);
                     var list = new StringBuilder();
                     foreach (var e in entries.Take(PreviewEntries)) list.Append(e.Name).Append(e.IsDirectory ? "/\n" : "\n");
-                    if (entries.Count > PreviewEntries) list.Append(CultureInfo.InvariantCulture, $"… {entries.Count - PreviewEntries} more");
+                    if (entries.Count > PreviewEntries) list.Append(Loc.F("… {0} more", entries.Count - PreviewEntries));
                     if (list.Length > 0) content.Content = Mono(list.ToString().TrimEnd('\n'));
                     break;
                 }
@@ -171,6 +192,7 @@ public static partial class PathLinks
     /// </summary>
     internal static (long Size, string Lines, bool Binary) ReadHead(string path, int? line)
     {
+        path = Services.ProjectFiles.Resolve(null, path) ?? throw new IOException("Only local file paths can be previewed.");
         using var stream = File.OpenRead(path);
         var size = stream.Length;
         var buffer = new byte[(int)Math.Min(size, MaxTextBytes)];

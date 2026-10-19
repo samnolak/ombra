@@ -113,7 +113,7 @@ public sealed class NetworkPrivacy : IAsyncDisposable
             {
                 throw new NetworkPrivacyException("the list of providers omp must not contact could not be saved (" + e.Message + "), so omp was not started.", e);
             }
-            spec = ProviderGate.Apply(spec, overlay, options.PrefixArgs.Length);
+            spec = ProviderGate.Apply(spec, overlay);
             lock (_lock)
             {
                 _gates[key] = result;

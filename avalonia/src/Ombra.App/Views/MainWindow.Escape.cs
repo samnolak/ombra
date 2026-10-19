@@ -17,6 +17,17 @@ public sealed partial class MainWindow
     {
         if (FocusManager?.GetFocusedElement() is not Visual focused) return false;
         if (Within(TerminalPanel, focused)) return true;
+        // The BTW panel and the goal bar sit beside a run: Esc there closes the panel (or the goal's editor), never stops omp
+        if (Within(BtwPanelHost, focused))
+        {
+            if (Vm is { } btw) btw.IsBtwOpen = false;
+            return true;
+        }
+        if (Within(GoalBarHost, focused))
+        {
+            Vm?.CancelGoalEditCommand.Execute(null);
+            return true;
+        }
         if (Within(SessionCardHost, focused))
         {
             if (Vm?.SessionCard?.DismissCommand is { } dismiss && dismiss.CanExecute(null)) dismiss.Execute(null);

@@ -54,6 +54,7 @@ public sealed class AgentBrowserDefaultsTests
 
         var starts = Starts(log);
         Assert.Equal(3, starts.Count);
+        Assert.Single(starts.Select(start => start["pid"]!.GetValue<int>()).Distinct());
         foreach (var s in starts)
         {
             Assert.Equal(bridge.Endpoint, Env(s, AgentBrowserBridge.SocketVariable));
@@ -73,7 +74,7 @@ public sealed class AgentBrowserDefaultsTests
         Assert.True(File.Exists(defaults.ExtensionPath));
     }
 
-    [Fact]
+    [AvaloniaFact] // makes a MainViewModel: on the UI thread (see ConnectorsFlowTests)
     public void The_terminals_omp_gets_the_same_and_keeps_an_inherited_overlay()
     {
         using var bridge = AgentBrowserBridge.TryStart();
@@ -133,7 +134,7 @@ public sealed class AgentBrowserDefaultsTests
 
         // Their own cmux socket in the settings' environment: left exactly as it is
         var own = new OmpRuntimeOptions { Command = "omp", Environment = new() { [AgentBrowserBridge.SocketVariable] = "/tmp/mine.sock" } };
-        Assert.Equal(own.ToLaunchSpec().Arguments, defaults.ForSession(own, new LaunchRequest()).Arguments);
+        Assert.Equal(own.ToLaunchSpec().SessionArguments, defaults.ForSession(own, new LaunchRequest()).SessionArguments);
         Assert.False(defaults.ForSession(own, new LaunchRequest()).Environment.ContainsKey(AgentBrowserDefaults.ConfigFilesVariable));
 
         // A flag they set themselves stays; a removed PI_CONFIG_FILES (null) means only ours
@@ -151,7 +152,7 @@ public sealed class AgentBrowserDefaultsTests
         var noFiles = new AgentBrowserDefaults(bridge, blocked, inherited: _ => null).ForSession(new OmpRuntimeOptions { Command = "omp" }, new LaunchRequest());
         Assert.Equal(bridge.Endpoint, noFiles.Environment[AgentBrowserBridge.SocketVariable]);
         Assert.False(noFiles.Environment.ContainsKey(AgentBrowserDefaults.ConfigFilesVariable));
-        Assert.DoesNotContain(AgentBrowserDefaults.ExtensionFlag, noFiles.Arguments);
+        Assert.DoesNotContain(AgentBrowserDefaults.ExtensionFlag, noFiles.SessionArguments);
     }
 
     [Fact]
@@ -176,6 +177,8 @@ public sealed class AgentBrowserDefaultsTests
         Assert.Contains("Never use `bash open`", note);
         Assert.Contains("`persist: true`", note);
         Assert.Contains("`tab.ariaSnapshot()`", note);
+        Assert.Contains("`tab.emulate({ device })`", note);
+        Assert.DoesNotContain("device emulation are not available", note);
         if (!OperatingSystem.IsWindows())
             Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(defaults.Directory));
     }
@@ -202,6 +205,10 @@ public sealed class AgentBrowserDefaultsTests
             Assert.Equal(defaults.OverlayPath, spec.Environment[AgentBrowserDefaults.ConfigFilesVariable]);
         }
         Assert.NotEqual(chat.Environment[TernHost.PaneVariable], tui.Environment[TernHost.PaneVariable]);
+        var peer = defaults.ForSession(options, new LaunchRequest(TestProcesses.TempDir("browser-peer")));
+        Assert.Equal(chat.Environment[TernHost.PaneVariable], peer.Environment[TernHost.PaneVariable]);
+        Assert.Equal(chat.Arguments, peer.Arguments);
+        Assert.Contains(AgentBrowserDefaults.ExtensionFlag, peer.SessionArguments);
         var yaml = File.ReadAllLines(defaults.OverlayPath).Where(l => !l.StartsWith('#')).ToArray();
         Assert.Equal(["browser:", "  enabled: true", "  cdpUrl: \"\"", "  cmux: true", "  tern: true", "  idleCloseSec: 0"], yaml);
         var note = defaults.PromptNote();

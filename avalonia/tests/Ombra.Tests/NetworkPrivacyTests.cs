@@ -16,16 +16,20 @@ using Ombra.Rpc;
 namespace Ombra.Tests;
 
 /// <summary>
-/// Settings › Advanced › Network privacy: every omp start turns off the providers the user has not added (a --config
-/// overlay after the runtime's own arguments), a failed check stops the start, a custom omp command is started and said
+/// Settings › Advanced › Network privacy: every session open turns off providers the user has not added (a session-scoped
+/// --config overlay), a failed check stops the open, a custom engine command is started and said
 /// to be ungated, and strict mode points every proxy variable at the app's filter, which lets through only the added
 /// providers, the user's addresses and a provider being signed in to.
 /// </summary>
 public sealed class NetworkPrivacyTests
 {
-    private static readonly string[] Prefix = ["--config=/rt/omp/bunfig.toml", "--no-env-file", "--no-install", "/rt/omp/node_modules/@oh-my-pi/pi-coding-agent/src/cli.ts"];
+    private static readonly string[] Prefix = ["--config=/rt/omp/bunfig.toml", "--no-env-file", "--no-install", "/rt/omp/engine/host.ts"];
 
-    private static readonly OmpRuntimeOptions Runtime = new() { Command = "/rt/bun/bun", PrefixArgs = Prefix };
+    private static readonly OmpRuntimeOptions Runtime = new()
+    {
+        Command = "/rt/bun/bun", PrefixArgs = Prefix,
+        ManagementPrefixArgs = ["--config=/rt/omp/bunfig.toml", "--no-env-file", "--no-install", "/rt/omp/engine/coding-agent/src/cli.ts"],
+    };
 
     private static ProviderGateResult Gate(params string[] added) => new(
         added,
@@ -46,8 +50,8 @@ public sealed class NetworkPrivacyTests
     {
         var options = Runtime with { Environment = new() { ["OMP_PROFILE"] = "work", ["ANTHROPIC_API_KEY"] = "k" } };
         var launch = options.ToLaunchSpec(new LaunchRequest("/projects/app"));
-        // An omp --config after cli.ts (the overlay of an earlier start) is omp's, not Bun's
-        var gated = ProviderGate.Apply(launch, "/settings/network-privacy/providers-x.yml", Prefix.Length);
+        // Logical overlays never leak into the process arguments used by the offline helper.
+        var gated = ProviderGate.Apply(launch, "/settings/network-privacy/providers-x.yml");
         foreach (var spec in new[] { launch, gated })
         {
             var helper = ProviderGate.HelperSpec(spec)!;
@@ -62,18 +66,17 @@ public sealed class NetworkPrivacyTests
     }
 
     [Fact]
-    public async Task Providers_not_added_are_turned_off_with_an_overlay_after_the_runtime_arguments()
+    public async Task Providers_not_added_are_turned_off_with_a_session_scoped_overlay()
     {
         var dir = TestProcesses.TempDir("privacy-gate");
         await using var privacy = Privacy(dir, Gate("anthropic"));
         var project = Path.Combine(dir, "project");
         var spec = await privacy.ApplyAsync(Runtime.ToLaunchSpec(new LaunchRequest(project)), Runtime);
 
-        // omp's options come after cli.ts: Bun would take a --config before it as its own bunfig
-        Assert.Equal(Prefix, spec.Arguments.Take(Prefix.Length));
-        var overlay = spec.Arguments[Prefix.Length];
+        Assert.Equal(Prefix, spec.Arguments);
+        var overlay = spec.SessionArguments[0];
         Assert.StartsWith("--config=", overlay);
-        Assert.Equal(["--mode", "rpc-ui"], spec.Arguments.Skip(Prefix.Length + 1).Take(2));
+        Assert.DoesNotContain("--mode", spec.SessionArguments);
         var listed = File.ReadAllLines(overlay["--config=".Length..]).Where(l => l.StartsWith("  - ")).Select(l => l[4..].Trim('"')).ToList();
         Assert.Equal(["alibaba-coding-plan", "kilo", "mine", "ollama", "openai-codex"], listed);
         Assert.Equal(["anthropic"], privacy.LastGate!.Added);
@@ -82,8 +85,10 @@ public sealed class NetworkPrivacyTests
         // The same project reuses its file; another project gets its own (its .omp/config.yml may differ)
         var again = await privacy.ApplyAsync(Runtime.ToLaunchSpec(new LaunchRequest(project)), Runtime);
         var other = await privacy.ApplyAsync(Runtime.ToLaunchSpec(new LaunchRequest(Path.Combine(dir, "other"))), Runtime);
-        Assert.Equal(overlay, again.Arguments[Prefix.Length]);
-        Assert.NotEqual(overlay, other.Arguments[Prefix.Length]);
+        Assert.Equal(overlay, again.SessionArguments[0]);
+        Assert.NotEqual(overlay, other.SessionArguments[0]);
+        Assert.Equal(spec.Arguments, other.Arguments);
+        Assert.Equal(spec.Environment, other.Environment);
     }
 
     [Fact]

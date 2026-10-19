@@ -34,16 +34,21 @@ public sealed partial class MainViewModel
         if (IsTerminalOpen && Terminals.Count == 0) NewShell();
     }
 
-    [RelayCommand]
-    private void NewShell()
+    [RelayCommand(CanExecute = nameof(CanMutateSession))]
+    private void NewShell() => NewShellIn(ProjectDirectory());
+
+    /// <summary>A shell in <paramref name="folder"/> (a path's menu: Open in terminal; null: the shell's own start).</summary>
+    internal void NewShellIn(string? folder)
     {
+        if (IsReadOnly) return;
         var (file, args) = DefaultShell();
-        Add(new TerminalViewModel(TerminalKind.Shell, ShellName(file), file, args, ProjectDirectory(), new Dictionary<string, string>()));
+        Add(new TerminalViewModel(TerminalKind.Shell, ShellName(file), file, args, folder, new Dictionary<string, string>()));
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanMutateSession))]
     private async Task OpenOmpTuiAsync()
     {
+        if (IsReadOnly) return;
         if (OmpTuiLaunch is not { } launch) return;
         Ombra.Rpc.OmpLaunchSpec spec;
         try { spec = await launch(ProjectDirectory(), Lifetime); }
@@ -104,7 +109,7 @@ public sealed partial class MainViewModel
         IsTerminalOpen = true;
     }
 
-    private string? ProjectDirectory() => _open.Last?.Cwd is { } cwd && Directory.Exists(cwd) ? cwd : null;
+    private string? ProjectDirectory() => !IsReadOnly && _open.Last?.Cwd is { } cwd && Directory.Exists(cwd) ? cwd : null;
 
     /// <summary>
     /// The user's shell: $SHELL (macOS, Linux), else %ComSpec% (Windows), else sh. $SHELL counts only when it names an

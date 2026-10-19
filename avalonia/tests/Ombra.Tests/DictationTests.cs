@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.Services.Speech;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore;
@@ -148,7 +149,7 @@ public sealed class DictationTests
     public async Task Record_then_stop_inserts_the_text_and_a_missing_model_asks_first()
     {
         var installed = false;
-        var mic = new FakeMic(new float[16_000]);
+        var mic = new FakeMic([.. Enumerable.Range(0, 16_000).Select(i => 0.3f * MathF.Sin(i * 0.05f))]);
         var transcriber = new FakeTranscriber();
         var vm = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs())
         {
@@ -189,8 +190,9 @@ public sealed class DictationTests
     [Fact]
     public void The_real_microphone_without_a_device_fails_cleanly()
     {
-        // CI runners and this container have no audio input: a clear exception, never a crash. Where PortAudio itself
-        // cannot load (Linux without libjack), the recorder fallback tests cover dictation instead.
+        // Explicit opt-in only: a development machine may have a real microphone with permission already granted.
+        if (Environment.GetEnvironmentVariable("OMBRA_AUDIO_CAPTURE") != "1")
+            Assert.Skip("Set OMBRA_AUDIO_CAPTURE=1 only with consent to capture microphone audio");
         using var mic = new Microphone();
         try
         {
@@ -238,7 +240,7 @@ public sealed class DictationTests
         var vm = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs())
         {
             SpeechModelInstalled = _ => true,
-            MicrophoneFactory = () => new FakeMic(new float[16_000]),
+            MicrophoneFactory = () => new FakeMic([.. Enumerable.Range(0, 16_000).Select(i => 0.3f * MathF.Sin(i * 0.05f))]),
             TranscriberFactory = _ => transcriber,
         };
         await vm.DictateCommand.ExecuteAsync(null);
@@ -263,16 +265,16 @@ public sealed class DictationTests
             + "libjack.so.0: cannot open shared object file: No such file or directory\n"
             + "/app/libportaudio.so: cannot open shared object file: No such file or directory\n");
         var text = MainViewModel.MicrophoneError(loader);
-        Assert.StartsWith("the audio library needs libjack.so.0", text);
+        Assert.StartsWith(Loc.F("the audio library needs {0}, which is not installed on this system (for example libjack0 / jack-audio-connection-kit).", "libjack.so.0"), text);
         Assert.DoesNotContain("/app", text);
-        Assert.Equal("the audio library could not be loaded on this system.", MainViewModel.MicrophoneError(new DllNotFoundException("portaudio.dll not found")));
+        Assert.Equal(Loc.T("the audio library could not be loaded on this system."), MainViewModel.MicrophoneError(new DllNotFoundException("portaudio.dll not found")));
         Assert.Equal("No microphone found.", MainViewModel.MicrophoneError(new InvalidOperationException("No microphone found.")));
     }
 
     private static CommandMicrophone FakeRecorder(string scenario)
     {
         var spec = TestProcesses.Fake(scenario);
-        return new CommandMicrophone(spec.FileName, spec.Arguments);
+        return new CommandMicrophone(spec.FileName, [.. spec.Arguments, .. spec.SessionArguments]);
     }
 
     [Fact]
@@ -314,11 +316,11 @@ public sealed class DictationTests
     {
         using var mic = new AutoMicrophone(() => new ThrowingMic(new DllNotFoundException("libjack.so.0: cannot open shared object file")), () => []);
         var e = Assert.Throws<DllNotFoundException>(mic.Start);
-        Assert.StartsWith("the audio library needs libjack.so.0", MainViewModel.MicrophoneError(e));
+        Assert.StartsWith(Loc.F("the audio library needs {0}, which is not installed on this system (for example libjack0 / jack-audio-connection-kit).", "libjack.so.0"), MainViewModel.MicrophoneError(e));
         // Recorders that all fail: each one's reason is shown.
         using var failing = new AutoMicrophone(() => new ThrowingMic(new DllNotFoundException("x")), () => [FakeRecorder("recorder-fails")]);
         var all = Assert.Throws<InvalidOperationException>(failing.Start);
-        Assert.StartsWith("No microphone could be opened:", all.Message);
+        Assert.StartsWith(Loc.T("No microphone could be opened: "), all.Message);
         Assert.Contains("Connection refused", MainViewModel.MicrophoneError(all));
         // A microphone that is simply missing is not a library problem: no fallback is tried.
         var tried = false;

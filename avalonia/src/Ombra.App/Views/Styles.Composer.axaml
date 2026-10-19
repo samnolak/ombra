@@ -88,6 +88,14 @@
     <Setter Property="Margin" Value="4,0,0,0" />
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="RenderTransform" Value="scale(1)" />
+    <Setter Property="ctl:Motion.Kind" Value="Send" />
+  </Style>
+  <Style Selector="Button.send:pressed">
+    <Setter Property="RenderTransform" Value="scale(0.94)" />
+  </Style>
+  <Style Selector="Window.reduced-motion Button.send:pressed">
+    <Setter Property="RenderTransform" Value="scale(1)" />
   </Style>
   <!-- Send is blue (Codex), not the inverse primary pill the "accent" class gives other buttons -->
   <Style Selector="Button.send.accent">

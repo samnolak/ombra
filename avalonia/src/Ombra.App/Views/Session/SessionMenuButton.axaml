@@ -83,6 +83,14 @@
                 <TextBlock Grid.Column="2" Classes="menu-hint" Text="/branch" VerticalAlignment="Center" />
               </Grid>
             </Button>
+            <Button x:Name="ForkItem" Classes="menu-item" Command="{Binding ForkSessionCommand}" AutomationProperties.Name="{loc:T 'Fork this session'}"
+                    ToolTip.Tip="{loc:T 'Go on in a copy of this session; the original stays as it is. Fork from here on a reply forks at that reply.'}">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <ctl:Icon Data="{StaticResource IconBranch}" Size="16" Margin="0,0,10,0" />
+                <TextBlock Grid.Column="1" Text="{loc:T 'Fork'}" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" Classes="menu-hint" Text="/fork" VerticalAlignment="Center" />
+              </Grid>
+            </Button>
             <Border Classes="menu-separator" />
             <Button x:Name="ExportItem" Classes="menu-item" Command="{Binding ExportHtmlCommand}" AutomationProperties.Name="{loc:T 'Export as HTML'}">
               <Grid ColumnDefinitions="Auto,*,Auto">

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    .NET wrapper over the ombra-core C ABI (server/native/ombra-core, src/ffi.rs). Shared by the
+    server ("public verification" mode, OmbraPublic) and the Ombra client (OmbraState).
+    Native library: libombra_core.{dylib,so} / ombra_core.dll, built by
+      cargo build (release profile) in server/native/ombra-core
+    and copied next to the assembly from $(OmbraNativeDir). The resolver in NativeLoader.cs also
+    honours OMBRA_CORE_NATIVE_PATH / AppContext "Ombra.Core.NativePath".
+  -->
+  <PropertyGroup>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+    <OmbraNativeDir Condition="'$(OmbraNativeDir)' == ''">$(MSBuildThisFileDirectory)../../native/ombra-core/target/release/</OmbraNativeDir>
+    <OmbraNativeFile Condition="'$(OmbraNativeFile)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">libombra_core.dylib</OmbraNativeFile>
+    <OmbraNativeFile Condition="'$(OmbraNativeFile)' == '' and $([MSBuild]::IsOSPlatform('Linux'))">libombra_core.so</OmbraNativeFile>
+    <OmbraNativeFile Condition="'$(OmbraNativeFile)' == '' and $([MSBuild]::IsOSPlatform('Windows'))">ombra_core.dll</OmbraNativeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="$(OmbraNativeDir)$(OmbraNativeFile)" Condition="Exists('$(OmbraNativeDir)$(OmbraNativeFile)')"
+          Link="$(OmbraNativeFile)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+</Project>

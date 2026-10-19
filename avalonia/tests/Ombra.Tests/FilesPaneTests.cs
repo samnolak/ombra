@@ -9,6 +9,7 @@ using Ombra.App;
 using Ombra.App.Controls;
 using Ombra.App.Services;
 using Ombra.App.ViewModels;
+using Ombra.App.Localization;
 using Ombra.ClientCore;
 
 namespace Ombra.Tests;
@@ -128,6 +129,50 @@ public sealed class FilesPaneTests
         if (!FileTestRepo.HasGit()) Assert.Skip("git is not installed");
     }
 
+
+    [Fact]
+    public async Task Mac_search_index_does_not_descend_into_home_or_ancestor_roots()
+    {
+        var home = TestProcesses.TempDir("index-home");
+        File.WriteAllText(Path.Combine(home, "top.txt"), "top");
+        foreach (var name in new[] { "nested", "Library", "Containers", "Trips.photoslibrary" })
+        {
+            Directory.CreateDirectory(Path.Combine(home, name));
+            File.WriteAllText(Path.Combine(home, name, "private.txt"), "private");
+        }
+
+        var ownHome = await ProjectFiles.IndexAsync(home, useGit: true, CancellationToken.None, home, macOS: true);
+        Assert.True(ownHome.Truncated);
+
+        var parent = TestProcesses.TempDir("index-home-parent");
+        var nestedHome = Path.Combine(parent, "Users", "alice");
+        Directory.CreateDirectory(nestedHome);
+        File.WriteAllText(Path.Combine(parent, "top.txt"), "top");
+        File.WriteAllText(Path.Combine(nestedHome, "private.txt"), "private");
+        var ancestor = await ProjectFiles.IndexAsync(parent, useGit: true, CancellationToken.None, nestedHome, macOS: true);
+        Assert.True(ancestor.Truncated);
+
+        var otherRoot = await ProjectFiles.IndexAsync(parent, useGit: false, CancellationToken.None, nestedHome, macOS: false);
+        Assert.Contains("Users/alice/private.txt", otherRoot.Paths);
+    }
+
+    [Fact]
+    public async Task A_project_folder_its_enclosing_repository_ignores_is_walked()
+    {
+        NeedGit();
+        var repo = TestProcesses.TempDir("index-ignored");
+        FileTestRepo.Git(repo, "init", "-q");
+        File.WriteAllText(Path.Combine(repo, ".gitignore"), "scratch/\n");
+        var project = Path.Combine(repo, "scratch", "project");
+        Directory.CreateDirectory(Path.Combine(project, "src"));
+        File.WriteAllText(Path.Combine(project, "notes-3.md"), "n");
+        File.WriteAllText(Path.Combine(project, "src", "app.ts"), "a");
+
+        // git ls-files answers with nothing (exit 0) inside an ignored folder: the folder's own files are listed anyway
+        var index = await ProjectFiles.IndexAsync(project, useGit: true, CancellationToken.None, "/nonexistent-home", macOS: false);
+        Assert.Contains("notes-3.md", index.Paths);
+        Assert.Contains("src/app.ts", index.Paths);
+    }
     [AvaloniaFact]
     public async Task The_tree_lists_folders_first_in_natural_order_without_git_internals()
     {
@@ -205,7 +250,7 @@ public sealed class FilesPaneTests
     [Fact]
     public void Go_to_file_ranks_the_name_first_and_matches_letters_in_order()
     {
-        string[] paths = ["src/app.py", "src/application/main.py", "tests/test_app.py", "docs/apple.md", "lib/zap.py", "src/util/pa.py"];
+        var paths = new ProjectFiles.SearchIndex(["src/app.py", "src/application/main.py", "tests/test_app.py", "docs/apple.md", "lib/zap.py", "src/util/pa.py"]);
         var hits = ProjectFiles.Search(paths, "app.py", 10, CancellationToken.None).Select(h => h.RelativePath).ToList();
         Assert.Equal("src/app.py", hits[0]); // the name itself
         Assert.Equal("tests/test_app.py", hits[1]); // the name contains it
@@ -216,6 +261,40 @@ public sealed class FilesPaneTests
         Assert.Equal(["src/util/pa.py"], ProjectFiles.Search(paths, "util/pa", 10, CancellationToken.None).Select(h => h.RelativePath));
         Assert.Equal(2, ProjectFiles.Search(paths, "p", 2, CancellationToken.None).Count);
         Assert.Throws<OperationCanceledException>(() => ProjectFiles.Search(paths, "a", 10, new CancellationToken(canceled: true)));
+    }
+
+    [Theory]
+    [InlineData("caf\u00e9", "cafe\u0301")]
+    [InlineData("cafe\u0301", "caf\u00e9")]
+    public void Go_to_file_matches_canonical_equivalents_without_changing_the_path(string query, string spelling)
+    {
+        var original = $"docs/{spelling}/{spelling}.txt";
+        var index = new ProjectFiles.SearchIndex([original]);
+        foreach (var q in new[] { query + ".txt", query + "/" + query, query + " " + query, "cf\u00e9" })
+        {
+            var hit = Assert.Single(ProjectFiles.Search(index, q, 10, CancellationToken.None));
+            Assert.Same(original, hit.RelativePath);
+        }
+        Assert.Equal(0, Assert.Single(ProjectFiles.Search(index, query + ".txt", 10, CancellationToken.None)).Score);
+    }
+
+    [Fact]
+    public void Go_to_file_keeps_ascii_scores_and_tie_order()
+    {
+        var index = new ProjectFiles.SearchIndex(["z/app", "app/file", "x/myapp", "x/a_p_p", "b/app2", "a/app", "app"]);
+        Assert.Equal(
+            [new FileHit("app", 0), new FileHit("a/app", 0), new FileHit("z/app", 0),
+                new FileHit("b/app2", 1), new FileHit("x/myapp", 2), new FileHit("app/file", 3), new FileHit("x/a_p_p", 4)],
+            ProjectFiles.Search(index, "app", 10, CancellationToken.None));
+    }
+
+    [Fact]
+    public void Go_to_file_keeps_malformed_utf16_searchable()
+    {
+        const string original = "src/bad\uD800.txt";
+        var index = new ProjectFiles.SearchIndex([original]);
+        Assert.Equal(original, Assert.Single(ProjectFiles.Search(index, "bad\uD800", 10, CancellationToken.None)).RelativePath);
+        Assert.Equal(original, Assert.Single(ProjectFiles.Search(index, "bad", 10, CancellationToken.None)).RelativePath);
     }
 
     [AvaloniaFact]
@@ -232,7 +311,7 @@ public sealed class FilesPaneTests
         f.Filter = "index";
         await FileTestRepo.Until(() => f.HasResultsMessage, "no match");
         Assert.Empty(f.Results); // node_modules is ignored
-        Assert.Equal("No files match “index”.", f.ResultsMessage);
+        Assert.Equal(Loc.F("No files match “{0}”.", "index"), f.ResultsMessage);
         f.Filter = "nfpy";
         await FileTestRepo.Until(() => f.Results.Any(r => r.Name == "new_file.py"), "letters in order");
         Assert.Equal(GitMark.Untracked, f.Results.Single(r => r.Name == "new_file.py").Git);
@@ -320,7 +399,7 @@ public sealed class FilesPaneTests
         vm.Rows.Add(RowViewModel.Create(new ToolItem(5, "t5", "bash", "{}", ToolStatus.Succeeded, "", "$ ls")));
         f.OnTranscriptChanged();
         Assert.Equal(2, f.SessionCount);
-        Assert.Equal("This session 2", f.SessionLabel);
+        Assert.Equal(Loc.F("This session {0}", 2), f.SessionLabel);
         Assert.Contains(Path.Combine(root, "src", "app.py"), f.SessionChangedFiles);
         f.Mode = FilesMode.Session;
         await FileTestRepo.Until(() => f.Results.Count == 2, "this session's list");
@@ -331,6 +410,35 @@ public sealed class FilesPaneTests
         await f.ToggleAsync(FileTestRepo.Node(f, "src"));
         Assert.True(FileTestRepo.Node(f, "src/app.py").IsSessionChanged);
         Assert.False(FileTestRepo.Node(f, "src/util.py").IsSessionChanged);
+    }
+
+    [AvaloniaFact]
+    public async Task Changed_and_session_filters_match_canonical_equivalents_and_preserve_paths()
+    {
+        NeedGit();
+        var root = FileTestRepo.Create();
+        FileTestRepo.Git(root, "config", "core.precomposeunicode", "false");
+        const string decomposed = "cafe\u0301.txt";
+        const string composed = "r\u00e9sum\u00e9.txt";
+        File.WriteAllText(Path.Combine(root, decomposed), "one");
+        File.WriteAllText(Path.Combine(root, composed), "two");
+        var vm = FileTestRepo.Vm(root);
+        var f = await FileTestRepo.Shown(vm, git: true);
+        vm.Rows.Add(RowViewModel.Create(new ToolItem(1, "nfd", "write", "{}", ToolStatus.Succeeded, "ok", decomposed, "+  1|one\n")));
+        vm.Rows.Add(RowViewModel.Create(new ToolItem(2, "nfc", "write", "{}", ToolStatus.Succeeded, "ok", composed, "+  1|two\n")));
+        f.OnTranscriptChanged();
+        foreach (var mode in new[] { FilesMode.Changed, FilesMode.Session })
+        {
+            f.Mode = mode;
+            foreach (var (query, original) in new[] { ("caf\u00e9", decomposed), ("re\u0301sume\u0301", composed) })
+            {
+                f.Filter = query;
+                await FileTestRepo.Until(() => !f.IsSearching && f.Results.Count == 1 && f.Results[0].RelativePath == original,
+                    $"{mode} canonical filter {query}");
+                Assert.Equal(original, f.Results[0].Name);
+                Assert.Equal(Path.Combine(root, original), f.Results[0].FullPath);
+            }
+        }
     }
 
     [Fact]
@@ -365,7 +473,7 @@ public sealed class FilesPaneTests
         Assert.Equal(ViewerState.Text, code.State);
         Assert.True(code.ShowCode);
         Assert.StartsWith("def step_1(x):", code.Text);
-        Assert.Equal("src · 40 lines · " + ProjectFiles.Size(new FileInfo(code.FullPath).Length), code.Subtitle);
+        Assert.Equal("src · " + Loc.F("{0:N0} lines", 40) + " · " + code.Document!.EncodingName, code.Subtitle);
         var md = await Open("README.md");
         Assert.True(md.ShowMarkdown && md.CanToggleSource && !md.ShowCode);
         md.ToggleSourceCommand.Execute(null);
@@ -376,13 +484,13 @@ public sealed class FilesPaneTests
         Assert.StartsWith("24 × 16 · ", img.Info);
         var bin = await Open("data.bin");
         Assert.Equal(ViewerState.Binary, bin.State);
-        Assert.Equal("Binary file", bin.StateTitle);
+        Assert.Equal(Loc.T("Binary file"), bin.StateTitle);
         var big = await Open("big.txt");
         Assert.Equal(ViewerState.TooLarge, big.State);
         Assert.True(big.CanShowHead);
         await big.ShowHeadCommand.ExecuteAsync(null);
         Assert.Equal(ViewerState.Text, big.State);
-        Assert.StartsWith("Showing the first 256 KB of 1.1 MB", big.Notice);
+        Assert.StartsWith(Loc.F("Showing the first {0} of {1}", "256 KB", "1.1 MB"), big.Notice);
         var gone = await Open("src/nothing.py");
         Assert.Equal(ViewerState.Missing, gone.State);
         Assert.True(gone.ShowState);
@@ -397,14 +505,29 @@ public sealed class FilesPaneTests
         var (text, lines, notes) = FileViewerViewModel.Decode(many);
         Assert.Equal(FileViewerViewModel.MaxLines, lines);
         Assert.EndsWith("\n10000", text);
-        Assert.Contains(notes, n => n.StartsWith("Showing the first 10,000 of 10,005 lines", StringComparison.Ordinal));
+        Assert.Contains(notes, n => n.StartsWith(Loc.F("Showing the first {0:N0} of {1:N0} lines", 10_000, 10_005), StringComparison.Ordinal));
         var (wide, _, wideNotes) = FileViewerViewModel.Decode(Encoding.UTF8.GetBytes(new string('a', 5000) + "\n\tb\r\n"));
         Assert.Equal(new string('a', FileViewerViewModel.MaxLineChars) + " …\n    b", wide);
-        Assert.Contains(wideNotes, n => n.StartsWith("Lines longer than", StringComparison.Ordinal));
+        Assert.Contains(wideNotes, n => n.StartsWith(Loc.F("Lines longer than {0:N0} characters are cut", FileViewerViewModel.MaxLineChars), StringComparison.Ordinal));
         Assert.True(FileViewerViewModel.IsBinary([0x50, 0x4B, 0x03, 0x04, 0x00, 0x00]));
         Assert.False(FileViewerViewModel.IsBinary(Encoding.UTF8.GetBytes("plain text, ünïcode\n")));
         Assert.False(FileViewerViewModel.IsBinary([0xFF, 0xFE, 0x41, 0x00])); // UTF-16 with its mark
         Assert.Equal("é", FileViewerViewModel.Decode([0xEF, 0xBB, 0xBF, 0xC3, 0xA9]).Text); // the UTF-8 mark goes
+    }
+
+    [Theory]
+    [InlineData("😀")]
+    [InlineData("e\u0301")]
+    [InlineData("👩‍💻")]
+    public void File_preview_line_limit_does_not_split_graphemes(string glyph)
+    {
+        for (var cut = 1; cut < glyph.Length; cut++)
+        {
+            var head = new string('a', FileViewerViewModel.MaxLineChars - cut);
+            var (text, _, notes) = FileViewerViewModel.Decode(Encoding.UTF8.GetBytes(head + glyph + " rest\nnext"));
+            Assert.Equal(head + " …\nnext", text);
+            Assert.NotEmpty(notes);
+        }
     }
 
     [AvaloniaFact]
@@ -458,7 +581,7 @@ public sealed class FilesPaneTests
         var vm = FileTestRepo.Vm(root);
         var f = await FileTestRepo.Shown(vm, git: false);
         var copied = new List<string>();
-        vm.CopyTextRequested += copied.Add;
+        vm.CopyTextRequested += text => { copied.Add(text); return Task.FromResult(true); };
         var started = new List<System.Diagnostics.ProcessStartInfo>();
         var dbusWorks = false;
         f.Launch = (psi, wait) =>
@@ -493,7 +616,8 @@ public sealed class FilesPaneTests
         // A program that cannot start is said in the pane
         f.Launch = (_, _) => Task.FromResult(false);
         await f.OpenInDefaultAppCommand.ExecuteAsync(f.Viewer);
-        Assert.StartsWith("Could not open app.py", f.Notice);
+        var notice = Loc.F("Could not {0}: {1} did not start.", Loc.F("open {0}", "app.py"), "\0");
+        Assert.StartsWith(notice[..notice.IndexOf('\0')], f.Notice);
         f.DismissNoticeCommand.Execute(null);
         Assert.False(f.HasNotice);
     }
@@ -514,7 +638,7 @@ public sealed class FilesPaneTests
         }
         var found = FileOpeners.FindEditors(dir + Path.PathSeparator + other);
         Assert.Equal(OperatingSystem.IsWindows() ? ["VS Code", "Zed"] : ["VS Code"], found.Select(e => e.Name));
-        Assert.Equal("Open in VS Code", found[0].Label);
+        Assert.Equal(Loc.F("Open in {0}", "VS Code"), found[0].Label);
         Assert.Empty(FileOpeners.FindEditors(TestProcesses.TempDir("editors-none")));
         var open = found[0].Open("/p/a.cs", 3);
         Assert.Equal(["-g", "/p/a.cs:3"], open.ArgumentList);
@@ -528,7 +652,7 @@ public sealed class FilesPaneTests
         var vm = FileTestRepo.Vm(root);
         var f = vm.Files;
         var copied = new List<string>();
-        vm.CopyTextRequested += copied.Add;
+        vm.CopyTextRequested += text => { copied.Add(text); return Task.FromResult(true); };
         var started = new List<System.Diagnostics.ProcessStartInfo>();
         f.Launch = (psi, _) => { started.Add(psi); return Task.FromResult(true); };
         f.BrowseFilesCommand.Execute(null);
@@ -562,7 +686,7 @@ public sealed class FilesPaneTests
         // A deleted file is its header (with its badge) and "Show N deleted lines" until asked
         var gone = (Border)DiffView.Build(new FileChange("old.py", FileChangeKind.Deleted, "-1|a\n-2|b\n"), unfolded: false, toggleFold: () => { });
         Assert.DoesNotContain(gone.GetLogicalDescendants().OfType<Grid>(), g => g.Classes.Contains("diff-row"));
-        Assert.Contains(gone.GetLogicalDescendants().OfType<Button>(), b => b.Content as string == "Show 2 deleted lines");
-        Assert.Contains(gone.GetLogicalDescendants().OfType<TextBlock>(), t => t.Text == "Deleted");
+        Assert.Contains(gone.GetLogicalDescendants().OfType<Button>(), b => b.Content as string == Loc.Plural(2, "Show {0} deleted line", "Show {0} deleted lines"));
+        Assert.Contains(gone.GetLogicalDescendants().OfType<TextBlock>(), t => t.Text == Loc.T("Deleted"));
     }
 }

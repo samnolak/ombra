@@ -1,5 +1,7 @@
 using System.Text.Json.Nodes;
+using Avalonia.Headless.XUnit;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore;
 using Ombra.Rpc;
@@ -222,13 +224,32 @@ public class ConnectorsParsingTests
     public void Plugin_list_json_reads_npm_and_marketplace_plugins()
     {
         var list = OmpPlugins.ParseList(RealPluginList)!;
-        Assert.Equal(new InstalledPluginInfo("omp-hello", "omp-hello", null, "1.2.0", "Greets you from a plugin", true, null, false), list[0]);
-        Assert.Equal(new InstalledPluginInfo("hello-skill@local-mkt", "hello-skill", "local-mkt", "0.1.0", null, false, "user", false), list[1]);
+        Assert.Equal(new InstalledPluginInfo("omp-hello", "omp-hello", null, "1.2.0", "Greets you from a plugin", true, null, false,
+            "/home/u/.omp/profiles/harness/plugins/node_modules/omp-hello", new PluginManifestParts(false, false, 0, 1)), list[0]);
+        Assert.Equal(new InstalledPluginInfo("hello-skill@local-mkt", "hello-skill", "local-mkt", "0.1.0", null, false, "user", false,
+            "/home/u/.omp/profiles/harness/plugins/cache/plugins/local-mkt___hello-skill___0.1.0"), list[1]);
         Assert.Empty(OmpPlugins.ParseList("{\n  \"npm\": [],\n  \"marketplace\": []\n}")!);
         Assert.Null(OmpPlugins.ParseList("error: something"));
         var shadowed = OmpPlugins.ParseList("""{"npm":[],"marketplace":[{"id":"a@m","scope":"user","entries":[{"version":"1"}],"shadowedBy":"project"}]}""")!;
         Assert.True(shadowed[0].Shadowed);
         Assert.True(shadowed[0].Enabled); // no "enabled" means enabled
+    }
+
+    [Fact]
+    public void Plugin_settings_json_reads_schema_values_and_secrets()
+    {
+        var list = OmpPlugins.ParsePluginSettings("""
+            { "settings": { "apiKey": "sk-1", "retries": 3 },
+              "schema": { "apiKey": { "type": "string", "description": "Key", "secret": true },
+                          "retries": { "type": "number", "default": 1 },
+                          "mode": { "type": "enum", "values": ["fast", "slow"], "default": "fast" } } }
+            """)!;
+        Assert.Equal(["apiKey", "retries", "mode"], list.Select(s => s.Key));
+        Assert.Equal(("string", true, "sk-1", "Key"), (list[0].Type, list[0].Secret, list[0].Value, list[0].Description));
+        Assert.Equal("3", list[1].Value);
+        Assert.Equal("fast", list[2].Value);
+        Assert.Equal(["fast", "slow"], list[2].Choices);
+        Assert.Null(OmpPlugins.ParsePluginSettings("No settings"));
     }
 
     [Fact]
@@ -246,6 +267,37 @@ public class ConnectorsParsingTests
         var rpc = OmpPlugins.ParseDiscover("Available plugins:\n  - hello-skill@0.1.0\n      Adds a skill that says hello\n  - bare")!;
         Assert.Equal([new MarketplacePluginInfo("hello-skill", "0.1.0", "Adds a skill that says hello"), new MarketplacePluginInfo("bare", null, null)], rpc);
         Assert.Empty(OmpPlugins.ParseDiscover("No plugins found in local-mkt")!);
+    }
+
+    [Fact]
+    public void Catalog_is_grouped_by_the_marketplaces_categories()
+    {
+        // A marketplace.json as Claude Code marketplaces write it: category per plugin, some marked featured
+        var meta = OmpPlugins.ParseCatalogMeta("""
+            { "name": "mkt", "plugins": [
+              { "name": "lint-kit", "category": "development", "source": "./lint-kit" },
+              { "name": "pr-review", "category": "developer-tools", "featured": true },
+              { "name": "notes", "category": "productivity" },
+              { "name": "hello-skill", "source": "./hello" },
+              { "name": "", "category": "x" } ] }
+            """);
+        Assert.Equal(new MarketplacePluginMeta("development", false), meta["lint-kit"]);
+        Assert.Equal(new MarketplacePluginMeta("developer-tools", true), meta["pr-review"]);
+        Assert.Equal(new MarketplacePluginMeta("", false), meta["hello-skill"]);
+        Assert.Equal(4, meta.Count);
+        Assert.Empty(OmpPlugins.ParseCatalogMeta("not json"));
+
+        var market = new MarketplaceRowViewModel(null!, new MarketplaceInfo("mkt", "/m"));
+        var rows = new[] { "notes", "lint-kit", "pr-review", "hello-skill", "zeta" }.Select(n =>
+            new MarketplacePluginRowViewModel(null!, market, new MarketplacePluginInfo(n, null, null))
+            {
+                Category = meta.GetValueOrDefault(n).Category ?? "", IsFeatured = meta.GetValueOrDefault(n).Featured,
+            });
+        var sections = CatalogSectionViewModel.Group(rows);
+        Assert.Equal([Loc.T("Popular"), "Development", "Productivity", Loc.T("Other")], sections.Select(s => s.Title));
+        Assert.Equal(["pr-review"], sections[0].Plugins.Select(p => p.Name));
+        Assert.Equal(["hello-skill", "zeta"], sections[3].Plugins.Select(p => p.Name));
+        Assert.Equal("Developer tools", CatalogSectionViewModel.Heading("developer-tools"));
     }
 
     [Fact]
@@ -273,7 +325,9 @@ public class ConnectorsParsingTests
     }
 }
 
-/// <summary>The Connectors page against the fake omp: the commands it sends (logged) and what it shows.</summary>
+/// <summary>The Connectors page against the fake omp: the commands it sends (logged) and what it shows. On the UI thread
+/// (<see cref="AvaloniaFactAttribute"/>) like every test that makes a <see cref="MainViewModel"/>: made on an xunit worker it
+/// would take that worker for Avalonia's UI thread while no UI test runs, and fail the UI test starting then.</summary>
 public class ConnectorsFlowTests
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
@@ -284,9 +338,10 @@ public class ConnectorsFlowTests
         public string[] Cli => File.Exists(CliLog) ? File.ReadAllLines(CliLog) : [];
     }
 
-    /// <summary>A fake omp answering /mcp and friends, a fake CLI, a user mcp.json and a project .omp/mcp.json.</summary>
+    /// <summary>A fake omp answering /mcp and friends, a fake CLI, a user mcp.json and a project .omp/mcp.json;
+    /// <paramref name="mcp"/>: omp's own server states (FakeMcp.cs, <c>{"servers":[…]}</c>).</summary>
     internal static async Task<Setup> StartAsync(Dictionary<string, string>? commands = null, Dictionary<string, object>? cli = null, bool start = true,
-        bool projectFiles = true)
+        bool projectFiles = true, string? mcp = null)
     {
         var dir = TestProcesses.TempDir("connectors");
         var project = Path.Combine(dir, "project");
@@ -336,6 +391,8 @@ public class ConnectorsFlowTests
         var cliFile = Path.Combine(dir, "cli.json");
         File.WriteAllText(commandsFile, System.Text.Json.JsonSerializer.Serialize(answers));
         File.WriteAllText(cliFile, System.Text.Json.JsonSerializer.Serialize(cliAnswers));
+        var mcpFile = Path.Combine(dir, "mcp-servers.json");
+        if (mcp is not null) File.WriteAllText(mcpFile, mcp);
         var log = Path.Combine(dir, "sent.log");
         var cliLog = Path.Combine(dir, "cli.log");
         var sessions = Path.Combine(dir, "sessions");
@@ -345,7 +402,7 @@ public class ConnectorsFlowTests
             return spec with
             {
                 WorkingDirectory = req.WorkingDirectory,
-                Environment = new Dictionary<string, string?>(spec.Environment) { ["FAKE_SESSION_DIR"] = sessions },
+                Environment = new Dictionary<string, string?>(spec.Environment) { ["FAKE_SESSION_DIR"] = sessions, ["FAKE_OMP_MCP"] = mcp is null ? null : mcpFile },
             };
         }, new LaunchRequest(project));
         var vm = new MainViewModel(s, new AppArgs()) { OmpCliLaunch = TestProcesses.FakeCli(cliFile, cliLog) };
@@ -363,7 +420,7 @@ public class ConnectorsFlowTests
         }
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task The_page_lists_omps_servers_with_details_and_what_this_session_has()
     {
         var t = await StartAsync();
@@ -376,20 +433,20 @@ public class ConnectorsFlowTests
         Assert.False(c.ShowEmpty);
         Assert.Equal(["echo", "broken", "web", "docs", "shared"], c.Servers.Select(s => s.Name));
         var echo = c.Servers[0];
-        Assert.Equal(("All projects", "stdio"), (echo.ScopeLabel, echo.TransportLabel));
+        Assert.Equal((Loc.T("Personal"), "stdio"), (echo.ScopeLabel, echo.TransportLabel));
         Assert.Equal("/opt/bun/bin/bun echo.js", echo.Detail);
-        Assert.Equal("Environment: ECHO_KEY", echo.Extras); // names only, never values
+        Assert.Equal(Loc.T("Environment: ") + "ECHO_KEY", echo.Extras); // names only, never values
         Assert.Equal(ConnectorState.Connected, echo.State);
-        Assert.Equal("Connected · 2 tools", echo.StateText);
+        Assert.Equal(Loc.Plural(2, "Connected · {0} tool", "Connected · {0} tools"), echo.StateText);
         var broken = c.Servers[1];
-        Assert.Equal(("This project", "/nonexistent/cmd --flag"), (broken.ScopeLabel, broken.Detail));
+        Assert.Equal((Loc.T("Project"), "/nonexistent/cmd --flag"), (broken.ScopeLabel, broken.Detail));
         Assert.Equal(ConnectorState.NotConnected, broken.State);
         var web = c.Servers[2];
         Assert.True(web.IsRemote);
-        Assert.Equal("Headers: Authorization", web.Extras);
+        Assert.Equal(Loc.T("Headers: ") + "Authorization", web.Extras);
         Assert.Equal("SSE", web.TransportLabel);
         Assert.Equal("mcp__claude_thing_run", c.OtherTools);
-        Assert.Equal(["/mcp list", "/tools"], t.Sent);
+        Assert.Equal(["/mcp list", "/tools", "get_mcp_servers"], t.Sent);
 
         // The project folder's own mcp.json / .mcp.json: listed after omp's, a name omp's files use is omp's.
         var docs = c.Servers.Single(s => s.Name == "docs");
@@ -407,7 +464,7 @@ public class ConnectorsFlowTests
         Assert.True(c.ProjectServers);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task The_switch_sends_mcp_disable_and_asks_for_a_restart()
     {
         var t = await StartAsync();
@@ -421,9 +478,13 @@ public class ConnectorsFlowTests
         Assert.Equal("/mcp disable echo", t.Sent.Last());
         Assert.False(echo.IsEnabled);
         Assert.Equal(ConnectorState.Off, echo.State);
-        Assert.Equal("Turned off “echo”.", c.Feedback.Notice);
+        Assert.Equal(Loc.F("Turned off “{0}”.", "echo"), c.Feedback.Notice);
         Assert.True(c.Feedback.ShowRestart);
-        Assert.Contains("Restart it", c.Feedback.RestartText);
+        Assert.Contains(c.Feedback.RestartText, new[]
+        {
+            Loc.T("omp reads MCP servers when it starts. Restart it once the reply finishes."),
+            Loc.T("omp reads MCP servers when it starts. Restart it to apply the change."),
+        });
 
         // omp refuses: the switch goes back and omp's words are shown
         var refused = await StartAsync(new() { ["/mcp enable"] = "Server \"nope\" not found in user or project config." });
@@ -438,7 +499,7 @@ public class ConnectorsFlowTests
         Assert.False(refused.Vm.Connectors.NeedsRestart);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task Remove_waits_for_the_confirmation_and_names_the_scope()
     {
         var t = await StartAsync();
@@ -457,11 +518,11 @@ public class ConnectorsFlowTests
         await broken.RemoveCommand.ExecuteAsync(null);
         Assert.Equal("/mcp remove broken --scope project", t.Sent.Last());
         Assert.DoesNotContain(broken, c.Servers);
-        Assert.Equal("Removed “broken”.", c.Feedback.Notice);
+        Assert.Equal(Loc.F("Removed “{0}”.", "broken"), c.Feedback.Notice);
         Assert.True(c.NeedsRestart);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task Test_shows_the_tools_or_omps_reason()
     {
         var t = await StartAsync();
@@ -471,7 +532,7 @@ public class ConnectorsFlowTests
         var echo = c.Servers[0];
         await echo.TestCommand.ExecuteAsync(null);
         Assert.Equal("/mcp test echo", t.Sent.Last());
-        Assert.Equal(("Test passed · 2 tools", "echo, add"), (echo.StateText, echo.Tools));
+        Assert.Equal((Loc.Plural(2, "Test passed · {0} tool", "Test passed · {0} tools"), "echo, add"), (echo.StateText, echo.Tools));
 
         var broken = c.Servers[1];
         await broken.TestCommand.ExecuteAsync(null);
@@ -482,14 +543,14 @@ public class ConnectorsFlowTests
         // A test result stays through a refresh of the list
         await c.RefreshAsync();
         Assert.Equal(ConnectorState.Failed, c.Servers[1].State);
-        // A remote server refused with 401 offers omp's terminal sign-in
+        // A remote server refused with 401 offers the in-app sign-in
         var web = c.Servers[2];
         web.Failure = "HTTP 401: Unauthorized";
         Assert.True(web.SuggestSignIn);
-        Assert.Equal("/mcp reauth web", web.ReauthCommand);
+        Assert.Equal(Loc.T("Sign in"), web.SignInLabel);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task The_add_form_checks_what_omp_would_refuse_before_sending()
     {
         var t = await StartAsync();
@@ -506,25 +567,25 @@ public class ConnectorsFlowTests
             return c.FormError;
         }
 
-        Assert.Equal("Give the connector a name.", await Submit());
+        Assert.Equal(Loc.T("Give the connector a name."), await Submit());
         c.FormName = "my server";
-        Assert.Contains("no spaces", await Submit());
+        Assert.Contains(Loc.T("Use letters, numbers, dash, underscore, dot or colon (no spaces)."), await Submit());
         c.FormName = "echo";
-        Assert.Contains("already a connector named “echo”", await Submit());
+        Assert.Contains(Loc.F("There is already an MCP server named “{0}” in your settings.", "echo"), await Submit());
         c.FormName = "github";
-        Assert.Contains("Enter the command", await Submit());
+        Assert.Contains(Loc.T("Enter the command that starts the server (for example npx)."), await Submit());
         c.FormCommand = "npx";
         c.FormEnv = "GITHUB_TOKEN";
-        Assert.Equal("“GITHUB_TOKEN” is not NAME=value.", await Submit());
+        Assert.Equal(Loc.F("“{0}” is not NAME=value.", "GITHUB_TOKEN"), await Submit());
         c.SetTransportCommand.Execute("http");
-        Assert.Equal("Enter the server's URL.", await Submit());
+        Assert.Equal(Loc.T("Enter the server's URL."), await Submit());
         c.FormUrl = "https://x";
         c.FormHeaders = "no colon";
-        Assert.Equal("“no colon” is not Name: value.", await Submit());
+        Assert.Equal(Loc.F("“{0}” is not Name: value.", "no colon"), await Submit());
         Assert.DoesNotContain(t.Sent, x => x.StartsWith("/mcp add", StringComparison.Ordinal));
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task Adding_goes_through_mcp_add_and_puts_the_environment_in_omps_entry()
     {
         var t = await StartAsync();
@@ -548,7 +609,7 @@ public class ConnectorsFlowTests
         var entry = McpConfigFile.ReadServer(Path.Combine(t.UserDir, "mcp.json"), "github")!;
         Assert.Equal("ghp_x=y", entry["env"]!["GITHUB_TOKEN"]!.GetValue<string>());
         Assert.Equal("npx", entry["command"]!.GetValue<string>());
-        Assert.Equal("Added “github”.", c.Feedback.Notice);
+        Assert.Equal(Loc.F("Added “{0}”.", "github"), c.Feedback.Notice);
         Assert.True(c.Feedback.ShowRestart);
 
         // omp's own refusal is shown in the form, which stays open
@@ -568,7 +629,7 @@ public class ConnectorsFlowTests
         Assert.True(r.IsFormOpen);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task Editing_changes_only_the_form_fields_in_the_file()
     {
         var t = await StartAsync();
@@ -588,11 +649,11 @@ public class ConnectorsFlowTests
         Assert.Equal("https://example.org/mcp", entry["url"]!.GetValue<string>());
         Assert.Equal("Bearer abc", entry["headers"]!["Authorization"]!.GetValue<string>());
         Assert.Equal("core", entry["headers"]!["X-Team"]!.GetValue<string>());
-        Assert.Equal("Saved “web”.", c.Feedback.Notice);
+        Assert.Equal(Loc.F("Saved “{0}”.", "web"), c.Feedback.Notice);
         Assert.DoesNotContain(t.Sent, x => x.StartsWith("/mcp add", StringComparison.Ordinal) || x.StartsWith("/mcp remove", StringComparison.Ordinal));
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task Resources_prompts_and_smithery_sign_in()
     {
         var t = await StartAsync();
@@ -611,7 +672,7 @@ public class ConnectorsFlowTests
         Assert.Equal("/mcp smithery-login", c.SmitheryLoginCommand);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task Nothing_is_sent_while_omp_is_not_running()
     {
         var t = await StartAsync(start: false);
@@ -625,11 +686,11 @@ public class ConnectorsFlowTests
         c.FormName = "x";
         c.FormCommand = "y";
         await c.SubmitFormCommand.ExecuteAsync(null);
-        Assert.Contains("omp isn't running", c.FormError);
+        Assert.Contains(Loc.T("omp isn't running. Start it, then add the server: omp checks it and saves it."), c.FormError);
         Assert.Empty(t.Sent);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task The_project_servers_option_goes_through_omp_config()
     {
         var t = await StartAsync();
@@ -645,7 +706,8 @@ public class ConnectorsFlowTests
     }
 }
 
-/// <summary>The Plugins and skills page against a fake CLI (logged) and the fake omp.</summary>
+/// <summary>The Plugins and skills page against a fake CLI (logged) and the fake omp; on the UI thread (see
+/// <see cref="ConnectorsFlowTests"/>).</summary>
 public class PluginsFlowTests
 {
     private static readonly string Markets = "Configured Marketplaces:\n\n  local-mkt  /home/u/fixtures/local-mkt\n";
@@ -676,9 +738,14 @@ public class PluginsFlowTests
         ["plugin install lint-kit@local-mkt"] = new { stdout = "✔ Installed lint-kit from local-mkt (2.0.1)\n" },
         ["plugin marketplace add"] = new { stdout = "✔ Added marketplace: owner/repo\n" },
         ["plugin marketplace remove local-mkt"] = new { stdout = "✔ Removed marketplace: local-mkt\n" },
+        ["plugin config list omp-hello --json"] = new
+        {
+            stdout = """{ "settings": { "greeting": "hi" }, "schema": { "greeting": { "type": "string", "description": "What it says" }, "loud": { "type": "boolean", "default": false } } }""",
+        },
+        ["plugin config set omp-hello"] = new { stdout = "✔ Set greeting\n" },
     };
 
-    [Fact]
+    [AvaloniaFact]
     public async Task The_page_lists_plugins_marketplaces_skills_and_sources()
     {
         var t = await ConnectorsFlowTests.StartAsync(cli: Cli());
@@ -706,7 +773,7 @@ public class PluginsFlowTests
         Assert.Equal(new[] { "plugin list --json", "plugin marketplace list", "config list --json", "plugin discover local-mkt" }.Order(), t.Cli.Order());
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task Switching_a_plugin_runs_omps_cli_then_reloads_plugins()
     {
         var t = await ConnectorsFlowTests.StartAsync(cli: Cli());
@@ -717,14 +784,18 @@ public class PluginsFlowTests
         await ConnectorsFlowTests.Until(() => p.NeedsRestart, "restart asked");
         Assert.Contains("plugin disable omp-hello --json", t.Cli);
         Assert.Equal("/reload-plugins", t.Sent.Last());
-        Assert.Equal("Turned off “omp-hello”. Skills and commands are updated.", p.PluginsFeedback.Notice);
-        Assert.Contains("tools, hooks and MCP servers", p.PluginsFeedback.RestartText);
+        Assert.Equal(Loc.F("Turned off “{0}”.", "omp-hello") + " " + Loc.T("Skills and commands are updated."), p.PluginsFeedback.Notice);
+        Assert.Contains(p.PluginsFeedback.RestartText, new[]
+        {
+            Loc.T("Plugin tools, hooks and MCP servers load when omp starts. Restart it to apply the change."),
+            Loc.T("Plugin tools, hooks and MCP servers load when omp starts. Restart it once the reply finishes to apply the change."),
+        });
 
         p.Plugins[1].IsEnabled = true;
         await ConnectorsFlowTests.Until(() => t.Cli.Contains("plugin enable hello-skill@local-mkt --json --scope user"), "marketplace plugin enabled with its scope");
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task Uninstall_asks_first_and_errors_are_omps_words()
     {
         var t = await ConnectorsFlowTests.StartAsync(cli: Cli());
@@ -738,7 +809,7 @@ public class PluginsFlowTests
         await npm.UninstallCommand.ExecuteAsync(null);
         Assert.Contains("plugin uninstall omp-hello", t.Cli);
         Assert.DoesNotContain(npm, p.Plugins);
-        Assert.StartsWith("Uninstalled “omp-hello”.", p.PluginsFeedback.Notice);
+        Assert.StartsWith(Loc.F("Uninstalled “{0}”.", "omp-hello"), p.PluginsFeedback.Notice);
 
         p.InstallSpec = "left-pad-nope";
         await p.InstallCommand.ExecuteAsync(null);
@@ -752,7 +823,35 @@ public class PluginsFlowTests
         Assert.StartsWith("Upgraded hello-skill@local-mkt (user) to 0.2.0.", p.PluginsFeedback.Notice);
     }
 
-    [Fact]
+    [AvaloniaFact]
+    public async Task A_plugins_page_shows_what_it_adds_and_saves_its_settings()
+    {
+        var t = await ConnectorsFlowTests.StartAsync(cli: Cli());
+        await using var _ = t.Session;
+        var hub = t.Vm.PluginsHub;
+        await t.Vm.Plugins.RefreshAsync();
+        var npm = t.Vm.Plugins.Plugins[0];
+        await hub.OpenPluginCommand.ExecuteAsync(npm);
+        Assert.True(hub.ShowDetails && hub.IsPluginDetails);
+        Assert.Contains(hub.Parts, p => p.Title == Loc.Plural(1, "{0} command", "{0} commands")); // the manifest's commands
+        Assert.Contains(hub.Facts, f => f.Title == Loc.T("Version") && f.Detail == "v1.2.0");
+        Assert.Equal(["greeting", "loud"], hub.PluginSettings.Select(s => s.Key));
+        Assert.Equal("hi", hub.PluginSettings[0].Value);
+        Assert.True(hub.PluginSettings[1].IsBoolean);
+
+        hub.PluginSettings[0].Value = "hello there";
+        await hub.PluginSettings[0].SaveCommand.ExecuteAsync(null);
+        Assert.Contains("plugin config set omp-hello greeting hello there", t.Cli);
+        Assert.Equal(Loc.F("Saved “{0}” for “{1}”.", "greeting", "omp-hello"), t.Vm.Plugins.PluginsFeedback.Notice);
+        Assert.True(t.Vm.Plugins.NeedsRestart);
+
+        // A marketplace plugin has no settings of omp's; its folder says what it adds
+        await hub.OpenPluginCommand.ExecuteAsync(t.Vm.Plugins.Plugins[1]);
+        Assert.Empty(hub.PluginSettings);
+        Assert.DoesNotContain("plugin config list hello-skill@local-mkt --json", t.Cli);
+    }
+
+    [AvaloniaFact]
     public async Task Marketplaces_add_browse_install_and_remove()
     {
         var t = await ConnectorsFlowTests.StartAsync(cli: Cli());
@@ -768,7 +867,7 @@ public class PluginsFlowTests
         await m.Plugins[1].InstallCommand.ExecuteAsync(null);
         Assert.Contains("plugin install lint-kit@local-mkt", t.Cli);
         Assert.Equal("/reload-plugins", t.Sent.Last());
-        Assert.StartsWith("Installed “lint-kit”.", p.MarketplacesFeedback.Notice);
+        Assert.StartsWith(Loc.F("Installed “{0}”.", "lint-kit"), p.MarketplacesFeedback.Notice);
 
         p.MarketplaceSource = "owner/repo";
         await p.AddMarketplaceCommand.ExecuteAsync(null);
@@ -783,7 +882,7 @@ public class PluginsFlowTests
         Assert.Empty(p.Marketplaces);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task Skills_switch_through_disabled_extensions_and_use_goes_to_the_composer()
     {
         var t = await ConnectorsFlowTests.StartAsync(cli: Cli());
@@ -817,7 +916,7 @@ public class PluginsFlowTests
         await ConnectorsFlowTests.Until(() => t.Cli.Contains("config set marketplace.autoUpdate off --json"), "auto update off");
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task Without_omps_cli_the_page_says_so()
     {
         var t = await ConnectorsFlowTests.StartAsync(cli: new() { ["plugin list --json"] = new { stderr = "✘ boom\n", exit = 1 } });

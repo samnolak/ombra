@@ -9,7 +9,8 @@
 // Everything lives in a closed shadow root, so the page's CSS does not reach it and the page's scripts cannot read it;
 // messages carry a token from this closure.
 // Entry: window.__ompAnnotate.{setMode(bool), setPins([{id, number, url, kind, selector, offsetX, offsetY, width, height,
-// pageX, pageY, comment}])} (the site's pins; each is drawn on its url only). Messages (JSON strings) through the web
+// pageX, pageY, comment, shared}]), reveal(id)} (the site's pins; each is drawn on its url only; shared pins are a team
+// member's marks: another colour, not editable; reveal scrolls a pin into view). Messages (JSON strings) through the web
 // view's invokeCSharpAction: {type: "annotation" | "annotation-update" {id, comment} | "annotation-remove" {id} |
 // "annotate-exit" | "ready" | "location" {url}, token, ...}.
 (function (token) {
@@ -37,6 +38,7 @@
     "border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.35)}" +
     ".pin{position:fixed;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:11px;background:#ffc21a;color:#211a0a;border:2px solid #fff;" +
     "box-shadow:0 1px 4px rgba(0,0,0,.35);font-size:11px;font-weight:600;line-height:18px;text-align:center;cursor:pointer;pointer-events:auto}" +
+    ".pin.shared{background:#8b5cf6;color:#fff;cursor:default}.pin.flash{outline:3px solid #8b5cf6;outline-offset:2px}" +
     ".pop{position:fixed;display:none;width:300px;background:#fff;color:#1f2328;border-radius:12px;padding:10px;pointer-events:auto;" +
     "box-shadow:0 8px 28px rgba(0,0,0,.22),0 0 0 1px rgba(0,0,0,.06)}" +
     ".what{font-size:11px;color:#6e7781;margin:0 2px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
@@ -297,12 +299,13 @@
         pinsBox.appendChild(a);
       }
       var d = document.createElement("div");
-      d.className = "pin";
+      d.className = m.shared ? "pin shared" : "pin";
       d.textContent = String(m.number);
-      d.title = m.comment + "\n(click to edit)";
-      // Opens its comment; the page never sees the click
+      d.title = m.shared ? m.comment : m.comment + "\n(click to edit)";
+      d.setAttribute("data-pin", m.id);
+      // Opens its comment; the page never sees the click (a team member's pin is only shown)
       d.addEventListener("mousedown", function (e) { e.stopPropagation(); e.preventDefault(); });
-      d.addEventListener("click", function (e) { e.stopPropagation(); e.preventDefault(); openEdit(m); });
+      d.addEventListener("click", function (e) { e.stopPropagation(); e.preventDefault(); if (!m.shared) openEdit(m); });
       place(d, p.left, p.top);
       pinsBox.appendChild(d);
     });
@@ -418,10 +421,21 @@
         return {
           id: p.id, number: p.number, url: p.url, kind: p.kind === "area" ? "area" : "point", selector: p.selector, el: null,
           offsetX: +p.offsetX || 0, offsetY: +p.offsetY || 0, width: +p.width || 0, height: +p.height || 0,
-          pageX: +p.pageX || 0, pageY: +p.pageY || 0, comment: p.comment
+          pageX: +p.pageX || 0, pageY: +p.pageY || 0, comment: p.comment, shared: !!p.shared
         };
       });
       drawPins();
+    },
+    reveal: function (id) {
+      var m = pins.find(function (x) { return x.id === id; });
+      if (!m) return false;
+      if (m.el === null && m.selector) whereIs(m);
+      if (m.el && m.el.isConnected) m.el.scrollIntoView({ block: "center", inline: "nearest" });
+      else window.scrollTo(0, Math.max(0, m.pageY - window.innerHeight / 2));
+      drawPins();
+      var d = pinsBox.querySelector('[data-pin="' + String(id).replace(/["\\]/g, "") + '"]');
+      if (d) { d.classList.add("flash"); setTimeout(function () { d.classList.remove("flash"); }, 1600); }
+      return true;
     },
     isOn: function () { return on; }
   };

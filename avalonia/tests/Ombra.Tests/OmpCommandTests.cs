@@ -64,12 +64,18 @@ public class OmpCommandTests
 
     [Theory]
     [InlineData("/mcp add x --url http://a", "mcp", true)]
-    [InlineData("  /usage", "usage", true)]
+    [InlineData("  /usage", null, false)]
     [InlineData("/worktree feature", "worktree", true)]
     [InlineData("/plan", "plan", false)]
     [InlineData("/login", "login", false)]
-    [InlineData("/skill:review", "skill:review", false)]
-    public void Which_builtins_run_over_rpc(string text, string name, bool rpc)
+    [InlineData("/skill:review", "skill", false)]
+    [InlineData("/rename:my title", "rename", true)]
+    [InlineData("/mcp\tlist", "mcp", true)]
+    [InlineData("/rename\uFEFFtitle", "rename", true)]
+    [InlineData("/rename\u0085title", "rename\u0085title", false)]
+    [InlineData("/Rename my title", "Rename", false)]
+    [InlineData("//rename", "/rename", false)]
+    public void Which_builtins_run_over_rpc(string text, string? name, bool rpc)
     {
         Assert.Equal(name, OmpBuiltins.NameOf(text));
         Assert.Equal(rpc, OmpBuiltins.RunsOverRpc(text));
@@ -101,7 +107,7 @@ public class OmpCommandTests
     [Fact]
     public void The_cli_launch_keeps_binary_prefix_and_profile_but_drops_rpc_flags()
     {
-        var o = new OmpRuntimeOptions { Command = "/opt/bun", PrefixArgs = ["/opt/omp/cli.js"], Profile = "work", Model = "a/b", ExtraArgs = ["--x"] };
+        var o = new OmpRuntimeOptions { Command = "/opt/bun", PrefixArgs = ["/opt/omp/host.js"], ManagementPrefixArgs = ["/opt/omp/cli.js"], Profile = "work", Model = "a/b", ExtraArgs = ["--x"] };
         var spec = o.ToCliLaunchSpec(["config", "get", "computer.enabled", "--json"], "/proj");
         Assert.Equal("/opt/bun", spec.FileName);
         Assert.Equal(["/opt/omp/cli.js", "config", "get", "computer.enabled", "--json"], spec.Arguments);

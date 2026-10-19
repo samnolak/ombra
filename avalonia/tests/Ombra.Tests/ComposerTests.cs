@@ -1,4 +1,5 @@
 using Ombra.ClientCore;
+using Ombra.Rpc;
 
 namespace Ombra.Tests;
 
@@ -46,8 +47,39 @@ public sealed class ComposerTests
         Assert.Contains(done.Items, i => i is UserItem { Text: "change of plan", Confirmed: true });
     }
 
+    [Theory]
+    [InlineData(QueueKind.FollowUp)]
+    [InlineData(QueueKind.Steer)]
+    public async Task Input_queued_after_a_local_command_has_settled_starts_its_own_turn(QueueKind kind)
+    {
+        await using var s = await StartAsync("normal");
+        var command = await s.RunSlashCommandAsync("/stats");
+        Assert.True(command.Ok);
+        Assert.False(command.AgentInvoked);
+        Assert.Equal(SessionPhase.Ready, s.Snapshot().Phase);
+        Assert.Equal(0, s.Snapshot().RunsEnded);
+
+        // A UI snapshot can still show /context (or another local read) as Running when it sends.
+        // Admission must drain this idle queue rather than wait for another prompt to wake the agent.
+        foreach (var text in new[] { "first queued task", "second queued task" })
+        {
+            var runs = s.Snapshot().RunsEnded;
+            Assert.True(await s.QueueAsync(kind, text, []));
+            var done = await TestProcesses.Eventually(s.Snapshot,
+                x => x.Phase == SessionPhase.Ready && x.RunsEnded == runs + 1 && x.Queued.Count == 0,
+                Wait, "idle queued input delivered and its turn ended");
+            Assert.Contains(done.Items, item => item is UserItem { Confirmed: true } user && user.Text == text);
+            Assert.Equal(0, (await s.Connection!.GetStateAsync()).QueuedMessageCount);
+        }
+
+        var final = s.Snapshot();
+        Assert.Equal(["first queued task", "second queued task"], final.Items.OfType<UserItem>().Select(user => user.Text));
+        Assert.Equal(2, final.RunsEnded);
+        Assert.Equal(2, final.Items.OfType<AssistantItem>().Count());
+    }
+
     [Fact]
-    public async Task Queued_messages_stay_queued_after_an_abort_like_omp_keeps_them()
+    public async Task Stop_withdraws_runtime_queue_and_preserves_it_for_explicit_recovery()
     {
         await using var s = await StartAsync("slow-stream");
         await s.PromptAsync("long task");
@@ -58,6 +90,9 @@ public sealed class ComposerTests
         var snap = s.Snapshot();
         Assert.True(snap.Queued.Count == 1, string.Join("\n", snap.Items.Select(i => i.ToString())) + "\n" + string.Join("\n", snap.DebugTail.TakeLast(15).Select(d => d.Type + " " + d.Summary)));
         Assert.Equal("later", snap.Queued[0].Text);
+        Assert.True(snap.Queued[0].Recovered);
+        Assert.Equal(0, (await s.Connection!.GetStateAsync()).QueuedMessageCount);
+        Assert.DoesNotContain(snap.Items, i => i is UserItem { Text: "later" });
     }
 
     [Fact]
@@ -74,7 +109,7 @@ public sealed class ComposerTests
 
         // History restores the images (omp's stored message carries them, base64).
         var rebuilt = new ConversationState();
-        rebuilt.Hydrate(await Ombra.Rpc.OmpCommands.GetMessagesAsync(s.Connection!));
+        rebuilt.Hydrate((await Ombra.Rpc.OmpCommands.GetMessagesPageAsync(s.Connection!)).Messages);
         var restored = rebuilt.Snapshot().Items.OfType<UserItem>().Single().Images;
         Assert.Equal(["image/png", "image/jpeg"], restored.Select(i => i.MimeType));
         Assert.Equal(png, restored[0].Data);

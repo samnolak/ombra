@@ -9,6 +9,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App;
 using Ombra.App.Controls;
+using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
 using Ombra.App.Views.Panes;
@@ -108,8 +109,11 @@ public sealed class FilesPaneUiTests
             await f.OpenFileAsync(Path.Combine(root, "src", "app.py"), line: 12);
             await Settle(400);
             a.Take(w, $"{tag}-viewer-code");
-            var code = pane.GetVisualDescendants().OfType<CodeView>().Single();
-            Assert.True(code.Scroller.Offset.Y > 0, "the viewer scrolled to line 12");
+            var code = pane.GetVisualDescendants().OfType<AvaloniaEdit.TextEditor>().Single();
+            Assert.Same(f.Viewer!.Document!.Buffer, code.Document);
+            Assert.Equal(12, code.TextArea.Caret.Line);
+            Assert.Contains(code.TextArea.TextView.VisualLines,
+                line => line.FirstDocumentLine.LineNumber <= 12 && line.LastDocumentLine.LineNumber >= 12);
 
             var more = pane.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "ViewerMoreButton");
             more.Flyout!.ShowAt(more);
@@ -232,7 +236,7 @@ public sealed class FilesPaneUiTests
             foreach (var item in new[] { "BrowseFilesItem", "FileManagerItem", "TerminalItem", "CopyPathItem", "OpenFolderItem" })
                 Assert.True(menu.FindControl<Button>(item)!.IsEffectivelyVisible, item);
             var editors = menu.FindControl<ItemsControl>("EditorItems")!;
-            Assert.Equal(["Open in VS Code"], editors.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text));
+            Assert.Equal([Loc.F("Open in {0}", "VS Code")], editors.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text));
             // A choice closes the menu and does what it says
             Invoke(menu.FindControl<Button>("BrowseFilesItem")!);
             await Settle(200);
@@ -257,7 +261,7 @@ public sealed class FilesPaneUiTests
         var (w, pane) = Host(vm, 900, 700, 400);
         var f = await FileTestRepo.Shown(vm, git: false);
         var copied = new List<string>();
-        vm.CopyTextRequested += copied.Add;
+        vm.CopyTextRequested += text => { copied.Add(text); return Task.FromResult(true); };
         void Key(Avalonia.Input.Key k, Avalonia.Input.PhysicalKey p)
         {
             w.KeyPress(k, Avalonia.Input.RawInputModifiers.None, p, null);
@@ -293,7 +297,7 @@ public sealed class FilesPaneUiTests
         var moreMenu = (Flyout)more.Flyout!;
         moreMenu.ShowAt(more);
         await Settle();
-        Invoke(((Control)moreMenu.Content!).GetLogicalDescendants().OfType<Button>().First(b => Avalonia.Automation.AutomationProperties.GetName(b) == "Copy path"));
+        Invoke(((Control)moreMenu.Content!).GetLogicalDescendants().OfType<Button>().First(b => Avalonia.Automation.AutomationProperties.GetName(b) == Loc.T("Copy path")));
         await Settle(200);
         Assert.False(moreMenu.IsOpen);
         Assert.Equal(Path.Combine(root, "docs", "guide.md"), copied[^1]);
@@ -301,7 +305,7 @@ public sealed class FilesPaneUiTests
         var treeMenu = (Flyout)srcRow.ContextFlyout!;
         treeMenu.ShowAt(srcRow);
         await Settle();
-        Invoke(((Control)treeMenu.Content!).GetLogicalDescendants().OfType<Button>().First(b => Avalonia.Automation.AutomationProperties.GetName(b) == "Copy relative path"));
+        Invoke(((Control)treeMenu.Content!).GetLogicalDescendants().OfType<Button>().First(b => Avalonia.Automation.AutomationProperties.GetName(b) == Loc.T("Copy relative path")));
         await Settle(200);
         Assert.False(treeMenu.IsOpen);
         Assert.Equal("src", copied[^1]);
@@ -319,16 +323,18 @@ public sealed class FilesPaneUiTests
         await f.OpenFileAsync(Path.Combine(root, "big.py"), line: 9990);
         await Settle(300);
         Assert.Null(f.Viewer!.MarkdownText); // a Markdown view never renders code
-        var code = pane.GetVisualDescendants().OfType<CodeView>().Single();
-        var surface = code.Surface;
-        Assert.Equal(FileViewerViewModel.MaxLines, surface.LineCount);
-        Assert.InRange(surface.LaidOutLines, 1, 60); // the lines on screen, not ten thousand
-        Assert.True(code.Scroller.Offset.Y > 9900 * CodeSurface.LineHeight, "scrolled to line 9990");
-        surface.Select(0, 4, 1, 3);
-        Assert.Equal("step_1(x):  return x + 1\ndef", surface.SelectedText);
-        surface.SelectAll();
-        Assert.StartsWith("def step_1", surface.SelectedText);
-        Assert.EndsWith("return x + 9999\n    # step 10000", surface.SelectedText);
+        var code = pane.GetVisualDescendants().OfType<AvaloniaEdit.TextEditor>().Single();
+        Assert.Same(f.Viewer.Document!.Buffer, code.Document);
+        Assert.Equal(FileViewerViewModel.MaxLines + 1, code.Document.LineCount); // trailing newline is preserved
+        Assert.InRange(code.TextArea.TextView.VisualLines.Count, 1, 60);
+        Assert.Equal(9990, code.TextArea.Caret.Line);
+        Assert.Contains(code.TextArea.TextView.VisualLines,
+            line => line.FirstDocumentLine.LineNumber <= 9990 && line.LastDocumentLine.LineNumber >= 9990);
+        code.Select(4, code.Document.GetOffset(2, 4) - 4);
+        Assert.Equal("step_1(x):  return x + 1\ndef", code.SelectedText);
+        code.SelectAll();
+        Assert.StartsWith("def step_1", code.SelectedText);
+        Assert.EndsWith("return x + 9999\n    # step 10000\n", code.SelectedText);
         w.Close();
     }
 
@@ -345,7 +351,7 @@ public sealed class FilesPaneUiTests
         Assert.True(menu.Button.IsEffectivelyVisible);
         Assert.Empty(menu.Button.GetVisualDescendants().OfType<TextBlock>());
         Assert.Equal(vm.ProjectChipLabel, ToolTip.GetTip(menu.Button));
-        Assert.Equal($"Project: {vm.ProjectChipLabel}", Avalonia.Automation.AutomationProperties.GetName(menu.Button));
+        Assert.Equal(Loc.F("Project: {0}", vm.ProjectChipLabel), Avalonia.Automation.AutomationProperties.GetName(menu.Button));
         Assert.True(menu.Button.TranslatePoint(new Point(menu.Button.Bounds.Width, 0), w)!.Value.X <= title.TranslatePoint(default, w)!.Value.X + 0.5);
         Assert.Empty(LayoutAudit.Run(w, header));
         w.Close();

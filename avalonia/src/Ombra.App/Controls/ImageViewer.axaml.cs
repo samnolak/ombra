@@ -1,10 +1,10 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
-using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Ombra.App.ViewModels;
+using Ombra.App.Localization;
 
 namespace Ombra.App.Controls;
 
@@ -47,9 +47,9 @@ public sealed partial class ImageViewer : UserControl
 
     private async Task CopyAsync()
     {
-        if (Vm is not { ViewerImage: { } bitmap } vm || TopLevel.GetTopLevel(this)?.Clipboard is not { } clipboard) return;
-        await clipboard.SetBitmapAsync(bitmap);
-        vm.ViewerNote = "Copied";
+        if (Vm is not { ViewerImage: { } bitmap } vm) return;
+        vm.ViewerNote = "";
+        await ContextMenus.CopyImageAsync(CopyImageButton, bitmap, failure: error => vm.ViewerNote = Loc.T("Couldn't copy") + ": " + error);
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)

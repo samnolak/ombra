@@ -1,0 +1,42 @@
+# Ombra team server — systemd variant without Docker (install.sh --systemd --ip; domain mode/Caddy is Docker-only).
+# Binaries: /opt/ombra/bin (self-contained publish + lib/libombra_core.so); config: /etc/ombra/server.env.
+# install.sh leaves /etc/ombra root's; user ombra may read only token.key, server-id, backup-recipients.txt,
+# tls/current.{crt,key} and server.env. The offline TLS next key (§6.2) lives in /etc/ombra-offline (root only,
+# inaccessible below) until the operator moves it off the host.
+# `ombra-admin restore` rewrites token.key/server-id: run it as root, then `chown ombra:ombra` both and restart.
+[Unit]
+Description=Ombra team server
+Wants=network-online.target
+After=network-online.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=exec
+User=ombra
+Group=ombra
+EnvironmentFile=/etc/ombra/server.env
+Environment=OMBRA_CORE_NATIVE_PATH=/opt/ombra/bin/lib/libombra_core.so
+Environment=DOTNET_gcServer=0
+ExecStart=/opt/ombra/bin/server/Ombra.Server
+Restart=on-failure
+RestartSec=5
+# Kestrel binds 443 directly and terminates TLS (IP mode only).
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/ombra /var/backups/ombra
+ReadOnlyPaths=/etc/ombra
+InaccessiblePaths=-/etc/ombra-offline -/etc/ombra/db_password
+# IP and access logs go to the journal; keep them 14 days (§8 п.1): set MaxRetentionSec=14d in journald.conf.
+
+[Install]
+WantedBy=multi-user.target

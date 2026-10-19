@@ -1,5 +1,13 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Avalonia.Controls;
+using Avalonia.Controls.Documents;
+using Avalonia.Headless.XUnit;
+using Avalonia.Media;
+using Avalonia.LogicalTree;
+using Avalonia.Interactivity;
+using Avalonia.Input.Platform;
+using Avalonia.Threading;
 using Ombra.App.Controls;
 using Ombra.ClientCore;
 using Ombra.Rpc;
@@ -14,6 +22,42 @@ namespace Ombra.Tests;
 public sealed class DiffViewTests
 {
     private static readonly DateTimeOffset T = DateTimeOffset.Parse("2026-10-12T12:00:00Z");
+    [AvaloniaTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Long_line_preview_is_bounded_but_copy_and_open_keep_original_data(bool tabs)
+    {
+        var original = (tabs ? new string('\t', 1023) : new string('a', 4095)) +
+            "👩‍💻" + new string('z', 60000);
+        var change = new FileChange("long.cs", FileChangeKind.Modified, "+7|" + original);
+        int? opened = null;
+        var card = Build(change, openFile: line => opened = line);
+        var window = new Window { Content = card, Width = 600, Height = 300 };
+        window.Show();
+        try
+        {
+            var code = card.GetLogicalDescendants().OfType<SelectableTextBlock>().Single(t => t.Classes.Contains("diff-code"));
+            var shown = string.Concat(code.Inlines!.OfType<Run>().Select(r => r.Text));
+            Assert.DoesNotContain("👩", shown, StringComparison.Ordinal);
+            Assert.DoesNotContain("\u200d", shown, StringComparison.Ordinal);
+            Assert.DoesNotContain("zzz", shown, StringComparison.Ordinal);
+            Assert.True(shown.Length < 4300);
+            Assert.Equal(original, Assert.Single(Parse(change.Diff!)).Text);
+            var link = card.GetLogicalDescendants().OfType<Button>().Single(b => b.Classes.Contains("diff-path-link"));
+            link.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert.Equal(7, opened);
+            var row = card.GetLogicalDescendants().OfType<Grid>().Single(g => g.Classes.Contains("diff-row"));
+            var menu = Assert.IsType<Flyout>(row.ContextFlyout);
+            menu.ShowAt(row);
+            Dispatcher.UIThread.RunJobs();
+            var copy = ((Control)menu.Content!).GetLogicalDescendants().OfType<Button>().Single();
+            copy.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert.Equal(original, await window.Clipboard!.TryGetTextAsync());
+            menu.Hide();
+        }
+        finally { window.Close(); }
+    }
+
 
     private static RpcFrame F(string json)
     {
@@ -179,6 +223,51 @@ public sealed class DiffViewTests
         Assert.Null(DiffWords.Compare("same()", "same()"));
         Assert.Null(DiffWords.Compare("import os", "return render(page, items)"));
         Assert.Null(DiffWords.Compare(new string('a', DiffWords.MaxLineLength + 1), new string('a', DiffWords.MaxLineLength) + "b"));
+    }
+
+    [Theory]
+    [InlineData("😀", "😁")]
+    [InlineData("e\u0301", "e\u0300")]
+    [InlineData("👩‍💻", "👩‍🔬")]
+    [InlineData("🇫🇷", "🇫🇮")]
+    [InlineData("𐐀", "𐐁")]
+    public void Changed_graphemes_are_marked_whole_with_original_utf16_offsets(string beforeGlyph, string afterGlyph)
+    {
+        const string prefix = "unchanged text: [";
+        var before = prefix + beforeGlyph + "] end";
+        var after = prefix + afterGlyph + "] end";
+        var (old, added) = DiffWords.Compare(before, after)!.Value;
+        Assert.Equal([beforeGlyph], Marked(before, old));
+        Assert.Equal([afterGlyph], Marked(after, added));
+        Assert.Equal(new DiffWords.Span(prefix.Length, beforeGlyph.Length), Assert.Single(old));
+        Assert.Equal(new DiffWords.Span(prefix.Length, afterGlyph.Length), Assert.Single(added));
+
+        var (_, inserted) = DiffWords.Compare(prefix + "] end", after)!.Value;
+        Assert.Equal([afterGlyph], Marked(after, inserted));
+        var (removed, _) = DiffWords.Compare(before, prefix + "] end")!.Value;
+        Assert.Equal([beforeGlyph], Marked(before, removed));
+    }
+
+    [AvaloniaTheory]
+    [InlineData("😀", "😁", true)]
+    [InlineData("e\u0301", "e\u0300", true)]
+    [InlineData("👩‍💻", "👩‍🔬", true)]
+    [InlineData("Cafe\u0301", "Cafe\u0300", false)]
+    [InlineData("Cafe\u093e", "Cafe\u093f", false)]
+    public void Rendered_diff_runs_do_not_separate_changed_graphemes(string oldGlyph, string newGlyph, bool quoted)
+    {
+        var before = quoted ? $"var label = \"{oldGlyph}\";" : $"var {oldGlyph} = 1;";
+        var after = quoted ? $"var label = \"{newGlyph}\";" : $"var {newGlyph} = 1;";
+        var (old, added) = DiffWords.Compare(before, after)!.Value;
+        foreach (var (line, marks, glyph) in new[] { (before, old, oldGlyph), (after, added, newGlyph) })
+        {
+            var block = new TextBlock();
+            var inBlock = false;
+            DiffWords.AddRuns(block.Inlines!, line, SyntaxHighlighter.ForName("cs"), ref inBlock, marks, Brushes.Red);
+            var runs = block.Inlines!.OfType<Run>().ToArray();
+            Assert.Equal(line, string.Concat(runs.Select(r => r.Text)));
+            Assert.Equal(glyph, Assert.Single(runs, r => r.Background == Brushes.Red).Text);
+        }
     }
 
     [Fact]

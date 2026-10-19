@@ -1,6 +1,7 @@
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Ombra.App;
+using Ombra.App.Localization;
 using Ombra.App.Platform;
 using Ombra.App.ViewModels;
 using Ombra.App.Views;
@@ -51,7 +52,7 @@ public sealed class AttentionTests
         await Until(() => vm.NeedsAttention, "attention");
         Assert.StartsWith("● ", vm.WindowTitle);
         Assert.StartsWith("● ", w.Title);
-        Assert.Equal("omp finished", Assert.Single(n.Calls).Title);
+        Assert.Equal(Loc.T("omp finished"), Assert.Single(n.Calls).Title);
         Assert.StartsWith("tok0", n.Calls[0].Message);
 
         vm.SetWindowActive(true);
@@ -74,7 +75,7 @@ public sealed class AttentionTests
         vm.ComposerText = "do it";
         vm.SendCommand.Execute(null);
         await Until(() => n.Calls.Count > 0, "notification while minimized");
-        Assert.Equal("omp finished", Assert.Single(n.Calls).Title);
+        Assert.Equal(Loc.T("omp finished"), Assert.Single(n.Calls).Title);
         Assert.StartsWith("tok0", n.Calls[0].Message);
         Assert.StartsWith("● ", vm.WindowTitle);
         Assert.Equal(Avalonia.Controls.WindowState.Minimized, w.WindowState);
@@ -100,7 +101,7 @@ public sealed class AttentionTests
         vm.ComposerText = "run it";
         vm.SendCommand.Execute(null);
         await Until(() => n.Calls.Count > 0, "notification while minimized");
-        Assert.Equal("omp needs your approval", n.Calls[0].Title);
+        Assert.Equal(Loc.T("omp needs your approval"), n.Calls[0].Title);
 
         w.WindowState = Avalonia.Controls.WindowState.Normal;
         vm.SetWindowState("Normal");
@@ -124,7 +125,7 @@ public sealed class AttentionTests
         var before = SnapshotOf(vm);
         Assert.Equal(SessionPhase.Ready, before.Phase);
         vm.Apply(before with { Version = before.Version + 1, RunsEnded = before.RunsEnded + 1 });
-        Assert.Equal("omp finished", Assert.Single(n.Calls).Title);
+        Assert.Equal(Loc.T("omp finished"), Assert.Single(n.Calls).Title);
         Assert.True(vm.NeedsAttention);
         vm.Apply(before with { Version = before.Version + 2, RunsEnded = before.RunsEnded + 1 });
         vm.Apply(before); // an older snapshot applied late
@@ -132,6 +133,39 @@ public sealed class AttentionTests
         Assert.Single(n.Calls); // the same run never notifies twice
         await vm.DisposeAsync();
         w.Close();
+    }
+
+    [AvaloniaTheory]
+    [InlineData("😀")]
+    [InlineData("e\u0301")]
+    [InlineData("👩‍💻")]
+    public async Task Session_titles_and_background_notifications_keep_whole_graphemes(string glyph)
+    {
+        var (w, vm, notifier) = await OpenAsync("normal");
+        try
+        {
+            vm.SetWindowActive(false);
+            var before = SnapshotOf(vm);
+            var titleHead = new string('t', 79);
+            var answerHead = new string('a', 139);
+            vm.Apply(before with
+            {
+                Version = before.Version + 1, RunsEnded = before.RunsEnded + 1,
+                SessionName = null, SessionTitleHint = null,
+                Items =
+                [
+                    new UserItem(1, titleHead + glyph + " rest", true),
+                    new AssistantItem(2, answerHead + glyph + " rest", "", false, "stop", null),
+                ],
+            });
+            Assert.Equal(titleHead + "…", vm.SessionTitle);
+            Assert.Equal(answerHead + "…", Assert.Single(notifier.Calls).Message);
+        }
+        finally
+        {
+            await vm.DisposeAsync();
+            w.Close();
+        }
     }
 
     private static SessionSnapshot SnapshotOf(MainViewModel vm) => vm.Session.Snapshot();
@@ -179,6 +213,69 @@ public sealed class AttentionTests
         new NotifySendNotifier().Notify("t", "m", 0, () => { });
         new OsaScriptNotifier().Notify("t", "\" & do shell script \"x", 0, () => { });
         new TaskbarFlashNotifier().Notify("t", "m", 0, () => { });
+    }
+
+    private sealed class RecordingDock : IDockAttention
+    {
+        public readonly List<(int Count, bool Request)> Calls = [];
+        public void Update(int waitingChats, bool requestAttention) => Calls.Add((waitingChats, requestAttention));
+    }
+
+    [AvaloniaFact]
+    public async Task Dock_counts_waiting_chats_once_and_respects_activation_and_notification_settings()
+    {
+        var (w, vm, _) = await OpenAsync("approval");
+        var dock = new RecordingDock();
+        w.DockAttention = dock;
+        try
+        {
+            vm.SetWindowActive(false);
+            vm.ComposerText = "first wait";
+            vm.SendCommand.Execute(null);
+            await Until(() => vm.HasDialog && vm.DockWaitingCount == 1, "first waiting chat");
+            Assert.Equal((1, true), dock.Calls.Last());
+            var first = vm.Session;
+            vm.Apply(first.Snapshot());
+            Assert.Single(dock.Calls, c => c.Request);
+
+            vm.NewChatCommand.Execute(null);
+            await Until(() => vm.Session != first && vm.Phase == SessionPhase.Ready, "second chat");
+            vm.ComposerText = "second wait";
+            vm.SendCommand.Execute(null);
+            await Until(() => vm.HasDialog && vm.DockWaitingCount == 2, "two waiting chats");
+            Assert.Equal((2, true), dock.Calls.Last());
+            Assert.Equal(2, dock.Calls.Count(c => c.Request));
+
+            vm.NotificationsEnabled = false;
+            Assert.Equal(0, vm.DockWaitingCount);
+            Assert.Equal((0, false), dock.Calls.Last());
+            vm.NotificationsEnabled = true;
+            Assert.Equal((2, false), dock.Calls.Last());
+            vm.SetWindowActive(true);
+            vm.CurrentDialog!.DenyCommand.Execute(null);
+            await Until(() => vm.Phase == SessionPhase.Ready && vm.DockWaitingCount == 1, "one wait cleared");
+            Assert.True(vm.CycleSession(1));
+            await Until(() => vm.Session == first && vm.HasDialog, "first waiting chat again");
+            vm.CurrentDialog!.DenyCommand.Execute(null);
+            await Until(() => vm.Phase == SessionPhase.Ready && vm.DockWaitingCount == 0, "all waits cleared");
+            Assert.Equal((0, false), dock.Calls.Last());
+
+            vm.ComposerText = "foreground wait";
+            vm.SendCommand.Execute(null);
+            await Until(() => vm.HasDialog && vm.DockWaitingCount == 1, "foreground wait");
+            Assert.Equal((1, false), dock.Calls.Last());
+            Assert.Equal(2, dock.Calls.Count(c => c.Request));
+            vm.NotificationsEnabled = false;
+            vm.CurrentDialog!.DenyCommand.Execute(null);
+            await Until(() => vm.Phase == SessionPhase.Ready, "disabled wait cleared");
+            vm.SetWindowActive(false);
+            vm.ComposerText = "disabled wait";
+            vm.SendCommand.Execute(null);
+            await Until(() => vm.HasDialog, "disabled background wait");
+            Assert.Equal(0, vm.DockWaitingCount);
+            Assert.Equal(2, dock.Calls.Count(c => c.Request));
+        }
+        finally { await vm.DisposeAsync(); w.Close(); }
     }
 
     /// <summary>

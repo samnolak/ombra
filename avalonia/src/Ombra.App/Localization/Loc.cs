@@ -18,6 +18,12 @@ public static class Loc
 {
     public const string English = "en";
     private static Dictionary<string, string> _strings = new(StringComparer.Ordinal);
+    private static Dictionary<string, string> _english = new(StringComparer.Ordinal);
+    private sealed class PluralForms
+    {
+        public string? One, Few, Many, Other;
+    }
+    private static Dictionary<string, PluralForms> _plurals = new(StringComparer.Ordinal);
 
     /// <summary>The code of the language shown (<see cref="English"/> when none is loaded).</summary>
     public static string Current { get; private set; } = English;
@@ -25,17 +31,35 @@ public static class Loc
     /// <summary><paramref name="english"/> in the current language (itself when untranslated).</summary>
     public static string T(string english) => _strings.TryGetValue(english, out var t) && t.Length > 0 ? t : english;
 
+    /// <summary>The English a text shown by <see cref="T"/> came from (itself when it is not a translation).</summary>
+    public static string Invariant(string shown) => _english.TryGetValue(shown, out var e) ? e : shown;
+
     /// <summary><see cref="T"/>, then <see cref="string.Format(IFormatProvider, string, object[])"/>.</summary>
     public static string F(string english, params object?[] args) =>
         string.Format(CultureInfo.CurrentCulture, T(english), args);
 
     /// <summary>
-    /// A count in words: <paramref name="one"/> when <paramref name="n"/> is 1, else <paramref name="other"/> (English's two
-    /// forms; each is its own key, so a language with other rules can word both neutrally). Formatted with
-    /// <paramref name="n"/> as <c>{0}</c> and <paramref name="args"/> as <c>{1}</c>, <c>{2}</c>….
+    /// Integer cardinal forms for the built-in languages. Optional translation keys are the English
+    /// <paramref name="other"/> plus |one, |few, |many or |other; old language files retain their two-form fallback.
+    /// The count is {0}, followed by the supplied arguments.
     /// </summary>
-    public static string Plural(long n, string one, string other, params object?[] args) =>
-        F(n == 1 ? one : other, [n, .. args]);
+    public static string Plural(long n, string one, string other, params object?[] args)
+    {
+        string? translated = null;
+        if (_plurals.TryGetValue(other, out var forms))
+        {
+            if (Current.Equals("ru", StringComparison.OrdinalIgnoreCase) || Current.StartsWith("ru-", StringComparison.OrdinalIgnoreCase))
+            {
+                var last = Math.Abs(n % 10);
+                var lastTwo = Math.Abs(n % 100);
+                translated = last == 1 && lastTwo != 11 ? forms.One
+                    : last is >= 2 and <= 4 && lastTwo is not (>= 12 and <= 14) ? forms.Few : forms.Many;
+            }
+            else translated = n is 1 or -1 ? forms.One : forms.Other;
+            translated ??= forms.Other;
+        }
+        return string.Format(CultureInfo.CurrentCulture, translated ?? T(n is 1 or -1 ? one : other), [n, .. args]);
+    }
 
     /// <summary>Where the user's language files go.</summary>
     public static string UserFolder(string settingsPath) =>
@@ -71,6 +95,23 @@ public static class Loc
     public static void Load(string code, string settingsPath)
     {
         _strings = StringsFor(code, settingsPath);
+        _plurals = new(StringComparer.Ordinal);
+        foreach (var (key, value) in _strings)
+        {
+            var separator = key.LastIndexOf('|');
+            if (separator < 0 || value.Length == 0) continue;
+            var category = key.AsSpan(separator + 1);
+            if (category is not ("one" or "few" or "many" or "other")) continue;
+            var baseKey = key[..separator];
+            if (!_plurals.TryGetValue(baseKey, out var forms)) _plurals[baseKey] = forms = new PluralForms();
+            if (category is "one") forms.One = value;
+            else if (category is "few") forms.Few = value;
+            else if (category is "many") forms.Many = value;
+            else forms.Other = value;
+        }
+        _english = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (english, translated) in _strings)
+            if (translated.Length > 0) _english.TryAdd(translated, english);
         Current = code;
     }
 
@@ -96,10 +137,17 @@ public static class Loc
         var folder = UserFolder(settingsPath);
         Directory.CreateDirectory(folder);
         IEnumerable<string> keys = ReadBuiltIn("ru")?.Strings?.Keys ?? Enumerable.Empty<string>();
-        var doc = new LanguageFile { Name = "My language", Strings = keys.ToDictionary(k => k, k => k, StringComparer.Ordinal) };
+        var doc = new LanguageFile { Name = "My language", Strings = keys.ToDictionary(k => k, TemplateText, StringComparer.Ordinal) };
         File.WriteAllText(Path.Combine(folder, "template.json"),
             JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping, PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
         return folder;
+    }
+
+    private static string TemplateText(string key)
+    {
+        var separator = key.LastIndexOf('|');
+        return separator >= 0 && key.AsSpan(separator + 1) is "one" or "few" or "many" or "other"
+            ? key[..separator] : key;
     }
 
     private sealed class LanguageFile

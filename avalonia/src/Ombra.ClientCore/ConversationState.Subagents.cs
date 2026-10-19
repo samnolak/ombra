@@ -27,6 +27,7 @@ public sealed record SubagentInfo
     public DateTimeOffset UpdatedAt { get; init; }
     /// <summary>omp's own running time at the last progress (<c>durationMs</c>).</summary>
     public TimeSpan? Duration { get; init; }
+    public MonotonicTime RunningTime { get; init; }
     public string? CurrentTool { get; init; }
     public string? CurrentToolArgs { get; init; }
     public string? LastIntent { get; init; }
@@ -53,6 +54,12 @@ public sealed record SubagentToolUse(string Tool, string Args);
 
 /// <summary>One message of a subagent's own conversation (<c>get_subagent_messages</c>), reduced to what a reader needs.</summary>
 public sealed record SubagentMessage(string Role, string Text);
+
+/// <summary>A complete-line byte range of a subagent transcript. Messages are a bounded preview, not the full transcript.</summary>
+public sealed record SubagentMessagesPage(string SessionFile, long FromByte, long NextByte, bool Reset, IReadOnlyList<SubagentMessage> Messages)
+{
+    public const int PreviewLimit = 40;
+}
 
 /// <summary>Subagents: frames, <c>get_subagents</c> merges, and whether this omp reports them at all.</summary>
 public sealed partial class ConversationState
@@ -134,7 +141,7 @@ public sealed partial class ConversationState
         for (var i = 0; i < _subagents.Count; i++)
             if (_subagents[i].IsRunning && !listed.Contains(_subagents[i].Id))
             {
-                _subagents[i] = _subagents[i] with { Status = "ended", EndedAt = _subagents[i].EndedAt ?? now };
+                _subagents[i] = _subagents[i] with { Status = "ended", EndedAt = _subagents[i].EndedAt ?? now, RunningTime = _subagents[i].RunningTime.Stop() };
                 _subagentsDirty = true;
             }
         Touch();
@@ -180,10 +187,14 @@ public sealed partial class ConversationState
     }
 
     /// <summary>omp's <c>AgentProgress</c>: status, activity, output, counters.</summary>
-    private static SubagentInfo WithProgress(SubagentInfo info, JsonElement g, DateTimeOffset now)
+    private SubagentInfo WithProgress(SubagentInfo info, JsonElement g, DateTimeOffset now)
     {
         var status = Str(g, "status") ?? info.Status;
         var ended = status is not ("running" or "pending");
+        var duration = Long(g, "durationMs") is { } ms ? TimeSpan.FromMilliseconds(ms) : info.Duration;
+        var elapsed = info.RunningTime.Elapsed;
+        // Seed once from the engine's duration; later progress cannot inject remote wall-clock jumps.
+        if (info.Duration is null && duration > elapsed) elapsed = duration.Value;
         string? retry = null;
         if (g.TryGetProperty("retryFailure", out var rf) && rf.ValueKind == JsonValueKind.Object)
             retry = "Gave up retrying: " + (Str(rf, "errorMessage") ?? "provider error");
@@ -209,7 +220,8 @@ public sealed partial class ConversationState
             ContextTokens = Long(g, "contextTokens") ?? info.ContextTokens,
             ContextWindow = Long(g, "contextWindow") ?? info.ContextWindow,
             Cost = g.TryGetProperty("cost", out var c) && c.ValueKind == JsonValueKind.Number ? c.GetDouble() : info.Cost,
-            Duration = Long(g, "durationMs") is { } ms ? TimeSpan.FromMilliseconds(ms) : info.Duration,
+            Duration = duration,
+            RunningTime = MonotonicTime.Start(_clock, elapsed),
             Model = Str(g, "resolvedModel") ?? info.Model,
             RetryNote = retry,
             UpdatedAt = now,
@@ -217,19 +229,22 @@ public sealed partial class ConversationState
         };
     }
 
-    private static SubagentInfo NewSubagent(string id, JsonElement from, DateTimeOffset now) => new()
+    private SubagentInfo NewSubagent(string id, JsonElement from, DateTimeOffset now) => new()
     {
         Id = id,
         Agent = Str(from, "agent") ?? "task",
         Status = "running",
         FirstSeenAt = now,
         UpdatedAt = now,
+        RunningTime = MonotonicTime.Start(_clock),
     };
 
     private SubagentInfo? FindSubagent(string id) => _subagents.FirstOrDefault(s => s.Id == id);
 
     private void PutSubagent(SubagentInfo info)
     {
+        if (!info.IsRunning) info = info with { RunningTime = info.RunningTime.Stop() };
+        else if (!info.RunningTime.IsRunning) info = info with { RunningTime = MonotonicTime.Start(_clock, info.RunningTime.Elapsed) };
         var i = _subagents.FindIndex(s => s.Id == info.Id);
         if (i >= 0) _subagents[i] = info;
         else
@@ -238,6 +253,25 @@ public sealed partial class ConversationState
             // The oldest finished ones go first when the list is long
             while (_subagents.Count > MaxSubagents && _subagents.FindIndex(s => !s.IsRunning) is >= 0 and var old) _subagents.RemoveAt(old);
         }
+        _subagentsDirty = true;
+        Touch();
+    }
+
+    /// <summary>
+    /// Ends subagents the client still shows as running with <paramref name="status"/>: omp went away (crash:
+    /// "failed"; asked to stop: "aborted"), or omp confirmed a cancel. A later lifecycle frame may still correct it.
+    /// </summary>
+    public void EndRunningSubagents(string status, DateTimeOffset now, string? id = null)
+    {
+        var changed = false;
+        for (var i = 0; i < _subagents.Count; i++)
+        {
+            var s = _subagents[i];
+            if (!s.IsRunning || (id is not null && s.Id != id)) continue;
+            _subagents[i] = s with { Status = status, EndedAt = s.EndedAt ?? now, UpdatedAt = now, RunningTime = s.RunningTime.Stop() };
+            changed = true;
+        }
+        if (!changed) return;
         _subagentsDirty = true;
         Touch();
     }
@@ -264,11 +298,44 @@ public sealed partial class ConversationState
         return _subagentsView;
     }
 
-    /// <summary><c>get_subagent_messages</c>: the subagent's conversation, one entry per text or tool call.</summary>
-    public static IReadOnlyList<SubagentMessage> ParseSubagentMessages(JsonElement data, int max = 40)
+    /// <summary>Accepts only a coherent byte cursor; malformed responses must never consume transcript bytes.</summary>
+    internal static SubagentMessagesPage? ParseSubagentMessagesPage(JsonElement data, long requestedByte)
     {
-        var list = new List<SubagentMessage>();
-        if (!data.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array) return list;
+        if (data.ValueKind != JsonValueKind.Object || Str(data, "sessionFile") is not { Length: > 0 } path
+            || !data.TryGetProperty("fromByte", out var from) || from.ValueKind != JsonValueKind.Number || !from.TryGetInt64(out var fromByte)
+            || !data.TryGetProperty("nextByte", out var next) || next.ValueKind != JsonValueKind.Number || !next.TryGetInt64(out var nextByte)
+            || !data.TryGetProperty("reset", out var reset) || reset.ValueKind is not (JsonValueKind.True or JsonValueKind.False)
+            || !data.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array
+            || fromByte < 0 || nextByte < fromByte || (reset.GetBoolean() ? fromByte != 0 : fromByte != requestedByte)
+            || (nextByte == fromByte && messages.GetArrayLength() > 0)) return null;
+        foreach (var message in messages.EnumerateArray())
+        {
+            if (Str(message, "role") is not { Length: > 0 } role) return null;
+            if (role is not ("user" or "assistant" or "toolResult")) continue;
+            if (!message.TryGetProperty("content", out var content)) return null;
+            if (content.ValueKind == JsonValueKind.String) continue;
+            if (content.ValueKind != JsonValueKind.Array) return null;
+            foreach (var part in content.EnumerateArray())
+            {
+                if (Str(part, "type") is not { Length: > 0 } type) return null;
+                if (type == "text" && Str(part, "text") is null) return null;
+                if (type == "toolCall" && Str(part, "name") is null) return null;
+            }
+        }
+        return new SubagentMessagesPage(path, fromByte, nextByte, reset.GetBoolean(), ParseSubagentMessages(data));
+    }
+
+    /// <summary><c>get_subagent_messages</c>: the subagent's conversation, one entry per text or tool call.</summary>
+    public static IReadOnlyList<SubagentMessage> ParseSubagentMessages(JsonElement data, int max = SubagentMessagesPage.PreviewLimit)
+    {
+        if (max <= 0 || data.ValueKind != JsonValueKind.Object
+            || !data.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array) return [];
+        var list = new Queue<SubagentMessage>(max);
+        void Add(SubagentMessage message)
+        {
+            if (list.Count == max) list.Dequeue();
+            list.Enqueue(message);
+        }
         foreach (var m in messages.EnumerateArray())
         {
             if (m.ValueKind != JsonValueKind.Object) continue;
@@ -276,23 +343,23 @@ public sealed partial class ConversationState
             switch (role)
             {
                 case "user" or "assistant":
-                    if (ContentText(m, "text") is { Length: > 0 } text) list.Add(new SubagentMessage(role, Truncate(text.Trim(), 1200)));
+                    if (ContentText(m, "text") is { Length: > 0 } text) Add(new SubagentMessage(role, Truncate(text.Trim(), 1200)));
                     if (m.TryGetProperty("content", out var parts) && parts.ValueKind == JsonValueKind.Array)
                         foreach (var part in parts.EnumerateArray())
                             if (Str(part, "type") == "toolCall")
                             {
                                 var name = Str(part, "name") ?? "tool";
                                 var what = part.TryGetProperty("arguments", out var a) ? ToolSummary(name, a) : "";
-                                list.Add(new SubagentMessage("tool", what.Length > 0 ? $"{name} · {what}" : name));
+                                Add(new SubagentMessage("tool", Truncate(what.Length > 0 ? $"{name} · {what}" : name, 1200)));
                             }
                     break;
                 case "toolResult":
                     var result = ContentText(m, "text").Trim();
-                    if (result.Length > 0) list.Add(new SubagentMessage(Bool(m, "isError") ? "error" : "result", HeadTail(result, 600)));
+                    if (result.Length > 0) Add(new SubagentMessage(Bool(m, "isError") ? "error" : "result", HeadTail(result, 600)));
                     break;
             }
         }
-        return list.Count > max ? list[^max..] : list;
+        return list.ToArray();
     }
 
     private static int? Int(JsonElement e, string name) =>

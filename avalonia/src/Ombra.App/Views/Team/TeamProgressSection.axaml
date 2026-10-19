@@ -1,0 +1,57 @@
+<!-- Team page: the team's project progress (P3, ViewModels/Team/TeamProgressViewModel), live, with a project filter.
+     Who works on what: member, project, status, the current task when its author shares it, when it changed.
+     A title (with the filter) above one list card of rows, the privacy line under it (as TeamPage). -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Ombra.App.Localization"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             x:Class="Ombra.App.Views.Team.TeamProgressSection"
+             x:DataType="vm:TeamProgressViewModel">
+  <Border x:Name="ProgressCard" IsVisible="{Binding IsAvailable}">
+    <StackPanel Spacing="8">
+      <Grid Classes="list-head" ColumnDefinitions="*,Auto">
+        <TextBlock Classes="section" Text="{loc:T 'Project progress'}" />
+        <ComboBox x:Name="ProgressFilter" Grid.Column="1" Classes="chip" MinWidth="180" ItemsSource="{Binding Filters}" SelectedItem="{Binding Filter}" VerticalAlignment="Center" />
+      </Grid>
+      <Border Classes="plug-list">
+        <StackPanel>
+          <StackPanel Classes="plug-body" IsVisible="{Binding IsEmpty}">
+            <TextBlock x:Name="ProgressEmpty" Classes="muted" TextWrapping="Wrap"
+                       Text="{loc:T 'Nobody online shares progress right now. Turn it on for your projects in Settings › Account.'}" />
+          </StackPanel>
+          <ItemsControl x:Name="ProgressList" ItemsSource="{Binding Rows}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ProgressRow">
+                <StackPanel>
+                  <Border Classes="plug-sep flush" />
+                  <Grid Classes="plug-row" ColumnDefinitions="Auto,*,Auto">
+                    <Ellipse Width="8" Height="8" Margin="8,0,0,0" VerticalAlignment="Center"
+                             Classes.working="{Binding IsWorking}" Classes.waiting="{Binding IsWaiting}">
+                      <Ellipse.Styles>
+                        <Style Selector="Ellipse"><Setter Property="Fill" Value="{DynamicResource GuiStatusNeutral}" /></Style>
+                        <Style Selector="Ellipse.working"><Setter Property="Fill" Value="{DynamicResource GuiStatusRunning}" /></Style>
+                        <Style Selector="Ellipse.waiting"><Setter Property="Fill" Value="{DynamicResource GuiStatusWaiting}" /></Style>
+                      </Ellipse.Styles>
+                    </Ellipse>
+                    <StackPanel Grid.Column="1" Classes="plug-lead" Margin="12,10,8,10">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Classes="conn-name" Text="{Binding Member}" />
+                        <TextBlock Classes="muted" Text="·" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding Project}" VerticalAlignment="Center" />
+                        <Border Classes="conn-tag"><TextBlock Text="{Binding StatusText}" /></Border>
+                      </StackPanel>
+                      <TextBlock Classes="plug-line" Text="{Binding Task}" IsVisible="{Binding HasTask}" ToolTip.Tip="{Binding Task}" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="2" Classes="plug-scope end" Text="{Binding Updated}" />
+                  </Grid>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </Border>
+      <TextBlock Classes="tertiary" TextWrapping="Wrap" Margin="4,0,0,0"
+                 Text="{loc:T 'End-to-end encrypted; the server relays it to online members and keeps nothing.'}" />
+    </StackPanel>
+  </Border>
+</UserControl>

@@ -40,14 +40,24 @@ public sealed record ModelProviderEntry
     public IReadOnlyList<string> Models { get; init; } = [];
     /// <summary>Why the page can't edit the entry without losing something (null: it can).</summary>
     public string? NotEditable { get; init; }
+    /// <summary>The settings named in <see cref="NotEditable"/> (empty when the entry's whole form is the reason).</summary>
+    public IReadOnlyList<string> NotEditableSettings { get; init; } = [];
 
     public bool SameAs(ModelProviderEntry o) =>
         Id == o.Id && BaseUrl == o.BaseUrl && Api == o.Api && (ApiKey ?? "") == (o.ApiKey ?? "") && NoAuth == o.NoAuth
         && Discovery == o.Discovery && InjectV1 == o.InjectV1 && Models.SequenceEqual(o.Models);
 }
 
-/// <summary>Why <c>models.yml</c> was not read or not changed. The file is left as it was.</summary>
-public sealed class ModelsConfigException(string message) : Exception(message);
+/// <summary>
+/// Why <c>models.yml</c> was not read or not changed. The file is left as it was. <see cref="Format"/> and <see cref="Args"/>
+/// let the app show the sentence in its language; <see cref="Exception.Message"/> is the English one.
+/// </summary>
+public sealed class ModelsConfigException(string format, params object?[] args)
+    : Exception(string.Format(System.Globalization.CultureInfo.InvariantCulture, format, args))
+{
+    public string Format { get; } = format;
+    public object?[] Args { get; } = args;
+}
 
 /// <summary>
 /// omp's <c>models.yml</c> in its agent folder (custom and local model providers; omp reads it when it starts). The app
@@ -102,14 +112,14 @@ public sealed class ModelsConfig
                 // omp moves a models.json into models.yml when it starts; until then the JSON file is the one it uses
                 var json = System.IO.Path.ChangeExtension(path, ".json");
                 if (File.Exists(json))
-                    throw new ModelsConfigException($"omp keeps these providers in {System.IO.Path.GetFileName(json)} and moves them to {FileName} when it starts. Start omp once, then try again.");
+                    throw new ModelsConfigException("omp keeps these providers in {0} and moves them to {1} when it starts. Start omp once, then try again.", System.IO.Path.GetFileName(json), FileName);
                 text = "";
             }
             else text = File.ReadAllText(path);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            throw new ModelsConfigException($"Couldn't read {System.IO.Path.GetFileName(path)}: {e.Message}");
+            throw new ModelsConfigException("Couldn't read {0}: {1}", System.IO.Path.GetFileName(path), e.Message);
         }
         return Parse(path, text);
     }
@@ -123,13 +133,13 @@ public sealed class ModelsConfig
         catch (YamlException e)
         {
             var why = e.InnerException?.Message ?? e.Message;
-            throw new ModelsConfigException($"{name} is not valid YAML (line {e.Start.Line}): {Clean(why)}");
+            throw new ModelsConfigException("{0} is not valid YAML (line {1}): {2}", name, e.Start.Line, Clean(why));
         }
-        if (stream.Documents.Count > 1) throw new ModelsConfigException($"{name} holds more than one YAML document; omp reads only one.");
+        if (stream.Documents.Count > 1) throw new ModelsConfigException("{0} holds more than one YAML document; omp reads only one.", name);
         var rootNode = stream.Documents.Count == 0 ? null : stream.Documents[0].RootNode;
         if (rootNode is null || rootNode is YamlScalarNode { Value: null or "" or "~" or "null" })
             return new ModelsConfig(path, text, null, null, null, []);
-        if (rootNode is not YamlMappingNode root) throw new ModelsConfigException($"{name} is not a mapping of settings (providers: …).");
+        if (rootNode is not YamlMappingNode root) throw new ModelsConfigException("{0} is not a mapping of settings (providers: …).", name);
 
         var key = root.Children.Keys.OfType<YamlScalarNode>().FirstOrDefault(k => k.Value == "providers");
         if (key is null) return new ModelsConfig(path, text, root, null, null, []);
@@ -138,7 +148,7 @@ public sealed class ModelsConfig
         if (value is YamlMappingNode map)
             foreach (var (k, v) in map.Children)
                 providers.Add(ReadEntry(k is YamlScalarNode { Value: { } id } ? id : k.ToString(), v));
-        else if (!IsNull(value)) throw new ModelsConfigException($"In {name}, providers is not a mapping of providers.");
+        else if (!IsNull(value)) throw new ModelsConfigException("In {0}, providers is not a mapping of providers.", name);
         return new ModelsConfig(path, text, root, key, value, providers);
     }
 
@@ -213,6 +223,7 @@ public sealed class ModelsConfig
             InjectV1 = injectV1,
             Models = models,
             NotEditable = problems.Count == 0 ? null : "it uses settings this page doesn't edit (" + string.Join(", ", problems.Distinct()) + ")",
+            NotEditableSettings = [.. problems.Distinct()],
         };
     }
 
@@ -267,7 +278,7 @@ public sealed class ModelsConfig
         {
             // providers: (nothing), providers: null, providers: {}: the line becomes the start of a block
             if (_providersValue is not null && !IsNull(_providersValue) && _providersValue is not YamlMappingNode { Children.Count: 0 })
-                throw new ModelsConfigException($"providers in {System.IO.Path.GetFileName(Path)} is written on one line; edit {System.IO.Path.GetFileName(Path)} itself.");
+                throw new ModelsConfigException("providers in {0} is written on one line; edit {0} itself.", System.IO.Path.GetFileName(Path));
             var start = LineStart(Index(_providersKey.Start));
             var end = LineEnd(Index(_providersValue?.End ?? _providersKey.End));
             var indent = IndentOf(_providersKey);
@@ -276,7 +287,7 @@ public sealed class ModelsConfig
         else
         {
             if (_root is { Style: MappingStyle.Flow })
-                throw new ModelsConfigException($"{System.IO.Path.GetFileName(Path)} is written on one line; edit it itself.");
+                throw new ModelsConfigException("{0} is written on one line; edit it itself.", System.IO.Path.GetFileName(Path));
             var indent = _root is { Children.Count: > 0 } r ? IndentOf(r.Children.Keys.First()) : 0;
             var before = Text.Length > 0 && !Text.EndsWith('\n') ? nl : "";
             result = Text + before + new string(' ', indent) + "providers:" + nl + Serialize(entry, indent + 2, nl);
@@ -290,9 +301,9 @@ public sealed class ModelsConfig
     public string WithoutProvider(string id)
     {
         if (_providersValue is not YamlMappingNode map || map.Children.Keys.ToList() is var keys && keys.FindIndex(k => k is YamlScalarNode { Value: var v } && v == id) is var at && at < 0)
-            throw new ModelsConfigException($"{id} is no longer in {System.IO.Path.GetFileName(Path)}.");
+            throw new ModelsConfigException("{0} is no longer in {1}.", id, System.IO.Path.GetFileName(Path));
         if (map.Style == MappingStyle.Flow)
-            throw new ModelsConfigException($"providers in {System.IO.Path.GetFileName(Path)} is written on one line; edit {System.IO.Path.GetFileName(Path)} itself.");
+            throw new ModelsConfigException("providers in {0} is written on one line; edit {0} itself.", System.IO.Path.GetFileName(Path));
         string result;
         if (keys.Count == 1)
         {
@@ -332,7 +343,7 @@ public sealed class ModelsConfig
         var keyIndex = Index(keys[at].Start);
         var start = LineStart(keyIndex);
         if (Text.AsSpan(start, keyIndex - start).Trim().Length > 0 || keys[at] is not YamlScalarNode)
-            throw new ModelsConfigException($"The provider list in {System.IO.Path.GetFileName(Path)} is written in a form this page doesn't edit.");
+            throw new ModelsConfigException("The provider list in {0} is written in a form this page doesn't edit.", System.IO.Path.GetFileName(Path));
         int end;
         if (at + 1 < keys.Count) end = LineStart(Index(keys[at + 1].Start));
         else
@@ -413,7 +424,7 @@ public sealed class ModelsConfig
         var name = System.IO.Path.GetFileName(Path);
         ModelsConfig after;
         try { after = Parse(Path, result); }
-        catch (ModelsConfigException) { throw new ModelsConfigException($"The change to {name} would not read back correctly, so it was not made. Edit {name} itself."); }
+        catch (ModelsConfigException) { throw new ModelsConfigException("The change to {0} would not read back correctly, so it was not made. Edit {0} itself.", name); }
 
         string Canon(YamlMappingNode? root, bool withProviders) => root is null ? "" : string.Join("\n",
             root.Children.Where(kv => withProviders || kv.Key is not YamlScalarNode { Value: "providers" }).Select(kv => Canonical(kv.Key) + "=" + Canonical(kv.Value)));
@@ -423,7 +434,7 @@ public sealed class ModelsConfig
         var ok = Canon(_root, false) == Canon(after._root, false) && Others(this).SequenceEqual(Others(after));
         var got = after.Providers.Where(p => p.Id == id).ToList();
         ok &= expected is null ? got.Count == 0 : got.Count == 1 && got[0].NotEditable is null && got[0].SameAs(expected);
-        if (!ok) throw new ModelsConfigException($"The change to {name} would not read back correctly, so it was not made. Edit {name} itself.");
+        if (!ok) throw new ModelsConfigException("The change to {0} would not read back correctly, so it was not made. Edit {0} itself.", name);
     }
 
     /// <summary>A node's content without its layout: what omp would read (plain scalars kept apart from quoted ones, which YAML types differently).</summary>
@@ -455,7 +466,7 @@ public sealed class ModelsConfig
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             try { File.Delete(temp); } catch (Exception d) when (d is IOException or UnauthorizedAccessException) { }
-            throw new ModelsConfigException($"Couldn't write {System.IO.Path.GetFileName(path)}: {e.Message}");
+            throw new ModelsConfigException("Couldn't write {0}: {1}", System.IO.Path.GetFileName(path), e.Message);
         }
     }
 }

@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.Input;
 using Ombra.App.Localization;
 using Ombra.ClientCore;
 
+using Ombra.App.Controls;
 namespace Ombra.App.ViewModels;
 
 /// <summary>One transcript row. Rows are updated in place so the list keeps its containers while text streams in.</summary>
@@ -119,8 +120,8 @@ public sealed partial class UserRowViewModel(UserItem item) : RowViewModel(item)
     {
         get
         {
-            // Code comments come before the page's (MainViewModel.WithComments)
-            foreach (var marker in (string[])[MainViewModel.CodeCommentsMarker, PreviewViewModel.PromptMarker])
+            // Code marks come before the page's (LocalMarks.BuildRequest)
+            foreach (var marker in (string[])[LocalMarks.CodeMarker, LocalMarks.PageMarker])
             {
                 if (Text.StartsWith(marker, StringComparison.Ordinal)) return 0;
                 var i = Text.IndexOf("\n\n" + marker, StringComparison.Ordinal);
@@ -139,7 +140,7 @@ public sealed partial class UserRowViewModel(UserItem item) : RowViewModel(item)
         {
             if (CommentsAt is var at && at < 0) return Text;
             var own = Text[..at].Trim();
-            return own is PreviewViewModel.CommentsOnlyLine or MainViewModel.CodeCommentsOnlyLine or MainViewModel.AllCommentsOnlyLine ? "" : own;
+            return own is LocalMarks.PageOnlyLine or LocalMarks.CodeOnlyLine or LocalMarks.AllOnlyLine ? "" : own;
         }
     }
 
@@ -150,12 +151,12 @@ public sealed partial class UserRowViewModel(UserItem item) : RowViewModel(item)
             if (CommentsAt is var at && at < 0) return "";
             var block = Text[at..];
             var n = block.Split('\n').Count(l => l.Length > 2 && char.IsAsciiDigit(l[0]) && l.IndexOf(". ", StringComparison.Ordinal) is > 0 and < 4);
-            var hosts = block.Split('\n').Where(l => l.StartsWith(PreviewViewModel.PromptMarker, StringComparison.Ordinal))
-                .Select(l => Uri.TryCreate(l[PreviewViewModel.PromptMarker.Length..].Split(' ')[0].TrimEnd(','), UriKind.Absolute, out var u) ? u.Authority + u.AbsolutePath.TrimEnd('/') : "")
+            var hosts = block.Split('\n').Where(l => l.StartsWith(LocalMarks.PageMarker, StringComparison.Ordinal))
+                .Select(l => Uri.TryCreate(l[LocalMarks.PageMarker.Length..].Split(' ')[0].TrimEnd(','), UriKind.Absolute, out var u) ? u.Authority + u.AbsolutePath.TrimEnd('/') : "")
                 .Where(h => h.Length > 0).Distinct().ToList();
             var what = n == 1 ? Loc.T("1 comment") : Loc.F("{0} comments", n);
-            if (block.StartsWith(MainViewModel.CodeCommentsMarker, StringComparison.Ordinal))
-                return block.Contains("\n\n" + PreviewViewModel.PromptMarker, StringComparison.Ordinal) ? what : Loc.F("{0} on the code", what);
+            if (block.StartsWith(LocalMarks.CodeMarker, StringComparison.Ordinal))
+                return block.Contains("\n\n" + LocalMarks.PageMarker, StringComparison.Ordinal) ? what : Loc.F("{0} on the code", what);
             return hosts.Count == 1 ? Loc.F("{0} on {1}", what, hosts[0]) : hosts.Count > 1 ? Loc.F("{0} on {1} pages", what, hosts.Count) : Loc.F("{0} on the page", what);
         }
     }
@@ -224,9 +225,14 @@ public sealed partial class AssistantRowViewModel : RowViewModel
     [NotifyPropertyChangedFor(nameof(TimeText), nameof(HasTime))]
     private DateTimeOffset? _at;
 
-    private DateTimeOffset? _thinkingFrom, _thinkingTo;
+    private readonly TimeProvider _clock;
+    private MonotonicTime? _thinkingTime;
 
-    public AssistantRowViewModel(AssistantItem item) : base(item) => OnUpdated();
+    public AssistantRowViewModel(AssistantItem item, TimeProvider? clock = null) : base(item)
+    {
+        _clock = clock ?? TimeProvider.System;
+        OnUpdated();
+    }
 
     public bool HasThinking => Thinking.Length > 0;
     public bool HasFooter => Footer is not null;
@@ -238,8 +244,8 @@ public sealed partial class AssistantRowViewModel : RowViewModel
     public bool IsThinkingLive => Streaming && HasThinking && !HasText;
     /// <summary>"Thinking… 4s" while it thinks, then "Thought for 4s" (Claude Code); loaded history just says "Thinking".</summary>
     public string ThinkingLabel => IsThinkingLive
-            ? _thinkingFrom is { } since && (DateTimeOffset.UtcNow - since).TotalSeconds >= 1 ? Loc.F("Thinking… {0}s", (int)(DateTimeOffset.UtcNow - since).TotalSeconds) : Loc.T("Thinking…")
-        : _thinkingFrom is { } from && _thinkingTo is { } to ? Loc.F("Thought for {0}s", Math.Max(1, (int)Math.Round((to - from).TotalSeconds)))
+            ? _thinkingTime is { Elapsed.TotalSeconds: >= 1 } live ? Loc.F("Thinking… {0}s", (int)live.Elapsed.TotalSeconds) : Loc.T("Thinking…")
+        : _thinkingTime is { } finished ? Loc.F("Thought for {0}s", Math.Max(1, (int)Math.Round(finished.Elapsed.TotalSeconds)))
         : Loc.T("Thinking");
     /// <summary>The actions line under the reply: the last reply of a finished turn, or a stopped one.</summary>
     public bool ShowActions => HasFooter || (IsTurnEnd && HasText && !Streaming);
@@ -253,15 +259,15 @@ public sealed partial class AssistantRowViewModel : RowViewModel
         if (IsThinkingLive) OnPropertyChanged(nameof(ThinkingLabel));
     }
 
-    /// <summary>Raised when the user copies the message; the view puts it on the clipboard.</summary>
-    public static event Action<string>? CopyRequested;
+    /// <summary>The originating row identifies its window, even when that window is inactive.</summary>
+    public static event Action<AssistantRowViewModel, string>? CopyRequested;
 
     [RelayCommand]
-    private void Copy() => CopyRequested?.Invoke(Text);
+    private void Copy() => CopyRequested?.Invoke(this, Text);
 
     /// <summary>Copies the reply as it reads, without the Markdown marks (Copy as Markdown is <see cref="CopyCommand"/>).</summary>
     [RelayCommand]
-    private void CopyText() => CopyRequested?.Invoke(Markdig.Markdown.ToPlainText(Text).TrimEnd());
+    private void CopyText() => CopyRequested?.Invoke(this, Markdig.Markdown.ToPlainText(Text).TrimEnd());
 
     protected override void OnUpdated()
     {
@@ -274,8 +280,8 @@ public sealed partial class AssistantRowViewModel : RowViewModel
         Footer = a.StopReason == "aborted" ? Loc.T("Interrupted") : null;
         ErrorText = a.StopReason == "aborted" ? null : a.Error;
         // Thinking time as seen here: from its first delta to the first answer text (or the end of the message)
-        if (a.Streaming && a.Thinking.Length > 0) _thinkingFrom ??= DateTimeOffset.UtcNow;
-        if (_thinkingFrom is not null && _thinkingTo is null && (a.Text.Length > 0 || !a.Streaming)) _thinkingTo = DateTimeOffset.UtcNow;
+        if (a.Streaming && a.Thinking.Length > 0) _thinkingTime ??= MonotonicTime.Start(_clock);
+        if (_thinkingTime is { IsRunning: true } timing && (a.Text.Length > 0 || !a.Streaming)) _thinkingTime = timing.Stop();
         OnPropertyChanged(nameof(HasThinking));
         OnPropertyChanged(nameof(HasFooter));
         OnPropertyChanged(nameof(HasError));
@@ -441,7 +447,7 @@ public sealed partial class ToolRowViewModel : RowViewModel
             ToolStatus.Skipped => Loc.T("skipped"),
             _ => Loc.T("interrupted"),
         };
-        Output = t.Output ?? "";
+        Output = Ombra.App.Controls.VisibleText.FromUntrustedOutput(t.Output ?? "", stripSgr: true);
         IsRunning = t.Status == ToolStatus.Running;
         IsFailed = t.Status == ToolStatus.Failed;
         IsDone = t.Status == ToolStatus.Succeeded;
@@ -512,7 +518,7 @@ public sealed partial class ToolRowViewModel : RowViewModel
             };
             value = string.Join(' ', value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)).Trim();
             if (value.Length == 0) continue;
-            if (value.Length > MaxValue) value = value[..(MaxValue - 1)] + "…";
+            if (value.Length > MaxValue) value = value[..GraphemeText.PrefixLength(value, MaxValue - 1)] + "…";
             lines.Add($"{p.Name.Replace('_', ' ')}: {value}");
             if (lines.Count == MaxLines) break;
         }
@@ -571,7 +577,7 @@ public sealed partial class ToolRowViewModel : RowViewModel
         if (IsCommand) { } // its output is in its Shell card
         else if (IsRunning) (result, isOutput) = (string.Join('\n', lines.Skip(Math.Max(0, lines.Length - PreviewLines))), true);
         else if (HasDiff && !IsFailed) { }
-        else if (t.ResultNote is { } note) meta = note.StartsWith("Found ", StringComparison.Ordinal) ? note[6..] : note;
+        else if (t.ResultNote is { } note) meta = NoteWords(note);
         else if (Name == "read" && !IsFailed && lines.Length > 0) meta = lines.Length == 1 ? Loc.T("1 line") : Loc.F("{0} lines", lines.Length);
         else if (Name == "ls" && !IsFailed && lines.Length > 0) meta = lines.Length == 1 ? Loc.T("1 entry") : Loc.F("{0} entries", lines.Length);
         else if (lines.Length > 0)
@@ -592,6 +598,34 @@ public sealed partial class ToolRowViewModel : RowViewModel
         OnPropertyChanged(nameof(ShowMore));
         OnPropertyChanged(nameof(MoreText));
     }
+
+    /// <summary>
+    /// ClientCore's search note (ConversationState.ResultNote: "Found 5 matches in 2 files", "No files found") as the
+    /// few words at the line's end, in the UI's language: "5 matches in 2 files".
+    /// </summary>
+    internal static string NoteWords(string note)
+    {
+        if (note == "No files found") return Loc.T("No files found");
+        if (note == "No matches") return Loc.T("No matches");
+        if (FoundNote().Match(note) is not { Success: true } m) return note;
+        var n = int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var more = m.Groups[2].Length > 0;
+        if (m.Groups[4].Success)
+        {
+            var inFiles = int.Parse(m.Groups[4].Value, System.Globalization.CultureInfo.InvariantCulture);
+            return more ? Loc.F("{0}+ matches in {1} files", n, inFiles) : Loc.F("{0} matches in {1} files", n, inFiles);
+        }
+        return (m.Groups[3].Value.StartsWith("file", StringComparison.Ordinal), more) switch
+        {
+            (true, true) => Loc.F("{0}+ files", n),
+            (true, false) => Loc.Plural(n, "1 file", "{0} files"),
+            (false, true) => Loc.F("{0}+ matches", n),
+            _ => Loc.Plural(n, "1 match", "{0} matches"),
+        };
+    }
+
+    [GeneratedRegex(@"^Found (\d+)(\+?) (files?|match(?:es)?)(?: in (\d+) files)?$")]
+    private static partial Regex FoundNote();
 
     /// <summary>Why omp set the call aside, from its result ("Skipped due to a queued user message. …", agent-loop.ts).</summary>
     internal static string SkippedFor(string output) => output switch
@@ -710,16 +744,201 @@ public sealed partial class ToolRowViewModel : RowViewModel
 
 public sealed partial class NoticeRowViewModel(NoticeItem item) : RowViewModel(item)
 {
-    public string Text => ((NoticeItem)Model).Text;
+    private string _text = Shown(item);
+    public string Text => _text;
     public bool IsError => ((NoticeItem)Model).Level == NoticeLevel.Error;
     public bool IsWarning => ((NoticeItem)Model).Level == NoticeLevel.Warning;
 
     protected override void OnUpdated()
     {
+        _text = Shown((NoticeItem)Model);
         OnPropertyChanged(nameof(Text));
         OnPropertyChanged(nameof(IsError));
         OnPropertyChanged(nameof(IsWarning));
     }
+
+    /// <summary>
+    /// The notice in the UI's language: the client's own first line (<see cref="NoticeItem.Headline"/>) through Loc, what
+    /// follows it (omp's stderr) as it is; else the dialog and rule notices AnswerNotices knows.
+    /// </summary>
+    private static string Shown(NoticeItem item)
+    {
+        var text = item.Headline is { } h && item.Text.StartsWith(h.ToString(), StringComparison.Ordinal)
+            ? Loc.F(h.Format, h.Args) + item.Text[h.ToString().Length..]
+            : AnswerNotices.Localize(item.Text);
+        return VisibleText.FromUntrustedOutput(text);
+    }
+}
+
+/// <summary>
+/// How a dialog ended and what a "don't ask again" rule did, as ClientCore writes it in English
+/// (ConversationState.RecordAnswer "Approved by you — bash", ExpireDialogs/CloseAllDialogs "Approval request closed (the
+/// run was stopped) — bash", SessionController.Approvals "Allowed automatically — …"): shown in the UI's language.
+/// Anything else is omp's or the client's own text and stays as it is.
+/// </summary>
+internal static partial class AnswerNotices
+{
+    /// <summary><c>Rule</c>: the first value is a rule in words and the second its scope (ApprovalGrant.Describe).</summary>
+    private static readonly (System.Text.RegularExpressions.Regex Pattern, string Key, bool Rule)[] Known =
+    [
+        (DeniedWithReason(), "Denied by you — {0}: “{1}”", false),
+        (AnsweredWithChoice(), "Answered by you: “{0}” — {1}", false),
+        (Simple("Approved"), "Approved by you — {0}", false),
+        (Simple("Denied"), "Denied by you — {0}", false),
+        (Simple("Answered"), "Answered by you — {0}", false),
+        (Simple("Confirmed"), "Confirmed by you — {0}", false),
+        (Simple("Declined"), "Declined by you — {0}", false),
+        (RuleAllowed(), "Allowed automatically — {0} ({1})", true),
+        (RuleKept(), "Won't ask again for {0} ({1}) — the rules are in Settings → Permissions", true),
+        (RuleNotKept(), "The rule was not kept ({0}); omp will ask again next time", false),
+    ];
+
+    /// <summary>ClientCore's English rule words (ApprovalRule.Description, "commands starting with “npm test”").</summary>
+    private static readonly (System.Text.RegularExpressions.Regex Pattern, string Key)[] RuleWords =
+    [
+        (CommandsStartingWith(), "commands starting with “{0}”"),
+        (TheCommand(), "the command “{0}”"),
+        (McpToolFrom(), "“{0}” from {1}"),
+        (TheTool(), "the {0} tool"),
+    ];
+
+    /// <summary>
+    /// A dialog that ended without an answer, or a connector's form (ConversationState.Describe names the dialog:
+    /// "Approval request", "Question", "Form from connector “github”"); the request's own title stays as omp wrote it.
+    /// </summary>
+    private static readonly (System.Text.RegularExpressions.Regex Pattern, string Key, Func<System.Text.RegularExpressions.Match, object?[]> Args)[] DialogEnds =
+    [
+        (DialogTimedOut(), "{0} timed out without an answer; omp applied its default — {1}", m => [DialogWords(m.Groups[1].Value), m.Groups[2].Value]),
+        (DialogClosed(), "{0} closed ({1}) — {2}", m => [DialogWords(m.Groups[1].Value), ReasonWords(m.Groups[2].Value), m.Groups[3].Value]),
+        (DialogDismissed(), "{0} dismissed by you — {1}", m => [DialogWords(m.Groups[1].Value), m.Groups[2].Value]),
+        (DialogWithdrawn(), "{0} withdrawn by omp — {1}", m => [DialogWords(m.Groups[1].Value), m.Groups[2].Value]),
+        (DialogDeclinedWhileStopping(), "{0} declined (the run is being stopped) — {1}", m => [DialogWords(m.Groups[1].Value), m.Groups[2].Value]),
+        (FormDismissedWhileStopping(), "Form from connector “{0}” dismissed (the run is being stopped)", m => [m.Groups[1].Value]),
+        (FormSent(), "Sent by you: form from connector “{0}” — {1}", m => [m.Groups[1].Value, m.Groups[2].Value]),
+        (FormDeclined(), "Declined by you: form from connector “{0}” — {1}", m => [m.Groups[1].Value, m.Groups[2].Value]),
+        (AskUnusable(), "Question declined (omp sent no usable question)", _ => []),
+        (PlanNotChanged(), "The plan was not changed: {0}", m => [m.Groups[1].Value]),
+    ];
+
+    private const string Dialog = "(Approval request|Question|Form from connector “.*?”)";
+
+    [System.Text.RegularExpressions.GeneratedRegex("^" + Dialog + " timed out without an answer; omp applied its default — (.*)$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex DialogTimedOut();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^" + Dialog + " closed \\((the run was stopped|this chat was opened elsewhere|omp was stopped|omp is no longer running)\\) — (.*)$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex DialogClosed();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^" + Dialog + " dismissed by you — (.*)$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex DialogDismissed();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^" + Dialog + " withdrawn by omp — (.*)$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex DialogWithdrawn();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^(Approval request|Question) declined \\(the run is being stopped\\) — (.*)$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex DialogDeclinedWhileStopping();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^Form from connector “(.*)” dismissed \\(the run is being stopped\\)$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex FormDismissedWhileStopping();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^Sent by you: form from connector “(.*?)” — (.*)$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex FormSent();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^Declined by you: form from connector “(.*?)” — (.*)$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex FormDeclined();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^Question declined \\(omp sent no usable question\\)$")]
+    private static partial System.Text.RegularExpressions.Regex AskUnusable();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^The plan was not changed: (.*)$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex PlanNotChanged();
+
+    /// <summary>The dialog as ConversationState.Describe names it, in the UI's language.</summary>
+    private static string DialogWords(string dialog) => dialog switch
+    {
+        "Approval request" => Loc.T("Approval request"),
+        "Question" => Loc.T("Question"),
+        _ => Loc.F("Form from connector “{0}”", dialog["Form from connector “".Length..^1]),
+    };
+
+    /// <summary>Why every open dialog was closed (SessionController), in the UI's language.</summary>
+    private static string ReasonWords(string reason) => reason switch
+    {
+        "the run was stopped" => Loc.T("the run was stopped"),
+        "this chat was opened elsewhere" => Loc.T("this chat was opened elsewhere"),
+        "omp was stopped" => Loc.T("omp was stopped"),
+        _ => Loc.T("omp is no longer running"),
+    };
+
+    private static System.Text.RegularExpressions.Regex Simple(string verb) =>
+        new($"^{verb} by you — (.+)$", System.Text.RegularExpressions.RegexOptions.Singleline);
+
+    [System.Text.RegularExpressions.GeneratedRegex("^Denied by you — (.+): “(.*)”$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex DeniedWithReason();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^Answered by you: “(.*)” — (.+)$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex AnsweredWithChoice();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^Allowed automatically — (.+) \\((this session|this project|always)\\)$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex RuleAllowed();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^Won't ask again for (.+) \\((this session|this project|always)\\) — the rules are in Settings → Permissions$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex RuleKept();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^The rule was not kept \\((.*)\\); omp will ask again next time$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex RuleNotKept();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^commands starting with “(.*)”$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex CommandsStartingWith();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^the command “(.*)”$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex TheCommand();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^“(.+)” from (.+)$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex McpToolFrom();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^the (.+) tool$", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex TheTool();
+
+    public static string Localize(string text)
+    {
+        if (Loc.Current == Loc.English) return text;
+        foreach (var (pattern, key, rule) in Known)
+            if (pattern.Match(text) is { Success: true } m)
+                return rule
+                    ? Loc.F(key, RuleDescription(m.Groups[1].Value), ScopeWords(m.Groups[2].Value))
+                    : Loc.F(key, [.. m.Groups.Values.Skip(1).Select(g => (object?)g.Value)]);
+        foreach (var (pattern, key, args) in DialogEnds)
+            if (pattern.Match(text) is { Success: true } m)
+                return Loc.F(key, args(m));
+        return text;
+    }
+
+    /// <summary>A rule in words (ApprovalRule.Description) in the UI's language: "команды, начинающиеся с «npm test»".</summary>
+    public static string RuleDescription(string text)
+    {
+        if (Loc.Current == Loc.English) return text;
+        switch (text)
+        {
+            case "every command": return Loc.T("every command");
+            case "writing files": return Loc.T("writing files");
+            case "edits": return Loc.T("edits");
+            case "reading files": return Loc.T("reading files");
+            case "running code": return Loc.T("running code");
+            case "opening web pages": return Loc.T("opening web pages");
+            case "starting subagents": return Loc.T("starting subagents");
+        }
+        foreach (var (pattern, key) in RuleWords)
+            if (pattern.Match(text) is { Success: true } m)
+                return Loc.F(key, [.. m.Groups.Values.Skip(1).Select(g => (object?)g.Value)]);
+        return text;
+    }
+
+    private static string ScopeWords(string scope) => scope switch
+    {
+        "this session" => Loc.T("this session"),
+        "this project" => Loc.T("this project"),
+        _ => Loc.T("always"),
+    };
 }
 
 /// <summary>
@@ -835,11 +1054,14 @@ public sealed partial class TurnEndRowViewModel(TurnEndItem item) : RowViewModel
         public int Last;
     }
 
+    /// <summary>How long a call took: "1.2s" (the decimal mark is the language's: "1,2 с"), "42s", "1m 05s", "1h 02m".</summary>
     public static string Duration(TimeSpan t) =>
-        t.TotalSeconds < 10 ? Loc.F("{0}s", $"{t.TotalSeconds:0.0}".Replace(',', '.'))
+        t.TotalSeconds < 10 ? Tenths((int)Math.Round(t.TotalSeconds * 10, MidpointRounding.AwayFromZero))
         : t.TotalMinutes < 1 ? Loc.F("{0}s", (int)t.TotalSeconds)
         : t.TotalHours < 1 ? Loc.F("{0}m {1:00}s", (int)t.TotalMinutes, t.Seconds)
         : Loc.F("{0}h {1:00}m", (int)t.TotalHours, t.Minutes);
+
+    private static string Tenths(int tenths) => Loc.F("{0}.{1}s", tenths / 10, tenths % 10);
 
     /// <summary>A turn's length in whole units, as Codex's "Worked for" line says it: "17s", "1m 18s", "1h 5m".</summary>
     public static string TurnDuration(TimeSpan t) =>
@@ -887,15 +1109,29 @@ public sealed class TurnFileViewModel(string path, FileChangeKind kind, string? 
     public string OpenName => Loc.F("Open {0}", Path);
 }
 
-public sealed partial class CommandOutputRowViewModel(CommandOutputItem item) : RowViewModel(item)
+public sealed partial class CommandOutputRowViewModel(CommandOutputItem item) : RowViewModel(item), IDisposable
 {
-    public string Text => ((CommandOutputItem)Model).Text;
+    private string _text = VisibleText.FromUntrustedOutput(item.Text);
+    public string Text => _text;
+    public string? Label => ((CommandOutputItem)Model).Label;
+    public bool IsContext => Label is not null;
+    public bool IsOutput => !IsContext && !IsMarker;
+    public string TimeText => MessageTimes.Short(((CommandOutputItem)Model).At);
+    public bool HasTime => ((CommandOutputItem)Model).At is not null;
+    public IReadOnlyList<ImagePreview> Previews { get; private set; } =
+        [.. item.Images.Select(image => new ImagePreview(image, () => item.Images))];
+    public bool HasImages => Previews.Count > 0;
+
+    public void Dispose()
+    {
+        foreach (var preview in Previews) preview.Dispose();
+    }
 
     /// <summary>
     /// A line that marks a point in the conversation rather than output to read ("Compaction complete. Tokens: 48210 ->
     /// 9120 …"): a divider saying what happened, not a block of raw text under the card that already reported it.
     /// </summary>
-    public string? Marker => Text.Trim() is var t && !t.Contains('\n') && t.StartsWith("Compaction complete", StringComparison.Ordinal)
+    public string? Marker => !IsContext && Text.Trim() is var t && !t.Contains('\n') && t.StartsWith("Compaction complete", StringComparison.Ordinal)
         && SessionOutputs.ParseCompactEnd(t) is { Ok: true } r
             ? r is { TokensBefore: { } b, TokensAfter: { } a } ? Loc.F("Conversation compacted · {0} → {1} tokens", SessionOutputs.Tokens(b), SessionOutputs.Tokens(a)) : Loc.T("Conversation compacted")
             : null;
@@ -903,9 +1139,23 @@ public sealed partial class CommandOutputRowViewModel(CommandOutputItem item) : 
 
     protected override void OnUpdated()
     {
+        _text = VisibleText.FromUntrustedOutput(((CommandOutputItem)Model).Text);
         OnPropertyChanged(nameof(Text));
         OnPropertyChanged(nameof(Marker));
         OnPropertyChanged(nameof(IsMarker));
+        OnPropertyChanged(nameof(Label));
+        OnPropertyChanged(nameof(IsContext));
+        OnPropertyChanged(nameof(IsOutput));
+        OnPropertyChanged(nameof(TimeText));
+        OnPropertyChanged(nameof(HasTime));
+        var images = ((CommandOutputItem)Model).Images;
+        if (!Previews.Select(preview => preview.Model).SequenceEqual(images))
+        {
+            Dispose();
+            Previews = [.. images.Select(image => new ImagePreview(image, () => images))];
+            OnPropertyChanged(nameof(Previews));
+            OnPropertyChanged(nameof(HasImages));
+        }
     }
 }
 

@@ -1,0 +1,64 @@
+<!-- The Plugins page's Skills tab, under the list: where omp looks for skills (ViewModels/PluginsViewModel.cs). -->
+<UserControl xmlns:loc="using:Ombra.App.Localization"
+             xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
+             xmlns:settings="using:Ombra.App.Views.Settings"
+             x:Class="Ombra.App.Views.Settings.SkillSourcesSection"
+             x:DataType="vm:PluginsViewModel">
+  <Border x:Name="SkillSourcesCard" Classes="section-card">
+    <StackPanel Spacing="14">
+      <StackPanel Spacing="4">
+        <TextBlock Classes="section" Text="{loc:T 'Where omp finds skills'}" />
+        <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'A skill is a folder with a SKILL.md. omp reads these places when it starts.'}" />
+      </StackPanel>
+      <!-- Folders of your own first: Add → Skill folder lands here -->
+      <StackPanel Spacing="8" IsVisible="{Binding HasSettings}">
+        <StackPanel Spacing="2">
+          <TextBlock Classes="ws-title" Text="{loc:T 'Your folders'}" />
+          <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'Folders of skills of your own that omp also reads'}" />
+        </StackPanel>
+        <ItemsControl ItemsSource="{Binding Directories}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:SkillDirectoryViewModel">
+              <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                <TextBlock Classes="conn-detail" Text="{Binding Path}" ToolTip.Tip="{Binding Path}" VerticalAlignment="Center" Foreground="{DynamicResource GuiTextPrimary}" />
+                <Button Grid.Column="1" Classes="icon" Command="{Binding RemoveCommand}" ToolTip.Tip="{loc:T 'Remove'}" AutomationProperties.Name="{Binding Path, StringFormat={loc:T 'Remove {0}'}}">
+                  <ctl:Icon Data="{StaticResource IconClose}" Size="16" />
+                </Button>
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBox x:Name="SkillFolderBox" Classes="sm" Text="{Binding NewDirectory}" PlaceholderText="~/my-skills" AutomationProperties.Name="{loc:T 'Folder to add'}">
+            <TextBox.KeyBindings>
+              <KeyBinding Gesture="Enter" Command="{Binding AddDirectoryCommand}" />
+            </TextBox.KeyBindings>
+          </TextBox>
+          <Button x:Name="AddSkillFolderButton" Grid.Column="1" Content="{loc:T 'Add folder'}" Command="{Binding AddDirectoryCommand}" Margin="8,0,0,0" />
+        </Grid>
+      </StackPanel>
+      <settings:ConnectorsSettingsFeedback DataContext="{Binding SourcesFeedback}" />
+      <Border Classes="conn-sep" IsVisible="{Binding HasSettings}" />
+      <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasSettingsError}">
+        <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
+        <SelectableTextBlock Grid.Column="1" x:Name="PluginsSettingsError" Classes="error" Text="{Binding SettingsError}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+      </Grid>
+      <ItemsControl ItemsSource="{Binding SkillSources}" IsVisible="{Binding HasSettings}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:SkillSourceViewModel">
+            <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,14">
+              <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
+                <TextBlock Classes="ws-title" Text="{Binding Title}" />
+                <TextBlock Classes="muted" Text="{Binding Description}" TextWrapping="Wrap" />
+              </StackPanel>
+              <ToggleButton Grid.Column="1" Classes="switch" IsChecked="{Binding IsOn}" VerticalAlignment="Center" AutomationProperties.Name="{Binding Title}" />
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </StackPanel>
+  </Border>
+</UserControl>

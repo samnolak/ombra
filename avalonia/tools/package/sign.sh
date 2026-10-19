@@ -27,6 +27,34 @@ cleanup() {
 trap cleanup EXIT
 record() { echo "$1" >> "$REC"; echo "signing: $1"; }
 
+# Every macOS mode enables hardened runtime. Local identities have no Team ID:
+# library validation otherwise prevents loading even our own signed .NET libraries.
+# Only that check is excepted locally; Developer ID retains library validation.
+sign_macos() {
+  local identity=$1; local trust=$2; shift 2
+  local ent="$HERE/packaging/entitlements.plist"
+  if [ "$trust" = local ]; then
+    cp "$ent" "$TMP/local-entitlements.plist"
+    ent="$TMP/local-entitlements.plist"
+    /usr/libexec/PlistBuddy -c 'Add :com.apple.security.cs.disable-library-validation bool true' "$ent"
+  fi
+  local main
+  main=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")
+  local f
+  while IFS= read -r -d '' f; do
+    # Signing the main executable signs its enclosing bundle: defer it until every
+    # nested binary is ready.
+    [ "$f" = "$APP/Contents/MacOS/$main" ] && continue
+    if file -b "$f" | grep -q 'Mach-O'; then
+      codesign --force --options runtime --entitlements "$ent" "$@" --sign "$identity" "$f"
+    fi
+  done < <(find "$APP/Contents/MacOS" -type f -print0)
+  # The current package also keeps managed DLLs/PDBs in Contents/MacOS. Deep signing
+  # gives those generic nested-code signatures before sealing the enclosing bundle.
+  codesign --force --deep --options runtime --entitlements "$ent" "$@" --sign "$identity" "$APP"
+  codesign --verify --deep --strict --verbose=2 "$APP"
+}
+
 case "$MODE" in
   windows)
     REC=${3:?record}
@@ -73,17 +101,17 @@ case "$MODE" in
         sudo -n security add-trusted-cert -d -r trustRoot -p codeSign -k "$KEYCHAIN" "$TMP/selfsign.pem"
         TRUSTED_CERT="$TMP/selfsign.pem"
         HASH=$(openssl x509 -in "$TMP/selfsign.pem" -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')
-        codesign --force --deep --keychain "$KEYCHAIN" --sign "$HASH" "$APP"
-        codesign --verify --deep --strict "$APP"
+        sign_macos "$HASH" local --keychain "$KEYCHAIN"
         REQ=$(codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => //p')
         case "$REQ" in *"certificate leaf = H\"$(echo "$HASH" | tr 'A-F' 'a-f')\""*|*"certificate root = H\"$(echo "$HASH" | tr 'A-F' 'a-f')\""*) ;;
           *) echo "unexpected designated requirement: $REQ"; exit 1 ;; esac
-        record "macos: self-signed (project certificate $HASH; permissions stay across updates), verified; not a Developer ID, Gatekeeper will warn"
+        record "macos: self-signed (project certificate $HASH; permissions stay across updates), hardened runtime with local library-validation exception, verified; not a Developer ID, Gatekeeper will warn"
         exit 0
       fi
-      codesign --force --deep --sign - "$APP"          # ad-hoc: Apple Silicon refuses unsigned native code; not a Developer ID
-      codesign --verify --deep --strict "$APP"
-      record "macos: UNSIGNED — ad-hoc signature only (no certificate in the CI secrets); Gatekeeper will warn, and macOS asks for permissions again after every update"
+      sign_macos "-" local
+      # Nightly pins this Ombra by its cdhash (zen.embed.peer-cdhash, written at launch; SECURITY.md).
+      CDHASH=$(codesign -dvvv "$APP" 2>&1 | sed -n 's/^CDHash=//p')
+      record "macos: UNSIGNED — ad-hoc signature only (cdhash $CDHASH), hardened runtime with local library-validation exception, verified (no certificate in the CI secrets); Gatekeeper will warn, and macOS asks for permissions again after every update"
       exit 0
     fi
     KEYCHAIN="$TMP/signing.keychain-db"
@@ -95,21 +123,13 @@ case "$MODE" in
     security import "$TMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign >/dev/null
     security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPASS" "$KEYCHAIN" >/dev/null
     security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
-    ENT="$HERE/packaging/entitlements.plist"
-    # Inside out: every Mach-O file (native libraries, the apphost), then the bundle itself.
-    while IFS= read -r -d '' f; do
-      if file -b "$f" | grep -q 'Mach-O'; then
-        codesign --force --timestamp --options runtime --entitlements "$ENT" --keychain "$KEYCHAIN" --sign "$MACOS_SIGN_IDENTITY" "$f"
-      fi
-    done < <(find "$APP/Contents/MacOS" -type f -print0)
-    codesign --force --timestamp --options runtime --entitlements "$ENT" --keychain "$KEYCHAIN" --sign "$MACOS_SIGN_IDENTITY" "$APP"
-    codesign --verify --deep --strict --verbose=2 "$APP"
+    sign_macos "$MACOS_SIGN_IDENTITY" developer --timestamp --keychain "$KEYCHAIN"
     record "macos: Developer ID ($MACOS_SIGN_IDENTITY), hardened runtime, verified (codesign --verify --deep --strict)"
     ;;
 
   notarize)
     ZIP=$TARGET; APP=${3:?app}; REC=${4:?record}
-    if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_TEAM_ID:-}" ] || [ -z "${APPLE_APP_PASSWORD:-}" ] || ! grep -q "Developer ID" "$REC"; then
+    if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_TEAM_ID:-}" ] || [ -z "${APPLE_APP_PASSWORD:-}" ] || ! grep -q '^macos: Developer ID (' "$REC"; then
       record "macos: NOT NOTARIZED (needs a Developer ID signature and APPLE_ID / APPLE_TEAM_ID / APPLE_APP_PASSWORD)"; exit 0
     fi
     xcrun notarytool submit "$ZIP" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait --timeout 30m \

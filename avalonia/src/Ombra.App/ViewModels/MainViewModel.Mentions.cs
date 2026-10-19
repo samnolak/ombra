@@ -20,7 +20,7 @@ public sealed partial class MainViewModel
     internal sealed record MentionToken(int Start, int End, string Query);
 
     /// <summary>The project's files and the folders above them ('/'-separated, relative), for the "@" menu.</summary>
-    internal sealed record MentionIndex(List<string> Paths, HashSet<string> Folders);
+    internal sealed record MentionIndex(ProjectFiles.SearchIndex Search, HashSet<string> Folders);
 
     private MentionToken? _mention;
     private CancellationTokenSource? _mentionSession, _mentionSearch;
@@ -164,7 +164,7 @@ public sealed partial class MainViewModel
                 if (folders.Add(f[..slash])) paths.Add(f[..slash]);
             paths.Add(f);
         }
-        return new MentionIndex(paths, folders);
+        return new MentionIndex(new ProjectFiles.SearchIndex(paths), folders);
     }
 
     /// <summary>
@@ -173,18 +173,20 @@ public sealed partial class MainViewModel
     /// </summary>
     internal static List<(string Path, bool IsFolder)> SearchMentions(MentionIndex index, string query, int max, CancellationToken ct)
     {
-        var q = query.Replace('\\', '/');
+        var q = ProjectFiles.NormalizeSearchKey(query.Replace('\\', '/'));
         if (q.Length == 0 || q.EndsWith('/'))
         {
             var folder = q.TrimEnd('/');
             var prefix = folder.Length == 0 ? "" : folder + "/";
-            return [.. index.Paths
-                .Where(p => p.Length > prefix.Length && p.StartsWith(prefix, ProjectFiles.PathComparison) && p.IndexOf('/', prefix.Length) < 0)
-                .Select(p => (p, index.Folders.Contains(p)))
+            return [.. Enumerable.Range(0, index.Search.Paths.Count)
+                .Where(i => index.Search.Keys[i].Length > prefix.Length
+                    && index.Search.Keys[i].StartsWith(prefix, ProjectFiles.PathComparison)
+                    && index.Search.Keys[i].IndexOf('/', prefix.Length) < 0)
+                .Select(i => (p: index.Search.Paths[i], index.Folders.Contains(index.Search.Paths[i])))
                 .OrderBy(x => !x.Item2).ThenBy(x => x.p, Comparer<string>.Create(ProjectFiles.NaturalCompare))
                 .Take(max)];
         }
-        return [.. ProjectFiles.Search(index.Paths, q, max, ct).Select(h => (h.RelativePath, index.Folders.Contains(h.RelativePath)))];
+        return [.. ProjectFiles.Search(index.Search, q, max, ct).Select(h => (h.RelativePath, index.Folders.Contains(h.RelativePath)))];
     }
 
     private void ShowMentions(List<(string Path, bool IsFolder)> hits, string empty)
@@ -246,12 +248,13 @@ public sealed partial class FilesViewModel
     internal async Task<IReadOnlyList<string>> ProjectIndexAsync(string root, CancellationToken ct)
     {
         var mine = IsActive && SamePath(Root, root);
-        if (mine && _index is { } kept) return kept;
+        if (mine && _index is { } kept) return kept.Paths;
         var (paths, truncated) = await ProjectFiles.IndexAsync(root, useGit: true, ct);
+        var index = await Task.Run(() => new ProjectFiles.SearchIndex(paths), ct);
         // Still the pane's project after the read: the pane's own search takes it too
         if (IsActive && SamePath(Root, root) && _index is null)
         {
-            _index = paths;
+            _index = index;
             _indexTruncated = truncated;
         }
         return paths;

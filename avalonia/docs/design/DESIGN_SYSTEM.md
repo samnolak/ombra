@@ -134,7 +134,7 @@ copied; the accent, type and components are the client's own (above).
 | Area | Arrangement | Size |
 |---|---|---|
 | Sidebar | top row in the band: sidebar toggle · name · search · add project; on its sheet: New chat (shortcut on hover); search; **Pinned** (omp's pins), then sessions **grouped by project** (a project row: folder icon · name; ⊖ remove from sidebar and + new session on hover, both with tooltips) as one-line rows (title · age, or a status dot: running pulses `GuiStatusRunning`, needs input `GuiStatusWaiting`, unseen reply `GuiStatusUnread`; pin and ⋯ replace it on hover / focus); bottom: Update (Settings is on the icon rail); the right edge drags the width (2 px `GuiFocus` line while hovered) | 260 default, 220–480 (kept); top row 44 (the band); rows 30 / 32, radius 8; open item on fill 2 |
-| Title bar (macOS) | no separate title-bar strip: the client area extends under it (`MainWindow.Chrome.cs`) and the 44 px band — the sidebar's top row, the header, the right panel's tabs (and the settings page's band), with the rail beside it — is the title bar: the traffic lights sit over the rail and the band's start, centred in the band 16 pt from the left edge as in the ChatGPT app (AppKit puts them back at the top of its lower title bar, so `MainWindow.PlaceTrafficLights` moves them again after every resize and full-screen change, `Platform/Mac/MacTrafficLights.cs`), what is in the band under them starts after them (the sidebar's top row — or the header while the sidebar is hidden, or the narrow settings header — 40 px in; the window's `traffic-lights` class, `Styles.Workspace.axaml`; the rail's buttons always start under the band); the empty parts of the band, the chat's title and the empty rail move the window and a double-click zooms it (`WindowDecorationProperties.ElementRole="TitleBar"`, hit-testable transparent backgrounds); in full screen the lights hide and the insets go. Windows and Linux keep their system title bar over the same band. The window's title (`WindowTitle`) is still set for Mission Control and accessibility | 44 high |
+| Title bar (macOS) | no separate title-bar strip: the client area extends under it (`MainWindow.Chrome.cs`) and the 44 px band — the sidebar's top row, the header, the right panel's tabs (and the settings page's band, the Browser page's tabs; the Team and Browser pages lie on a sheet under it), with the rail beside it — is the title bar: the traffic lights sit over the rail and the band's start, centred in the band 16 pt from the left edge as in the ChatGPT app (AppKit puts them back at the top of its lower 28 pt title bar whenever it lays it out again — a resize, a new window title, a theme change — so `MainWindow.PlaceTrafficLights` holds them: `Platform/Mac/MacTrafficLights.cs` places them again on every frame change of the title bar's container or a button; the feature smoke's `title-bar` section measures them against the band's row in the real window), what is in the band under them starts after them (the sidebar's top row — or the header or the Browser page's tabs while the sidebar is hidden, or the narrow settings header — 40 px in; the window's `traffic-lights` class, `Styles.Workspace.axaml`; the rail's buttons always start under the band); the empty parts of the band, the chat's title and the empty rail move the window and a double-click zooms it (`WindowDecorationProperties.ElementRole="TitleBar"`, hit-testable transparent backgrounds); in full screen the lights hide and the insets go. Windows and Linux keep their system title bar over the same band. The window's title (`WindowTitle`) is still set for Mission Control and accessibility | 44 high |
 | Icon rail | left of the sidebar, full height, also while the sidebar is hidden and on the settings page (`Border.rail`, transparent on the chrome: one surface with the band): Chats · Plugins · MCP (Connectors) · Skills under the band, Settings pinned at the bottom, as 36 px `Button.rail-item` icon squares (radius 10, tooltips to the right); the one shown is lit (fill 2, `MainViewModel.Rail.cs`): Chats while the conversation is, the others while their settings page is; Chats leaves the settings for the conversation; Skills opens Plugins and skills scrolled to its Skills card | 52 wide |
 | Header | in the band: the project's folder (an icon button: the project menu, the name in its tooltip) · the chat's title (medium, trims; double-click renames it where the header is not the macOS title bar) · branch, trimming first — on the right ⋯ (the chat menu: the session's actions with their `/command`, then **Panels**: Files · Changes · Background tasks · Plan · Browser · Terminal with shortcuts and a tick on the one shown), the summary toggle and, while the right panel is hidden, its toggle (`IconPanelRight`); a dot on ⋯ and the summary while background tasks run unseen; sidebar toggle only while the sidebar is hidden; no divider line (the sheet's edge is the line) | 44 high |
 | Summary | the header's summary popover (a menu card, 300 wide): the project, **Changes** with the chat's +N −M (opens the Changes tab), **Plan** with done/total (when there is one), then **Background processes** — running subagents and jobs (open Background tasks) and live terminal tabs (open the terminal) — or "Nothing runs in the background" (`MainViewModel.Summary.cs`) | 300 |
@@ -273,7 +273,10 @@ inside stays bare in every state.
 - `Border.notice`: transcript notices; plain text by default, `notice error` / `notice warning` get a soft status
   fill, radius 8 and padding 12,8.
 - `Border.status` badges: full radius, 20 high, 12 px medium. `status running` (info soft / link text),
-  `status done` (success), `status failed` (error), plain `status` neutral.
+  `status done` (success), `status failed` (error), plain `status` neutral. The style centres the text in the full
+  20 px (no vertical padding) and draws the 6 px dot half a pixel under the badge's middle (`translate`), on the
+  lowercase letters' middle: the badge's text then shares its baseline with a 12 px text centred beside it in the
+  row, at any scale. Don't nudge the text or the dot per screen.
 - Transcript (`Styles.Session.axaml`): `TextBlock.date-separator`; `StackPanel.user-row` with `Border.user-bubble`
   (`GuiUserBubble`, `GuiUserBubbleText`, radius 18, padding 15,10) and `StackPanel.message-actions.user-meta` under it
   (`TextBlock.message-time` and `Button.row-action` 28 px tertiary icons; shown on the row's hover or focus);
@@ -306,6 +309,19 @@ inside stays bare in every state.
   queue) on fill 1 with a `GuiBorderSoft` hairline (strong on hover); 52 px in a composer chip, 78 px over a sent
   message (right-aligned, 10 apart, the comments pill `Border.bubble-chip` under them), 24 px in the queue. An image
   that cannot be shown keeps the square with a tertiary `IconImage`.
+
+### Interaction motion
+
+`Controls/Motion` owns the window-scoped `GuiMotionFast` (120 ms) and `GuiMotionBase` (150 ms) tokens, with
+`CubicEaseOut`. Row actions fade, chevrons rotate, Send scales to 0.94 while pressed, and Jump to latest fades.
+Transitions belong to each control, not a shared mutable style instance. The existing OS reduced-motion setting
+is re-read when the window activates: durations become zero and Send does not scale. The OS probe supports macOS
+and Windows; Linux preference integration still needs a native platform pass.
+
+Do not animate transcript heights, virtualized row measurements, or scroll anchors, and do not add decorative
+springs. A disappearing Jump button loses focusability and hit testing immediately; its short visual fade must
+never leave an invisible interactive control. Its new-activity dot follows live transcript updates, not history
+pagination or layout changes.
 
 ### Sidebar and sessions
 
