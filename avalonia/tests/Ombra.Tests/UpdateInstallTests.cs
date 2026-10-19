@@ -224,6 +224,59 @@ public sealed class UpdateInstallTests
         Assert.Equal("old", File.ReadAllText(Path.Combine(root, "marker.txt")));
     }
 
+    private static string Sh(string file, params string[] args)
+    {
+        var psi = new ProcessStartInfo(file) { RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        using var p = Process.Start(psi)!;
+        var output = p.StandardOutput.ReadToEndAsync();
+        var error = p.StandardError.ReadToEnd();
+        p.WaitForExit();
+        return p.ExitCode == 0 ? "" : $"exit {p.ExitCode}: {output.Result}{error}";
+    }
+
+    [Fact]
+    public async Task A_signed_bundle_zipped_with_ditto_keeps_a_valid_signature_when_unpacked()
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            Assert.Skip("macOS code signing");
+            return;
+        }
+        var dir = TestProcesses.TempDir("upd-codesign");
+        var app = Path.Combine(dir, "src", "Ombra.app");
+        var macos = Path.Combine(app, "Contents", "MacOS");
+        Directory.CreateDirectory(macos);
+        File.WriteAllText(Path.Combine(app, "Contents", "Info.plist"), """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0"><dict>
+            <key>CFBundleExecutable</key><string>Ombra</string>
+            <key>CFBundleIdentifier</key><string>dev.ombra.signature-test</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            </dict></plist>
+            """);
+        File.Copy("/usr/bin/true", Path.Combine(macos, "Ombra"));
+        // A non-Mach-O file next to the executable: codesign keeps its signature in extended attributes.
+        File.WriteAllText(Path.Combine(macos, "System.Security.Principal.dll"), "not a Mach-O file");
+        Assert.Equal("", Sh("/usr/bin/codesign", "--force", "--deep", "--sign", "-", app));
+        Assert.Equal("", Sh("/usr/bin/codesign", "--verify", "--deep", "--strict", app));
+        var zip = Path.Combine(dir, "Ombra-macos.zip");
+        Assert.Equal("", Sh("/usr/bin/ditto", "-c", "-k", "--keepParent", app, zip));
+
+        var unpacked = Path.Combine(dir, "unpacked");
+        Directory.CreateDirectory(unpacked);
+        await UpdateInstaller.UnpackAsync(zip, unpacked, CancellationToken.None);
+        await UpdateInstaller.VerifyCodeSignatureAsync(Path.Combine(unpacked, "Ombra.app"), CancellationToken.None);
+
+        // What the updater did before: ZipFile drops the attributes, and the signature check refuses the result.
+        var plain = Path.Combine(dir, "plain");
+        ZipFile.ExtractToDirectory(zip, plain);
+        var e = await Assert.ThrowsAsync<InvalidDataException>(() => UpdateInstaller.VerifyCodeSignatureAsync(Path.Combine(plain, "Ombra.app"), CancellationToken.None));
+        Assert.Contains("code signature", e.Message);
+        Directory.Delete(dir, true);
+    }
+
     [Fact]
     public async Task A_failed_swap_puts_the_current_version_back()
     {
