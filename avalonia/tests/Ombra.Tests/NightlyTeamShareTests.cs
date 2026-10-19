@@ -240,10 +240,12 @@ public sealed class NightlyTeamShareTests
         var service = $"com.ombra.nightly-teams.test.{Environment.ProcessId}.{Guid.NewGuid():N}";
         using var link = new NightlyTeamLink(new NightlyTeamShare(source), service, (pid, token) =>
             trust && pid == Environment.ProcessId && token.Length == NightlyMach.AuditTokenSize);
+        Assert.Equal(0, link.LastPeer);
 
         var (id, json) = await Task.Run(() => Request(service, """{"op":"state"}"""));
         Assert.Equal(NightlyTeamLink.ReplyId, id);
         Assert.Equal(["Bob", "Carol"], JsonNode.Parse(json!)!["teams"]![0]!["members"]!.AsArray().Select(m => (string)m!["name"]!));
+        Assert.Equal(Environment.ProcessId, link.LastPeer);
 
         var big = new string('x', 200_000); // larger than one page: still inline
         (id, json) = await Task.Run(() => Request(service, $$$$"""{"op":"share","team":"{{{{Team}}}}","to":["{{{{B}}}}"],"item":{"kind":"link","url":"https://example.com/","title":"t","comment":"{{{{big}}}}"}}"""));

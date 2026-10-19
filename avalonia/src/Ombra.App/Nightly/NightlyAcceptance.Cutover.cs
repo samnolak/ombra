@@ -75,6 +75,7 @@ internal static partial class NightlyAcceptance
         {
             // The rail's Browser with Nightly: one whole Nightly browser window on the agent's runtime (BrowserWindowChecks).
             await BrowserWindowChecks(Shown()?.RuntimePid ?? 0);
+            await TeamLinkCheck();
             Check("browser-page-closed", await Until(() => Shown() is { FramesShown: > 0, IsBrowserWindow: false }, 10),
                 $"panes={Panes().Count}");
         }

@@ -10,7 +10,9 @@ namespace Ombra.App.Nightly;
 /// <summary>
 /// The local channel a standalone Nightly on this Mac uses to share through this Ombra's team account
 /// (<see cref="NightlyTeamShare"/>; SERVER_DESIGN §7, decision 2026-10-18: Nightly has no team device of its own).
-/// <para>Transport: the Mach bootstrap service <see cref="ServiceName"/> in the user's namespace. A request is a plain
+/// <para>Transport: the Mach bootstrap service <see cref="ServiceName"/> in the user's namespace (a standalone Nightly),
+/// and this process's own <see cref="EmbedServiceName"/> (the runtime Ombra embeds, told by <c>NIGHTLY_TEAMS_SERVICE</c>:
+/// it shares through the Ombra that shows it even while another Ombra on this Mac holds the shared name). A request is a plain
 /// message (header, then <c>u32 version, u32 length, UTF-8 JSON</c>) whose local port is a send-once reply right; the
 /// answer goes back on that right with the same layout. Nightly blocks a worker thread on the reply (the <c>inbox</c>
 /// long poll as well). Nightly (desktop <c>src/zen/teams/ZenTeamLinkWorker.js</c>) checks that the answer comes from
@@ -35,34 +37,46 @@ internal sealed class NightlyTeamLink : IDisposable
     private readonly Thread _thread;
     private readonly CancellationTokenSource _stop = new();
     private volatile bool _disposed;
+    private volatile int _lastPeer;
 
     /// <param name="trusted">Whether a sender (pid, audit token) may use the link; <see cref="IsKnownNightly"/> in the app.</param>
     public NightlyTeamLink(NightlyTeamShare share, string serviceName, Func<int, byte[], bool> trusted)
     {
         _share = share;
         _trusted = trusted;
+        Name = serviceName;
         _port = NightlyMach.CheckIn(serviceName, 16);
         if (_port == 0) throw new InvalidOperationException($"Could not register {serviceName} (another Ombra has it?).");
         _thread = new Thread(Run) { IsBackground = true, Name = "nightly-teams" };
         _thread.Start();
     }
 
-    private static NightlyTeamLink? _app;
+    /// <summary>The bootstrap name this link serves.</summary>
+    public string Name { get; }
 
-    /// <summary>The app's link, serving <paramref name="source"/>; logged and skipped when the name is taken.</summary>
+    /// <summary>The pid of the last sender this link accepted a request from (0: none yet).</summary>
+    public int LastPeer => _lastPeer;
+
+    private static readonly List<NightlyTeamLink> _app = [];
+
+    /// <summary>This Ombra's own name for the link, given to the Nightly it embeds as <c>NIGHTLY_TEAMS_SERVICE</c>.</summary>
+    public static string EmbedServiceName { get; } = $"{ServiceName}.{Environment.ProcessId}.{Guid.NewGuid():N}";
+
+    /// <summary>The app's link under <see cref="EmbedServiceName"/>; null before <see cref="Start"/> or when it failed.</summary>
+    public static NightlyTeamLink? Embedded => _app.FirstOrDefault(link => link.Name == EmbedServiceName);
+
+    /// <summary>The app's link, serving <paramref name="source"/> under <see cref="EmbedServiceName"/> and, when free,
+    /// <see cref="ServiceName"/>; a name that cannot be registered is logged and skipped.</summary>
     public static void Start(INightlyTeamSource source)
     {
-        if (_app is not null) return;
-        try
+        if (_app.Count > 0) return;
+        var share = new NightlyTeamShare(source, (op, e) => Services.ClientLog.Shared.Write("nightly-teams", $"{op}: {e}"));
+        foreach (var name in new[] { EmbedServiceName, ServiceName })
         {
-            _app = new NightlyTeamLink(new NightlyTeamShare(source, (op, e) => Services.ClientLog.Shared.Write("nightly-teams", $"{op}: {e}")),
-                ServiceName, IsKnownNightly);
-            AppDomain.CurrentDomain.ProcessExit += (_, _) => _app?.Dispose();
+            try { _app.Add(new NightlyTeamLink(share, name, IsKnownNightly)); }
+            catch (InvalidOperationException e) { Services.ClientLog.Shared.Write("nightly-teams", e.Message); }
         }
-        catch (InvalidOperationException e)
-        {
-            Services.ClientLog.Shared.Write("nightly-teams", e.Message);
-        }
+        if (_app.Count > 0) AppDomain.CurrentDomain.ProcessExit += (_, _) => _app.ForEach(link => link.Dispose());
     }
 
     /// <summary>The Nightly executables Ombra lets use its team account: the runtime it runs (or <c>OMBRA_NIGHTLY_APP</c>) and an installed Nightly.</summary>
@@ -114,6 +128,7 @@ internal sealed class NightlyTeamLink : IDisposable
                 NightlyMach.Deallocate(reply); // the sender's wait ends with "port deleted"
                 continue;
             }
+            _lastPeer = pid;
             _ = Task.Run(() => AnswerAsync(request, reply)); // the receive loop stays free (the inbox long poll waits)
         }
     }
