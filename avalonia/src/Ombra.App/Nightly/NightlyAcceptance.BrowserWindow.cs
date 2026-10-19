@@ -452,15 +452,16 @@ internal static partial class NightlyAcceptance
                 case "imeend" when Shown() is { IsBrowserWindow: false } agentPane:
                     await CompositionEndedByNightly(agentPane, parts.Length > 1 ? int.Parse(parts[1], CultureInfo.InvariantCulture) : 1);
                     break;
-                case "newtabs":
-                    // NewTabChecks on their own (their PASS/FAIL lines in the log); the Browser page first shows here.
-                    await NewTabChecks(0);
-                    break;
-                default:
                 case "openinapp":
                     // OpenInAppChecks on their own (their PASS/FAIL lines in the log).
                     await OpenInAppChecks();
                     break;
+                case "newtabs":
+                    // NewTabChecks on their own (their PASS/FAIL lines in the log); the Browser page first shows here.
+                    // `newtabs steal`: another app takes the focus right after every other open.
+                    await NewTabChecks(0, parts.Length > 1 && parts[1] == "steal");
+                    break;
+                default:
                     if (!await PerfCommand(parts, pane)) Log($"DRIVE unknown or not possible now: {line}");
                     break;
             }

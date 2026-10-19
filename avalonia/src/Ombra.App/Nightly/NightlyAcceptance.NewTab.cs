@@ -31,16 +31,39 @@ internal static partial class NightlyAcceptance
         /// closed) is a new tab too: Esc, ⌘T, leaving the page for the chats and the app losing the focus all leave it
         /// with its bar. On a page: ⌘T with the focus in the page, in the sidebar's URL bar, in the sidebar and in Ombra's
         /// rail, the sidebar's "+ New Tab", a middle click on the sidebar, ⌘T after Chats ↔ Browser and after the app
-        /// lost the focus, ⌘T in compact mode. A URL typed into the empty tab's bar opens. Returns to the chats.
+        /// lost the focus, ⌘T in compact mode; and the owner's sequence: a bar open, another app takes the focus, back,
+        /// then "+ New Tab", ⌘T or a middle click again (the bar stays, with the keyboard). A URL typed into the empty
+        /// tab's bar opens. Returns to the chats.
+        /// <para>Any profile: the space's tabs are closed first (<see cref="EmptyTabBaseline"/>); it must have no pinned
+        /// tabs. Gecko's focus must be production's: no Marionette recommended prefs (<c>MOZ_MARIONETTE</c>, which Nightly
+        /// inherits, applies them unless the runtime profile sets <c>remote.prefs.recommended</c> false), whose
+        /// <c>focusmanager.testmode</c> keeps the window active when Ombra deactivates it (AppWindow::WindowDeactivated),
+        /// so a bar outlives the app losing the focus (<c>newtab-production-focus</c>). <paramref name="stealFocus"/>:
+        /// another app takes the focus right after every other open (<see cref="AnotherAppTakesFocus"/>; the try is made
+        /// again), so each try after it opens a new tab in a window that Ombra deactivated and activated again.</para>
         /// </summary>
-        private async Task NewTabChecks(int agentPid)
+        private async Task NewTabChecks(int agentPid, bool stealFocus = false)
         {
+            var marionette = Environment.GetEnvironmentVariable("MOZ_MARIONETTE") is not null;
+            var prefs = Environment.GetEnvironmentVariable("OMBRA_NIGHTLY_PROFILE") is { Length: > 0 } profile ? Path.Combine(profile, "prefs.js") : null;
+            var recommendedOff = prefs is not null && File.Exists(prefs)
+                && File.ReadAllText(prefs).Contains("\"remote.prefs.recommended\", false", StringComparison.Ordinal);
+            Check("newtab-production-focus", !marionette || recommendedOff,
+                marionette ? $"MOZ_MARIONETTE set; remote.prefs.recommended false in the runtime profile: {recommendedOff}" : "no Marionette");
+            _stealFocus = stealFocus;
             if (await OpenBrowserWindow("nt-a-first", agentPid) is not { } pane) return;
             await EnsureActive();
             var (first, firstDetail) = await NewTabBar(pane);
             Check("newtab-first-browser-page", first, firstDetail);
             await Task.Delay(300);
             ScreenShot("nt-b-empty-tab");
+            var (baseline, closed) = await EmptyTabBaseline(pane);
+            Check("newtab-empty-tab-baseline", baseline, $"{closed} tabs closed before the space was left with its empty tab");
+            if (!baseline)
+            {
+                vm.ShowChatsCommand.Execute(null);
+                return;
+            }
 
             Func<Task> Keys(string characters, ushort keyCode, ulong flags) => () =>
             {
@@ -66,14 +89,16 @@ internal static partial class NightlyAcceptance
             await NewTabPath("empty-focus-loss", pane, null, LoseAppFocus, null);
             // A URL typed into the bar opens (the white fixture page), and ⌘W on that last tab leaves the empty tab again.
             var page = new Uri(new Uri(url), "cutover.html");
-            var typed = 0;
-            await NewTabPath("last-tab-closed", pane, async _ =>
+            // Retries replace the same try's result; a stolen focus must not count a typed URL twice.
+            var typed = new bool[NewTabTries];
+            await NewTabPath("last-tab-closed", pane, async i =>
             {
                 foreach (var ch in page.AbsoluteUri) KeyPress(ch.ToString(), CharKeyCode(ch), 0);
                 KeyPress("\r", 0x24, 0);
-                if (await Until(async () => await FrameRegionLuma(pane, ContentMiddle) > 240, 15)) typed++;
+                typed[i] = await Until(async () => await FrameRegionLuma(pane, ContentMiddle) > 240, 15);
             }, cmdW, null);
-            Check("newtab-typed-url-opens", typed == NewTabTries, $"{typed}/{NewTabTries} typed URLs showed {page}");
+            var typedCount = typed.Count(opened => opened);
+            Check("newtab-typed-url-opens", typedCount == NewTabTries, $"{typedCount}/{NewTabTries} typed URLs showed {page}");
 
             // ── from a page ──
             vm.OpenInBrowserWindow?.Invoke(page);
@@ -95,10 +120,25 @@ internal static partial class NightlyAcceptance
                 await Task.Delay(300);
                 Log($"Ombra focus={window.FocusManager?.GetFocusedElement()?.GetType().Name ?? "none"}");
             }, cmdT, Close);
-            await NewTabPath("sidebar-new-tab", pane, null, () => ClickPane(pane, SidebarNewTab), Close);
-            await NewTabPath("sidebar-middle-click", pane, null, () => MiddleClick(pane, SidebarEmpty(pane)), Close);
+            Func<Task> newTabClick = () => ClickPane(pane, SidebarNewTab);
+            Func<Task> middleClick = () => MiddleClick(pane, SidebarEmpty(pane));
+            await NewTabPath("sidebar-new-tab", pane, null, newTabClick, Close);
+            await NewTabPath("sidebar-middle-click", pane, null, middleClick, Close);
             await NewTabPath("chats-browser-cmd-t", pane, _ => ChatsAndBack(), cmdT, Close);
             await NewTabPath("focus-loss-cmd-t", pane, _ => LoseAppFocus(), cmdT, Close);
+            // The owner's sequence: a new tab's bar open, another app takes the focus, back in Ombra (Firefox keeps the
+            // bar open through the window's deactivation), then "+ New Tab", ⌘T or a middle click again: the bar stays,
+            // with the keyboard (Zen's new tab used to toggle it closed, leaving no input at all).
+            Func<int, Task> OpenThenSwitchApps(Func<Task> opener) => async _ =>
+            {
+                await opener();
+                var (opened, detail) = await NewTabBar(pane);
+                if (!opened) _beforeFailed = $"no bar before the switch ({detail})";
+                await LoseAppFocus();
+            };
+            await NewTabPath("switch-sidebar-new-tab", pane, OpenThenSwitchApps(newTabClick), newTabClick, Close);
+            await NewTabPath("switch-cmd-t", pane, OpenThenSwitchApps(cmdT), cmdT, Close);
+            await NewTabPath("switch-middle-click", pane, OpenThenSwitchApps(middleClick), middleClick, Close);
             // Compact mode (⌘S): the sidebar hides, the bar still floats over the content.
             await ClickPane(pane, content);
             KeyPress("s", 0x01, CommandKey);
@@ -142,13 +182,15 @@ internal static partial class NightlyAcceptance
         /// <paramref name="open"/> (after <paramref name="before"/>) <see cref="NewTabTries"/> times, each followed by
         /// <see cref="NewTabBar"/> and <paramref name="after"/>: one check with how many showed the bar, the first
         /// failures' details and a screen shot of each failure (and of the first success). A try during which another app
-        /// took the focus from Ombra (other than <see cref="LoseAppFocus"/>'s own) says nothing about the new tab and is
-        /// made again, up to 30 times in all.
+        /// took the focus from Ombra (other than <see cref="LoseAppFocus"/>'s own; <see cref="NewTabChecks"/>' stealFocus
+        /// on every other try) says nothing about the new tab and is made again, up to 30 times in all (stealFocus' own
+        /// besides). <paramref name="after"/> runs while Ombra has the focus (<see cref="Settle"/>).
         /// </summary>
         private async Task NewTabPath(string name, NightlyPane pane, Func<int, Task>? before, Func<Task> open, Func<Task>? after)
         {
             var failures = new List<string>();
             var interrupted = 0;
+            var stolen = 0;
             void OnDeactivated(object? sender, EventArgs e) => _deactivated = true;
             window.Deactivated += OnDeactivated;
             try
@@ -156,18 +198,27 @@ internal static partial class NightlyAcceptance
                 for (var i = 0; i < NewTabTries;)
                 {
                     await EnsureActive();
-                    if (before is not null) await before(i);
                     _deactivated = false;
+                    _beforeFailed = null;
+                    if (before is not null) await before(i);
                     await open();
+                    if (_stealFocus && (++_opens & 1) == 1)
+                    {
+                        AnotherAppTakesFocus();
+                        await Until(() => !window.IsActive, 3);
+                        stolen++;
+                        Log($"newtab {name} #{i}: another app takes the focus (stealFocus), active={window.IsActive}");
+                    }
                     var (ok, detail) = await NewTabBar(pane);
                     if (_deactivated || !window.IsActive)
                     {
                         Log($"newtab {name} #{i} again: another app took the focus meanwhile ({detail})");
-                        if (after is not null) await after();
-                        if (++interrupted < 30) continue;
+                        await Settle(after);
+                        if (++interrupted < 30 + stolen) continue;
                         failures.Add($"#{i}: other apps kept taking the focus");
                         break;
                     }
+                    if (_beforeFailed is { } why) (ok, detail) = (false, $"{why}; {detail}");
                     Log($"newtab {name} #{i} {(ok ? "ok" : "FAILED")} {detail}");
                     if (!ok)
                     {
@@ -175,7 +226,7 @@ internal static partial class NightlyAcceptance
                         ScreenShot($"nt-fail-{name}-{i}");
                     }
                     else if (i == 0) ScreenShot($"nt-{name}");
-                    if (after is not null) await after();
+                    await Settle(after);
                     i++;
                 }
             }
@@ -185,17 +236,63 @@ internal static partial class NightlyAcceptance
             }
             Check($"newtab-{name}", failures.Count == 0,
                 $"{NewTabTries - failures.Count}/{NewTabTries} showed the bar, {interrupted} tries again after another app took the focus"
+                + (_stealFocus ? $" ({stolen} on purpose)" : "")
                 + (failures.Count > 0 ? ": " + string.Join("; ", failures.Take(3)) : ""));
         }
 
         private bool _deactivated;
+        private bool _stealFocus;
+        private int _opens;
+        // What a path's before could not set up (OpenThenSwitchApps: no bar before the switch): the try fails.
+        private string? _beforeFailed;
+
+        /// <summary>
+        /// A try's end, <paramref name="after"/> (Esc closing the bar over the page), while Ombra has the focus: keys
+        /// posted while another app has it reach no window, and the next try would start with that try's bar still open
+        /// (Firefox keeps it through the window's deactivation). Made again when another app took the focus meanwhile.
+        /// </summary>
+        private async Task Settle(Func<Task>? after)
+        {
+            if (after is null) return;
+            for (var n = 0; n < 3; n++)
+            {
+                await EnsureActive();
+                _deactivated = false;
+                await after();
+                if (!_deactivated && window.IsActive) return;
+            }
+        }
+
+        /// <summary>
+        /// The window left with the empty tab alone in its space, as on a fresh profile: ⌃Tab to any other tab of the space,
+        /// Esc (the empty tab keeps its bar, a page's closes) and, on a page, ⌘W, until ⌃Tab finds no tab but the empty
+        /// one. False when tabs stay (pinned ones: ⌘W only selects an unpinned tab). Also how many were closed.
+        /// </summary>
+        private async Task<(bool Ok, int Closed)> EmptyTabBaseline(NightlyPane pane)
+        {
+            for (var closed = 0; closed < 24; closed++)
+            {
+                await EnsureActive();
+                pane.FocusPage();
+                KeyPress("\t", 0x30, 1UL << 18);
+                await Task.Delay(600);
+                KeyPress("\u001b", 0x35, 0);
+                var (empty, detail) = await NewTabBar(pane);
+                if (empty) return (true, closed);
+                Log($"newtab baseline: a tab of the space ({detail}): ⌘W");
+                KeyPress("w", 0x0D, CommandKey);
+                await Task.Delay(600);
+            }
+            return (false, 24);
+        }
 
         /// <summary>
         /// Whether Nightly shows a new tab's URL bar with the keyboard. A composition started through the window's text
         /// input client (as an input method starts one) must land in an editor floating over the content: its caret, as
         /// Nightly reports it for the candidate window, lies in the content's upper middle, not in the sidebar's URL bar
         /// or nowhere (no editor has the keyboard); the frame must show the bar there, its band unlike the content right
-        /// above the bar. The composition is cancelled each time. A bar on its way gets 3 s.
+        /// above the bar. The composition is cancelled each time. A bar on its way gets 3 s. Not while another app has the
+        /// focus (no input method composes for Ombra then).
         /// </summary>
         private async Task<(bool Ok, string Detail)> NewTabBar(NightlyPane pane)
         {
@@ -204,6 +301,7 @@ internal static partial class NightlyAcceptance
             while (true)
             {
                 var focus = $"Ombra focus={window.FocusManager?.GetFocusedElement()?.GetType().Name ?? "none"} active={window.IsActive}";
+                if (!window.IsActive) return (false, $"another app has the focus, {focus}");
                 var client = TextInputClient();
                 string detail;
                 if (client == 0) detail = $"no text input client, {focus}";
@@ -287,7 +385,7 @@ internal static partial class NightlyAcceptance
         /// come back (another app kept it) counts as interrupted.</summary>
         private async Task LoseAppFocus()
         {
-            MacObjC.SendVoid(App, "deactivate");
+            AnotherAppTakesFocus();
             await Until(() => !window.IsActive, 5);
             await Task.Delay(300);
             for (var i = 0; i < 3 && !window.IsActive; i++)
@@ -303,6 +401,14 @@ internal static partial class NightlyAcceptance
         private static unsafe void ActivateRunningApplication() =>
             ((delegate* unmanaged<nint, nint, ulong, byte>)MacObjC.MsgSend)(
                 MacObjC.Send(MacObjC.Cls("NSRunningApplication"), "currentApplication"), MacObjC.Sel("activateWithOptions:"), 3);
+
+        /// <summary>Finder (always running) takes the focus, as when the user switches apps.</summary>
+        private static unsafe void AnotherAppTakesFocus()
+        {
+            var apps = MacObjC.Send(MacObjC.Cls("NSRunningApplication"), "runningApplicationsWithBundleIdentifier:", MacObjC.Str("com.apple.finder"));
+            if (MacObjC.SendLong(apps, "count") > 0)
+                ((delegate* unmanaged<nint, nint, ulong, byte>)MacObjC.MsgSend)(MacObjC.Send(apps, "objectAtIndex:", 0), MacObjC.Sel("activateWithOptions:"), 3);
+        }
 
         /// <summary>A left click at <paramref name="at"/> (the browser window's points).</summary>
         private async Task ClickPane(NightlyPane pane, Point at)

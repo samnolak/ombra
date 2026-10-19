@@ -73,7 +73,9 @@ internal static partial class NightlyAcceptance
 
         private async Task BrowserPage()
         {
-            // The rail's Browser with Nightly: one whole Nightly browser window on the agent's runtime (BrowserWindowChecks).
+            // The rail's Browser with Nightly: its new tabs first (the fresh profile's empty tab is the first page,
+            // NightlyAcceptance.NewTab.cs), then one whole Nightly browser window on the agent's runtime (BrowserWindowChecks).
+            await NewTabChecks(Shown()?.RuntimePid ?? 0);
             await BrowserWindowChecks(Shown()?.RuntimePid ?? 0);
             await TeamLinkCheck();
             Check("browser-page-closed", await Until(() => Shown() is { FramesShown: > 0, IsBrowserWindow: false }, 10),
