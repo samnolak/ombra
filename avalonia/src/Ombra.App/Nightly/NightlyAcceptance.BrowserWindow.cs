@@ -405,6 +405,10 @@ internal static partial class NightlyAcceptance
                     Activate();
                     await Task.Delay(300);
                     break;
+                case "deactivate":
+                    AnotherAppTakesFocus();
+                    await Until(() => !window.IsActive, 5);
+                    break;
                 case "wait":
                     await Task.Delay((int)D(1));
                     break;
