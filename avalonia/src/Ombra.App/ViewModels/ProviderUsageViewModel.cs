@@ -88,8 +88,10 @@ public sealed partial class ProviderUsageGroupViewModel(ProviderUsageViewModel o
 /// <summary>
 /// The subscription limits of every signed-in provider that reports them (Claude's and ChatGPT's 5-hour and weekly
 /// windows, API spend…), read from <c>omp usage --json</c>: a side process, never a message in the conversation.
-/// Explicitly read in Settings → Model providers, at most every <see cref="MinInterval"/> unless refreshed by hand
-/// or marked stale (a run ended). Providers without a usage source are simply absent.
+/// Read only while someone looks at them — Settings → Model providers, or the context ring's popover (the session
+/// model's provider) — at most every <see cref="MinInterval"/> unless refreshed by hand or marked stale (a run ended).
+/// <c>get_state.usageLimit</c> is no substitute: omp reports it only in the wrap-up and low-priority stages, never the
+/// windows' percentages. Providers without a usage source are simply absent.
 /// </summary>
 public sealed partial class ProviderUsageViewModel : ObservableObject
 {
@@ -122,6 +124,15 @@ public sealed partial class ProviderUsageViewModel : ObservableObject
     [ObservableProperty] private string _note = "";
     [ObservableProperty] private bool _refreshFailed;
 
+    /// <summary>Raised after the groups were made again (a read, a countdown refresh), so the popover's copy follows.</summary>
+    public event Action? Updated;
+
+    /// <summary>Settings → Model providers or the context popover is on screen: the only times omp is asked.</summary>
+    private bool IsShown => (_main.IsSettingsOpen && _main.SettingsCategory == "providers") || _main.IsUsagePopoverOpen;
+
+    /// <summary>The groups for one provider (the session's model), in report order.</summary>
+    internal IEnumerable<ProviderUsageGroupViewModel> For(string provider) => Groups.Where(g => g.Provider == provider);
+
     /// <summary>A run ended: the next load asks omp again even within <see cref="MinInterval"/>.</summary>
     internal void MarkStale() => _stale = true;
 
@@ -132,7 +143,7 @@ public sealed partial class ProviderUsageViewModel : ObservableObject
     internal Task LoadAsync(bool force = false)
     {
         if (force) _stale = true;
-        if (!_main.IsSettingsOpen || _main.SettingsCategory != "providers") return Task.CompletedTask;
+        if (!IsShown) return Task.CompletedTask;
         if (_loading is { IsCompleted: false } running) return running;
         if (!force && !_stale && DateTimeOffset.UtcNow - _fetchedAt < MinInterval)
         {
@@ -185,6 +196,7 @@ public sealed partial class ProviderUsageViewModel : ObservableObject
         HasGroups = Groups.Count > 0;
         var oldest = _reports.Select(r => r.FetchedAt).OfType<DateTimeOffset>().DefaultIfEmpty(_fetchedAt).Min();
         Note = HasGroups ? Loc.F("As of {0}", oldest.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)) : "";
+        Updated?.Invoke();
     }
 
     internal void ForgetSpendMessage(ProviderUsageGroupViewModel group) => _spendMessages.Remove((group.Provider, group.Report.Account));
@@ -250,6 +262,9 @@ public partial class MainViewModel
 {
     private ProviderUsageViewModel? _providerUsage;
 
-    /// <summary>Signed-in providers' plan limits, read only in Settings → Model providers.</summary>
+    /// <summary>Signed-in providers' plan limits (Settings → Model providers and the context popover).</summary>
     public ProviderUsageViewModel ProviderUsage => _providerUsage ??= new ProviderUsageViewModel(this);
+
+    /// <summary>The open session's context popover is showing (its plan section reads the limits).</summary>
+    internal bool IsUsagePopoverOpen => _open.Usage?.IsOpen == true;
 }

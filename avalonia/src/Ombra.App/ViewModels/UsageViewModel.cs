@@ -23,8 +23,10 @@ public sealed record UsageTotalViewModel(string Label, string Value);
 /// <summary>
 /// Claude Code's context ring next to the model: how full the model's context is (get_state's contextUsage, after
 /// every turn), in the warning colour from 70 % and the negative one from 85 % (omp compacts near the end). Its
-/// popover draws omp's <c>/context</c> breakdown, this session's tokens and cost (<c>get_session_stats</c>),
-/// and the active account's exceptional usage stage from <c>get_state</c>. Full provider reports belong to Settings.
+/// popover draws omp's <c>/context</c> breakdown, this session's tokens and cost (<c>get_session_stats</c>), the plan
+/// limits of the model's provider (<see cref="ProviderUsageViewModel"/>, omp's usage JSON) and the active account's
+/// exceptional stage from <c>get_state</c> (wrap-up, low priority), and offers "Compact now"; it refreshes after each
+/// turn while it is open.
 /// </summary>
 public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObject
 {
@@ -35,11 +37,13 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
     private string? _model;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasUsageLimit), nameof(HasIndicator), nameof(LimitBadge), nameof(LimitStatus), nameof(Tooltip), nameof(AccessibleName))]
+    [NotifyPropertyChangedFor(nameof(HasUsageLimit), nameof(HasIndicator), nameof(ShowsStageCaption), nameof(LimitBadge), nameof(LimitStatus), nameof(Tooltip), nameof(AccessibleName))]
     private OmpUsageLimit? _usageLimit;
 
     public bool HasUsageLimit => UsageLimit is not null;
     public bool HasIndicator => HasPercent || HasUsageLimit;
+    /// <summary>The stage's own caption only without the plan meters, which already head the section.</summary>
+    public bool ShowsStageCaption => HasUsageLimit && !HasLimits;
     public string LimitBadge => UsageLimit?.Stage == "low_priority" ? Loc.T("Low priority")
         : UsageLimit is not null ? Loc.T("Limit reached · wrapping up") : "";
     public string LimitStatus
@@ -87,12 +91,18 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string _contextHeadline = "";
     [ObservableProperty] private string _contextNote = "";
+    [ObservableProperty] private string _usageNote = "";
     [ObservableProperty] private string _error = "";
     [ObservableProperty] private bool _hasContext;
     [ObservableProperty] private bool _hasTotals;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowsStageCaption))]
+    private bool _hasLimits;
 
     public ObservableCollection<ContextRowViewModel> ContextRows { get; } = [];
     public ObservableCollection<UsageTotalViewModel> Totals { get; } = [];
+    /// <summary>The plan limits of the session model's provider (every account omp has for it).</summary>
+    public ObservableCollection<ProviderUsageGroupViewModel> Limits { get; } = [];
 
     /// <summary>From each applied snapshot: the ring, and a refresh of the open popover once a turn ended.</summary>
     internal void Apply(SessionSnapshot s)
@@ -108,6 +118,7 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
             HasContext = HasTotals = false;
             ContextHeadline = ContextNote = Error = "";
             _runsEnded = -1;
+            ApplyLimits(); // another model may be another provider: its own reports, without asking omp again
         }
         UsageLimit = s.UsageLimit;
         // Like Claude: no ring on a new chat. Before the first message omp's percentage is its system prompt and tools
@@ -126,7 +137,10 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
 
     partial void OnIsOpenChanged(bool value)
     {
+        // The plan section follows every new read (a spent reset, Settings' refresh) only while it is on screen
+        owner.ProviderUsage.Updated -= ApplyLimits;
         if (!value) return;
+        owner.ProviderUsage.Updated += ApplyLimits;
         CompactNowCommand.NotifyCanExecuteChanged(); // the conversation may have begun since
         _ = LoadAsync();
     }
@@ -170,7 +184,10 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
         return owner.OpenSettingsAtAsync("providers");
     }
 
-    /// <summary>Reads context and session stats through the active connection, never provider CLI reports.</summary>
+    /// <summary>
+    /// Runs <c>/context</c> and reads <c>get_session_stats</c> through the session connection; the provider's limits
+    /// come from omp's usage report, a side process that runs meanwhile and needs no running session.
+    /// </summary>
     internal async Task LoadAsync()
     {
         var load = ++_loads;
@@ -182,6 +199,7 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
         Error = "";
         try
         {
+            _ = owner.ProviderUsage.LoadAsync(); // applied through Updated when it lands
             if (!owner.CanRunOmpCommands)
             {
                 Error = Loc.T("omp is not running.");
@@ -245,6 +263,17 @@ public sealed partial class UsageViewModel(MainViewModel owner) : ObservableObje
             if (s.Cost > 0) Totals.Add(new UsageTotalViewModel(Loc.T("Cost"), Money(s.Cost)));
         }
         HasTotals = Totals.Count > 0;
+    }
+
+    /// <summary>The model's provider's groups from the last report ("anthropic" of "anthropic/claude-…"); "As of" under them.</summary>
+    private void ApplyLimits()
+    {
+        Limits.Clear();
+        var provider = _model is { } m && m.IndexOf('/') is var slash and > 0 ? m[..slash] : null;
+        if (provider is not null)
+            foreach (var g in owner.ProviderUsage.For(provider)) Limits.Add(g);
+        HasLimits = Limits.Count > 0;
+        UsageNote = HasLimits ? owner.ProviderUsage.Note : "";
     }
 
     /// <summary>"$0.42", and four decimals under a cent so a cheap session does not read as free.</summary>

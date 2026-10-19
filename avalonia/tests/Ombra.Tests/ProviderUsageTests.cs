@@ -13,8 +13,8 @@ using static Ombra.Tests.SessionAreaTests;
 namespace Ombra.Tests;
 
 /// <summary>
-/// Full plan reports and saved resets only in Settings → Model providers; active account stages, context and session
-/// totals in the composer, without launching a CLI report process.
+/// The session model's plan limits in the context ring's popover and every provider's in Settings → Model providers,
+/// both from <c>omp usage --json</c> read only while on screen; saved resets; the active account's exceptional stage.
 /// </summary>
 public sealed class ProviderUsageTests
 {
@@ -265,51 +265,66 @@ public sealed class ProviderUsageTests
     private static int UsageReads(Env e) => File.Exists(e.Cli) ? File.ReadAllLines(e.Cli).Count(l => l == "usage --json") : 0;
 
     [AvaloniaFact]
-    public async Task Composer_usage_never_launches_reports_but_explicit_settings_still_reads_all_accounts()
+    public async Task The_models_plan_usage_shows_in_the_ring_popover_and_every_provider_in_settings()
     {
+        // get_state carries no usageLimit outside wrap-up/low priority (the owner's real engine, 18.8.0): the popover's
+        // 5-hour and weekly meters must come from omp's usage report, never wait for that stage.
         var e = await OpenAsync(model: Claude);
         var vm = e.Vm;
         await Send(e, "Look at the parser"); // a new chat has no ring: it shows with the conversation
         await Until(() => vm.Usage.HasPercent && vm.Phase == SessionPhase.Ready && vm.Rows.OfType<AssistantRowViewModel>().Any(), "context ring");
         Assert.Equal(0, UsageReads(e)); // nothing read before it is looked at
+        Assert.False(vm.Usage.HasUsageLimit);
         var runs = vm.Session.Snapshot().RunsEnded;
 
         vm.Usage.IsOpen = true;
-        await Until(() => !vm.Usage.IsLoading && vm.Usage.HasContext && vm.Usage.HasTotals, "context and session totals");
-        var ring = e.W.GetVisualDescendants().OfType<UsageIndicator>().Single();
-        await Settle(300);
-        Assert.Empty(ring.Popup.Child!.GetVisualDescendants().OfType<ProviderUsageGroupView>());
-        Assert.Equal(0, UsageReads(e));
-        Assert.Equal(runs, vm.Session.Snapshot().RunsEnded); // /context is a read, not another agent turn
-
-        // Reopening and an explicit composer refresh still use only the session connection.
-        vm.Usage.IsOpen = false;
-        vm.Usage.IsOpen = true;
-        await Until(() => !vm.Usage.IsLoading, "reopened");
-        await vm.Usage.RefreshCommand.ExecuteAsync(null);
-        Assert.Equal(0, UsageReads(e));
-        Assert.Equal(runs, vm.Session.Snapshot().RunsEnded);
-
-        // A run ended while it is open: session tallies grow, without a report process.
-        var contextReads = Sent(e).Count(l => l == "/context");
-        await Send(e, "Explain the parser change");
-        await Until(() => Sent(e).Count(l => l == "/context") > contextReads && !vm.Usage.IsLoading, "context refreshed after run");
-        Assert.Equal(runs + 1, vm.Session.Snapshot().RunsEnded);
-        await Until(() => vm.Usage.Totals.Any(t => t.Label == Loc.T("Cost")), "the session's cost");
-        Assert.DoesNotContain(Sent(e), l => l.StartsWith("/usage", StringComparison.Ordinal)); // never a command in the conversation
-
-        // Settings → Model providers: every provider that reports usage
-        vm.Usage.IsOpen = false;
-        await vm.OpenSettingsAtAsync("providers");
-        await Until(() => vm.ProviderUsage.Groups.Count == 2 && !vm.ProviderUsage.IsLoading, "plan usage in settings");
-        Assert.Equal(["Claude", "ChatGPT"], vm.ProviderUsage.Groups.Select(g => g.Name));
-        Assert.Equal(1, UsageReads(e));
-        var claude = vm.ProviderUsage.Groups.Single(g => g.Provider == "anthropic");
-        Assert.Equal(("Claude", "dev@example.com"), (claude.Name, claude.Account));
+        await Until(() => !vm.Usage.IsLoading && vm.Usage.HasContext && vm.Usage.HasTotals && vm.Usage.HasLimits, "plan usage in the popover");
+        var claude = Assert.Single(vm.Usage.Limits); // only the session model's provider
+        Assert.Equal(("anthropic", "Claude", "dev@example.com"), (claude.Provider, claude.Name, claude.Account));
         Assert.Equal([Loc.T("5-hour limit"), Loc.T("Weekly limit")], claude.Meters.Select(m => m.Label));
         Assert.Equal((Loc.F("{0:0}% used", 42.0), 42.0), (claude.Meters[0].Amount, claude.Meters[0].Value));
         Assert.True(claude.Meters[1].IsHigh);
         Assert.False(claude.Meters[0].IsHigh);
+        Assert.False(vm.Usage.ShowsStageCaption);
+        var ring = e.W.GetVisualDescendants().OfType<UsageIndicator>().Single();
+        await Settle(300);
+        var meters = ring.Popup.Child!.GetVisualDescendants().OfType<ProviderUsageGroupView>().Single();
+        Assert.True(meters.IsEffectivelyVisible);
+        Assert.Equal(1, UsageReads(e));
+        Assert.Equal(runs, vm.Session.Snapshot().RunsEnded); // /context is a read, not another agent turn
+
+        // Opened again at once: omp is not asked again (no polling)
+        vm.Usage.IsOpen = false;
+        vm.Usage.IsOpen = true;
+        await Until(() => !vm.Usage.IsLoading && vm.Usage.HasLimits, "reopened");
+        Assert.Equal(1, UsageReads(e));
+        Assert.Equal(runs, vm.Session.Snapshot().RunsEnded);
+
+        // A run ended while it is open: the limits are read again, the session's tallies grow
+        await Send(e, "Explain the parser change");
+        await Until(() => UsageReads(e) == 2 && !vm.Usage.IsLoading && vm.Usage.HasLimits, "read again after the run");
+        Assert.Equal(runs + 1, vm.Session.Snapshot().RunsEnded);
+        await Until(() => vm.Usage.Totals.Any(t => t.Label == Loc.T("Cost")), "the session's cost");
+        Assert.DoesNotContain(Sent(e), l => l.StartsWith("/usage", StringComparison.Ordinal)); // never a command in the conversation
+
+        // Closed: a run ending reads nothing until it is looked at again
+        vm.Usage.IsOpen = false;
+        await Send(e, "And the tests");
+        await Until(() => vm.Session.Snapshot().RunsEnded == runs + 2 && vm.Phase == SessionPhase.Ready, "run while closed");
+        await Settle(200);
+        Assert.Equal(2, UsageReads(e));
+
+        // Settings → Model providers: every provider that reports usage
+        await vm.OpenSettingsAtAsync("providers");
+        await Until(() => vm.ProviderUsage.Groups.Count == 2 && !vm.ProviderUsage.IsLoading, "plan usage in settings");
+        Assert.Equal(["Claude", "ChatGPT"], vm.ProviderUsage.Groups.Select(g => g.Name));
+        Assert.Equal(3, UsageReads(e)); // stale since the last run
+        var inSettings = vm.ProviderUsage.Groups.Single(g => g.Provider == "anthropic");
+        Assert.Equal(("Claude", "dev@example.com"), (inSettings.Name, inSettings.Account));
+        Assert.Equal([Loc.T("5-hour limit"), Loc.T("Weekly limit")], inSettings.Meters.Select(m => m.Label));
+        Assert.Equal((Loc.F("{0:0}% used", 42.0), 42.0), (inSettings.Meters[0].Amount, inSettings.Meters[0].Value));
+        Assert.True(inSettings.Meters[1].IsHigh);
+        Assert.False(inSettings.Meters[0].IsHigh);
         Assert.Equal("dev@example.com · " + Loc.F("{0} plan", "Plus"), vm.ProviderUsage.Groups[1].Account);
         Assert.Equal([Loc.T("5-hour limit"), Loc.T("Weekly limit")], vm.ProviderUsage.Groups[1].Meters.Select(m => m.Label));
         await Settle(200);
@@ -327,16 +342,17 @@ public sealed class ProviderUsageTests
     [AvaloniaFact]
     public async Task Providers_without_a_usage_source_show_no_meters()
     {
-        // No exceptional stage reported: show no badge, never infer a percentage or full quota.
+        // The session's provider reports nothing and no exceptional stage: no plan section, no badge, no made-up numbers
         var e = await OpenAsync();
         var vm = e.Vm;
         await Send(e, "Look at the parser"); // a new chat has no ring: it shows with the conversation
         await Until(() => vm.Usage.HasPercent && vm.Phase == SessionPhase.Ready && vm.Rows.OfType<AssistantRowViewModel>().Any(), "context ring");
         vm.Usage.IsOpen = true;
-        await Until(() => !vm.Usage.IsLoading && vm.Usage.HasContext, "popover loaded");
+        await Until(() => !vm.Usage.IsLoading && vm.Usage.HasContext && UsageReads(e) == 1 && !vm.ProviderUsage.IsLoading, "popover loaded");
+        Assert.False(vm.Usage.HasLimits);
+        Assert.Empty(vm.Usage.Limits);
         Assert.False(vm.Usage.HasUsageLimit);
         Assert.Equal("", vm.Usage.LimitStatus);
-        Assert.Equal(0, UsageReads(e));
         await Close(e);
 
         // omp has no usage to report (no credentials): Settings shows no plan usage card
@@ -366,7 +382,7 @@ public sealed class ProviderUsageTests
             await Send(e, "Explain the parser change");
             await Until(() => vm.Phase == SessionPhase.Ready && vm.Usage.HasPercent, "reply");
             vm.Usage.IsOpen = true;
-            await Until(() => !vm.Usage.IsLoading && vm.Usage.HasContext && vm.Usage.HasTotals, "popover");
+            await Until(() => !vm.Usage.IsLoading && vm.Usage.HasContext && vm.Usage.HasTotals && vm.Usage.HasLimits, "popover");
             await Settle(400);
             Save(e.W.CaptureRenderedFrame(), dir, $"{theme}-usage-window");
             vm.Usage.IsOpen = false;

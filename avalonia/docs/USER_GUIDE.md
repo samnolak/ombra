@@ -686,22 +686,22 @@ is, from the first message on (a new chat shows none: before it, omp's few perce
 tools); it turns orange from 70 % and red from 85 % (omp compacts the conversation on its own near the end, when
 Auto-compact is on). Click it for the breakdown as bars (the parts omp's `/context` reports, the auto-compact buffer,
 free room), this session's tokens (input, output, cache) and cost (when omp prices the model), **Compact now**,
-**Measure again** and a link to omp's **Usage dashboard** across all sessions. The open popover refreshes session
-details after each reply. When `get_state` reports an exceptional usage stage for the active account, a badge
+**Measure again** and a link to omp's **Usage dashboard** across all sessions. Under *Plan usage* it shows the limits
+of the model's provider for each of its signed-in accounts (Claude's or ChatGPT's 5-hour and weekly windows, API
+spend…) as meters with the share used and the time to reset, from `omp usage --json`: a side process run when the
+popover opens (at most every 30 seconds, again after a reply), never a message in the conversation. The open popover
+refreshes after each reply. When `get_state` reports an exceptional usage stage for the active account, a badge
 shows **Low priority** or **Limit reached · wrapping up**, even in an empty chat. Details include the reported reset
-time, extra-usage status and optional low-priority allowance. This is not a full subscription quota report;
-missing state shows no badge, and changing model or session clears stale state.
-
-The composer and its popover never launch `omp usage`. **All providers** opens Settings → Model providers,
-where full plan reports show subscription windows as meters with the share used and time to reset.
-These reports come from `omp usage --json`, separately from the live session's usage stage.
+time, extra-usage status and optional low-priority allowance; missing state shows no badge, and changing model or
+session clears stale state. **All providers** opens Settings → Model providers with every signed-in provider's
+limits.
 
 Some providers give an account **saved resets** (ChatGPT and Claude subscriptions, now and then): each refreshes a
-used-up limit when you spend it. Under the account's meters in Settings → Model providers you can see how many
-it has, how many can be spent now, when the soonest expires, or why none can be spent now (omp's reason, such as a
-cooldown). **Use a saved reset** asks once more in place; **Use reset** has omp spend one of that account's resets
-(`/usage reset`, without a message in the conversation), shows omp's answer under the account and reads the limits
-again. It needs a running chat; a spent reset cannot be taken back.
+used-up limit when you spend it. Under the account's meters (the popover and Settings → Model providers) you can see
+how many it has, how many can be spent now, when the soonest expires, or why none can be spent now (omp's reason,
+such as a cooldown). **Use a saved reset** asks once more in place; **Use reset** has omp spend one of that account's
+resets (`/usage reset`, without a message in the conversation), shows omp's answer under the account and reads the
+limits again. It needs a running chat; a spent reset cannot be taken back.
 
 ### Model options
 

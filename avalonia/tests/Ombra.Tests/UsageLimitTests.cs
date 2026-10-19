@@ -271,9 +271,12 @@ public sealed class UsageLimitTests
             // In the app's language, as the conversation's times: never the system region's date format
             Assert.Contains(Loc.F("Resets {0}", MessageTimes.Short(DateTimeOffset.FromUnixTimeSeconds(reset))), vm.Usage.LimitStatus);
             indicator.Button.Command!.Execute(null);
-            await Until(() => !vm.Usage.IsLoading && vm.Usage.HasContext, "context details");
+            await Until(() => !vm.Usage.IsLoading && vm.Usage.HasContext && vm.Usage.HasLimits, "context details and plan usage");
+            await Settle(100);
             Assert.True(indicator.Popup.Child!.GetVisualDescendants().OfType<TextBlock>().Single(x => x.Name == "UsageLimitStatus").IsEffectivelyVisible);
-            Assert.Empty(indicator.Popup.Child!.GetVisualDescendants().OfType<ProviderUsageGroupView>());
+            // The stage sits under the provider's own meters (omp's usage report), which head the section
+            Assert.True(indicator.Popup.Child!.GetVisualDescendants().OfType<ProviderUsageGroupView>().Single().IsEffectivelyVisible);
+            Assert.False(vm.Usage.ShowsStageCaption);
 
             await SetLimit(vm.Session, """{"stage":"wrap_up","extraUsage":true}""");
             await Until(() => vm.Usage.UsageLimit?.ExtraUsage == true, "paid extra usage indication");
