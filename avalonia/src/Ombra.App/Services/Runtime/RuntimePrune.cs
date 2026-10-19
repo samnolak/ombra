@@ -4,7 +4,8 @@ namespace Ombra.App.Services.Runtime;
 /// Removes from a freshly installed npm tree what the engine on this platform never loads, before the host's
 /// <c>--self-check</c> runs on the result (the installer's last gate). Every rule names why the files are unreachable;
 /// a rule whose evidence no longer holds after a pin change must be re-checked (avalonia/docs/PARITY.md, F3).
-/// Measured on darwin-aarch64, 18.8.0: node_modules 951 → 441 MB, the whole pack 1017 → 515 MiB (26,719 → 13,228 files).
+/// Rules reviewed against omp 18.12.2, transformers 4.3.1 and onnxruntime-node 1.30.0.
+/// Historical darwin-aarch64 measurement (18.8.0): whole pack 1017 → 515 MiB; not a size claim for this pin.
 /// </summary>
 internal static class RuntimePrune
 {
@@ -13,8 +14,8 @@ internal static class RuntimePrune
     /// onnxruntime-web — @huggingface/transformers' "node" export (dist/transformers.node.mjs) inlines the ORT web
     ///   bundle it needs and loads onnxruntime-node for inference; only its browser export imports this package.
     /// lucide-react, react, react-dom, scheduler — dependencies of @oh-my-pi/omp-stats' dashboard sources
-    ///   (src/client/*.tsx), which only its build.ts bundles; the server serves the prebuilt dist/client
-    ///   (kept current below, so it is never rebuilt).
+    ///   (src/client/*.tsx), which only its build.ts bundles; the server serves the embedded archive when present,
+    ///   otherwise prebuilt dist/client (kept current below, so it is never rebuilt).
     /// </summary>
     internal static readonly string[] Packages = ["onnxruntime-web", "lucide-react", "react", "react-dom", "scheduler"];
 
@@ -82,9 +83,9 @@ internal static class RuntimePrune
             removed += Delete(file);
         }
 
-        // omp-stats rebuilds its dashboard into its own folder when a source is newer than dist/client (server.ts
-        // ensureClientBuild); the install writes both at once in no fixed order. The prebuilt dashboard is made the
-        // newer, so it is served as shipped and nothing is ever written into the (read-only, bundled) pack.
+        // omp-stats 18.12.2 uses its embedded dashboard when available; otherwise ensureClientBuild checks
+        // index.html and index.css against src/client's newest mtime. Keep that disk fallback newer too:
+        // nothing may rebuild into the (read-only, bundled) pack after React/build dependencies are pruned.
         var stats = Path.Combine(modules, "@oh-my-pi", "omp-stats");
         var client = Path.Combine(stats, "src", "client");
         var dist = Path.Combine(stats, "dist", "client");

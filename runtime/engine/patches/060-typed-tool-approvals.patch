@@ -1,0 +1,369 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: samnolak <258669251+samnolak@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 21:42:07 +0300
+Subject: [PATCH] typed tool approvals
+
+What: Preserve the repository-owned typed tool approvals.
+Why: Ombra embeds multiple concurrent sessions and renders native host features.
+Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
+
+diff --git a/src/extensibility/extensions/runner.ts b/src/extensibility/extensions/runner.ts
+index a21f6f9951e89c70bdfa4103fee3ed781c72080b..5ca077beb6cf2cf61f77e3233a8964fe8a34d177 100644
+--- a/src/extensibility/extensions/runner.ts
++++ b/src/extensibility/extensions/runner.ts
+@@ -30,7 +30,8 @@ import { logger } from "@oh-my-pi/pi-utils";
+ import { refreshShellConfigCache } from "@oh-my-pi/pi-utils/procmgr";
+ import { MAIN_AGENT_RULE_NAME } from "../../capability/rule";
+ import type { ModelRegistry } from "../../config/model-registry";
+-import { type Settings, withActiveSettings } from "../../config/settings";
++import type { Settings } from "../../config/settings";
++import { isUntrustedProjectScope, withActiveSettings } from "../../config/settings-context";
+ import type { LocalProtocolOptions } from "../../internal-urls/local-protocol";
+ import type { MemoryRuntimeContext } from "../../memory-backend";
+ import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
+@@ -1430,7 +1431,7 @@ export class ExtensionRunner {
+ 			cwd: this.cwd,
+ 			sessionManager: this.sessionManager,
+ 			modelRegistry: this.modelRegistry,
+-			isProjectTrusted: () => true,
++			isProjectTrusted: () => (this.settings ? !this.settings.ignoresProjectSettings : !isUntrustedProjectScope()),
+ 			agent,
+ 			get model() {
+ 				return getModel();
+diff --git a/src/extensibility/extensions/types.ts b/src/extensibility/extensions/types.ts
+index 4921c96d2a2816ea01940c621c26dc6ec447f8e8..f9e83abc67a177bda1d0227bf9fafb08b3d79ea1 100644
+--- a/src/extensibility/extensions/types.ts
++++ b/src/extensibility/extensions/types.ts
+@@ -93,7 +93,7 @@ import type { BashToolInput, GlobToolInput, GrepToolInput, ReadToolInput, WriteT
+ import type { GlobToolDetails } from "@oh-my-pi/pi-tui/tools/glob";
+ import type { GrepToolDetails } from "@oh-my-pi/pi-tui/tools/grep";
+ import type { ReadToolDetails } from "@oh-my-pi/pi-tui/tools/read";
+-import type { ApprovalMode } from "../../tools/approval";
++import type { ApprovalMode, ToolApprovalRequest } from "../../tools/approval";
+ import type { BashToolDetails } from "@oh-my-pi/pi-tui/tools/bash";
+ import type { FileDeleteFallbackHandler, FileWriteFallbackHandler } from "../../tools/file-write-fallback";
+ import type { EventBus } from "../../utils/event-bus";
+@@ -231,6 +231,10 @@ export interface ExtensionUIDialogOptions {
+ 	markableCount?: number;
+ 	/** Allow image pastes in rich ask-dialog custom-answer and note prompts. */
+ 	acceptImages?: boolean;
++	/** Tool approval select: the typed request hosts with structured approval render instead of the title text. */
++	approval?: ToolApprovalRequest;
++	/** Tool approval select: receives the reason a host returned with "Deny". */
++	onApprovalDenied?: (reason: string) => void;
+ }
+ 
+ /** Raw terminal input listener for extensions. */
+@@ -709,11 +713,10 @@ export interface ExtensionContext {
+ 	/** Identity of the agent this session runs: the top-level session or a subagent. */
+ 	agent: ExtensionAgentIdentity;
+ 	/**
+-	 * Whether the current project/workspace is trusted. OMP performs no
+-	 * project-trust gating — project-level settings and extensions load
+-	 * unconditionally — so this always returns `true`. Exposed for
+-	 * compatibility with extensions authored against upstream Pi, whose
+-	 * `SettingsManager` accepts a `projectTrusted` flag.
++	 * Whether the current project/workspace is trusted: `false` when the session runs the folder
++	 * untrusted (`--untrusted-project`, `settings.ignoresProjectSettings`), where the folder's own
++	 * settings, extensions and tools are not loaded. Extensions must then not read or run
++	 * project-local config either. Matches upstream Pi's `projectTrusted` flag.
+ 	 */
+ 	isProjectTrusted(): boolean;
+ 	/** Get the current effective system prompt. */
+@@ -778,11 +781,9 @@ export interface ExtensionContext {
+ 	 * here; extensions written against that API (e.g. Plannotator) feature-detect this method to
+ 	 * decide whether project-local config is safe to load, and warn when it is absent.
+ 	 *
+-	 * OMP has no equivalent per-directory trust gate: `.omp/extensions`, `.omp/config.yml`, and
+-	 * other project-local inputs are already discovered and loaded unconditionally (see
+-	 * `docs/extension-loading.md`). This method exists for compatibility with that upstream surface
+-	 * and always returns `true`, truthfully reflecting that OMP already trusts project-local inputs
+-	 * by default -- it does not narrow or widen OMP's own security model.
++	 * OMP's equivalent gate is the untrusted-folder scope (`--untrusted-project`): project-local
++	 * inputs (`.omp/extensions`, `.omp/config.yml`, …) are skipped there, and this method returns
++	 * `false`. Otherwise it returns `true`.
+ 	 */
+ 	isProjectTrusted(): boolean;
+ }
+@@ -882,6 +883,8 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
+ 	/** Tool approval tier. Defaults to `"exec"` when omitted.
+ 	 *  `"read"`: read-only operations. `"write"`: mutations. `"exec"`: code execution. */
+ 	approval?: ToolApproval;
++	/** Lines appended after the standard approval prompt header (the call's arguments in words). */
++	formatApprovalDetails?: (args: unknown) => string | string[] | undefined;
+ 	/** Structured-output strict grammar opt-in/out. `false` is meaningful: OpenAI-family
+ 	 *  serializers preserve an explicit `strict: false` on the wire (#4336/#4340). */
+ 	strict?: boolean;
+diff --git a/src/extensibility/extensions/wrapper.ts b/src/extensibility/extensions/wrapper.ts
+index f482104bfb1ca305e4820942efc2d0275ed80967..4fb8b95d26f5e8fb0a7eb910fbd08c39e04c756c 100644
+--- a/src/extensibility/extensions/wrapper.ts
++++ b/src/extensibility/extensions/wrapper.ts
+@@ -14,12 +14,15 @@ import { prompt, sanitizeText, untilAborted } from "@oh-my-pi/pi-utils";
+ import type { Theme } from "@oh-my-pi/pi-tui/theme";
+ import nativeDelegationTemplate from "../../prompts/tools/native-delegation.md" with { type: "text" };
+ import {
++	buildToolApprovalRequest,
++	deniedByUserMessage,
+ 	denyError,
+ 	requestApproval,
+ 	resolveApproval,
+ 	resolveApprovalFromContext,
+ 	sessionApprovalScope,
+ 	truncateForPrompt,
++	type ToolApprovalOutcome,
+ } from "../../tools/approval";
+ import { defaultLoadModeForToolName } from "../../tools/essential-tools";
+ import { withFileMutationSession } from "../../tools/file-write-fallback";
+@@ -339,7 +342,7 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
+ 		// satisfies explicit prompts, but compares against a deep snapshot because
+ 		// handlers can mutate the original argument object in place. Denies were
+ 		// enforced above, and provider safety checks remain independently required.
+-		const explicitPrompt = resolved.override || Object.hasOwn(userPolicies, resolved.policyKey ?? this.tool.name);
++		const explicitPrompt = resolved.override || resolved.source === "tool" || resolved.source === "user";
+ 		const xdevBypass = context?.xdevApproved === true && effectiveParams === params;
+ 		const acpBypass =
+ 			context !== undefined &&
+@@ -358,6 +361,7 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
+ 		};
+ 
+ 		if (approvalCheck.required) {
++			const approvalSessionId = this.runner.sessionId;
+ 			const scheduledCall = context?.toolCall?.toolCalls[context.toolCall.index];
+ 			if (
+ 				scheduledCall?.id === toolCallId &&
+@@ -413,26 +417,41 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
+ 			}
+ 
+ 			const uiContext = this.runner.getUIContext();
+-			const safetyAppendix =
+-				pendingSafetyChecks.length > 0 ? ["Provider safety checks:", ...safetyCheckLines(pendingSafetyChecks)] : [];
+-			let approved: boolean;
++			const safetyLines = safetyCheckLines(pendingSafetyChecks);
++			const safetyAppendix = safetyLines.length > 0 ? ["Provider safety checks:", ...safetyLines] : [];
++			const request = buildToolApprovalRequest(this.tool, resolvedArgs, {
++				risk: resolved.tier,
++				reason: approvalCheck.reason,
++				toolCallId,
++				safetyChecks: safetyLines,
++				// The tool or the user's own policy insists on a person every time: no answer may be kept.
++				override: explicitPrompt,
++			});
++			let outcome: ToolApprovalOutcome;
+ 			try {
+-				const answer = await requestApproval(uiContext, this.tool, resolvedArgs, {
++				outcome = await requestApproval(uiContext, this.tool, resolvedArgs, {
++					approval: request,
+ 					reason: approvalCheck.reason,
+ 					appendix: safetyAppendix,
+ 					sessionSubject: sessionScope?.subject,
+ 				});
+-				approved = answer !== "deny";
+-				if (answer === "session" && sessionScope) this.runner.grantSessionApproval(sessionScope.key);
++				if (
++					outcome.approved &&
++					outcome.scope === "session" &&
++					sessionScope &&
++					this.runner.sessionId === approvalSessionId
++				) {
++					this.runner.grantSessionApproval(sessionScope.key);
++				}
+ 			} catch (err) {
+ 				await emitApprovalResolved(false, err instanceof Error ? err.message : "approval aborted");
+ 				cancelPreflight();
+ 				throw err;
+ 			}
+-			await emitApprovalResolved(approved, approved ? undefined : "denied by user");
+-			if (!approved) {
++			await emitApprovalResolved(outcome.approved, outcome.approved ? undefined : (outcome.reason ?? "denied by user"));
++			if (!outcome.approved) {
+ 				cancelPreflight();
+-				throw new Error(`Tool call denied by user: ${this.tool.name}`);
++				throw new Error(deniedByUserMessage(`Tool call denied by user: ${this.tool.name}`, outcome.reason));
+ 			}
+ 			if (pendingSafetyChecks.length > 0) {
+ 				if (!context) {
+diff --git a/src/tools/approval.ts b/src/tools/approval.ts
+index f11397fa82195aec7e5322f7a6fa2e742779e7a0..46787b330c2b072cd5216ff94fa333e19d0caf00 100644
+--- a/src/tools/approval.ts
++++ b/src/tools/approval.ts
+@@ -38,6 +38,8 @@ type ApprovalSubject = Pick<AgentTool, "name" | "approval" | "formatApprovalDeta
+ 	 * (`allow` is deliberately not inherited — see resolveApproval).
+ 	 */
+ 	readonly legacyName?: string;
++	/** The MCP server a tool fronts (MCPTool, forwarded through the tool adapters). */
++	readonly mcpServerName?: unknown;
+ };
+ 
+ const APPROVAL_MODES: ReadonlySet<ApprovalMode> = new Set(["always-ask", "write", "yolo"]);
+@@ -432,8 +434,9 @@ export function formatApprovalArguments(args: unknown, options?: { showEmpty?: b
+ function approvalHeader(tool: ApprovalSubject, reason?: string): string[] {
+ 	const lines = [`Allow tool: ${tool.name}`];
+ 
+-	if (tool.name.startsWith("mcp__") && tool.approval === undefined) {
+-		lines.push("Origin: MCP server tool");
++	const server = mcpServerOf(tool);
++	if (server !== undefined) {
++		lines.push(server ? `Origin: MCP server tool (${server})` : "Origin: MCP server tool");
+ 	}
+ 
+ 	if (reason) {
+@@ -442,6 +445,55 @@ function approvalHeader(tool: ApprovalSubject, reason?: string): string[] {
+ 	return lines;
+ }
+ 
++/** The MCP server behind `tool` ("" when only its name says MCP); undefined for every other tool. */
++function mcpServerOf(tool: ApprovalSubject): string | undefined {
++	if (typeof tool.mcpServerName === "string" && tool.mcpServerName) return tool.mcpServerName;
++	return tool.name.startsWith("mcp__") && tool.approval === undefined ? "" : undefined;
++}
++
++/** How long a host may let an approval answer stand: this call, this session, or a saved pattern. */
++export type ToolApprovalScope = "once" | "session" | "always";
++
++/**
++ * The typed approval request hosts render natively instead of parsing
++ * {@link formatApprovalPrompt}. Passed to approval dialogs and their select fallback.
++ */
++export interface ToolApprovalRequest {
++	tool: string;
++	toolCallId?: string;
++	/** Capability tier of this call: read, write or exec. */
++	risk: ToolTier;
++	/** The tool's own reason for asking. */
++	reason?: string;
++	/** A tool of an MCP server (`server` names it when known). */
++	origin?: "mcp";
++	server?: string;
++	/** The tool's argument summary lines (bounded, as in the text prompt). */
++	details: string[];
++	/** `bash` only: the complete command, absent when longer than {@link MAX_APPROVAL_COMMAND_CHARS}. */
++	command?: string;
++	/** `bash` only: the folder the call names to run in (as given; relative to the session's folder). */
++	cwd?: string;
++	/** Provider safety checks only a person may confirm. */
++	safetyChecks?: string[];
++	/**
++	 * Scopes the host may apply to an approval: only `once` while safety checks are pending or an
++	 * explicit tool/user prompt policy insists on a person for every call.
++	 */
++	scopes: ToolApprovalScope[];
++}
++
++/** The user's answer; a deny may carry the reason the agent reads in the failed tool result. */
++export interface ToolApprovalOutcome {
++	approved: boolean;
++	reason?: string;
++	scope?: "once" | "session";
++}
++
++export const MAX_APPROVAL_COMMAND_CHARS = 65_536;
++/** Longest denial reason forwarded to the agent. */
++export const MAX_APPROVAL_DENY_REASON_CHARS = 4_000;
++
+ /** The tool's own detail rows for `args` (command, path, content), blanks dropped. */
+ function approvalDetails(tool: ApprovalSubject, args: unknown): string[] {
+ 	const details = tool.formatApprovalDetails?.(args);
+@@ -454,6 +506,30 @@ function approvalDetails(tool: ApprovalSubject, args: unknown): string[] {
+ 	return [];
+ }
+ 
++/** Build the typed request for one prompted call (see {@link ToolApprovalRequest}). */
++export function buildToolApprovalRequest(
++	tool: ApprovalSubject,
++	args: unknown,
++	options: { risk: ToolTier; reason?: string; toolCallId?: string; safetyChecks?: readonly string[]; override?: boolean },
++): ToolApprovalRequest {
++	const command = tool.name === "bash" && isRecord(args) ? args.command : undefined;
++	const cwd = tool.name === "bash" && isRecord(args) && typeof args.cwd === "string" && args.cwd.trim() ? args.cwd : undefined;
++	const safetyChecks = options.safetyChecks?.length ? [...options.safetyChecks] : undefined;
++	const server = mcpServerOf(tool);
++	return {
++		tool: tool.name,
++		...(options.toolCallId ? { toolCallId: options.toolCallId } : {}),
++		risk: options.risk,
++		...(options.reason ? { reason: options.reason } : {}),
++		...(server !== undefined ? { origin: "mcp" as const, ...(server ? { server } : {}) } : {}),
++		details: approvalDetails(tool, args),
++		...(typeof command === "string" && command.length <= MAX_APPROVAL_COMMAND_CHARS ? { command } : {}),
++		...(cwd ? { cwd } : {}),
++		...(safetyChecks ? { safetyChecks } : {}),
++		scopes: safetyChecks || options.override ? ["once"] : ["once", "session", "always"],
++	};
++}
++
+ /** Format the approval prompt body shown to the user: the header, then the tool's own details. */
+ export function formatApprovalPrompt(tool: ApprovalSubject, args: unknown, reason?: string): string {
+ 	return [...approvalHeader(tool, reason), ...approvalDetails(tool, args)].join("\n");
+@@ -495,29 +571,58 @@ export function sessionApprovalScope(
+ }
+ 
+ /**
+- * Ask the user to approve a call: the host's approval dialog when it has one (it gets the full
+- * prompt and a compact one with the details summarized to a row, so the composer beneath it
+- * keeps its room), else a select with the full prompt (RPC, ACP, extension hosts). `appendix`
+- * lines follow the prompt on both. With a `sessionSubject`, both also offer to approve that
+- * subject for the rest of the session. Anything but an explicit approval is `deny`.
++ * Ask through the host's approval dialog, or a select fallback. Both receive the typed request
++ * and denial-reason callback. Session grants are offered only when allowed by the request;
++ * provider safety checks and explicit prompt policies stay per-call. Anything but an explicit
++ * supported approval is a denial.
+  */
+ export async function requestApproval(
+ 	ui: Pick<ExtensionUIContext, "select" | "approve">,
+ 	tool: ApprovalSubject,
+ 	args: unknown,
+-	options: { reason?: string; appendix?: readonly string[]; sessionSubject?: string } = {},
+-): Promise<ExtensionApprovalAnswer> {
+-	const { reason, appendix = [], sessionSubject } = options;
++	options: {
++		approval: ToolApprovalRequest;
++		reason?: string;
++		appendix?: readonly string[];
++		sessionSubject?: string;
++	},
++): Promise<ToolApprovalOutcome> {
++	const { approval, reason, appendix = [], sessionSubject } = options;
+ 	const header = approvalHeader(tool, reason);
+ 	const details = approvalDetails(tool, args);
+ 	const full = [...header, ...details, ...appendix].join("\n");
+-	const session = sessionSubject === undefined ? undefined : `Approve ${sessionSubject} for this session`;
++	const session =
++		sessionSubject !== undefined && approval.scopes.includes("session") && !approval.safetyChecks?.length
++			? `Approve ${sessionSubject} for this session`
++			: undefined;
++	let denyReason: string | undefined;
++	const dialogOptions = {
++		approval,
++		onApprovalDenied: (reason: string) => {
++			denyReason = reason.trim().slice(0, MAX_APPROVAL_DENY_REASON_CHARS) || undefined;
++		},
++	};
++	let answer: ExtensionApprovalAnswer;
+ 	if (ui.approve) {
+ 		const summary = approvalSummary(details);
+ 		const compact = [...header, ...(summary === undefined ? [] : [summary]), ...appendix].join("\n");
+-		const answer = await ui.approve({ full, compact, ...(session ? { session } : {}) });
+-		return answer === "once" || (answer === "session" && session) ? answer : "deny";
++		answer = await ui.approve({ full, compact, ...(session ? { session } : {}) }, dialogOptions);
++	} else {
++		const choice = await ui.select(
++			full,
++			session ? ["Approve", session, "Deny"] : ["Approve", "Deny"],
++			dialogOptions,
++		);
++		answer = choice === "Approve" ? "once" : session && choice === session ? "session" : "deny";
+ 	}
+-	const choice = await ui.select(full, session ? ["Approve", session, "Deny"] : ["Approve", "Deny"]);
+-	return choice === "Approve" ? "once" : session && choice === session ? "session" : "deny";
++	if (answer === "once" || (answer === "session" && session)) return { approved: true, scope: answer };
++	return denyReason ? { approved: false, reason: denyReason } : { approved: false };
+ }
++
++/**
++ * The failed tool result of a denied call: the user's reason, when given, is what the agent reads next. It is a
++ * JSON string after a fixed label, so a reason spanning lines cannot pose as further tool output.
++ */
++export function deniedByUserMessage(subject: string, reason?: string): string {
++	return reason ? `${subject}\nThe user said (approval prompt): ${JSON.stringify(reason)}` : subject;
++}
+\ No newline at end of file

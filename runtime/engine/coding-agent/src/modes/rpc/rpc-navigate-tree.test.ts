@@ -128,6 +128,43 @@ describe("RPC navigate_tree", () => {
 		};
 	}
 
+	test("rewinding restores image bytes from the stored user message", async () => {
+		const h = await open();
+		try {
+			const images = [{
+				type: "image",
+				mimeType: "image/png",
+				data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jf9sAAAAASUVORK5CYII=",
+			}];
+			expect(await h.promptResult(h.send({ type: "prompt", message: "look", images }))).toMatchObject({
+				status: "completed",
+			});
+			await h.session.sessionManager.flush();
+			// Image preparation may resize/re-encode the upload. Restore what the engine actually stored.
+			const original = h.session.sessionManager.buildSessionContext().messages.findLast(message => message.role === "user");
+			if (original?.role !== "user" || !Array.isArray(original.content)) throw new Error("missing image user message");
+			const storedImages = original.content.filter(part => part.type === "image");
+			expect(storedImages).toHaveLength(1);
+			expect(storedImages[0].data).not.toStartWith("blob:");
+			const file = h.session.sessionFile;
+			const result = await h.request({ type: "navigate_tree", targetId: await h.branchEntry("look") });
+			expect(result).toMatchObject({
+				success: true,
+				data: { text: "look", images: storedImages, cancelled: false },
+			});
+			expect(h.session.sessionFile).toBe(file);
+			expect(h.userTexts()).toEqual([]);
+			if (!isRecord(result.data)) throw new Error("missing navigate_tree data");
+			expect(await h.promptResult(h.send({ type: "prompt", message: "look again", images: result.data.images }))).toMatchObject({
+				status: "completed",
+			});
+			const user = h.session.sessionManager.buildSessionContext().messages.findLast(message => message.role === "user");
+			expect(user?.content).toEqual(expect.arrayContaining(storedImages));
+		} finally {
+			await h.runtime.close();
+		}
+	}, 60_000);
+
 	test("rewinding a stopped last message stays in the same session file, also after the chat is reopened", async () => {
 		const h = await open();
 		try {

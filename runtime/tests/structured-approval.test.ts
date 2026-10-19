@@ -142,7 +142,7 @@ test("a tool approval is a typed request; Deny carries the user's reason into th
 	const request = await host.waitSession(key, isApproval, "approval request");
 	// The text prompt stays for hosts without structured approval.
 	expect(request.title.split("\n")[0]).toBe("Allow tool: bash");
-	expect(request.options).toEqual(["Approve", "Deny"]);
+	expect(request.options).toEqual(["Approve", "Approve bash for this session", "Deny"]);
 	expect(request.approval).toMatchObject({
 		tool: "bash",
 		risk: "exec",

@@ -10,16 +10,17 @@ import {
 	type ToolLoadMode,
 } from "@oh-my-pi/pi-agent-core";
 import type { ComputerSafetyCheck, ImageContent, Static, TextContent, TSchema } from "@oh-my-pi/pi-ai";
-import { sanitizeText, untilAborted } from "@oh-my-pi/pi-utils";
+import { prompt, sanitizeText, untilAborted } from "@oh-my-pi/pi-utils";
 import type { Theme } from "@oh-my-pi/pi-tui/theme";
+import nativeDelegationTemplate from "../../prompts/tools/native-delegation.md" with { type: "text" };
 import {
 	buildToolApprovalRequest,
 	deniedByUserMessage,
 	denyError,
-	formatApprovalPrompt,
-	promptToolApproval,
+	requestApproval,
 	resolveApproval,
 	resolveApprovalFromContext,
+	sessionApprovalScope,
 	truncateForPrompt,
 	type ToolApprovalOutcome,
 } from "../../tools/approval";
@@ -65,7 +66,13 @@ function renderOptionsWithTheme<T extends object>(options: T, theme: Theme): T &
  */
 export class RegisteredToolAdapter implements AgentTool<any, any, any> {
 	declare name: string;
-	declare description: string;
+	get description(): string {
+		const description = this.registeredTool.definition.description;
+		const guidance = this.runner.getNativeDelegationGuidance(this.name);
+		return guidance
+			? prompt.render(nativeDelegationTemplate, { description, name: this.name, guidance })
+			: description;
+	}
 	declare parameters: any;
 	declare label: string;
 	declare strict: boolean;
@@ -335,20 +342,26 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 		// satisfies explicit prompts, but compares against a deep snapshot because
 		// handlers can mutate the original argument object in place. Denies were
 		// enforced above, and provider safety checks remain independently required.
-		const explicitPrompt = resolved.override || Object.hasOwn(userPolicies, resolved.policyKey ?? this.tool.name);
+		const explicitPrompt = resolved.override || resolved.source === "tool" || resolved.source === "user";
 		const xdevBypass = context?.xdevApproved === true && effectiveParams === params;
 		const acpBypass =
 			context !== undefined &&
 			Object.hasOwn(context, "acpApprovedArgs") &&
 			Bun.deepEquals(effectiveParams, context.acpApprovedArgs);
+		// A prompt the approval mode raised can be approved for the rest of the session; provider
+		// safety checks are per-call, so they never offer it.
+		const sessionScope =
+			pendingSafetyChecks.length === 0 ? sessionApprovalScope(resolved, this.tool.name) : undefined;
+		const sessionApproved = sessionScope !== undefined && this.runner.hasSessionApproval(sessionScope.key);
 		const approvalCheck = {
 			required:
 				pendingSafetyChecks.length > 0 ||
-				(resolved.policy === "prompt" && !acpBypass && (explicitPrompt || !xdevBypass)),
+				(resolved.policy === "prompt" && !acpBypass && !sessionApproved && (explicitPrompt || !xdevBypass)),
 			reason: resolved.reason,
 		};
 
 		if (approvalCheck.required) {
+			const approvalSessionId = this.runner.sessionId;
 			const scheduledCall = context?.toolCall?.toolCalls[context.toolCall.index];
 			if (
 				scheduledCall?.id === toolCallId &&
@@ -404,10 +417,8 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 			}
 
 			const uiContext = this.runner.getUIContext();
-			const basePrompt = formatApprovalPrompt(this.tool, resolvedArgs, approvalCheck.reason);
 			const safetyLines = safetyCheckLines(pendingSafetyChecks);
-			const safetyPrompt =
-				safetyLines.length > 0 ? `${basePrompt}\nProvider safety checks:\n${safetyLines.join("\n")}` : basePrompt;
+			const safetyAppendix = safetyLines.length > 0 ? ["Provider safety checks:", ...safetyLines] : [];
 			const request = buildToolApprovalRequest(this.tool, resolvedArgs, {
 				risk: resolved.tier,
 				reason: approvalCheck.reason,
@@ -418,7 +429,20 @@ export class ExtensionToolWrapper<TParameters extends TSchema = TSchema, TDetail
 			});
 			let outcome: ToolApprovalOutcome;
 			try {
-				outcome = await promptToolApproval(uiContext, safetyPrompt, request);
+				outcome = await requestApproval(uiContext, this.tool, resolvedArgs, {
+					approval: request,
+					reason: approvalCheck.reason,
+					appendix: safetyAppendix,
+					sessionSubject: sessionScope?.subject,
+				});
+				if (
+					outcome.approved &&
+					outcome.scope === "session" &&
+					sessionScope &&
+					this.runner.sessionId === approvalSessionId
+				) {
+					this.runner.grantSessionApproval(sessionScope.key);
+				}
 			} catch (err) {
 				await emitApprovalResolved(false, err instanceof Error ? err.message : "approval aborted");
 				cancelPreflight();

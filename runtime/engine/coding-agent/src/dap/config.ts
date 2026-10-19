@@ -2,10 +2,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { isRecord, logger, WhichCachePolicy } from "@oh-my-pi/pi-utils";
-import { getConfigDirPaths } from "../config";
 import { isUntrustedProjectScope } from "../config/settings-context";
-import { getPreloadedPluginRoots } from "../discovery/helpers";
 import { hasRootMarkers, parseConfigContent, resolveCommand } from "../lsp/config";
+import { type ConfigFileAdapter, configFileSources } from "../utils/config-file-sources";
 import DEFAULTS from "./defaults.json" with { type: "json" };
 import type { DapAdapterConfig, DapResolvedAdapter } from "./types";
 
@@ -15,10 +14,6 @@ const DAP_PORT_ARGUMENT = "$" + "{port}";
 
 interface NormalizedConfig {
 	adapters: Record<string, unknown>;
-}
-
-interface ConfigSource {
-	read(): NormalizedConfig | null;
 }
 
 function normalizeConfig(value: unknown): NormalizedConfig | null {
@@ -53,14 +48,8 @@ function normalizeAdapterConfig(config: unknown): DapAdapterConfig | null {
 	};
 }
 
-function readConfigFile(filePath: string): NormalizedConfig | null {
-	try {
-		const content = fs.readFileSync(filePath, "utf-8");
-		return normalizeConfig(parseConfigContent(content, filePath));
-	} catch {
-		return null;
-	}
-}
+const adaptConfig: ConfigFileAdapter<NormalizedConfig> = (content, filePath) =>
+	normalizeConfig(parseConfigContent(content, filePath));
 
 function getDefaults(): Record<string, DapAdapterConfig> {
 	const adapters: Record<string, DapAdapterConfig> = {};
@@ -109,54 +98,12 @@ function mergeAdapters(
 	return merged;
 }
 
-function fileConfigSource(filePath: string): ConfigSource {
-	return {
-		read: () => readConfigFile(filePath),
-	};
-}
-
-function getConfigSources(cwd: string): ConfigSource[] {
-	const filenames = ["dap.json", ".dap.json", "dap.yaml", ".dap.yaml", "dap.yml", ".dap.yml"];
-	const sources: ConfigSource[] = [];
-
-	// An untrusted folder's own adapter config names programs to run: never read it.
-	// (Its project-local bin directories are skipped by `resolveCommand` under the same scope.)
-	if (!isUntrustedProjectScope()) {
-		for (const filename of filenames) {
-			sources.push(fileConfigSource(path.join(cwd, filename)));
-		}
-		const projectDirs = getConfigDirPaths("", { user: false, project: true, cwd });
-		for (const dir of projectDirs) {
-			for (const filename of filenames) {
-				sources.push(fileConfigSource(path.join(dir, filename)));
-			}
-		}
-	}
-
-	const userDirs = getConfigDirPaths("", { user: true, project: false });
-	for (const dir of userDirs) {
-		for (const filename of filenames) {
-			sources.push(fileConfigSource(path.join(dir, filename)));
-		}
-	}
-
-	const pluginRoots = getPreloadedPluginRoots();
-	for (const root of pluginRoots) {
-		for (const filename of filenames) {
-			sources.push(fileConfigSource(path.join(root.path, filename)));
-		}
-	}
-
-	for (const filename of filenames) {
-		sources.push(fileConfigSource(path.join(os.homedir(), filename)));
-	}
-
-	return sources;
-}
-
 function loadAdapterConfigs(cwd: string): Record<string, DapAdapterConfig> {
 	let adapters = { ...DEFAULT_ADAPTERS };
-	for (const source of getConfigSources(cwd).reverse()) {
+	// Adapter configs name programs to run; never read an untrusted project's sources.
+	for (const source of configFileSources("dap", cwd, adaptConfig, {
+		includeProject: !isUntrustedProjectScope(),
+	}).reverse()) {
 		const parsed = source.read();
 		if (!parsed) continue;
 		adapters = mergeAdapters(adapters, parsed.adapters);

@@ -46,7 +46,7 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 			uri: "string", version: "number.integer", "text?": "string", "languageId?": "string",
 			"baseHash?": "string", "dirty?": "boolean", "conflict?": "boolean",
 			"method?": "'completion' | 'hover' | 'definition' | 'rename' | 'diagnostics'",
-			"position?": { line: "number.integer", character: "number.integer" }, "newName?": "string",
+			"position?": "EditorPosition", "newName?": "string",
 		},
 		result: { version: "number.integer", result: "unknown", positionEncoding: "'utf-16'" },
 	},
@@ -325,7 +325,7 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 	},
 	{
 		name: "navigate_tree",
-		doc: "Move the leaf in place, in the same session file (the TUI's /tree and Esc Esc rewind, no summary): a user message rewinds past itself and its text comes back; the abandoned path stays as a sibling branch. Refused with `session_busy` while the session works.",
+		doc: "Move the leaf in place, in the same session file (the TUI's /tree and Esc Esc rewind, no summary): a user message rewinds past itself and its text and images come back; the abandoned path stays as a sibling branch. Refused with `session_busy` while the session works.",
 		params: { targetId: "string" },
 		result: "NavigateTreeResult",
 	},

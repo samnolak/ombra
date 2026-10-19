@@ -56,10 +56,10 @@
  * - Removing a DIRECTORY is never the intent: the delete seam refuses to divert a
  *   target it can confirm is one, and reports `confirmedFile: false` when the
  *   target's metadata is behind the same boundary and the check cannot be resolved.
- * - The `lsp` tool's own writes: applying a workspace edit or a code action
- *   (`lsp/edits.ts`), and the Biome formatter, which writes the buffer and then
- *   shells out to `biome format --write` (`lsp/clients/biome-client.ts`) — a
- *   subprocess write no in-process seam can reach anyway.
+ * - The `lsp` tool's own writes when applying a workspace edit or a code action
+ *   (`lsp/edits.ts`). Biome formatting is in-memory (`--stdin-file-path`); its
+ *   caller is responsible for committing the returned content through the
+ *   appropriate editor or disk write path.
  *
  * ## Diverting
  *
@@ -67,9 +67,11 @@
  * case where Bun hides such a denial behind an `ENOENT` (see
  * {@link classifyWriteFailure}). Every other error rethrows untouched.
  *
- * With no handler registered this module is inert: the primitive runs exactly as
- * it did before, a failure rethrows from the same place, and no extra syscalls
- * are performed.
+ * With no editor documents open, overlay lookup does not inspect disk metadata.
+ * With no handler registered either, the primitive runs exactly as it did before,
+ * a failure rethrows from the same place, and no extra syscalls are performed.
+ * When any editor document is open, overlay guards still require canonical
+ * identity and fail closed if it cannot be established.
  *
  * ## The path a handler is given
  *

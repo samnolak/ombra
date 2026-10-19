@@ -22,11 +22,11 @@ public sealed record BunBuild(string Key, string Integrity, string Exe)
 /// </summary>
 public static partial class RuntimePack
 {
-    public const string Name = "ombra-engine-18.8.0-bun-1.4.2-v1";
-    public const string SourceDirectoryName = "ombra-engine-18.8.0-bun-1.4.2-v1";
+    public const string Name = "ombra-engine-18.12.2-bun-1.4.2-v1";
+    public const string SourceDirectoryName = "ombra-engine-18.12.2-bun-1.4.2-v1";
     public const string SourceIdentity = "ombra-engine-v1";
-    public const string OmpVersion = "18.8.0";
-    public const string OmpIntegrity = "sha512-i0m5z+sljos+Fb7GwKhtXimAbvZ3EOiulyN9RiDeVy0yl1UtNlErgp2O376EurT263rD7C/CAbVOp9EyK7saOQ==";
+    public const string OmpVersion = "18.12.2";
+    public const string OmpIntegrity = "sha512-1qh9EwuiMBUTVix0ZWZNOMPTW++nWhL6t3EaRhGe05sVIBfDTyVl36iTyDv0TvM+R/EmOL4PvFrmIPgXd3xYQQ==";
     public const string BunVersion = "1.4.2";
     public const string CliEntry = "engine/coding-agent/src/cli.ts";
     public const string HostEntry = "engine/host.ts";

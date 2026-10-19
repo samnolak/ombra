@@ -112,11 +112,11 @@ start_app; shot 01-first-start
 [ ! -e "$H/.config/Ombra/ombra.local.json" ]; check first-start-writes-no-settings $? "no settings file written by just starting"
 # Coordinates below are for the 1100x760 window (MainWindow.axaml): the recovery card sits right above the composer
 # (bottom of the main column), its buttons start at x≈363 (272 sidebar + 24 margin + 36 icon + 14 gap + card padding).
-click 499 436                                       # "Install omp 18.8.0" on the setup screen ("Install omp to get started")
+click 499 436                                       # "Install omp 18.12.2" on the setup screen ("Install omp to get started")
 log "install clicked"
 for _ in $(seq 1 1200); do ls "$H"/.local/share/Ombra/runtimes/*/installed.json > /dev/null 2>&1 && break; sleep 0.5; done
 RT=$(dirname "$(ls "$H"/.local/share/Ombra/runtimes/*/installed.json 2>/dev/null | head -1)")
-grep -q '"omp": "18.8.0"' "$RT/installed.json" 2>/dev/null && grep -q '"bun": "1.4.2"' "$RT/installed.json"; check runtime-installed-from-ui $? "installed.json: $(tr -d '\n ' < "$RT/installed.json" 2>/dev/null | cut -c1-120)"
+grep -q '"omp": "18.12.2"' "$RT/installed.json" 2>/dev/null && grep -q '"bun": "1.4.2"' "$RT/installed.json"; check runtime-installed-from-ui $? "installed.json: $(tr -d '\n ' < "$RT/installed.json" 2>/dev/null | cut -c1-120)"
 # omp starts from the new runtime and, with no model, exits before its RPC is ready (after its local-provider
 # discovery, which takes seconds): wait for that exit instead of a fixed pause, then the screen offers Try again.
 omp_pid() { for p in $(ls /proc | grep -E '^[0-9]+$'); do [ "$(awk '/^PPid:/{print $2}' "/proc/$p/status" 2>/dev/null)" = "$APP" ] && [ "$(readlink "/proc/$p/exe" 2>/dev/null)" = "$RT/bun/bun" ] && echo "$p"; done 2>/dev/null | head -1; }

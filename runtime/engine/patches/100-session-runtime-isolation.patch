@@ -1,0 +1,401 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: samnolak <258669251+samnolak@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 21:42:08 +0300
+Subject: [PATCH] session runtime isolation
+
+What: Preserve the repository-owned session runtime isolation.
+Why: Ombra embeds multiple concurrent sessions and renders native host features.
+Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
+
+diff --git a/src/eval/completion-bridge.ts b/src/eval/completion-bridge.ts
+index 52e73b4dd7558481e47f072d28e9ecf078051362..4f9f1d37b040c430a141b7aa16bb03ef4f5390c6 100644
+--- a/src/eval/completion-bridge.ts
++++ b/src/eval/completion-bridge.ts
+@@ -30,7 +30,7 @@ import {
+ 	resolveModelOverride,
+ } from "../config/model-resolver";
+ import type { Settings } from "../config/settings";
+-import { MAIN_AGENT_ID } from "../registry/agent-registry";
++import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
+ import { Semaphore } from "../task/parallel";
+ import type { ToolSession } from "../tools";
+ import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
+@@ -103,7 +103,17 @@ export interface CompletionHandleEntry {
+ }
+ 
+ const COMPLETION_HANDLE_RETENTION_MS = 30 * 60 * 1000;
+-const completionHandles = new Map<string, CompletionHandleEntry>();
++const completionHandlesByRegistry = new WeakMap<AgentRegistry, Map<string, CompletionHandleEntry>>();
++
++function completionHandles(): Map<string, CompletionHandleEntry> {
++	const registry = AgentRegistry.global();
++	let handles = completionHandlesByRegistry.get(registry);
++	if (!handles) {
++		handles = new Map();
++		completionHandlesByRegistry.set(registry, handles);
++	}
++	return handles;
++}
+ 
+ /**
+  * Process-wide ceiling on eval model requests executing at once, shared by
+@@ -118,16 +128,17 @@ export const evalRequestSlots = new Semaphore(EVAL_HANDLE_CONCURRENCY);
+ 
+ /** Resolve a retained completion handle by id. */
+ export function getCompletionHandle(id: string): CompletionHandleEntry | undefined {
+-	return completionHandles.get(id);
++	return completionHandles().get(id);
+ }
+ 
+ /** Cancel and remove every completion handle owned by an agent session. */
+ export function releaseCompletionHandles(ownerId: string): void {
+-	for (const [id, entry] of completionHandles) {
++	const handles = completionHandles();
++	for (const [id, entry] of handles) {
+ 		if (entry.ownerId !== ownerId) continue;
+ 		entry.controller.abort(new ToolError("Completion handle owner released"));
+ 		clearTimeout(entry.evictionTimer);
+-		completionHandles.delete(id);
++		handles.delete(id);
+ 	}
+ }
+ 
+@@ -476,7 +487,8 @@ export function retainCompletionHandle(
+ 		promise: Promise.resolve(),
+ 		settled: false,
+ 	};
+-	completionHandles.set(id, entry);
++	const handles = completionHandles();
++	handles.set(id, entry);
+ 	const run = async (): Promise<EvalCompletionResult> => {
+ 		await evalRequestSlots.acquire(signal);
+ 		try {
+@@ -497,7 +509,7 @@ export function retainCompletionHandle(
+ 		.finally(() => {
+ 			entry.settled = true;
+ 			const timer = setTimeout(() => {
+-				if (completionHandles.get(id) === entry) completionHandles.delete(id);
++				if (handles.get(id) === entry) handles.delete(id);
+ 			}, COMPLETION_HANDLE_RETENTION_MS);
+ 			timer.unref?.();
+ 			entry.evictionTimer = timer;
+diff --git a/src/eval/executor-base.ts b/src/eval/executor-base.ts
+index 7da61e1c5ccf3a8f453ff84c1d494c3c08133bf7..dd3009732175555526e3b6fba8fb8270d53bcc51 100644
+--- a/src/eval/executor-base.ts
++++ b/src/eval/executor-base.ts
+@@ -442,7 +442,7 @@ export async function executeWithKernelBase<
+ 		formatTimeoutAnnotation,
+ 	} = params;
+ 
+-	const settings = await Settings.init();
++	const settings = await Settings.forSession();
+ 	const sink = new OutputSink({
+ 		onChunk: options?.onChunk,
+ 		artifactPath: options?.artifactPath,
+diff --git a/src/eval/judgment-batch-bridge.ts b/src/eval/judgment-batch-bridge.ts
+index a186773bd7aa50df051518ae630a320bc5cce83f..73ce9d46d049c7065d48c47a78d16f7a4579528c 100644
+--- a/src/eval/judgment-batch-bridge.ts
++++ b/src/eval/judgment-batch-bridge.ts
+@@ -20,7 +20,7 @@ import type { ImageContent, JudgmentState, Question } from "@oh-my-pi/pi-ai";
+ import { isRecord, logger, Snowflake } from "@oh-my-pi/pi-utils";
+ import { formatCost } from "@oh-my-pi/pi-tui/overlays/agent-hub-renderer";
+ import type { ChainJudge } from "../judgment";
+-import { MAIN_AGENT_ID } from "../registry/agent-registry";
++import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
+ import type { ToolSession } from "../tools";
+ import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
+ import { withBridgeTimeoutPause } from "./bridge-timeout";
+@@ -499,20 +499,31 @@ export class JudgmentBatch {
+ 	}
+ }
+ 
+-const batches = new Map<string, JudgmentBatch>();
++const batchesByRegistry = new WeakMap<AgentRegistry, Map<string, JudgmentBatch>>();
++
++function batches(): Map<string, JudgmentBatch> {
++	const registry = AgentRegistry.global();
++	let owned = batchesByRegistry.get(registry);
++	if (!owned) {
++		owned = new Map();
++		batchesByRegistry.set(registry, owned);
++	}
++	return owned;
++}
+ 
+ /** Resolve a batch owned by the calling session. */
+ export function getJudgmentBatch(id: string, session: ToolSession): JudgmentBatch | undefined {
+-	const batch = batches.get(id);
++	const batch = batches().get(id);
+ 	return batch && batch.ownerId === ownerOf(session) ? batch : undefined;
+ }
+ 
+ /** Cancel and forget every batch owned by an agent session. */
+ export function releaseJudgmentBatches(ownerId: string): void {
+-	for (const [id, batch] of batches) {
++	const owned = batches();
++	for (const [id, batch] of owned) {
+ 		if (batch.ownerId !== ownerId) continue;
+ 		batch.cancel();
+-		batches.delete(id);
++		owned.delete(id);
+ 	}
+ }
+ 
+@@ -542,7 +553,7 @@ export async function runEvalJudgmentBatch(
+ 				parseBatchOptions(args, items.length),
+ 				parseIntent(args.intent),
+ 			);
+-			batches.set(batch.id, batch);
++			batches().set(batch.id, batch);
+ 			batch.start();
+ 			return batch.status();
+ 		}
+@@ -574,7 +585,7 @@ export async function runEvalJudgmentBatch(
+ 		case "close": {
+ 			const batch = requireBatch(args, session);
+ 			batch.cancel();
+-			batches.delete(batch.id);
++			batches().delete(batch.id);
+ 			return { closed: true };
+ 		}
+ 		default:
+diff --git a/src/eval/preludes.ts b/src/eval/preludes.ts
+index ed96dfb8b2bb53c0bf7ff152f41220fdc85cc39f..50a6d284994cf3efaa26970817bca26a947edb84 100644
+--- a/src/eval/preludes.ts
++++ b/src/eval/preludes.ts
+@@ -1,7 +1,14 @@
+ import type { AgentToolContext, AgentToolResult, AgentToolUpdateCallback, ToolApproval } from "@oh-my-pi/pi-agent-core";
+ import { untilAborted } from "@oh-my-pi/pi-utils";
+ import type { ToolSession } from "../tools";
+-import { denyError, requestApproval, resolveApproval, resolveApprovalFromContext } from "../tools/approval";
++import {
++	buildToolApprovalRequest,
++	deniedByUserMessage,
++	denyError,
++	requestApproval,
++	resolveApproval,
++	resolveApprovalFromContext,
++} from "../tools/approval";
+ 
+ /** Host context supplied when an eval prelude calls back out of its language VM. */
+ export interface EvalPreludeContext {
+@@ -105,10 +112,18 @@ async function approvePreludeInvocation(
+ 				`Set tools.approval.${definition.name}: allow or use an interactive UI to approve the call.`,
+ 		);
+ 	}
+-	const answer = await untilAborted(context.signal, () =>
+-		requestApproval(ui, subject, parameters, { reason: resolved.reason }),
++	const outcome = await untilAborted(context.signal, () =>
++		requestApproval(ui, subject, parameters, {
++			reason: resolved.reason,
++			approval: buildToolApprovalRequest(subject, parameters, {
++				risk: resolved.tier,
++				reason: resolved.reason,
++				override: resolved.override || resolved.source !== "mode",
++			}),
++		}),
+ 	);
+-	if (answer === "deny") throw new Error(`Eval prelude call denied by user: ${definition.name}`);
++	if (!outcome.approved)
++		throw new Error(deniedByUserMessage(`Eval prelude call denied by user: ${definition.name}`, outcome.reason));
+ }
+ 
+ /**
+diff --git a/src/eval/py/kernel.ts b/src/eval/py/kernel.ts
+index ac7ef56a7f1bbc19f401c4d5c2f88d94cddeaa11..1f5d6a798a0460993f6d701c06900d501983c056 100644
+--- a/src/eval/py/kernel.ts
++++ b/src/eval/py/kernel.ts
+@@ -10,6 +10,7 @@
+ import * as path from "node:path";
+ import { $flag, isBunTestRuntime, logger, Snowflake } from "@oh-my-pi/pi-utils";
+ import { Settings } from "../../config/settings";
++import { isUntrustedProjectScope } from "../../config/settings-context";
+ import {
+ 	BaseKernel,
+ 	getRemainingTimeMs,
+@@ -120,7 +121,8 @@ export async function checkPythonKernelAvailability(
+ 		return { ok: true };
+ 	}
+ 	const resolvedCwd = path.resolve(cwd);
+-	const key = `${resolvedCwd}\0${interpreter ?? ""}`;
++	// An untrusted session never reuses a runtime a trusted one probed in the same folder (its `.venv`).
++	const key = `${resolvedCwd}\0${interpreter ?? ""}\0${isUntrustedProjectScope() ? "untrusted" : "trusted"}`;
+ 	const cached = availabilityCache.get(key);
+ 	if (cached) return await cached;
+ 	// Probe controls belong to one caller. Do not share an in-flight promise:
+@@ -136,7 +138,7 @@ async function probePythonKernelAvailability(
+ 	probeOpts?: BackendProbeOptions,
+ ): Promise<PythonKernelAvailability> {
+ 	try {
+-		const settings = await Settings.init();
++		const settings = await Settings.forSession();
+ 		const { env } = settings.getShellConfig();
+ 		const baseEnv = filterEnv(env);
+ 		const runtimes = interpreter
+@@ -287,7 +289,7 @@ export class PythonKernel extends BaseKernel<PythonKernelExecuteOptions> {
+ 
+ 		let runtime = availability.runtime;
+ 		if (!runtime) {
+-			const { env: shellEnv } = (await Settings.init()).getShellConfig();
++			const { env: shellEnv } = (await Settings.forSession()).getShellConfig();
+ 			runtime = options.interpreter
+ 				? resolveExplicitPythonRuntime(options.interpreter, options.cwd, filterEnv(shellEnv))
+ 				: resolvePythonRuntime(options.cwd, filterEnv(shellEnv));
+diff --git a/src/eval/py/runtime.ts b/src/eval/py/runtime.ts
+index 2309bf0bf414d87ae0483db158ce9ed0762815e2..8457e9e18e66e0bcea8ac084f2ed79d0b5def018 100644
+--- a/src/eval/py/runtime.ts
++++ b/src/eval/py/runtime.ts
+@@ -8,6 +8,7 @@ import * as fs from "node:fs";
+ import * as os from "node:os";
+ import * as path from "node:path";
+ import { $env, $which, getPythonEnvDir } from "@oh-my-pi/pi-utils";
++import { isUntrustedProjectScope } from "../../config/settings-context";
+ 
+ const DEFAULT_ENV_ALLOWLIST = new Set([
+ 	"PATH",
+@@ -149,10 +150,12 @@ export function filterEnv(env: Record<string, string | undefined>): Record<strin
+ 
+ /**
+  * Detect virtual environment path from VIRTUAL_ENV or common locations.
++ * An untrusted folder's own `.venv`/`venv` is never picked: its interpreter is the folder's code.
+  */
+ export function resolveVenvPath(cwd: string): string | undefined {
+ 	if ($env.VIRTUAL_ENV) return $env.VIRTUAL_ENV;
+ 	if ($env.CONDA_PREFIX) return $env.CONDA_PREFIX;
++	if (isUntrustedProjectScope()) return undefined;
+ 	const candidates = [path.join(cwd, ".venv"), path.join(cwd, "venv")];
+ 	for (const candidate of candidates) {
+ 		if (fs.existsSync(candidate)) {
+diff --git a/src/eval/session-id.ts b/src/eval/session-id.ts
+index d339b6a9c8230f9f8524432cc5b87c48c1fb9a5c..e0e35575e98b64bce762e2b81b1fc4fc2fc5a589 100644
+--- a/src/eval/session-id.ts
++++ b/src/eval/session-id.ts
+@@ -1,8 +1,10 @@
+ import type { ToolSession } from "../tools";
+ 
+-export type EvalSessionSource = Pick<ToolSession, "cwd" | "getSessionFile">;
++export type EvalSessionSource = Pick<ToolSession, "cwd" | "getSessionFile" | "getEvalKernelOwnerId">;
+ 
+ export function defaultEvalSessionId(session: EvalSessionSource): string {
+ 	const sessionFile = session.getSessionFile?.() ?? undefined;
+-	return sessionFile ? `session:${sessionFile}:cwd:${session.cwd}` : `cwd:${session.cwd}`;
++	const identity = sessionFile ? `session:${sessionFile}:cwd:${session.cwd}` : `cwd:${session.cwd}`;
++	const owner = session.getEvalKernelOwnerId?.();
++	return owner ? `${identity}:owner:${owner}` : identity;
+ }
+diff --git a/src/eval/startup-warning.ts b/src/eval/startup-warning.ts
+index fda656d243d9ce7d540d2a99db00ad21edd41bd2..7b0d7f5f6cf6913ad80c24d66f18f838894907d1 100644
+--- a/src/eval/startup-warning.ts
++++ b/src/eval/startup-warning.ts
+@@ -52,6 +52,8 @@ export async function resolveFirstLaunchPythonEvalWarning({
+ 	signal?: AbortSignal;
+ }): Promise<string | undefined> {
+ 	if (lastChangelogVersion !== undefined) return undefined;
++	// The probe runs an interpreter, and an untrusted folder must not pick it.
++	if (settings.ignoresProjectSettings) return undefined;
+ 	if (args.continue || args.resume || args.fromClaude || args.fromCodex) return undefined;
+ 	// An explicit --tools list wins over --no-tools, matching session tool selection.
+ 	const evalExposed = args.tools ? args.tools.includes("eval") : !args.noTools;
+diff --git a/src/exec/bash-executor.ts b/src/exec/bash-executor.ts
+index eb7246d21fb4b8a66a66ad9e656372e72705665c..5fb7773214401f6c155fded2d32244ded473583b 100644
+--- a/src/exec/bash-executor.ts
++++ b/src/exec/bash-executor.ts
+@@ -533,7 +533,7 @@ async function executeUserShellPty(run: {
+ }
+ 
+ export async function executeBash(command: string, options?: BashExecutorOptions): Promise<BashResult> {
+-	const settings = await Settings.init();
++	const settings = await Settings.forSession();
+ 	const baseShellConfig = settings.getShellConfig();
+ 	const shellConfig =
+ 		options?.useUserShell === true ? resolveUserShellConfig(settings, baseShellConfig) : baseShellConfig;
+diff --git a/src/registry/agent-lifecycle.ts b/src/registry/agent-lifecycle.ts
+index b442fed66a347b18f36041b4572ffc350211100a..61ae20e525e265bbd647596666f0b48198a0d2be 100644
+--- a/src/registry/agent-lifecycle.ts
++++ b/src/registry/agent-lifecycle.ts
+@@ -90,32 +90,26 @@ interface RevivingAgent {
+ }
+ 
+ export class AgentLifecycleManager {
+-	static #global: AgentLifecycleManager | undefined;
++	static #instances = new WeakMap<AgentRegistry, AgentLifecycleManager>();
+ 
+ 	static global(): AgentLifecycleManager {
+-		const current = AgentLifecycleManager.#global;
+-		if (current) {
+-			// The manager captures its registry at construction and subscribes to
+-			// it for the manager's lifetime. A test that swaps the global registry
+-			// (`AgentRegistry.resetGlobalForTests`) without also resetting this
+-			// manager would strand it on the dead instance: terminal transitions
+-			// (`release`) would mutate the old registry while consumers subscribe
+-			// to the new one, so `status_changed` never reaches them (issue #11432).
+-			// Rebind by retiring the stale manager and reconstructing against the
+-			// current global registry. In production the registry is never reset, so
+-			// this always short-circuits and the singleton is stable.
+-			if (current.#registry === AgentRegistry.global()) return current;
+-			current.#retire();
++		return AgentLifecycleManager.forRegistry(AgentRegistry.global());
++	}
++
++	static forRegistry(registry: AgentRegistry): AgentLifecycleManager {
++		let manager = AgentLifecycleManager.#instances.get(registry);
++		if (!manager) {
++			manager = new AgentLifecycleManager(registry);
++			AgentLifecycleManager.#instances.set(registry, manager);
+ 		}
+-		AgentLifecycleManager.#global = new AgentLifecycleManager();
+-		return AgentLifecycleManager.#global;
++		return manager;
+ 	}
+ 
+ 	/** Reset the global manager. Test-only. */
+ 	static resetGlobalForTests(): void {
+-		const current = AgentLifecycleManager.#global;
+-		if (current) current.#retire();
+-		AgentLifecycleManager.#global = undefined;
++		const registry = AgentRegistry.global();
++		AgentLifecycleManager.#instances.get(registry)?.#retire();
++		AgentLifecycleManager.#instances.delete(registry);
+ 	}
+ 
+ 	/** Detach from the registry and cancel every pending timer/park/revival. */
+@@ -541,7 +535,9 @@ export class AgentLifecycleManager {
+ 		this.#revivals.clear();
+ 		this.#parks.clear();
+ 		this.#persistedReviverFactory = undefined;
+-		if (AgentLifecycleManager.#global === this) AgentLifecycleManager.#global = undefined;
++		if (AgentLifecycleManager.#instances.get(this.#registry) === this) {
++			AgentLifecycleManager.#instances.delete(this.#registry);
++		}
+ 	}
+ 
+ 	async #revive(id: string, revive: AgentReviver, ref: AgentRef, adopted: AdoptedAgent): Promise<AgentSession> {
+diff --git a/src/registry/agent-registry.ts b/src/registry/agent-registry.ts
+index 7c3730a3781a84f72e001c8286548e15a7841003..9aad0e91a0731943e724cb557fc97bbf9ffe42cd 100644
+--- a/src/registry/agent-registry.ts
++++ b/src/registry/agent-registry.ts
+@@ -9,6 +9,7 @@
+  * revival) and are only removed on explicit release/teardown.
+  */
+ 
++import { AsyncLocalStorage } from "node:async_hooks";
+ import { logger } from "@oh-my-pi/pi-utils";
+ import type { AgentSession } from "../session/agent-session";
+ import { oneLineLabel } from "@oh-my-pi/pi-tui/tools/task";
+@@ -113,8 +114,16 @@ export interface RegisterInput {
+ 
+ export class AgentRegistry {
+ 	static #global: AgentRegistry | undefined;
++	static readonly #scope = new AsyncLocalStorage<AgentRegistry>();
++
++	/** Bind an embedded session tree without replacing another chat's registry. */
++	static runWithRegistry<T>(registry: AgentRegistry, callback: () => T): T {
++		return AgentRegistry.#scope.run(registry, callback);
++	}
+ 
+ 	static global(): AgentRegistry {
++		const scoped = AgentRegistry.#scope.getStore();
++		if (scoped) return scoped;
+ 		if (!AgentRegistry.#global) {
+ 			AgentRegistry.#global = new AgentRegistry();
+ 		}

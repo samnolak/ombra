@@ -5,8 +5,7 @@ import {
 	buildToolApprovalRequest,
 	deniedByUserMessage,
 	denyError,
-	formatApprovalPrompt,
-	promptToolApproval,
+	requestApproval,
 	resolveApproval,
 	resolveApprovalFromContext,
 } from "../tools/approval";
@@ -48,8 +47,6 @@ export interface EvalPreludeDefinition {
 	 * mid-session, since the cached system prompt is not rebuilt for the toggle.
 	 */
 	guidance?: string;
-	/** Optional declarations appended to code-mode TypeScript context while enabled. */
-	codeModeDeclarations?: string;
 	/** Approval tier or argument-dependent approval decision for host calls. */
 	approval?: ToolApproval;
 	/** Live availability predicate. Omission means enabled. */
@@ -116,15 +113,14 @@ async function approvePreludeInvocation(
 		);
 	}
 	const outcome = await untilAborted(context.signal, () =>
-		promptToolApproval(
-			ui,
-			formatApprovalPrompt(subject, parameters, resolved.reason),
-			buildToolApprovalRequest(subject, parameters, {
+		requestApproval(ui, subject, parameters, {
+			reason: resolved.reason,
+			approval: buildToolApprovalRequest(subject, parameters, {
 				risk: resolved.tier,
 				reason: resolved.reason,
-				override: resolved.override || Object.hasOwn(policies, resolved.policyKey ?? definition.name),
+				override: resolved.override || resolved.source !== "mode",
 			}),
-		),
+		}),
 	);
 	if (!outcome.approved)
 		throw new Error(deniedByUserMessage(`Eval prelude call denied by user: ${definition.name}`, outcome.reason));

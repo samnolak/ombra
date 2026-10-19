@@ -1,0 +1,948 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: samnolak <258669251+samnolak@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 21:42:06 +0300
+Subject: [PATCH] editor documents
+
+What: Preserve the repository-owned editor documents.
+Why: Ombra embeds multiple concurrent sessions and renders native host features.
+Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
+
+diff --git a/src/edit/ast-preview.ts b/src/edit/ast-preview.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b4ef1bcaed03682d1a73be48bd12ef79b8cbe357
+--- /dev/null
++++ b/src/edit/ast-preview.ts
+@@ -0,0 +1,39 @@
++import type { AstReplaceChange } from "@oh-my-pi/pi-natives";
++
++/** Native AST ranges are UTF-8 byte offsets, not LSP UTF-16 columns. */
++export function applyAstPreview(bytes: Uint8Array, changes: readonly AstReplaceChange[]): Buffer {
++	const original = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
++	const spans = changes.map(change => {
++		if (!Number.isSafeInteger(change.byteStart) || !Number.isSafeInteger(change.byteEnd) || !Number.isSafeInteger(change.deletedLength) || change.byteStart < 0 || change.byteEnd < change.byteStart || change.deletedLength < 0) {
++			throw new Error("Invalid native AST replacement range");
++		}
++		return { change, before: Buffer.from(change.before), after: Buffer.from(change.after), end: change.byteStart + change.deletedLength };
++	});
++	const sorted = [...spans].sort((a, b) => a.change.byteStart - b.change.byteStart);
++	let previousEnd = 0;
++	const originalCoordinates = sorted.every(span => {
++		const valid = span.change.byteStart >= previousEnd && span.end <= original.length && span.change.byteEnd <= original.length && original.subarray(span.change.byteStart, span.change.byteEnd).equals(span.before);
++		previousEnd = span.end;
++		return valid;
++	});
++	if (originalCoordinates) {
++		const chunks: Uint8Array[] = [];
++		let offset = 0;
++		for (const span of sorted) {
++			chunks.push(original.subarray(offset, span.change.byteStart), span.after);
++			offset = span.end;
++		}
++		chunks.push(original.subarray(offset));
++		return Buffer.concat(chunks);
++	}
++	// Multiple rewrite rules can report later ranges in the already-rewritten text.
++	// Replay those in their declared order, verifying every exact preimage.
++	let result = original;
++	for (const span of spans) {
++		if (span.end > result.length || span.change.byteEnd > result.length || !result.subarray(span.change.byteStart, span.change.byteEnd).equals(span.before)) {
++			throw new Error("Stale or incomplete native AST preview; no files were changed");
++		}
++		result = Buffer.concat([result.subarray(0, span.change.byteStart), span.after, result.subarray(span.end)]);
++	}
++	return result;
++}
+diff --git a/src/edit/index.ts b/src/edit/index.ts
+index a92aff80fa04e2cc4d11958141923feaf83bff61..45c0ea7ea1899cafb50d0bd0c114b6f81d9c24a3 100644
+--- a/src/edit/index.ts
++++ b/src/edit/index.ts
+@@ -29,6 +29,7 @@ import { extractUriScheme, InternalUrlRouter, type ResolveContext, sessionResolv
+ import { createLspWritethrough, flushLspWritethroughBatch, type WritethroughCallback, writethroughNoop } from "../lsp";
+ import { type FileDiagnosticsResult } from "@oh-my-pi/pi-tui/tools/lsp";
+ import { FileChangeType, notifyWorkspaceWatchedFiles } from "../lsp/client";
++import { applyEditorContent, assertNoEditorResourceMutation } from "../lsp/editor-documents";
+ import { DeferredDiagnostics } from "../lsp/deferred-diagnostics";
+ import { getDiagnosticsLedger } from "../lsp/diagnostics-ledger";
+ import type { ToolSession } from "../tools";
+@@ -672,6 +673,13 @@ export class EditTool implements AgentTool<TInput> {
+ 	}
+ 
+ 	async #write(request: EditWriteRequest, signal?: AbortSignal): Promise<EditWriteResponse> {
++		if (request.op === "delete" || request.op === "move") {
++			assertNoEditorResourceMutation(request.path);
++			if (request.moveTo) assertNoEditorResourceMutation(request.moveTo);
++		} else if (request.content !== undefined && await applyEditorContent(request.path, request.content)) {
++			this.session.bumpFileMutationVersion?.(request.path);
++			return { written: request.content };
++		}
+ 		if (request.op === "delete") {
+ 			await deleteFileWithFallback(request.path, Bun.file(request.path));
+ 			if (this.session.enableLsp ?? true) {
+diff --git a/src/lsp/client.ts b/src/lsp/client.ts
+index ba835c213157a9b22535ba5a3ec7576e33cb317c..ca9251f1d5b57f7ff2f7579809326cb400267dd4 100644
+--- a/src/lsp/client.ts
++++ b/src/lsp/client.ts
+@@ -1,8 +1,11 @@
+ import * as path from "node:path";
+ import { isEnoent, logger, postmortem, ptree, stableStringifyJson, untilAborted } from "@oh-my-pi/pi-utils";
++import { getActiveSettings } from "../config/settings-context";
++import { cfgLspShared } from "./settings";
+ import { encodeMessageFrame, MessageFramer } from "../jsonrpc/message-framing";
+ import { ToolAbortError, throwIfAborted } from "../tools/tool-errors";
+-import { getConfig } from "./config";
++import { getConfig, getServersForFile } from "./config";
++import { assertEditorDocumentTrusted, assertEditorProjectTrusted, editorDocument } from "./editor-documents";
+ import { applyWorkspaceEdit, type ExecutedWorkspaceChange } from "./edits";
+ import { getLspmuxCommand, isLspmuxSupported } from "./lspmux";
+ import { connectSharedLspTransport } from "./mux/daemon";
+@@ -176,7 +179,9 @@ function stopIdleChecker(): void {
+ // =============================================================================
+ 
+ const CLIENT_CAPABILITIES = {
++	general: { positionEncodings: ["utf-16"] },
+ 	textDocument: {
++		completion: { completionItem: { snippetSupport: false, documentationFormat: ["markdown", "plaintext"] } },
+ 		synchronization: {
+ 			didSave: true,
+ 			dynamicRegistration: false,
+@@ -370,7 +375,18 @@ function queueWriteMessage(
+ 	message: LspJsonRpcRequest | LspJsonRpcNotification | LspJsonRpcResponse,
+ 	signal?: AbortSignal,
+ ): Promise<void> {
+-	const write = client.writeQueue.catch(() => {}).then(() => writeMessage(client.proc.stdin, message, signal));
++	const method = "method" in message ? message.method : undefined;
++	const params = "params" in message ? message.params as { textDocument?: { uri?: string } } | undefined : undefined;
++	const uri = params?.textDocument?.uri;
++	const guardedUri = typeof uri === "string" && uri.startsWith("file:")
++		&& (method === "textDocument/didOpen" || method === "textDocument/didChange" || method === "textDocument/didSave")
++		&& editorDocument(uri) ? uri : undefined;
++	const write = client.writeQueue.catch(() => {}).then(() => {
++		// Check at the actual write boundary, not before waiting on the queue:
++		// revocation must also prevent snapshots queued under a previous grant.
++		if (guardedUri) assertEditorDocumentTrusted(client.cwd, guardedUri, client.config);
++		return writeMessage(client.proc.stdin, message, signal);
++	});
+ 	const result = write.catch((err: unknown) => {
+ 		if (err instanceof LspDrainAbortError) {
+ 			// Only an abort that raced this write's in-flight drain leaves
+@@ -1007,6 +1023,7 @@ export async function getOrCreateClient(
+ 	initTimeoutMs?: number,
+ 	signal?: AbortSignal,
+ ): Promise<LspClient> {
++	assertEditorProjectTrusted(cwd, config);
+ 	const key = clientKey(config, cwd);
+ 	// Check if client already exists
+ 	const existingClient = clients.get(key);
+@@ -1075,7 +1092,8 @@ export async function getOrCreateClient(
+ 		// already multiplexing this command. Any shared-path failure falls back
+ 		// to a private spawn so LSP never regresses on broker trouble.
+ 		let proc: LspTransport | null = null;
+-		if (sharedLspEnabled && command === baseCommand) {
++		const activeSettings = getActiveSettings();
++		if ((activeSettings ? cfgLspShared.get(activeSettings) : sharedLspEnabled) && command === baseCommand) {
+ 			proc = await connectSharedLspTransport({ command, args, cwd, env, initializationOptions, signal });
+ 		}
+ 		proc ??= ptree.spawn([command, ...args], {
+@@ -1170,6 +1188,8 @@ export async function getOrCreateClient(
+ 			}
+ 
+ 			client.serverCapabilities = initResult.capabilities as LspClient["serverCapabilities"];
++			const encoding = (initResult.capabilities as { positionEncoding?: string } | undefined)?.positionEncoding;
++			if (encoding && encoding !== "utf-16") throw new Error(`Unsupported LSP position encoding: ${encoding}`);
+ 
+ 			// Finish the initialize handshake before publishing the client as ready.
+ 			await sendNotification(client, "initialized", {}, signal);
+@@ -1275,6 +1295,11 @@ export function endPendingDiskWrite(filePath: string): void {
+ export async function ensureFileOpen(client: LspClient, filePath: string, signal?: AbortSignal): Promise<void> {
+ 	throwIfAborted(signal);
+ 	const uri = fileToUri(filePath);
++	const editor = editorDocument(filePath);
++	if (editor) {
++		await syncContent(client, filePath, editor.text, signal, editor.version, editor.languageId);
++		return;
++	}
+ 	const lockKey = `${client.name}:${uri}`;
+ 
+ 	// Check if file is already open
+@@ -1358,6 +1383,11 @@ export async function reconcileFileFromDisk(
+ ): Promise<boolean> {
+ 	throwIfAborted(signal);
+ 	const uri = fileToUri(filePath);
++	const editor = editorDocument(filePath);
++	if (editor) {
++		await syncContent(client, filePath, editor.text, signal, editor.version, editor.languageId);
++		return false;
++	}
+ 	if (!client.openFiles.has(uri)) {
+ 		await ensureFileOpen(client, filePath, signal);
+ 		return false;
+@@ -1455,6 +1485,8 @@ export async function syncContent(
+ 	filePath: string,
+ 	content: string,
+ 	signal?: AbortSignal,
++	version?: number,
++	languageId?: string,
+ ): Promise<void> {
+ 	const uri = fileToUri(filePath);
+ 	const lockKey = `${client.name}:${uri}`;
+@@ -1466,14 +1498,25 @@ export async function syncContent(
+ 	}
+ 
+ 	const syncPromise = (async () => {
+-		// Clear stale diagnostics before syncing new content
++		const editor = editorDocument(filePath);
++		if (editor) {
++			assertEditorDocumentTrusted(client.cwd, filePath, client.config);
++			content = editor.text;
++			version = editor.version;
++			languageId = editor.languageId;
++		}
++		let info = client.openFiles.get(uri);
++		if (version !== undefined && info?.version === version && info.syncedHash === documentSignature(content) && (!languageId || info.languageId === languageId)) return;
++		if (info && ((version !== undefined && info.version >= version) || (languageId && info.languageId !== languageId))) {
++			await sendNotification(client, "textDocument/didClose", { textDocument: { uri } }, signal);
++			client.openFiles.delete(uri);
++			info = undefined;
++		}
+ 		client.diagnostics.delete(uri);
+ 
+-		const info = client.openFiles.get(uri);
+-
+ 		if (!info) {
+ 			// Open file with provided content instead of reading from disk
+-			const languageId = client.config.languageId ?? detectLanguageId(filePath);
++			const documentLanguage = languageId ?? client.config.languageId ?? detectLanguageId(filePath);
+ 			throwIfAborted(signal);
+ 			await sendNotification(
+ 				client,
+@@ -1481,25 +1524,25 @@ export async function syncContent(
+ 				{
+ 					textDocument: {
+ 						uri,
+-						languageId,
+-						version: 1,
++						languageId: documentLanguage,
++						version: version ?? 1,
+ 						text: content,
+ 					},
+ 				},
+ 				signal,
+ 			);
+-			client.openFiles.set(uri, { version: 1, languageId, syncedHash: documentSignature(content) });
++			client.openFiles.set(uri, { version: version ?? 1, languageId: documentLanguage, syncedHash: documentSignature(content) });
+ 			client.lastActivity = Date.now();
+ 			return;
+ 		}
+ 
+-		const version = ++info.version;
++		info.version = version ?? info.version + 1;
+ 		throwIfAborted(signal);
+ 		await sendNotification(
+ 			client,
+ 			"textDocument/didChange",
+ 			{
+-				textDocument: { uri, version },
++				textDocument: { uri, version: info.version },
+ 				contentChanges: [{ text: content }],
+ 			},
+ 			signal,
+@@ -1537,7 +1580,7 @@ export async function notifySaved(client: LspClient, filePath: string, signal?:
+ 	if (!info) return; // File not open, nothing to notify
+ 
+ 	throwIfAborted(signal);
+-	const text = saveIncludesText(client) ? await Bun.file(filePath).text() : undefined;
++	const text = saveIncludesText(client) ? editorDocument(filePath)?.text ?? await readTextFromDisk(filePath) : undefined;
+ 	throwIfAborted(signal);
+ 	await sendNotification(
+ 		client,
+@@ -1614,6 +1657,11 @@ export async function notifyWorkspaceWatchedFiles(
+  * Increments version, sends didChange and didSave notifications.
+  */
+ export async function refreshFile(client: LspClient, filePath: string, signal?: AbortSignal): Promise<void> {
++	const editor = editorDocument(filePath);
++	if (editor) {
++		await syncContent(client, filePath, editor.text, signal, editor.version, editor.languageId);
++		return;
++	}
+ 	throwIfAborted(signal);
+ 	const uri = fileToUri(filePath);
+ 	const lockKey = `${client.name}:${uri}`;
+@@ -1939,3 +1987,16 @@ if (typeof process !== "undefined") {
+ 	});
+ 	postmortem.register("lsp-shutdown", () => shutdownAll());
+ }
++
++/** Existing process-wide clients only; editor open/change must never cold-start a server. */
++export function getEditorLspClients(cwd: string, filePath?: string): LspClient[] {
++	const matching = filePath ? new Set(getServersForFile(getConfig(cwd), filePath).map(([, config]) => config)) : undefined;
++	return Array.from(clients.values()).filter(client => {
++		if (path.resolve(client.cwd) !== path.resolve(cwd) || (matching && !matching.has(client.config))) return false;
++		try {
++			if (filePath) assertEditorDocumentTrusted(cwd, filePath, client.config);
++			else assertEditorProjectTrusted(cwd, client.config);
++			return true;
++		} catch { return false; }
++	});
++}
+diff --git a/src/lsp/clients/biome-client.test.ts b/src/lsp/clients/biome-client.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..6fe5b38957b32013c33014f8e827cac88efbd352
+--- /dev/null
++++ b/src/lsp/clients/biome-client.test.ts
+@@ -0,0 +1,68 @@
++import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
++import * as fs from "node:fs/promises";
++import * as os from "node:os";
++import * as path from "node:path";
++import type { Subprocess } from "bun";
++import { BiomeClient } from "./biome-client";
++
++let directory: string;
++let file: string;
++const diskContent = "export const stale = true;\n";
++const input = "export const value:number=1\n";
++const formatted = "export const value: number = 1;\n";
++
++beforeEach(async () => {
++	directory = await fs.mkdtemp(path.join(os.tmpdir(), "omp-biome-overlay-"));
++	file = path.join(directory, "example.ts");
++	await Bun.write(file, diskContent);
++});
++
++afterEach(async () => {
++	await fs.rm(directory, { recursive: true, force: true });
++});
++
++function client(): BiomeClient {
++	return new BiomeClient({ command: "biome", resolvedCommand: "overlay-biome", fileTypes: [".ts"], rootMarkers: [] }, directory);
++}
++
++function formatProcess(stdout: string, exitCode: number): Subprocess {
++	return {
++		stdout: new Blob([stdout]).stream(),
++		stderr: new Blob([]).stream(),
++		exited: Promise.resolve(exitCode),
++	} as Subprocess;
++}
++
++describe("Biome editor overlay formatting", () => {
++	test("sends the supplied buffer on stdin and leaves stale disk content untouched", async () => {
++		const spawn = spyOn(Bun, "spawn").mockReturnValue(formatProcess(formatted, 0));
++		try {
++			expect(await client().format(file, input)).toBe(formatted);
++			expect(spawn).toHaveBeenCalledWith(["overlay-biome", "format", "--stdin-file-path", file], {
++				cwd: directory,
++				stdin: Buffer.from(input),
++				stdout: "pipe",
++				stderr: "pipe",
++				windowsHide: true,
++				signal: undefined,
++			});
++			expect(await Bun.file(file).text()).toBe(diskContent);
++		} finally { spawn.mockRestore(); }
++	});
++
++	test("a CLI failure preserves both the supplied buffer and its disk base", async () => {
++		const spawn = spyOn(Bun, "spawn").mockReturnValue(formatProcess("partial output", 1));
++		try {
++			expect(await client().format(file, input)).toBe(input);
++			expect(await Bun.file(file).text()).toBe(diskContent);
++		} finally { spawn.mockRestore(); }
++	});
++
++	test("an empty formatted buffer is not replaced by stale disk text", async () => {
++		const spawn = spyOn(Bun, "spawn").mockReturnValue(formatProcess("", 0));
++		try {
++			expect(await client().format(file, "")).toBe("");
++			expect(await Bun.file(file).text()).toBe(diskContent);
++		} finally { spawn.mockRestore(); }
++	});
++});
+diff --git a/src/lsp/clients/biome-client.ts b/src/lsp/clients/biome-client.ts
+index 6b3742531ab0425a679c761baf6b04e5a001271a..1174b53094f88a324bd91916e91ed7bdc9f8c1f6 100644
+--- a/src/lsp/clients/biome-client.ts
++++ b/src/lsp/clients/biome-client.ts
+@@ -62,12 +62,14 @@ async function runBiome(
+ 	cwd: string,
+ 	resolvedCommand?: string,
+ 	signal?: AbortSignal,
++	input?: string,
+ ): Promise<{ stdout: string; stderr: string; success: boolean }> {
+ 	const command = resolvedCommand ?? "biome";
+ 
+ 	try {
+ 		const proc = Bun.spawn([command, ...args], {
+ 			cwd,
++			stdin: input === undefined ? "ignore" : Buffer.from(input),
+ 			stdout: "pipe",
+ 			stderr: "pipe",
+ 			windowsHide: true,
+@@ -115,14 +117,11 @@ export class BiomeClient implements LinterClient {
+ 	) {}
+ 
+ 	async format(filePath: string, content: string): Promise<string> {
+-		// Keep the standalone LinterClient contract: callers supply the content to
+-		// format, regardless of what is currently on disk.
+-		await Bun.write(filePath, content);
+-
+-		const result = await runBiome(["format", "--write", filePath], this.cwd, this.config.resolvedCommand);
++		// Format the supplied overlay on stdin; never overwrite a live editor's disk base.
++		const result = await runBiome(["format", "--stdin-file-path", filePath], this.cwd, this.config.resolvedCommand, undefined, content);
+ 
+ 		if (result.success) {
+-			return await Bun.file(filePath).text();
++			return result.stdout;
+ 		}
+ 
+ 		// Format failed, return original
+diff --git a/src/lsp/clients/index.ts b/src/lsp/clients/index.ts
+index 5fa9b9325d52340369f564b685c08eecab66553f..72c479c02cf2f4f5b2d634e2aedeb80e41c7e5ca 100644
+--- a/src/lsp/clients/index.ts
++++ b/src/lsp/clients/index.ts
+@@ -1,5 +1,6 @@
+ import type { LinterClient, ServerConfig } from "../../lsp/types";
+ import { LspLinterClient } from "./lsp-linter-client";
++import { assertEditorProjectTrusted } from "../editor-documents";
+ 
+ /**
+  * Linter client implementations.
+@@ -20,6 +21,7 @@ const clientCache = new Map<string, LinterClient>();
+  * Uses the server's custom factory if provided, otherwise falls back to LSP.
+  */
+ export function getLinterClient(serverName: string, config: ServerConfig, cwd: string): LinterClient {
++	assertEditorProjectTrusted(cwd, config);
+ 	const key = `${serverName}:${cwd}`;
+ 
+ 	let client = clientCache.get(key);
+diff --git a/src/lsp/config.ts b/src/lsp/config.ts
+index a768d2457cc0008e36534617aa8ef5b6e0ef6ab6..3437353c1b579b6cff06abc34961dc96bf6286b8 100644
+--- a/src/lsp/config.ts
++++ b/src/lsp/config.ts
+@@ -2,6 +2,7 @@ import * as fs from "node:fs";
+ import * as path from "node:path";
+ import { $which, isRecord, logger, pathIsWithin, type WhichOptions } from "@oh-my-pi/pi-utils";
+ import { YAML } from "bun";
++import { isUntrustedProjectScope } from "../config/settings-context";
+ import type { ClaudePluginRoot } from "../discovery/helpers";
+ import {
+ 	type ConfigFileAdapter,
+@@ -169,9 +170,9 @@ function applyRuntimeDefaults(servers: Record<string, ServerConfig>): Record<str
+ // =============================================================================
+ 
+ /**
+- * Check if any root marker file exists in the directory
++ * First root marker present in the directory, as an absolute path (`null` when none is).
+  */
+-export function hasRootMarkers(cwd: string, markers: string[]): boolean {
++export function findRootMarker(cwd: string, markers: string[]): string | null {
+ 	let entries: string[] | null = null;
+ 	for (const marker of markers) {
+ 		// Handle glob-like patterns (e.g., "*.cabal"). Root markers live at the
+@@ -189,17 +190,24 @@ export function hasRootMarkers(cwd: string, markers: string[]): boolean {
+ 			const glob = new Bun.Glob(marker);
+ 			for (const entry of entries) {
+ 				if (glob.match(entry)) {
+-					return true;
++					return path.join(cwd, entry);
+ 				}
+ 			}
+ 			continue;
+ 		}
+ 		const filePath = path.join(cwd, marker);
+ 		if (fs.existsSync(filePath)) {
+-			return true;
++			return filePath;
+ 		}
+ 	}
+-	return false;
++	return null;
++}
++
++/**
++ * Check if any root marker file exists in the directory
++ */
++export function hasRootMarkers(cwd: string, markers: string[]): boolean {
++	return findRootMarker(cwd, markers) !== null;
+ }
+ 
+ /**
+@@ -286,21 +294,19 @@ export interface ResolveCommandOptions extends Pick<WhichOptions, "cache" | "PAT
+ 
+ /**
+  * Resolve a command to an executable path.
+- * Checks project-local bin directories first, then falls back to $PATH.
++ * Checks project-local bin directories first, then falls back to $PATH. In an untrusted folder
++ * ({@link isUntrustedProjectScope}) no project-local bin directory is consulted: those binaries are the folder's code.
+  *
+  * @param command - The command name (e.g., "typescript-language-server")
+  * @param cwd - Working directory to search from
+  * @returns Absolute path to the executable, or null if not found
+  */
+ export function resolveCommand(command: string, cwd: string, options?: ResolveCommandOptions): string | null {
+-	if (options?.localRoots) {
+-		for (const root of options.localRoots) {
++	if (!isUntrustedProjectScope()) {
++		for (const root of options?.localRoots ?? [cwd]) {
+ 			const resolved = resolveCommandFromLocalRoot(command, root);
+ 			if (resolved) return resolved;
+ 		}
+-	} else {
+-		const resolved = resolveCommandFromLocalRoot(command, cwd);
+-		if (resolved) return resolved;
+ 	}
+ 
+ 	if (!options) return $which(command);
+@@ -399,6 +405,20 @@ function marketplaceConfigSource(root: ClaudePluginRoot): ConfigFileSource<Norma
+ 	};
+ }
+ 
++/**
++ * Highest-priority config file that declares `server` for `cwd`, without starting anything;
++ * `undefined` when only the built-in defaults (or a plugin marketplace catalog) define it.
++ */
++export function findServerConfigFile(cwd: string, server: string): string | undefined {
++	for (const source of configFileSources("lsp", cwd, adaptConfig, {
++		includeProject: !isUntrustedProjectScope(),
++		pluginRootSource: marketplaceConfigSource,
++	})) {
++		if (source.path && source.read()?.servers[server]) return source.path;
++	}
++	return undefined;
++}
++
+ /**
+  * Load LSP configuration.
+  *
+@@ -435,6 +455,7 @@ export function loadConfig(cwd: string): LspConfig {
+ 	let mergedServers = coerceServerConfigs(DEFAULTS);
+ 
+ 	const configSources = configFileSources("lsp", cwd, adaptConfig, {
++		includeProject: !isUntrustedProjectScope(),
+ 		pluginRootSource: marketplaceConfigSource,
+ 	}).reverse();
+ 
+@@ -464,18 +485,25 @@ export function loadConfig(cwd: string): LspConfig {
+ 	return { servers, idleTimeoutMs };
+ }
+ 
+-// Cache config per cwd to avoid repeated file I/O
+-export const configCache = new Map<string, LspConfig>();
++// Cache config per cwd and folder trust to avoid repeated file I/O
++const configCache = new Map<string, LspConfig>();
+ 
+ export function getConfig(cwd: string): LspConfig {
+-	let config = configCache.get(cwd);
++	const key = `${cwd}\0${isUntrustedProjectScope() ? "untrusted" : "trusted"}`;
++	let config = configCache.get(key);
+ 	if (!config) {
+ 		config = loadConfig(cwd);
+-		configCache.set(cwd, config);
++		configCache.set(key, config);
+ 	}
+ 	return config;
+ }
+ 
++/** Forget the cached config for `cwd` (every trust level), so the next {@link getConfig} reloads it. */
++export function invalidateConfig(cwd: string): void {
++	configCache.delete(`${cwd}\0trusted`);
++	configCache.delete(`${cwd}\0untrusted`);
++}
++
+ // =============================================================================
+ // Server Selection
+ // =============================================================================
+diff --git a/src/lsp/diagnostics.ts b/src/lsp/diagnostics.ts
+index a57854482c07c387b9e3dfb9aeeb78710a922e81..93ada13f8a87bafa607c7908a5be97b5ebb28df4 100644
+--- a/src/lsp/diagnostics.ts
++++ b/src/lsp/diagnostics.ts
+@@ -279,7 +279,7 @@ export async function waitForDiagnostics(
+ 
+ 		const versionOk = minVersion === undefined || client.diagnosticsVersion > minVersion;
+ 		const published = client.diagnostics.get(uri);
+-		if (published && versionOk) {
++		if (published && versionOk && (expectedDocumentVersion === undefined || published.version === null || published.version === expectedDocumentVersion)) {
+ 			// Server honored our exact document version → authoritative, accept now.
+ 			if (expectedDocumentVersion !== undefined && published.version === expectedDocumentVersion) {
+ 				return published.diagnostics;
+@@ -321,7 +321,7 @@ export async function waitForDiagnostics(
+ 
+ 	const versionOk = minVersion === undefined || client.diagnosticsVersion > minVersion;
+ 	const published = client.diagnostics.get(uri);
+-	if (published && versionOk) {
++	if (published && versionOk && (expectedDocumentVersion === undefined || published.version === null || published.version === expectedDocumentVersion)) {
+ 		if (expectedDocumentVersion !== undefined && published.version === expectedDocumentVersion) {
+ 			return published.diagnostics;
+ 		}
+diff --git a/src/lsp/editor-documents.ts b/src/lsp/editor-documents.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1358f18a999b1ce450522bb823f44921a802a520
+--- /dev/null
++++ b/src/lsp/editor-documents.ts
+@@ -0,0 +1,150 @@
++import { createHash } from "node:crypto";
++import { lstatSync, realpathSync } from "node:fs";
++import * as path from "node:path";
++import { fileURLToPath, pathToFileURL } from "node:url";
++
++export interface EditorDocumentSnapshot {
++	uri: string;
++	version: number;
++	text: string;
++	languageId: string;
++	baseHash: string;
++	dirty: boolean;
++	conflict?: boolean;
++}
++export interface EditorDocument extends EditorDocumentSnapshot {
++	owner: object;
++	apply: (snapshot: EditorDocumentSnapshot, text: string) => Promise<EditorDocumentSnapshot>;
++}
++
++/** Process-wide: every engine session and in-process agent uses the same GUI overlay. */
++const documents = new Map<string, EditorDocument>();
++let requireTrust = false;
++const trustedRoots = new Map<string, Set<string>>();
++
++function canonicalEditorPath(file: string): string {
++	try {
++		return realpathSync.native(file);
++	} catch (error) {
++		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
++		// An absent leaf is valid for a deleted/recovered buffer, but dangling
++		// links and other filesystem errors must never become lexical aliases.
++		try {
++			if (lstatSync(file).isSymbolicLink()) throw new Error(`Cannot resolve dangling editor symlink: ${file}`);
++		} catch (linkError) {
++			if ((linkError as NodeJS.ErrnoException).code !== "ENOENT") throw linkError;
++		}
++		const parent = path.dirname(file);
++		if (parent === file) throw error;
++		return path.join(canonicalEditorPath(parent), path.basename(file));
++	}
++}
++
++export function canonicalEditorUri(value: string): string {
++	let file = value.startsWith("file:") ? fileURLToPath(value) : value;
++	if (!path.isAbsolute(file)) file = `${process.cwd()}${path.sep}${file}`;
++	file = canonicalEditorPath(file);
++	if (process.platform === "win32") file = file.toLowerCase();
++	return pathToFileURL(file).href;
++}
++export function requireEditorProjectTrust(required = true): void { requireTrust = required; }
++export function setEditorProjectTrust(cwd: string, trusted: boolean, configurations: readonly unknown[] = []): void {
++	const root = canonicalEditorUri(cwd);
++	if (trusted) trustedRoots.set(root, new Set(configurations.map(config => JSON.stringify(config))));
++	else trustedRoots.delete(root);
++}
++export function assertEditorProjectTrusted(cwd: string, configuration?: unknown): void {
++	const grant = trustedRoots.get(canonicalEditorUri(cwd));
++	if (requireTrust && (!grant || (configuration !== undefined && !grant.has(JSON.stringify(configuration))))) {
++		throw new Error("Explicit project trust is required for this language server configuration.");
++	}
++}
++/** Overlay registration is global; disclosure to a server is project-local and trusted. */
++export function assertEditorDocumentTrusted(cwd: string, file: string, configuration?: unknown): void {
++	assertEditorProjectTrusted(cwd, configuration);
++	const relative = path.relative(fileURLToPath(canonicalEditorUri(cwd)), fileURLToPath(canonicalEditorUri(file)));
++	if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
++		throw new Error("Document is outside the trusted project");
++	}
++}
++export function editorDocument(file: string): EditorDocument | undefined {
++	// With no overlays there is no identity to protect. Leave inaccessible disk
++	// metadata to the filesystem/broker instead of introducing a new preflight.
++	// Once any document is open, canonicalization must still fail closed: an
++	// unresolved path could alias that document.
++	if (documents.size === 0) return undefined;
++	return documents.get(canonicalEditorUri(file));
++}
++export function validateEditorSnapshot(snapshot: EditorDocumentSnapshot): void {
++	if (!Number.isSafeInteger(snapshot.version) || snapshot.version < 1) throw new Error("Invalid editor revision");
++	if (typeof snapshot.text !== "string" || typeof snapshot.languageId !== "string" || typeof snapshot.dirty !== "boolean" || !/^[a-f\d]{64}$/i.test(snapshot.baseHash)) {
++		throw new Error("Invalid editor document snapshot");
++	}
++	if (!snapshot.uri.startsWith("file:")) throw new Error("Editor documents require file URIs");
++}
++export function registerEditorDocument(snapshot: EditorDocumentSnapshot, owner: object, apply: EditorDocument["apply"]): EditorDocument {
++	validateEditorSnapshot(snapshot);
++	const uri = canonicalEditorUri(snapshot.uri);
++	const previous = documents.get(uri);
++	if (previous && (snapshot.version < previous.version || (snapshot.version === previous.version && snapshot.text !== previous.text))) {
++		throw new Error("Stale editor document revision");
++	}
++	const document = { ...snapshot, uri, owner, apply };
++	documents.set(uri, document);
++	return document;
++}
++export function closeEditorDocument(uri: string, owner: object): void {
++	const key = canonicalEditorUri(uri);
++	if (documents.get(key)?.owner === owner) documents.delete(key);
++}
++export function disconnectEditorDocuments(owner: object): void {
++	// Keep the guard when a chat disconnects while its GUI buffers remain open.
++	for (const document of documents.values()) if (document.owner === owner) {
++		document.apply = async () => { throw new Error("Editor disconnected; reopen the document connection before editing."); };
++	}
++}
++export function assertEditorRevision(document: EditorDocument, version: number, baseHash: string): void {
++	const current = documents.get(document.uri);
++	if (!current || current.version !== version || current.baseHash.toLowerCase() !== baseHash.toLowerCase()) throw new Error("Stale editor revision or base hash");
++}
++/**
++ * The GUI buffer that should receive an agent edit, or undefined when the edit goes to disk instead: no open buffer, or a
++ * buffer with unsaved/conflicting user text. Writing disk never touches that text; the editor sees the change and offers
++ * "Reload (keeps your text as a copy) / Keep mine".
++ */
++export function assertEditorWritable(file: string, version?: number, hash?: string): EditorDocument | undefined {
++	const document = editorDocument(file);
++	if (!document || document.dirty || document.conflict) return undefined;
++	if (version !== undefined) assertEditorRevision(document, version, hash ?? "");
++	return document;
++}
++/** Language-server edits are computed against the buffer the server sees, so they cannot fall back to the disk text. */
++export function assertNoUnsavedEditorBuffer(file: string): void {
++	const document = editorDocument(file);
++	if (document?.dirty || document?.conflict) throw new Error(`Unsaved or conflicting editor buffer: ${file}. Save or reload it before language-server edits.`);
++}
++/** Resource operations cannot preserve the identity/undo history of a live GUI buffer. */
++export function assertNoEditorResourceMutation(file: string): void {
++	if (documents.size === 0) return;
++	const uri = canonicalEditorUri(file);
++	for (const key of documents.keys()) if (key === uri || key.startsWith(`${uri}/`)) {
++		throw new Error(`Close the editor document before deleting, replacing or moving ${file}`);
++	}
++}
++/** Return true only after the UI has accepted the revision/hash-checked edit into undo. Never writes disk. */
++export async function applyEditorContent(file: string, text: string, expected?: EditorDocumentSnapshot): Promise<boolean> {
++	const document = assertEditorWritable(file, expected?.version, expected?.baseHash);
++	if (!document) return false;
++	if (text === document.text) return true;
++	const snapshot = { ...document };
++	const diskHash = createHash("sha256").update(await Bun.file(fileURLToPath(document.uri)).bytes()).digest("hex");
++	if (diskHash !== snapshot.baseHash.toLowerCase()) throw new Error("Editor base file changed on disk; reload before applying edits");
++	if (!assertEditorWritable(file, snapshot.version, snapshot.baseHash)) throw new Error("Editor buffer gained unsaved edits; retry the edit");
++	const result = await document.apply(snapshot, text);
++	validateEditorSnapshot(result);
++	if (canonicalEditorUri(result.uri) !== document.uri || result.text !== text || result.version <= snapshot.version || !result.dirty) {
++		throw new Error("Editor rejected or returned an invalid edit acknowledgement");
++	}
++	registerEditorDocument(result, document.owner, document.apply);
++	return true;
++}
+diff --git a/src/lsp/edits.ts b/src/lsp/edits.ts
+index 7b88ff13645e9118f23894b0d79acb8821fa2879..12763a3893947367400cca1972e016c6fe9c1d03 100644
+--- a/src/lsp/edits.ts
++++ b/src/lsp/edits.ts
+@@ -3,6 +3,7 @@ import * as path from "node:path";
+ import { isEexist, isEnoent, logger } from "@oh-my-pi/pi-utils";
+ import { formatPathRelativeToCwd } from "../tools/path-utils";
+ import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
++import { applyEditorContent, assertEditorWritable, assertNoEditorResourceMutation, assertNoUnsavedEditorBuffer } from "./editor-documents";
+ import type {
+ 	CreateFile,
+ 	CreateFileOptions,
+@@ -161,9 +162,11 @@ export function flattenWorkspaceTextEdits(edit: WorkspaceEdit): Map<string, Text
+  * Edits are applied in reverse order (bottom-to-top) to preserve line/character indices.
+  */
+ export async function applyTextEdits(filePath: string, edits: TextEdit[]): Promise<void> {
+-	const content = await readTextFromDisk(filePath);
++	assertNoUnsavedEditorBuffer(filePath);
++	const document = assertEditorWritable(filePath);
++	const content = document?.text ?? await readTextFromDisk(filePath);
+ 	const result = applyTextEditsToString(content, edits);
+-	await Bun.write(filePath, result);
++	if (!await applyEditorContent(filePath, result, document)) await Bun.write(filePath, result);
+ }
+ 
+ /** A reference file and the text edits a rename computed for it. */
+@@ -189,6 +192,10 @@ export async function applyEditsThenRename(
+ 	source: string,
+ 	dest: string,
+ ): Promise<void> {
++	assertNoEditorResourceMutation(source);
++	assertNoEditorResourceMutation(dest);
++	// Rollback is disk-based; live references must not participate in this transaction.
++	for (const reference of references) assertNoEditorResourceMutation(reference.filePath);
+ 	const backups: Array<{ filePath: string; original: string }> = [];
+ 	for (const { filePath, edits } of references) {
+ 		backups.push({ filePath, original: await readTextFromDisk(filePath) });
+@@ -324,6 +331,37 @@ export async function applyWorkspaceEdit(
+ 		executed.push(change);
+ 		onExecuted?.(change);
+ 	};
++	// Validate every live target before the first disk mutation. Apply GUI edits first,
++	// so a late dirty/stale refusal from the UI cannot leave earlier disk edits behind.
++	const guiEdits = new Map<string, TextEdit[]>();
++	const changes = edit.documentChanges ?? Object.entries(edit.changes ?? {}).map(([uri, edits]) => ({ textDocument: { uri }, edits }));
++	for (const change of changes) {
++		if ("textDocument" in change) {
++			const file = uriToFile(change.textDocument.uri);
++			assertNoUnsavedEditorBuffer(file);
++			const document = assertEditorWritable(file);
++			if (document) {
++				if ("version" in change.textDocument && change.textDocument.version != null && change.textDocument.version !== document.version) {
++					throw new Error("Stale workspace edit document version");
++				}
++				const previous = guiEdits.get(change.textDocument.uri) ?? [];
++				previous.push(...change.edits);
++				guiEdits.set(change.textDocument.uri, previous);
++			}
++			sortAndValidateTextEdits(change.edits);
++		} else if (change.kind === "rename") {
++			assertNoEditorResourceMutation(uriToFile(change.oldUri));
++			assertNoEditorResourceMutation(uriToFile(change.newUri));
++		} else {
++			assertNoEditorResourceMutation(uriToFile(change.uri));
++		}
++	}
++	for (const [uri, edits] of guiEdits) {
++		const document = assertEditorWritable(uri);
++		if (!document) throw new Error(`Editor buffer gained unsaved edits: ${uriToFile(uri)}. Save it and retry.`);
++		await applyEditorContent(uri, applyTextEditsToString(document.text, edits), document);
++		applied.push(`Updated editor buffer ${formatPathRelativeToCwd(uriToFile(uri), cwd)} (unsaved; Undo available)`);
++	}
+ 
+ 	if (edit.documentChanges) {
+ 		const ops = planDocumentChanges(edit.documentChanges);
+@@ -332,6 +370,7 @@ export async function applyWorkspaceEdit(
+ 		}
+ 		for (const op of ops) {
+ 			if (op.kind === "text") {
++				if (guiEdits.has(op.uri)) continue;
+ 				const filePath = uriToFile(op.uri);
+ 				await applyTextEdits(filePath, op.edits);
+ 				applied.push(`Applied ${op.edits.length} edit(s) to ${formatPathRelativeToCwd(filePath, cwd)}`);
+@@ -440,6 +479,7 @@ export async function applyWorkspaceEdit(
+ 		}
+ 		for (const uri in changes) {
+ 			const textEdits = changes[uri];
++			if (guiEdits.has(uri)) continue;
+ 			if (textEdits.length === 0) continue;
+ 			const filePath = uriToFile(uri);
+ 			await applyTextEdits(filePath, textEdits);
+diff --git a/src/lsp/tool.ts b/src/lsp/tool.ts
+index 2c4b7d9fc8f3152b70229bf575e8951a43618541..05b5954b18dae49c90259255cd43623f9d695692 100644
+--- a/src/lsp/tool.ts
++++ b/src/lsp/tool.ts
+@@ -33,7 +33,7 @@ import {
+ 	waitForProjectLoaded,
+ } from "./client";
+ import { getLinterClient } from "./clients";
+-import { configCache, getConfig, getServersForFile } from "./config";
++import { getConfig, getServersForFile, invalidateConfig } from "./config";
+ import {
+ 	BATCH_DIAGNOSTICS_WAIT_TIMEOUT_MS,
+ 	formatLocationWithContext,
+@@ -1107,7 +1107,7 @@ export class LspTool implements AgentTool<typeof lspSchema, LspToolDetails, Them
+ 			// and plugin configs added after the first LSP call become visible —
+ 			// otherwise `getConfig` returns the first observation for the rest of
+ 			// the process lifetime (#3546).
+-			configCache.delete(this.session.cwd);
++			invalidateConfig(this.session.cwd);
+ 			const refreshedConfig = getConfig(this.session.cwd);
+ 			reconcileIdleChecker();
+ 			const servers = getLspServers(refreshedConfig);
+diff --git a/src/lsp/utils.ts b/src/lsp/utils.ts
+index cbe06702ff4a1c820f3a37ceb9a3bf7e075cb93b..998ce524411f3fede1f5849635ba702f67ec4721 100644
+--- a/src/lsp/utils.ts
++++ b/src/lsp/utils.ts
+@@ -5,6 +5,7 @@ import path from "node:path";
+ import { isEnoent } from "@oh-my-pi/pi-utils";
+ import { type Theme, theme } from "@oh-my-pi/pi-tui/theme";
+ import { formatPathRelativeToCwd, resolveToCwd, specialFileKind } from "../tools/path-utils";
++import { editorDocument } from "./editor-documents";
+ import type {
+ 	CodeAction,
+ 	Command,
+@@ -650,7 +651,7 @@ function parseSymbolSpec(spec: string): { symbol: string; occurrence: number } {
+ export async function resolveSymbolColumn(filePath: string, line: number, symbolSpec?: string): Promise<number> {
+ 	const lineNumber = Math.max(1, line);
+ 	try {
+-		const fileText = await readTextFromDisk(filePath);
++		const fileText = editorDocument(filePath)?.text ?? await readTextFromDisk(filePath);
+ 		const lines = fileText.split("\n");
+ 		const targetLine = lines[lineNumber - 1] ?? "";
+ 		if (!symbolSpec) {
+@@ -681,9 +682,10 @@ export async function readLocationContext(filePath: string, line: number, contex
+ 	const targetLine = Math.max(1, line);
+ 	const surrounding = Math.max(0, contextLines);
+ 	try {
++		const document = editorDocument(filePath);
+ 		// Context is decoration: a special-file location keeps its header, like a missing file.
+-		if (specialFileKind(await fs.stat(filePath))) return [];
+-		const fileText = await Bun.file(filePath).text();
++		if (!document && specialFileKind(await fs.stat(filePath))) return [];
++		const fileText = document?.text ?? await Bun.file(filePath).text();
+ 		const lines = fileText.split("\n");
+ 		if (lines.length === 0) return [];
+ 
+diff --git a/src/lsp/writethrough.ts b/src/lsp/writethrough.ts
+index 5523c831f708881edfd76d701a6710bbc4e6dfdf..19c508b5ed84d059c622f93c9128b5ef01ecc72b 100644
+--- a/src/lsp/writethrough.ts
++++ b/src/lsp/writethrough.ts
+@@ -2,6 +2,7 @@ import * as fs from "node:fs";
+ import { isEnoent, isRecord, logger, untilAborted } from "@oh-my-pi/pi-utils";
+ import type { BunFile } from "bun";
+ import { isPermissionDeniedError, writeFileWithFallback } from "../tools/file-write-fallback";
++import { applyEditorContent } from "./editor-documents";
+ import {
+ 	beginPendingDiskWrite,
+ 	endPendingDiskWrite,
+@@ -138,6 +139,7 @@ export async function writethroughNoop(
+ 	_batch?: LspWritethroughBatchRequest,
+ 	_getDeferred?: (dst: string) => WritethroughDeferredHandle | undefined,
+ ): Promise<WritethroughResult> {
++	if (await applyEditorContent(dst, content)) return { finalContent: content };
+ 	await writeFileWithFallback(dst, content, file);
+ 	return { finalContent: content };
+ }
+@@ -662,6 +664,7 @@ export function createLspWritethrough(cwd: string, options?: WritethroughOptions
+ 		batch?: LspWritethroughBatchRequest,
+ 		getDeferred?: (dst: string) => WritethroughDeferredHandle | undefined,
+ 	) => {
++		if (await applyEditorContent(dst, content)) return { finalContent: content };
+ 		const changeType = (await Bun.file(dst).exists()) ? FileChangeType.Changed : FileChangeType.Created;
+ 		if (!batch) {
+ 			const bundle = getDeferred?.(dst);
+diff --git a/src/utils/config-file-sources.ts b/src/utils/config-file-sources.ts
+index f136f61f379ab478e8fb36d6aca53c4f572624bd..b64724c7c12275fcc7bd21a9e0aae4c7a217f6d2 100644
+--- a/src/utils/config-file-sources.ts
++++ b/src/utils/config-file-sources.ts
+@@ -10,6 +10,8 @@ export type ConfigFileAdapter<T> = (content: string, filePath: string) => T | nu
+ /** One entry of a config stack; `read` yields `null` for unreadable or rejected files. */
+ export interface ConfigFileSource<T> {
+ 	read(): T | null;
++	/** Config file path; absent for synthetic sources such as marketplace catalogs. */
++	path?: string;
+ }
+ 
+ /**
+@@ -28,6 +30,8 @@ export function readConfigFile<T>(filePath: string, adapt: ConfigFileAdapter<T>)
+ }
+ 
+ export interface ConfigFileSourcesOptions<T> {
++	/** Include cwd files and project config directories. Disable for untrusted projects. */
++	includeProject?: boolean;
+ 	/** Extra source emitted right after each plugin root's config files (e.g. its marketplace catalog). */
+ 	pluginRootSource?: (root: ClaudePluginRoot) => ConfigFileSource<T>;
+ }
+@@ -48,13 +52,15 @@ export function configFileSources<T>(
+ 	const sources: ConfigFileSource<T>[] = [];
+ 	const addDir = (dir: string): void => {
+ 		for (const filename of filenames) {
+-			sources.push({ read: () => readConfigFile(path.join(dir, filename), adapt) });
++			const filePath = path.join(dir, filename);
++			sources.push({ path: filePath, read: () => readConfigFile(filePath, adapt) });
+ 		}
+ 	};
+ 
+-	addDir(cwd);
+-
+-	for (const dir of getConfigDirPaths("", { user: false, project: true, cwd })) addDir(dir);
++	if (options.includeProject !== false) {
++		addDir(cwd);
++		for (const dir of getConfigDirPaths("", { user: false, project: true, cwd })) addDir(dir);
++	}
+ 
+ 	for (const dir of getConfigDirPaths("", { user: true, project: false })) addDir(dir);
+ 

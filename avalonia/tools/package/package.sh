@@ -38,7 +38,8 @@ docs() {
 sha() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi; }
 native() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else echo "$1"; fi; }
 
-# The pinned engine pack, installed by the published app itself, into $1 (the folder RuntimePack.BundledRoot names).
+# The pinned engine pack (currently omp 18.12.2 / Bun 1.4.2), installed by the published app itself,
+# into $1 (the folder RuntimePack.BundledRoot names). Read its identity from the installer, never an older cache.
 engine() {
   local key exe build pack
   case "$RID" in

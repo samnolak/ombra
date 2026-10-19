@@ -89,6 +89,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Owned engine patches reproduce checked-in source
+        run: python3 ../runtime/engine/patcher.py --check
       - name: Owned engine artifact is current
         run: python3 ../runtime/generate-engine-artifact.py --check
       - name: .NET 10 SDK

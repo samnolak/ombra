@@ -202,8 +202,10 @@ export interface RpcSessionState {
 	isSettled: boolean;
 	/** Displayable queue-chip text for pending user-authored messages, mirroring
 	 *  `AgentSession.getQueuedMessages()`. Render the queue from this snapshot
-	 *  (and the `queue_update` event) instead of tracking chips independently. */
-	queuedMessages: { steering: string[]; followUp: string[] };
+	 *  (and the `queue_update` event) instead of tracking chips independently.
+	 *  `liveSteered` counts the leading `steering` entries already sent into the
+	 *  streaming response; `remove_queued_message` cannot reach them. */
+	queuedMessages: { steering: string[]; followUp: string[]; liveSteered: number };
 	todoPhases: TodoPhase[];
 	/** For session dump / export (plain-text parity with /dump). */
 	systemPrompt?: string[];
@@ -635,7 +637,7 @@ export type RpcResponse =
 			type: "response";
 			command: "navigate_tree";
 			success: true;
-			data: { text?: string; cancelled: boolean };
+			data: { text?: string; images?: ImageContent[]; cancelled: boolean };
 	  }
 	| {
 			id?: string;
@@ -753,7 +755,10 @@ export type RpcMessageEventType = "message_start" | "message_update" | "message_
  */
 export type RpcMessageEventFrame = Extract<AgentSessionEvent, { type: RpcMessageEventType }> & { messageId: string };
 
-type WithoutPartial<T> = T extends unknown ? Omit<T, "partial"> : never;
+/** Keep the answer/reasoning distinction when the content snapshot is omitted. */
+type WithoutPartial<T> = T extends { type: "thinking_end" }
+	? Omit<T, "partial"> & { narration?: boolean }
+	: T extends unknown ? Omit<T, "partial"> : never;
 
 /** Raw-protocol opt-in projection; terminal subtype fields are preserved. */
 export type RpcDeltaMessageUpdateFrame = Omit<

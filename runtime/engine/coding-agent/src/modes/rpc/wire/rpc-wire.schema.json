@@ -23,20 +23,35 @@
 			{
 				"name": "editor_document",
 				"doc": "K7 v1 canonical editor overlay and UTF-16 language requests; never starts a server without explicit trust.",
-				"params": "EditorDocumentParams", "result": "EditorDocumentResult",
-				"nullable": false, "unwrap": null, "timeoutMs": null, "completion": null, "clientOmit": []
+				"params": "EditorDocumentParams",
+				"result": "EditorDocumentResult",
+				"nullable": false,
+				"unwrap": null,
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
 			},
 			{
 				"name": "editor_trust",
 				"doc": "Explicitly grant or revoke trust for this project's current language-server configuration.",
-				"params": "EditorTrustParams", "result": "EditorTrustResult",
-				"nullable": false, "unwrap": null, "timeoutMs": null, "completion": null, "clientOmit": []
+				"params": "EditorTrustParams",
+				"result": "EditorTrustResult",
+				"nullable": false,
+				"unwrap": null,
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
 			},
 			{
 				"name": "editor_edit_result",
 				"doc": "Acknowledge a revision/hash-checked edit applied to the canonical GUI buffer, without saving.",
-				"params": "EditorEditResultParams", "result": "EditorEditResultResult",
-				"nullable": false, "unwrap": null, "timeoutMs": null, "completion": null, "clientOmit": []
+				"params": "EditorEditResultParams",
+				"result": "EditorEditResultResult",
+				"nullable": false,
+				"unwrap": null,
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
 			},
 			{
 				"name": "prompt",
@@ -186,6 +201,17 @@
 				"doc": "Read or change goal mode with the lifecycle of the interactive `/goal` command.",
 				"params": "GoalParams",
 				"result": "GoalResult",
+				"nullable": false,
+				"unwrap": null,
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
+				"name": "plan_mode",
+				"doc": "Read or change plan mode: enter/exit, and approve or reject (with feedback) the proposed plan, as the interactive `/plan` review does. Approve/reject name the review's `revision` (else `plan_review_stale`) and are refused while a turn runs (`session_busy`).",
+				"params": "PlanModeParams",
+				"result": "PlanModeResult",
 				"nullable": false,
 				"unwrap": null,
 				"timeoutMs": null,
@@ -636,7 +662,7 @@
 			},
 			{
 				"name": "navigate_tree",
-				"doc": "Move the leaf in place, in the same session file (the TUI's /tree and Esc Esc rewind, no summary): a user message rewinds past itself and its text comes back; the abandoned path stays as a sibling branch. Refused with `session_busy` while the session works.",
+				"doc": "Move the leaf in place, in the same session file (the TUI's /tree and Esc Esc rewind, no summary): a user message rewinds past itself and its text and images come back; the abandoned path stays as a sibling branch. Refused with `session_busy` while the session works.",
 				"params": "NavigateTreeParams",
 				"result": "NavigateTreeResult",
 				"nullable": false,
@@ -809,64 +835,54 @@
 				"timeoutMs": null,
 				"completion": null,
 				"clientOmit": []
+			},
+			{
+				"name": "get_mcp_servers",
+				"doc": "The session's MCP servers: connection, tool count, sign-in state.",
+				"params": null,
+				"result": "GetMcpServersResult",
+				"nullable": false,
+				"unwrap": "servers",
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
+				"name": "mcp_login",
+				"doc": "Sign in to an MCP server with OAuth; the authorization URL arrives as `open_url` with `mcpServer`. Cancelled: code `mcp_login_cancelled`.",
+				"params": "McpLoginParams",
+				"result": "McpServerInfo",
+				"nullable": false,
+				"unwrap": null,
+				"timeoutMs": 600000,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
+				"name": "mcp_login_cancel",
+				"doc": "Cancel a running `mcp_login` for the server.",
+				"params": "McpLoginCancelParams",
+				"result": "McpLoginCancelResult",
+				"nullable": false,
+				"unwrap": "cancelled",
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
+				"name": "mcp_reconnect",
+				"doc": "Reconnect one server from its config, or without a name rediscover and reconnect them all.",
+				"params": "McpReconnectParams",
+				"result": "McpReconnectResult",
+				"nullable": false,
+				"unwrap": "servers",
+				"timeoutMs": 120000,
+				"completion": null,
+				"clientOmit": []
 			}
 		]
 	},
 	"$defs": {
-		"EditorDocumentSnapshot": {
-			"type": "object",
-			"properties": {
-				"uri": { "type": "string" }, "version": { "type": "integer" },
-				"text": { "type": "string" }, "languageId": { "type": "string" },
-				"baseHash": { "type": "string" }, "dirty": { "type": "boolean" }, "conflict": { "type": "boolean" }
-			},
-			"required": ["uri", "version", "text", "languageId", "baseHash", "dirty"]
-		},
-		"EditorApplyEditEvent": {
-			"type": "object",
-			"properties": {
-				"type": { "const": "editor_apply_edit" }, "requestId": { "type": "string" },
-				"uri": { "type": "string" }, "expectedRevision": { "type": "integer" },
-				"expectedHash": { "type": "string" }, "text": { "type": "string" }
-			},
-			"required": ["type", "requestId", "uri", "expectedRevision", "expectedHash", "text"]
-		},
-		"EditorDocumentParams": {
-			"type": "object",
-			"properties": {
-				"action": { "enum": ["open", "change", "save", "close", "request"], "type": "string" },
-				"uri": { "type": "string" }, "version": { "type": "integer" }, "text": { "type": "string" },
-				"languageId": { "type": "string" }, "baseHash": { "type": "string" }, "dirty": { "type": "boolean" },
-				"conflict": { "type": "boolean" },
-				"method": { "enum": ["completion", "hover", "definition", "rename", "diagnostics"], "type": "string" },
-				"position": {
-					"type": "object", "properties": { "line": { "type": "integer" }, "character": { "type": "integer" } },
-					"required": ["line", "character"]
-				},
-				"newName": { "type": "string" }
-			},
-			"required": ["action", "uri", "version"]
-		},
-		"EditorDocumentResult": {
-			"type": "object",
-			"properties": { "version": { "type": "integer" }, "result": {}, "positionEncoding": { "const": "utf-16" } },
-			"required": ["version", "result", "positionEncoding"]
-		},
-		"EditorTrustParams": {
-			"type": "object", "properties": { "trusted": { "type": "boolean" } }, "required": ["trusted"]
-		},
-		"EditorTrustResult": {
-			"type": "object", "properties": { "trusted": { "type": "boolean" } }, "required": ["trusted"]
-		},
-		"EditorEditResultParams": {
-			"type": "object",
-			"properties": {
-				"requestId": { "type": "string" }, "success": { "type": "boolean" }, "error": { "type": "string" },
-				"document": { "$ref": "#/$defs/EditorDocumentSnapshot" }
-			},
-			"required": ["requestId", "success"]
-		},
-		"EditorEditResultResult": { "type": "object" },
 		"Attribution": {
 			"enum": [
 				"user",
@@ -918,6 +934,10 @@
 				},
 				"itemId": {
 					"type": "string"
+				},
+				"narration": {
+					"type": "boolean",
+					"description": "Prose the model addressed to the user, returned by the provider as thinking; present it as answer text."
 				}
 			},
 			"required": [
@@ -2260,6 +2280,21 @@
 			],
 			"description": "Model descriptor: the client-relevant subset of the server's model record."
 		},
+		"EditorPosition": {
+			"type": "object",
+			"properties": {
+				"line": {
+					"type": "integer"
+				},
+				"character": {
+					"type": "integer"
+				}
+			},
+			"required": [
+				"line",
+				"character"
+			]
+		},
 		"QueueMode": {
 			"enum": [
 				"all",
@@ -2451,6 +2486,11 @@
 					"items": {
 						"type": "string"
 					}
+				},
+				"liveSteered": {
+					"type": "integer",
+					"description": "Leading `steering` entries are live steering already sent into the streaming response; `remove_queued_message` cannot reach them.",
+					"default": 0
 				}
 			},
 			"required": [
@@ -2574,6 +2614,96 @@
 				"state"
 			],
 			"description": "Outcome of every `goal` op; both fields are null when the session has no goal."
+		},
+		"PlanModeOp": {
+			"enum": [
+				"get",
+				"enter",
+				"exit",
+				"approve",
+				"reject"
+			],
+			"type": "string"
+		},
+		"PlanModeState": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": "boolean"
+				},
+				"planFilePath": {
+					"type": "string"
+				},
+				"workflow": {
+					"enum": [
+						"parallel",
+						"iterative"
+					],
+					"type": "string"
+				},
+				"reentry": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"enabled",
+				"planFilePath"
+			],
+			"description": "Session plan mode: the agent drafts `planFilePath` read-only until a plan is approved."
+		},
+		"PlanReview": {
+			"type": "object",
+			"properties": {
+				"revision": {
+					"type": "string"
+				},
+				"planFilePath": {
+					"type": "string"
+				},
+				"title": {
+					"type": "string"
+				},
+				"content": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"revision",
+				"planFilePath",
+				"title",
+				"content"
+			],
+			"description": "A plan the agent proposed (`xd://propose`) that waits for `plan_mode` approve or reject naming its `revision`; `content` is the Markdown approval executes."
+		},
+		"PlanModeResult": {
+			"type": "object",
+			"properties": {
+				"state": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/PlanModeState"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"review": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/PlanReview"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"state",
+				"review"
+			],
+			"description": "Outcome of every `plan_mode` op; `state` is null when plan mode is off, `review` when no plan waits."
 		},
 		"SlowModeScope": {
 			"enum": [
@@ -2737,7 +2867,8 @@
 					"$ref": "#/$defs/QueuedMessagesState",
 					"default": {
 						"steering": [],
-						"followUp": []
+						"followUp": [],
+						"liveSteered": 0
 					}
 				},
 				"todoPhases": {
@@ -2777,6 +2908,14 @@
 					],
 					"description": "Current goal mode; null when the session has no goal.",
 					"default": null
+				},
+				"planMode": {
+					"$ref": "#/$defs/PlanModeResult",
+					"description": "Plan mode and the proposed plan awaiting approval.",
+					"default": {
+						"state": null,
+						"review": null
+					}
 				}
 			},
 			"required": [
@@ -2879,6 +3018,9 @@
 					"type": "object",
 					"properties": {},
 					"additionalProperties": {}
+				},
+				"providerReplayThroughEntryId": {
+					"type": "string"
 				}
 			},
 			"required": [
@@ -3064,11 +3206,17 @@
 		"NavigateTreeResult": {
 			"type": "object",
 			"properties": {
+				"cancelled": {
+					"type": "boolean"
+				},
 				"text": {
 					"type": "string"
 				},
-				"cancelled": {
-					"type": "boolean"
+				"images": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ImageContent"
+					}
 				}
 			},
 			"required": [
@@ -3715,6 +3863,171 @@
 			],
 			"description": "A stored credential `logout` can remove; `active` marks credentials the session may be using."
 		},
+		"McpAuthState": {
+			"enum": [
+				"none",
+				"signed_in",
+				"signed_out",
+				"expired"
+			],
+			"type": "string",
+			"description": "Connector sign-in: no OMP-managed OAuth, a working credential, none that works, or one the server now refuses."
+		},
+		"McpServerInfo": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"transport": {
+					"enum": [
+						"stdio",
+						"http",
+						"sse"
+					],
+					"type": "string"
+				},
+				"status": {
+					"enum": [
+						"connected",
+						"connecting",
+						"disconnected",
+						"failed"
+					],
+					"type": "string"
+				},
+				"toolCount": {
+					"type": "integer",
+					"description": "Tools of this server in the session; 0 while connected deserves a warning."
+				},
+				"auth": {
+					"$ref": "#/$defs/McpAuthState"
+				},
+				"scope": {
+					"enum": [
+						"user",
+						"project",
+						"native"
+					],
+					"type": "string"
+				},
+				"error": {
+					"type": "string",
+					"description": "Last connection failure (URL queries removed) until the server connects again."
+				}
+			},
+			"required": [
+				"name",
+				"transport",
+				"status",
+				"toolCount",
+				"auth"
+			],
+			"description": "One MCP server of the session. Never carries credentials."
+		},
+		"ElicitationOption": {
+			"type": "object",
+			"properties": {
+				"value": {
+					"type": "string"
+				},
+				"label": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"value",
+				"label"
+			]
+		},
+		"ElicitationField": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"title": {
+					"type": "string"
+				},
+				"required": {
+					"type": "boolean"
+				},
+				"kind": {
+					"enum": [
+						"text",
+						"number",
+						"integer",
+						"boolean",
+						"select",
+						"multiselect"
+					],
+					"type": "string"
+				},
+				"description": {
+					"type": "string"
+				},
+				"format": {
+					"enum": [
+						"email",
+						"uri",
+						"date",
+						"date-time"
+					],
+					"type": "string"
+				},
+				"minLength": {
+					"type": "integer"
+				},
+				"maxLength": {
+					"type": "integer"
+				},
+				"minimum": {
+					"type": "number"
+				},
+				"maximum": {
+					"type": "number"
+				},
+				"options": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ElicitationOption"
+					},
+					"description": "For `select` and `multiselect`."
+				},
+				"minItems": {
+					"type": "integer"
+				},
+				"maxItems": {
+					"type": "integer"
+				},
+				"default": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "boolean"
+						},
+						{
+							"type": "array",
+							"items": {
+								"type": "string"
+							}
+						}
+					]
+				}
+			},
+			"required": [
+				"name",
+				"title",
+				"required",
+				"kind"
+			],
+			"description": "One field of an MCP form, normalized from the server's JSON Schema; limits apply to its kind."
+		},
 		"HandoffResult": {
 			"type": "object",
 			"properties": {
@@ -3812,6 +4125,13 @@
 			"properties": {
 				"type": {
 					"const": "agent_start"
+				},
+				"resumedToolCallIds": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Calls of an unpaired assistant tail a continued run executes before its first model request."
 				}
 			},
 			"required": [
@@ -4467,6 +4787,11 @@
 					"items": {
 						"type": "string"
 					}
+				},
+				"liveSteered": {
+					"type": "integer",
+					"description": "Leading `steering` entries are live steering already sent into the streaming response; `remove_queued_message` cannot reach them.",
+					"default": 0
 				}
 			},
 			"required": [
@@ -4573,6 +4898,71 @@
 				}
 			],
 			"description": "A session event, discriminated by `type`; `set_event_filter` selects which are sent."
+		},
+		"EditorDocumentSnapshot": {
+			"type": "object",
+			"properties": {
+				"uri": {
+					"type": "string"
+				},
+				"version": {
+					"type": "integer"
+				},
+				"text": {
+					"type": "string"
+				},
+				"languageId": {
+					"type": "string"
+				},
+				"baseHash": {
+					"type": "string"
+				},
+				"dirty": {
+					"type": "boolean"
+				},
+				"conflict": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"uri",
+				"version",
+				"text",
+				"languageId",
+				"baseHash",
+				"dirty"
+			]
+		},
+		"EditorApplyEditEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"const": "editor_apply_edit"
+				},
+				"requestId": {
+					"type": "string"
+				},
+				"uri": {
+					"type": "string"
+				},
+				"expectedRevision": {
+					"type": "integer"
+				},
+				"expectedHash": {
+					"type": "string"
+				},
+				"text": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"type",
+				"requestId",
+				"uri",
+				"expectedRevision",
+				"expectedHash",
+				"text"
+			]
 		},
 		"ReadyEvent": {
 			"type": "object",
@@ -5007,6 +5397,122 @@
 			],
 			"description": "Full side-question record on every lifecycle change (started, complete, cancelled, error); the last one per id wins."
 		},
+		"PlanModeUpdatedEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"const": "plan_mode_updated"
+				},
+				"state": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/PlanModeState"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"review": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/PlanReview"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"type",
+				"state",
+				"review"
+			],
+			"description": "Plan mode changed: entered, exited, a plan proposed for review (with its document), approved or rejected."
+		},
+		"McpAuthRequiredEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"const": "mcp_auth_required"
+				},
+				"serverName": {
+					"type": "string"
+				},
+				"reason": {
+					"enum": [
+						"signed_out",
+						"expired"
+					],
+					"type": "string"
+				}
+			},
+			"required": [
+				"type",
+				"serverName",
+				"reason"
+			],
+			"description": "A connector needs the user to sign in (again); nothing was opened. Offer `mcp_login`."
+		},
+		"SessionLeaseHolder": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string",
+					"description": "The holder process's lease identity (random per process)."
+				},
+				"kind": {
+					"type": "string",
+					"description": "`ombra` for the desktop app's engine, `omp` for the terminal and CLI."
+				},
+				"pid": {
+					"type": "integer"
+				},
+				"since": {
+					"type": "string",
+					"description": "When it took the lease (ISO 8601)."
+				},
+				"label": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"id",
+				"kind",
+				"pid",
+				"since"
+			],
+			"description": "Who holds (or asked for) a session's writer lease, as that process published itself."
+		},
+		"SessionLeaseLostEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"const": "session_lease_lost"
+				},
+				"holder": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/SessionLeaseHolder"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"interrupted": {
+					"type": "boolean",
+					"description": "A reply was in progress: it is stopped, not finished."
+				}
+			},
+			"required": [
+				"type",
+				"holder",
+				"interrupted"
+			],
+			"description": "Another window or terminal asked to write this session (`holder`, null when unknown): the run is aborted and the logical session closes after its last write. Show the chat read-only with an action to take it back."
+		},
 		"CommandOutputEvent": {
 			"type": "object",
 			"properties": {
@@ -5147,6 +5653,85 @@
 			],
 			"description": "One question of an `ask` request; hosts always offer free text besides `options`."
 		},
+		"ToolApprovalRisk": {
+			"enum": [
+				"read",
+				"write",
+				"exec"
+			],
+			"type": "string"
+		},
+		"ToolApprovalScope": {
+			"enum": [
+				"once",
+				"session",
+				"always"
+			],
+			"type": "string"
+		},
+		"ToolApprovalRequest": {
+			"type": "object",
+			"properties": {
+				"tool": {
+					"type": "string"
+				},
+				"risk": {
+					"$ref": "#/$defs/ToolApprovalRisk",
+					"description": "Capability tier of this call."
+				},
+				"details": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "The tool's argument summary lines, bounded as in the text prompt."
+				},
+				"scopes": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ToolApprovalScope"
+					},
+					"description": "Scopes a host may keep an approval for; only `once` with safety checks or when the tool or the user's policy insists on asking every time."
+				},
+				"toolCallId": {
+					"type": "string"
+				},
+				"reason": {
+					"type": "string",
+					"description": "The tool's own reason for asking."
+				},
+				"origin": {
+					"const": "mcp",
+					"description": "A tool of an MCP server."
+				},
+				"server": {
+					"type": "string",
+					"description": "With `origin`: the MCP server's name."
+				},
+				"command": {
+					"type": "string",
+					"description": "`bash` only: the complete command; absent when longer than 65536 characters."
+				},
+				"cwd": {
+					"type": "string",
+					"description": "`bash` only: the folder the call runs in, as given (relative to the session's folder)."
+				},
+				"safetyChecks": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Provider safety checks only a person may confirm."
+				}
+			},
+			"required": [
+				"tool",
+				"risk",
+				"details",
+				"scopes"
+			],
+			"description": "Typed tool approval: render it instead of parsing the select `title`."
+		},
 		"SelectUiRequest": {
 			"type": "object",
 			"properties": {
@@ -5173,6 +5758,10 @@
 					"items": {
 						"$ref": "#/$defs/SelectOptionDetail"
 					}
+				},
+				"approval": {
+					"$ref": "#/$defs/ToolApprovalRequest",
+					"description": "Set on tool approvals (options Approve/Deny); a `Deny` answer may carry `reason`."
 				},
 				"timeout": {
 					"type": "integer"
@@ -5479,6 +6068,10 @@
 				},
 				"instructions": {
 					"type": "string"
+				},
+				"mcpServer": {
+					"type": "string",
+					"description": "Set when the URL belongs to the host's `mcp_login` for this server."
 				}
 			},
 			"required": [
@@ -5487,6 +6080,41 @@
 				"method",
 				"url"
 			]
+		},
+		"ElicitUiRequest": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"const": "extension_ui_request"
+				},
+				"id": {
+					"type": "string"
+				},
+				"method": {
+					"const": "elicit"
+				},
+				"serverName": {
+					"type": "string"
+				},
+				"message": {
+					"type": "string"
+				},
+				"fields": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ElicitationField"
+					}
+				}
+			},
+			"required": [
+				"type",
+				"id",
+				"method",
+				"serverName",
+				"message",
+				"fields"
+			],
+			"description": "An MCP server asks the user for a form; show `serverName` and offer Decline. Answers are validated against `fields`."
 		},
 		"ExtensionUiRequest": {
 			"anyOf": [
@@ -5525,6 +6153,9 @@
 				},
 				{
 					"$ref": "#/$defs/OpenUrlUiRequest"
+				},
+				{
+					"$ref": "#/$defs/ElicitUiRequest"
 				}
 			],
 			"description": "Extension UI request, discriminated by `method`."
@@ -5562,6 +6193,10 @@
 				},
 				"value": {
 					"type": "string"
+				},
+				"reason": {
+					"type": "string",
+					"description": "With `Deny` on an `approval` select: why, for the agent's failed tool result."
 				}
 			},
 			"required": [
@@ -5637,6 +6272,54 @@
 			],
 			"description": "Answers an `ask` request: one `AskAnswer` per question, in question order."
 		},
+		"ElicitUiResponse": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"const": "extension_ui_response"
+				},
+				"id": {
+					"type": "string"
+				},
+				"action": {
+					"enum": [
+						"accept",
+						"decline"
+					],
+					"type": "string"
+				},
+				"content": {
+					"type": "object",
+					"properties": {},
+					"additionalProperties": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "number"
+							},
+							{
+								"type": "boolean"
+							},
+							{
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							}
+						]
+					},
+					"description": "Field values by name; required with `accept`."
+				}
+			},
+			"required": [
+				"type",
+				"id",
+				"action"
+			],
+			"description": "Answers an `elicit` form; dismissing it sends `CancelUiResponse` instead."
+		},
 		"ExtensionUiResponse": {
 			"anyOf": [
 				{
@@ -5650,6 +6333,9 @@
 				},
 				{
 					"$ref": "#/$defs/AnswersUiResponse"
+				},
+				{
+					"$ref": "#/$defs/ElicitUiResponse"
 				}
 			],
 			"description": "Host reply to an extension UI request; variants share `type` and differ by their payload key."
@@ -6002,7 +6688,9 @@
 				{
 					"$ref": "#/$defs/ReadyEvent"
 				},
-				{ "$ref": "#/$defs/EditorApplyEditEvent" },
+				{
+					"$ref": "#/$defs/EditorApplyEditEvent"
+				},
 				{
 					"$ref": "#/$defs/PromptResultEvent"
 				},
@@ -6044,6 +6732,15 @@
 				},
 				{
 					"$ref": "#/$defs/BtwRecordEvent"
+				},
+				{
+					"$ref": "#/$defs/PlanModeUpdatedEvent"
+				},
+				{
+					"$ref": "#/$defs/McpAuthRequiredEvent"
+				},
+				{
+					"$ref": "#/$defs/SessionLeaseLostEvent"
 				},
 				{
 					"$ref": "#/$defs/CommandOutputEvent"
@@ -6098,6 +6795,127 @@
 			"required": [
 				"protocolVersion"
 			]
+		},
+		"EditorDocumentParams": {
+			"type": "object",
+			"properties": {
+				"action": {
+					"enum": [
+						"open",
+						"change",
+						"save",
+						"close",
+						"request"
+					],
+					"type": "string"
+				},
+				"uri": {
+					"type": "string"
+				},
+				"version": {
+					"type": "integer"
+				},
+				"text": {
+					"type": "string"
+				},
+				"languageId": {
+					"type": "string"
+				},
+				"baseHash": {
+					"type": "string"
+				},
+				"dirty": {
+					"type": "boolean"
+				},
+				"conflict": {
+					"type": "boolean"
+				},
+				"method": {
+					"enum": [
+						"completion",
+						"hover",
+						"definition",
+						"rename",
+						"diagnostics"
+					],
+					"type": "string"
+				},
+				"position": {
+					"$ref": "#/$defs/EditorPosition"
+				},
+				"newName": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"action",
+				"uri",
+				"version"
+			]
+		},
+		"EditorDocumentResult": {
+			"type": "object",
+			"properties": {
+				"version": {
+					"type": "integer"
+				},
+				"result": {},
+				"positionEncoding": {
+					"const": "utf-16"
+				}
+			},
+			"required": [
+				"version",
+				"result",
+				"positionEncoding"
+			]
+		},
+		"EditorTrustParams": {
+			"type": "object",
+			"properties": {
+				"trusted": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"trusted"
+			]
+		},
+		"EditorTrustResult": {
+			"type": "object",
+			"properties": {
+				"trusted": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"trusted"
+			]
+		},
+		"EditorEditResultParams": {
+			"type": "object",
+			"properties": {
+				"requestId": {
+					"type": "string"
+				},
+				"success": {
+					"type": "boolean"
+				},
+				"error": {
+					"type": "string"
+				},
+				"document": {
+					"$ref": "#/$defs/EditorDocumentSnapshot"
+				}
+			},
+			"required": [
+				"requestId",
+				"success"
+			]
+		},
+		"EditorEditResultResult": {
+			"type": "object",
+			"properties": {}
 		},
 		"PromptParams": {
 			"type": "object",
@@ -6269,6 +7087,26 @@
 				},
 				"token_budget": {
 					"type": "integer"
+				}
+			},
+			"required": [
+				"op"
+			]
+		},
+		"PlanModeParams": {
+			"type": "object",
+			"properties": {
+				"op": {
+					"$ref": "#/$defs/PlanModeOp"
+				},
+				"planFilePath": {
+					"type": "string"
+				},
+				"feedback": {
+					"type": "string"
+				},
+				"revision": {
+					"type": "string"
 				}
 			},
 			"required": [
@@ -7127,6 +7965,75 @@
 			},
 			"required": [
 				"records"
+			]
+		},
+		"GetMcpServersResult": {
+			"type": "object",
+			"properties": {
+				"servers": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/McpServerInfo"
+					}
+				}
+			},
+			"required": [
+				"servers"
+			]
+		},
+		"McpLoginParams": {
+			"type": "object",
+			"properties": {
+				"serverName": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"serverName"
+			]
+		},
+		"McpLoginCancelParams": {
+			"type": "object",
+			"properties": {
+				"serverName": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"serverName"
+			]
+		},
+		"McpLoginCancelResult": {
+			"type": "object",
+			"properties": {
+				"cancelled": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"cancelled"
+			]
+		},
+		"McpReconnectParams": {
+			"type": "object",
+			"properties": {
+				"serverName": {
+					"type": "string"
+				}
+			}
+		},
+		"McpReconnectResult": {
+			"type": "object",
+			"properties": {
+				"servers": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/McpServerInfo"
+					}
+				}
+			},
+			"required": [
+				"servers"
 			]
 		}
 	}

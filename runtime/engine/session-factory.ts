@@ -28,7 +28,7 @@ const unsupportedFields: Partial<Record<keyof Args, string>> = {
 	profile: "--profile", alias: "--alias", help: "--help", version: "--version",
 	print: "--print", printThoughts: "--print-thoughts", export: "--export",
 	fromClaude: "--from-claude", fromCodex: "--from-codex", pluginDirs: "--plugin-dir",
-	goal: "--goal",
+	goal: "--goal", restore: "--restore",
 	planYolo: "--plan-yolo", planYoloInto: "--plan-yolo-into", noPty: "--no-pty",
 };
 

@@ -1,0 +1,1015 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ombra engine maintainers <engine@ombra.local>
+Date: Sat, 1 Jan 2000 00:00:00 +0000
+Subject: [PATCH] rpc input recovery
+
+What: Preserve prompt admission and deterministic abort-and-prompt completion.
+Why: Ombra requires this behavior in its native multi-session host.
+Upstream-Status: Ombra-only RPC integration; generic recovery fixes are upstream candidates.
+
+diff --git a/src/modes/rpc/rpc-abort-and-prompt.test.ts b/src/modes/rpc/rpc-abort-and-prompt.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..f1fb7a92cddabe0cad9e285328521d5fff732b9b
+--- /dev/null
++++ b/src/modes/rpc/rpc-abort-and-prompt.test.ts
+@@ -0,0 +1,199 @@
++import { afterAll, beforeAll, describe, expect, test } from "bun:test";
++import { realpathSync } from "node:fs";
++import { mkdir, mkdtemp, rm } from "node:fs/promises";
++import * as os from "node:os";
++import * as path from "node:path";
++import type { Context } from "@oh-my-pi/pi-ai";
++import { createMockModel, type MockResponse, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
++import { isRecord } from "@oh-my-pi/pi-utils";
++import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils/dirs";
++import { Settings } from "../../config/settings";
++import { withActiveSettings } from "../../config/settings-context";
++import { AgentRegistry, createAgentSession } from "../../sdk";
++import { SessionManager } from "../../session/session-manager";
++import { createRpcSessionRuntime } from "./rpc-mode";
++
++type Frame = Record<string, unknown>;
++
++const textOf = (message: Context["messages"][number]): string => {
++	if (!("content" in message)) return "";
++	const content: unknown = message.content;
++	if (typeof content === "string") return content;
++	if (!Array.isArray(content)) return "";
++	return content.map(part => (isRecord(part) && typeof part.text === "string" ? part.text : "")).join("");
++};
++
++/**
++ * The stand-in model: a reply to a user message with "SLOW" streams until aborted, one to "WARM" waits for the test to
++ * release it, anything else answers at once. `requested(n)` resolves once the model has been asked n times.
++ */
++function standInModel() {
++	const warm = Promise.withResolvers<void>();
++	const waiters: Array<{ count: number; resolve: () => void }> = [];
++	const model = createMockModel({
++		id: "abort-and-prompt-mock",
++		handler: async (context): Promise<MockResponse> => {
++			for (const waiter of waiters.filter(w => model.calls.length >= w.count)) {
++				waiters.splice(waiters.indexOf(waiter), 1);
++				waiter.resolve();
++			}
++			const lastUser = context.messages.findLast(message => message.role === "user");
++			const text = lastUser ? textOf(lastUser) : "";
++			if (text.includes("SLOW")) return { content: ["Streaming a long reply."], delayMs: 60_000 };
++			if (text.includes("WARM")) await warm.promise;
++			return { content: [`Reply to: ${text.slice(0, 40)}`] };
++		},
++	});
++	return {
++		model,
++		releaseWarm: warm.resolve,
++		requested: (count: number): Promise<void> => {
++			if (model.calls.length >= count) return Promise.resolve();
++			const reached = Promise.withResolvers<void>();
++			waiters.push({ count, resolve: reached.resolve });
++			return reached.promise;
++		},
++		/** Serialized context of each model call, in call order. */
++		calls: () => model.calls.map(call => JSON.stringify(call.context.messages)),
++		aborted: (index: number) => model.calls[index]?.options?.signal?.aborted === true,
++	};
++}
++
++describe("RPC abort_and_prompt", () => {
++	const root = path.join(realpathSync(os.tmpdir()), "ombra-tests", `run-${process.pid}`, "rpc-abort-and-prompt");
++	const previousAgentDir = getAgentDir();
++	beforeAll(async () => {
++		await mkdir(path.join(root, "agent"), { recursive: true });
++		setAgentDir(path.join(root, "agent"));
++		registerMockApi();
++	});
++	afterAll(async () => {
++		setAgentDir(previousAgentDir);
++		await rm(root, { recursive: true, force: true });
++	});
++
++	async function open() {
++		const cwd = await mkdtemp(path.join(root, "project-"));
++		const sessionManager = SessionManager.create(cwd, path.join(cwd, ".sessions"));
++		const settings = await Settings.loadIsolated({ cwd, agentDir: getAgentDir(), projectRoot: cwd, inMemory: true });
++		const standIn = standInModel();
++		const registry = new AgentRegistry();
++		const { session } = await AgentRegistry.runWithRegistry(registry, () =>
++			withActiveSettings(settings, () =>
++				createAgentSession({
++					cwd, settings, sessionManager, agentRegistry: registry, model: standIn.model, bindProcessState: false,
++					disableExtensionDiscovery: true, skills: [], rules: [], enableLsp: false,
++				}),
++			),
++		);
++		session.modelRegistry.authStorage.keys.setRuntime(standIn.model.provider, "mock-key");
++		const frames: Frame[] = [];
++		const waiters: Array<{ match: (frame: Frame) => boolean; resolve: (frame: Frame) => void }> = [];
++		const runtime = await withActiveSettings(settings, () =>
++			createRpcSessionRuntime(session, {
++				protocolVersion: 2,
++				output: frame => {
++					if (!isRecord(frame)) return;
++					frames.push(frame);
++					for (const waiter of waiters.filter(w => w.match(frame))) {
++						waiters.splice(waiters.indexOf(waiter), 1);
++						waiter.resolve(frame);
++					}
++				},
++			}),
++		);
++		const next = (match: (frame: Frame) => boolean): Promise<Frame> => {
++			const seen = frames.find(match);
++			if (seen) return Promise.resolve(seen);
++			const waiting = Promise.withResolvers<Frame>();
++			waiters.push({ match, resolve: waiting.resolve });
++			return waiting.promise;
++		};
++		let ids = 0;
++		/** Writes a command frame without waiting for anything, as a client pipelining frames on stdin does. */
++		const send = (command: Frame): string => {
++			const id = `r${++ids}`;
++			runtime.dispatch({ ...command, id });
++			return id;
++		};
++		const response = (id: string) => next(frame => frame.type === "response" && frame.id === id);
++		const promptResult = (id: string) => next(frame => frame.type === "prompt_result" && frame.id === id);
++		return { session, runtime, standIn, send, response, promptResult, request: (command: Frame) => response(send(command)) };
++	}
++
++	test("replaces a run whose Send-now steer is still queued: the run stops, the new prompt runs next, queued input follows it", async () => {
++		const h = await open();
++		try {
++			const slow = h.send({ type: "prompt", message: "SLOW first reply" });
++			await h.standIn.requested(1);
++			// Queue while it streams, then Send now: the follow-up moves to the steering queue, still unread.
++			expect(await h.request({ type: "follow_up", message: "queued alpha" })).toMatchObject({ success: true });
++			expect(await h.request({ type: "promote_queued_message", message: "queued alpha" })).toMatchObject({
++				success: true,
++				data: { promoted: true },
++			});
++			expect(await h.request({ type: "follow_up", message: "queued bravo" })).toMatchObject({ success: true });
++
++			const interrupt = h.send({ type: "abort_and_prompt", message: "interrupt bravo" });
++			expect(await h.response(interrupt)).toMatchObject({
++				success: true,
++				data: { inputDisposition: "admitted", agentInvoked: true },
++			});
++			expect(await h.promptResult(slow)).toMatchObject({ status: "aborted" });
++			expect(await h.promptResult(interrupt)).toMatchObject({ status: "completed" });
++
++			const calls = h.standIn.calls();
++			expect(h.standIn.aborted(0)).toBe(true);
++			// The replacement prompt is the next thing the model reads; the steer and the follow-up come after it.
++			expect(calls[1]).toContain("interrupt bravo");
++			expect(calls[1]!.indexOf("interrupt bravo")).toBeLessThan(calls[1]!.indexOf("queued alpha"));
++			expect(calls.at(-1)).toContain("queued bravo");
++			expect(h.session.queuedMessageCount).toBe(0);
++		} finally {
++			await h.runtime.close();
++		}
++	}, 60_000);
++
++	test("after a turn a Send-now steer caused, stops a prompt sent just before it, whether or not that run started", async () => {
++		const h = await open();
++		try {
++			// A turn whose Send-now message is delivered at its end, as an interjection; then the session goes idle.
++			const warm = h.send({ type: "prompt", message: "WARM up" });
++			await h.standIn.requested(1);
++			await h.request({ type: "follow_up", message: "queued alpha" });
++			expect(await h.request({ type: "promote_queued_message", message: "queued alpha" })).toMatchObject({
++				data: { promoted: true },
++			});
++			h.standIn.releaseWarm();
++			expect(await h.promptResult(warm)).toMatchObject({ status: "completed" });
++			const warmCalls = h.standIn.calls().length;
++			expect(h.standIn.calls().at(-1)).toContain("queued alpha");
++
++			// Pipelined: the prompt frame and the interrupt frame arrive together.
++			const pipelined = h.send({ type: "prompt", message: "SLOW second" });
++			const first = h.send({ type: "abort_and_prompt", message: "interrupt charlie" });
++			expect(await h.response(first)).toMatchObject({ success: true, data: { inputDisposition: "admitted" } });
++			expect(await h.response(pipelined)).toMatchObject({ success: true });
++			expect(await h.promptResult(first)).toMatchObject({ status: "completed" });
++			let calls = h.standIn.calls();
++			expect(calls.at(-1)).toContain("interrupt charlie");
++			for (let index = warmCalls; index < calls.length; index++) {
++				if (calls[index]!.includes("SLOW second")) expect(h.standIn.aborted(index)).toBe(true);
++			}
++
++			// The prompt's run has started (the client saw it running) when the interrupt arrives.
++			const before = calls.length;
++			const started = h.send({ type: "prompt", message: "SLOW third" });
++			await h.standIn.requested(before + 1);
++			const second = h.send({ type: "abort_and_prompt", message: "interrupt delta" });
++			expect(await h.response(second)).toMatchObject({ success: true, data: { inputDisposition: "admitted" } });
++			expect(await h.promptResult(started)).toMatchObject({ status: "aborted" });
++			expect(await h.promptResult(second)).toMatchObject({ status: "completed" });
++			calls = h.standIn.calls();
++			expect(h.standIn.aborted(before)).toBe(true);
++			expect(calls[before + 1]).toContain("interrupt delta");
++		} finally {
++			await h.runtime.close();
++		}
++	}, 60_000);
++});
+diff --git a/src/modes/rpc/rpc-input-admission.test.ts b/src/modes/rpc/rpc-input-admission.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1ce557b392b3d4dacabd6017d44d9cb0d6cc70e2
+--- /dev/null
++++ b/src/modes/rpc/rpc-input-admission.test.ts
+@@ -0,0 +1,46 @@
++import { describe, expect, test } from "bun:test";
++import { dispatchRpcInputFrame, type PendingExtensionRequest, type RpcInputFrameDeps } from "./rpc-mode";
++import type { RpcResponse } from "./rpc-types";
++
++describe("RPC input admission does not block control commands", () => {
++	for (const inputType of ["prompt", "steer", "follow_up", "abort_and_prompt"] as const) {
++		test(`${inputType} allows abort to overtake unfinished preparation`, async () => {
++			const inputResponse = Promise.withResolvers<RpcResponse>();
++			const handled: string[] = [];
++			const output: object[] = [];
++			const background: Promise<void>[] = [];
++			const deps: RpcInputFrameDeps = {
++				handleCommand: async command => {
++					handled.push(command.type);
++					if (command.type === inputType) return inputResponse.promise;
++					return { type: "response", id: command.id, command: "abort", success: true };
++				},
++				output: frame => output.push(frame),
++				errorResponse: (id, command, error) => ({ type: "response", id, command, success: false, error }),
++				trackBackgroundTask: task => background.push(task),
++				pendingExtensionRequests: new Map<string, PendingExtensionRequest>(),
++				onHostToolResult: () => {},
++				onHostToolUpdate: () => {},
++				onHostUriResult: () => {},
++			};
++			const input = dispatchRpcInputFrame({ type: inputType, id: "input", message: "prepare slowly" }, deps);
++			expect(input).toBeUndefined();
++			expect(background).toHaveLength(1);
++			await dispatchRpcInputFrame({ type: "abort", id: "abort" }, deps);
++			expect(handled).toEqual([inputType, "abort"]);
++			expect(output).toEqual([{ type: "response", id: "abort", command: "abort", success: true }]);
++			inputResponse.resolve({
++				type: "response",
++				id: "input",
++				command: inputType,
++				success: true,
++				data: { inputDisposition: "cancelled", agentInvoked: false },
++			});
++			await Promise.all(background);
++			expect(output[1]).toMatchObject({
++				command: inputType,
++				data: { inputDisposition: "cancelled", agentInvoked: false },
++			});
++		});
++	}
++});
+diff --git a/src/modes/rpc/rpc-prompt-results.test.ts b/src/modes/rpc/rpc-prompt-results.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..490f913c24b9b2b29cfd773a9bb750d905d9ebcb
+--- /dev/null
++++ b/src/modes/rpc/rpc-prompt-results.test.ts
+@@ -0,0 +1,335 @@
++import { describe, expect, test } from "bun:test";
++import {
++	RpcExtensionUserMessageTracker,
++	RpcPromptResults,
++	watchAndReportPromptResult,
++	watchRpcInputAdmission,
++} from "./rpc-prompt-results";
++import type { RpcInputDisposition, RpcPromptResultFrame } from "./rpc-types";
++
++const idleSession = {
++	isStreaming: false,
++	hasAdmittedSubmission: false,
++	queuedMessageCount: 0,
++	hasPendingAsyncWork: () => false,
++};
++
++describe("causal RPC input admission", () => {
++	for (const inputKind of ["prompt", "steer", "follow_up"] as const) {
++		test(`${inputKind} acknowledges after queue insertion, not after the turn`, async () => {
++			const preparation = Promise.withResolvers<void>();
++			const fullTurn = Promise.withResolvers<void>();
++			const queue: string[] = [];
++			const ack = watchRpcInputAdmission({
++				extensionUserMessageTracker: new RpcExtensionUserMessageTracker(),
++				startInput: async onPromptAdmitted => {
++					await preparation.promise;
++					queue.push(inputKind);
++					onPromptAdmitted();
++					await fullTurn.promise;
++					return "admitted";
++				},
++			}).then(result => {
++				expect(queue).toEqual([inputKind]);
++				return result;
++			});
++			preparation.resolve();
++			expect(await ack).toEqual({ inputDisposition: "admitted", agentInvoked: true });
++			fullTurn.resolve();
++		});
++	}
++
++	for (const disposition of ["local", "cancelled"] as const) {
++		test(`${disposition} input never invents agent invocation`, async () => {
++			const ack = await watchRpcInputAdmission({
++				extensionUserMessageTracker: new RpcExtensionUserMessageTracker(),
++				startInput: async () => disposition,
++			});
++			expect(ack).toEqual({ inputDisposition: disposition, agentInvoked: false });
++		});
++	}
++
++	test("a completed SDK call without admission is cancelled", async () => {
++		expect(await watchRpcInputAdmission({
++			extensionUserMessageTracker: new RpcExtensionUserMessageTracker(),
++			startInput: async () => "admitted",
++		})).toEqual({ inputDisposition: "cancelled", agentInvoked: false });
++	});
++
++	for (const hookOutcome of ["handled", "transformed-empty"] as const) {
++		test(`${hookOutcome} input waits for its extension send's admission, not its turn`, async () => {
++			const tracker = new RpcExtensionUserMessageTracker();
++			const admission = Promise.withResolvers<RpcInputDisposition>();
++			const fullTurn = Promise.withResolvers<void>();
++			let queued = false;
++			const ack = watchRpcInputAdmission({
++				extensionUserMessageTracker: tracker,
++				startInput: async () => {
++					tracker.trackAgentMessageTask(fullTurn.promise, admission.promise);
++					return "local";
++				},
++			}).then(result => {
++				expect(queued).toBe(true);
++				return result;
++			});
++			queued = true;
++			admission.resolve("admitted");
++			expect(await ack).toEqual({ inputDisposition: "local", agentInvoked: true });
++			fullTurn.resolve();
++		});
++	}
++
++	test("nested asynchronous extension sends remain attached after the handler returns", async () => {
++		const tracker = new RpcExtensionUserMessageTracker();
++		const parentPreparation = Promise.withResolvers<void>();
++		const parentAdmission = Promise.withResolvers<RpcInputDisposition>();
++		const nestedAdmission = Promise.withResolvers<RpcInputDisposition>();
++		const nestedRegistered = Promise.withResolvers<void>();
++		const fullTurn = Promise.withResolvers<void>();
++		const queue: string[] = [];
++		const ack = watchRpcInputAdmission({
++			extensionUserMessageTracker: tracker,
++			startInput: async () => {
++				const parentSend = (async () => {
++					await parentPreparation.promise;
++					tracker.trackAgentMessageTask(fullTurn.promise, nestedAdmission.promise);
++					queue.push("parent");
++					parentAdmission.resolve("admitted");
++					nestedRegistered.resolve();
++					await fullTurn.promise;
++				})();
++				tracker.trackAgentMessageTask(parentSend, parentAdmission.promise);
++				return "local";
++			},
++		}).then(result => {
++			expect(queue).toEqual(["parent", "nested"]);
++			return result;
++		});
++		parentPreparation.resolve();
++		await nestedRegistered.promise;
++		queue.push("nested");
++		nestedAdmission.resolve("admitted");
++		expect(await ack).toEqual({ inputDisposition: "local", agentInvoked: true });
++		fullTurn.resolve();
++	});
++
++	test("concurrent input scopes do not claim each other's extension sends", async () => {
++		const tracker = new RpcExtensionUserMessageTracker();
++		const admission = Promise.withResolvers<RpcInputDisposition>();
++		const fullTurn = Promise.withResolvers<void>();
++		const first = watchRpcInputAdmission({
++			extensionUserMessageTracker: tracker,
++			startInput: async () => {
++				tracker.trackAgentMessageTask(fullTurn.promise, admission.promise);
++				return "local";
++			},
++		});
++		const unrelated = await watchRpcInputAdmission({
++			extensionUserMessageTracker: tracker,
++			startInput: async () => "local",
++		});
++		expect(unrelated).toEqual({ inputDisposition: "local", agentInvoked: false });
++		admission.resolve("admitted");
++		expect(await first).toEqual({ inputDisposition: "local", agentInvoked: true });
++		fullTurn.resolve();
++	});
++
++	test("nested tracking scopes propagate only to their causal ancestors", async () => {
++		const tracker = new RpcExtensionUserMessageTracker();
++		const outer = tracker.watchPrompt(async () => {
++			const inner = tracker.watchPrompt(async () => {
++				tracker.trackAgentMessageTask(Promise.resolve(), Promise.resolve("admitted"));
++			});
++			await inner.prompt;
++			await inner.waitForAgentMessageAdmissions();
++			expect(inner.hasAgentMessageTask()).toBe(true);
++		});
++		await outer.prompt;
++		await outer.waitForAgentMessageAdmissions();
++		expect(outer.hasAgentMessageTask()).toBe(true);
++	});
++
++	test("folded or deferred custom messages do not claim an agent turn", async () => {
++		const tracker = new RpcExtensionUserMessageTracker();
++		expect(await watchRpcInputAdmission({
++			extensionUserMessageTracker: tracker,
++			startInput: async () => {
++				tracker.trackAgentMessageTask(Promise.resolve(false), Promise.resolve("local"));
++				return "local";
++			},
++		})).toEqual({ inputDisposition: "local", agentInvoked: false });
++	});
++
++	test("failed extension admission rejects instead of acknowledging nonexistent queued input", async () => {
++		const tracker = new RpcExtensionUserMessageTracker();
++		const failure = new Error("image preparation failed");
++		const ack = watchRpcInputAdmission({
++			extensionUserMessageTracker: tracker,
++			startInput: async () => {
++				tracker.trackAgentMessageTask(Promise.reject(failure), Promise.reject(failure));
++				return "local";
++			},
++		});
++		await expect(ack).rejects.toThrow("image preparation failed");
++	});
++
++	test("a failed nested send does not withdraw an already admitted direct input", async () => {
++		const tracker = new RpcExtensionUserMessageTracker();
++		const fullTurn = Promise.withResolvers<void>();
++		const failure = new Error("nested preparation failed");
++		const ack = await watchRpcInputAdmission({
++			extensionUserMessageTracker: tracker,
++			startInput: async onPromptAdmitted => {
++				tracker.trackAgentMessageTask(Promise.reject(failure), Promise.reject(failure));
++				onPromptAdmitted();
++				await fullTurn.promise;
++				return "admitted";
++			},
++		});
++		expect(ack).toEqual({ inputDisposition: "admitted", agentInvoked: true });
++		fullTurn.resolve();
++	});
++
++	test("cancelled original input remains recoverable while a nested turn is live", async () => {
++		const tracker = new RpcExtensionUserMessageTracker();
++		const fullTurn = Promise.withResolvers<void>();
++		const ack = await watchRpcInputAdmission({
++			extensionUserMessageTracker: tracker,
++			startInput: async () => {
++				tracker.trackAgentMessageTask(fullTurn.promise, Promise.resolve("admitted"));
++				return "cancelled";
++			},
++		});
++		expect(ack).toEqual({ inputDisposition: "cancelled", agentInvoked: true });
++		fullTurn.resolve();
++	});
++
++	test("a local builtin can start a turn without queueing the original command text", async () => {
++		const fullTurn = Promise.withResolvers<void>();
++		const ack = await watchRpcInputAdmission({
++			extensionUserMessageTracker: new RpcExtensionUserMessageTracker(),
++			startInput: async onPromptAdmitted => {
++				onPromptAdmitted("local");
++				await fullTurn.promise;
++				return "local";
++			},
++		});
++		expect(ack).toEqual({ inputDisposition: "local", agentInvoked: true });
++		fullTurn.resolve();
++	});
++});
++
++describe("causal prompt result ordering", () => {
++	test("a result is buffered until the transport writes the matching acknowledgement", () => {
++		const frames: RpcPromptResultFrame[] = [];
++		const results = new RpcPromptResults(idleSession, frame => frames.push(frame));
++		const ticket = results.begin("prompt-1");
++		results.fail(ticket, "failed after admission");
++		expect(frames).toEqual([]);
++		results.acknowledge("another-prompt");
++		expect(frames).toEqual([]);
++		results.acknowledge("prompt-1");
++		expect(frames).toHaveLength(1);
++		expect(frames[0]).toMatchObject({ id: "prompt-1", status: "error" });
++		results.acknowledge("prompt-1");
++		results.fail(ticket, "duplicate");
++		expect(frames).toHaveLength(1);
++	});
++
++	test("discarded id-less input does not release the next input's result", () => {
++		const frames: RpcPromptResultFrame[] = [];
++		const results = new RpcPromptResults(idleSession, frame => frames.push(frame));
++		const local = results.begin(undefined);
++		const next = results.begin(undefined);
++		results.discard(local);
++		results.fail(next, "second input");
++		results.acknowledge(undefined);
++		expect(frames).toEqual([]);
++		results.acknowledge(undefined);
++		expect(frames).toHaveLength(1);
++	});
++
++	test("late failure notifications stay behind the actual input acknowledgement", () => {
++		const order: string[] = [];
++		const results = new RpcPromptResults(idleSession, () => order.push("result"));
++		const ticket = results.begin("failure");
++		results.fail(ticket, "late error", () => order.push("error"));
++		expect(order).toEqual([]);
++		order.push("ack");
++		results.acknowledge("failure");
++		expect(order).toEqual(["ack", "error", "result"]);
++	});
++
++	test("local commands and cancelled preparation owe no prompt_result", async () => {
++		for (const completed of [false, true]) {
++			const frames: RpcPromptResultFrame[] = [];
++			const errors: Error[] = [];
++			const results = new RpcPromptResults(idleSession, frame => frames.push(frame));
++			const ack = await watchAndReportPromptResult({
++				ticket: results.begin("local"),
++				startPrompt: async () => completed,
++				results,
++				onError: error => errors.push(error),
++				extensionUserMessageTracker: new RpcExtensionUserMessageTracker(),
++			});
++			results.acknowledge("local");
++			expect(ack).toEqual({ inputDisposition: completed ? "cancelled" : "local", agentInvoked: false });
++			expect(frames).toEqual([]);
++			expect(errors).toEqual([]);
++		}
++	});
++
++	test("local input with an extension-created turn still receives its correlated prompt_result", async () => {
++		const session = { ...idleSession, isStreaming: true };
++		const frames: RpcPromptResultFrame[] = [];
++		const reported = Promise.withResolvers<RpcPromptResultFrame>();
++		const results = new RpcPromptResults(session, frame => {
++			frames.push(frame);
++			reported.resolve(frame);
++		});
++		const tracker = new RpcExtensionUserMessageTracker();
++		const fullTurn = Promise.withResolvers<void>();
++		const ack = await watchRpcInputAdmission({
++			extensionUserMessageTracker: tracker,
++			report: {
++				ticket: results.begin("handled-hook"),
++				results,
++				onError: error => { throw error; },
++			},
++			startInput: async () => {
++				tracker.trackAgentMessageTask(fullTurn.promise, Promise.resolve("admitted"));
++				results.observe({ type: "agent_start" });
++				return "local";
++			},
++		});
++		expect(ack).toEqual({ inputDisposition: "local", agentInvoked: true });
++		results.acknowledge("handled-hook");
++		expect(frames).toEqual([]);
++		session.isStreaming = false;
++		results.observe({ type: "agent_end", messages: [], yielded: true, isTerminal: true });
++		fullTurn.resolve();
++		expect(await reported.promise).toMatchObject({
++			id: "handled-hook",
++			agentInvoked: true,
++			status: "completed",
++		});
++		expect(frames).toHaveLength(1);
++	});
++
++	test("pre-admission failure is returned to the dispatcher without a duplicate late error", async () => {
++		const frames: RpcPromptResultFrame[] = [];
++		const errors: Error[] = [];
++		const results = new RpcPromptResults(idleSession, frame => frames.push(frame));
++		const ack = watchAndReportPromptResult({
++			ticket: results.begin("failure"),
++			startPrompt: async () => { throw new Error("denied preflight"); },
++			results,
++			onError: error => errors.push(error),
++			extensionUserMessageTracker: new RpcExtensionUserMessageTracker(),
++		});
++		await expect(ack).rejects.toThrow("denied preflight");
++		results.acknowledge("failure");
++		expect(frames).toEqual([]);
++		expect(errors).toEqual([]);
++	});
++});
+diff --git a/src/modes/rpc/rpc-prompt-results.ts b/src/modes/rpc/rpc-prompt-results.ts
+index a54bdfa913e14e5646ac49f266be4aa9ae7f6336..d2332bbae0c11724f2825a0a37bbdb384e8b364e 100644
+--- a/src/modes/rpc/rpc-prompt-results.ts
++++ b/src/modes/rpc/rpc-prompt-results.ts
+@@ -8,13 +8,15 @@
+  * started or joined. Hosts correlate on the command `id` instead of inferring
+  * ownership of an `agent_end` that carries no prompt identity.
+  */
++import { AsyncLocalStorage } from "node:async_hooks";
+ import type { AgentMessage } from "@oh-my-pi/pi-agent-core";
+ import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+ import * as AIError from "@oh-my-pi/pi-ai/error";
+ import { stripRawHttpRequestDiagnostics } from "@oh-my-pi/pi-ai/utils/http-inspector";
+ import type { AgentSessionEvent } from "../../session/agent-session";
++import { isSilentAbort } from "../../session/messages";
+ import { isRpcSessionSettled, type RpcScheduledTurnProbe, type RpcSettleSession } from "./rpc-session-settle";
+-import type { RpcPromptError, RpcPromptResultFrame, RpcPromptStatus } from "./rpc-types";
++import type { RpcInputAck, RpcInputDisposition, RpcPromptError, RpcPromptResultFrame, RpcPromptStatus } from "./rpc-types";
+ 
+ /** A prompt accepted by RPC mode whose `prompt_result` is still owed; see {@link RpcPromptResults.begin}. */
+ export interface RpcPromptTicket {
+@@ -33,6 +35,9 @@ interface OpenPrompt {
+ 	ownOutcome?: RunOutcome;
+ 	/** Settled while another run was live: reported at the next yield that leaves nothing queued. */
+ 	waiting: boolean;
++	acknowledged: boolean;
++	report?: { agentInvoked: boolean; outcome: RunOutcome };
++	onFailure?: () => void;
+ }
+ 
+ /**
+@@ -51,7 +56,14 @@ interface OpenPrompt {
+  */
+ export class RpcPromptResults {
+ 	#agentStarts = 0;
++	/**
++	 * The run's last assistant message was aborted silently (plan review stops the planning turn): control
++	 * flow, not an operator abort. Read from `message_end`, where the session stamps the marker; the
++	 * `agent_end` copy of the message does not carry it.
++	 */
++	#silentAbort = false;
+ 	#open = new Map<RpcPromptTicket, OpenPrompt>();
++	#awaitingAcknowledgement = new Set<RpcPromptTicket>();
+ 	readonly #session: RpcSettleSession;
+ 	readonly #output: (frame: RpcPromptResultFrame) => void;
+ 	readonly #scheduledTurn: RpcScheduledTurnProbe | undefined;
+@@ -73,7 +85,8 @@ export class RpcPromptResults {
+ 	/** Open a ticket before the prompt starts any work. Close it with exactly one report or {@link discard}. */
+ 	begin(id: string | undefined): RpcPromptTicket {
+ 		const ticket: RpcPromptTicket = { id };
+-		this.#open.set(ticket, { startsAtBegin: this.#agentStarts, waiting: false });
++		this.#open.set(ticket, { startsAtBegin: this.#agentStarts, waiting: false, acknowledged: false });
++		this.#awaitingAcknowledgement.add(ticket);
+ 		return ticket;
+ 	}
+ 
+@@ -82,6 +95,20 @@ export class RpcPromptResults {
+ 		this.#open.delete(ticket);
+ 	}
+ 
++	/** Called by the transport immediately after writing this input's response. */
++	acknowledge(id: string | undefined): void {
++		for (const ticket of this.#awaitingAcknowledgement) {
++			if (ticket.id !== id) continue;
++			this.#awaitingAcknowledgement.delete(ticket);
++			const open = this.#open.get(ticket);
++			if (open) {
++				open.acknowledged = true;
++				if (open.report) this.#report(ticket, open.report.agentInvoked, open.report.outcome);
++			}
++			return;
++		}
++	}
++
+ 	/**
+ 	 * The prompt's work reached the agent (dispatched or queued). Reports now if
+ 	 * its own run already settled, otherwise at the next terminal `agent_end`.
+@@ -105,8 +132,11 @@ export class RpcPromptResults {
+ 		this.#report(ticket, false, { status: "completed" });
+ 	}
+ 
+-	/** The prompt failed before reaching the agent. */
+-	fail(ticket: RpcPromptTicket, message: string): void {
++	/** Defer failure notification with the result until the input ACK has been written. */
++	fail(ticket: RpcPromptTicket, message: string, onFailure?: () => void): void {
++		const open = this.#open.get(ticket);
++		if (!open || open.report) return;
++		open.onFailure = onFailure;
+ 		this.#report(ticket, false, { status: "error", error: { message, retryable: false } });
+ 	}
+ 
+@@ -129,12 +159,18 @@ export class RpcPromptResults {
+ 	observe(event: AgentSessionEvent): void {
+ 		if (event.type === "agent_start") {
+ 			this.#agentStarts++;
++			this.#silentAbort = false;
++			return;
++		}
++		if (event.type === "message_end" && event.message.role === "assistant") {
++			this.#silentAbort = event.message.stopReason === "aborted" && isSilentAbort(event.message);
+ 			return;
+ 		}
+ 		if (event.type !== "agent_end" || this.#open.size === 0) return;
+ 		// Older sessions omit `yielded`; only their terminal ends were yields.
+ 		if (!(event.yielded ?? event.isTerminal !== false)) return;
+-		const outcome = runOutcome(event.messages);
++		const ended = runOutcome(event.messages);
++		const outcome: RunOutcome = ended.status === "aborted" && this.#silentAbort ? { status: "completed" } : ended;
+ 		// A still-queued steer/follow-up has not been read by the agent yet.
+ 		const queueDrained = this.#session.queuedMessageCount === 0;
+ 		for (const [ticket, open] of this.#open) {
+@@ -147,22 +183,23 @@ export class RpcPromptResults {
+ 	}
+ 
+ 	#report(ticket: RpcPromptTicket, agentInvoked: boolean, outcome: RunOutcome): void {
+-		if (!this.#open.delete(ticket)) return;
+-		// A prompt command's response is written after the handler's remaining
+-		// microtasks; deferring to the next macrotask keeps every prompt_result
+-		// behind the response for the same id and lets queue drains land before
+-		// `sessionSettled` is read.
+-		setImmediate(() => {
+-			const frame: RpcPromptResultFrame = {
+-				type: "prompt_result",
+-				id: ticket.id,
+-				agentInvoked,
+-				status: outcome.status,
+-				sessionSettled: isRpcSessionSettled(this.#session, this.#scheduledTurn),
+-			};
+-			if (outcome.error) frame.error = outcome.error;
+-			this.#output(frame);
+-		});
++		const open = this.#open.get(ticket);
++		if (!open || (open.report && !open.acknowledged)) return;
++		if (!open.acknowledged) {
++			open.report = { agentInvoked, outcome };
++			return;
++		}
++		this.#open.delete(ticket);
++		const frame: RpcPromptResultFrame = {
++			type: "prompt_result",
++			id: ticket.id,
++			agentInvoked,
++			status: outcome.status,
++			sessionSettled: isRpcSessionSettled(this.#session, this.#scheduledTurn),
++		};
++		if (outcome.error) frame.error = outcome.error;
++		open.onFailure?.();
++		this.#output(frame);
+ 	}
+ }
+ 
+@@ -198,83 +235,97 @@ function promptError(message: AssistantMessage): RpcPromptError {
+ 	return error;
+ }
+ 
+-type RpcExtensionUserMessageScope = {
++interface RpcExtensionUserMessageScope {
++	parent: RpcExtensionUserMessageScope | undefined;
+ 	hasAgentMessageTask: boolean;
++	hasCancelledAgentMessage: boolean;
++	promptSettled: boolean;
+ 	pendingAgentMessageTasks: Set<Promise<void>>;
+-};
++	pendingAdmissions: Set<Promise<void>>;
++	admissionError?: { cause: unknown };
++}
+ 
+ /**
+- * Tracks extension-originated messages while an RPC prompt is executing.
+- * A slash command can resolve the outer prompt as local-only while also
+- * scheduling agent work through pi.sendUserMessage() or pi.sendMessage()
+- * with triggerTurn; that prompt's result must wait for the agent work.
++ * Tracks only sends causally descended from an input, including sends started
++ * by another send's asynchronous extension hooks. Concurrent inputs never
++ * inherit each other's tasks. Admission and full-turn completion are separate.
+  */
+ export class RpcExtensionUserMessageTracker {
+-	#activePromptScopes = new Set<RpcExtensionUserMessageScope>();
+-
+-	markAgentMessageTask(): void {
+-		for (const scope of this.#activePromptScopes) {
+-			scope.hasAgentMessageTask = true;
+-		}
+-	}
++	readonly #scope = new AsyncLocalStorage<RpcExtensionUserMessageScope>();
+ 
+-	trackAgentMessageTask(task: Promise<unknown>): void {
+-		for (const scope of this.#activePromptScopes) {
+-			this.#trackAgentMessageTaskForScope(scope, task);
+-		}
+-	}
+-
+-	#trackAgentMessageTaskForScope(scope: RpcExtensionUserMessageScope, task: Promise<unknown>): void {
+-		const scopedTask = task.then(
+-			() => {
+-				scope.hasAgentMessageTask = true;
+-			},
+-			() => {},
+-		);
+-		scope.pendingAgentMessageTasks.add(scopedTask);
+-		void scopedTask.finally(() => {
+-			scope.pendingAgentMessageTasks.delete(scopedTask);
+-		});
++	/** Release this session's async context after its outstanding work has drained. */
++	dispose(): void {
++		this.#scope.disable();
+ 	}
+ 
+-	async #waitForAgentMessageTasks(scope: RpcExtensionUserMessageScope): Promise<void> {
+-		while (scope.pendingAgentMessageTasks.size > 0) {
+-			await Promise.allSettled(Array.from(scope.pendingAgentMessageTasks));
++	trackAgentMessageTask(task: Promise<unknown>, admission: Promise<RpcInputDisposition>): void {
++		for (let scope = this.#scope.getStore(); scope; scope = scope.parent) {
++			if (scope.promptSettled && scope.pendingAgentMessageTasks.size === 0) continue;
++			const current = scope;
++			const pendingAdmission = admission.then(
++				disposition => {
++					if (disposition === "admitted") current.hasAgentMessageTask = true;
++					else if (disposition === "cancelled") current.hasCancelledAgentMessage = true;
++				},
++				cause => {
++					current.admissionError ??= { cause };
++				},
++			);
++			current.pendingAdmissions.add(pendingAdmission);
++			void pendingAdmission.then(() => current.pendingAdmissions.delete(pendingAdmission));
++			const pendingTask = task.then(
++				() => {},
++				() => {},
++			);
++			current.pendingAgentMessageTasks.add(pendingTask);
++			void pendingTask.then(() => current.pendingAgentMessageTasks.delete(pendingTask));
+ 		}
+ 	}
+ 
+ 	watchPrompt<T>(startPrompt: () => Promise<T>): {
+ 		prompt: Promise<T>;
+ 		hasAgentMessageTask: () => boolean;
++		hasCancelledAgentMessage: () => boolean;
+ 		waitForAgentMessageTasks: () => Promise<void>;
++		waitForAgentMessageAdmissions: () => Promise<void>;
+ 	} {
+ 		const scope: RpcExtensionUserMessageScope = {
++			parent: this.#scope.getStore(),
+ 			hasAgentMessageTask: false,
++			hasCancelledAgentMessage: false,
++			promptSettled: false,
+ 			pendingAgentMessageTasks: new Set(),
++			pendingAdmissions: new Set(),
+ 		};
+-		this.#activePromptScopes.add(scope);
+ 		let prompt: Promise<T>;
+ 		try {
+-			prompt = startPrompt();
++			prompt = this.#scope.run(scope, startPrompt);
+ 		} catch (error) {
+-			this.#activePromptScopes.delete(scope);
++			scope.promptSettled = true;
+ 			throw error;
+ 		}
+ 		return {
+ 			prompt: prompt.finally(() => {
+-				this.#activePromptScopes.delete(scope);
++				scope.promptSettled = true;
+ 			}),
+ 			hasAgentMessageTask: () => scope.hasAgentMessageTask,
+-			waitForAgentMessageTasks: () => this.#waitForAgentMessageTasks(scope),
++			hasCancelledAgentMessage: () => scope.hasCancelledAgentMessage,
++			waitForAgentMessageTasks: async () => {
++				while (scope.pendingAgentMessageTasks.size > 0) {
++					await Promise.all(scope.pendingAgentMessageTasks);
++				}
++			},
++			waitForAgentMessageAdmissions: async () => {
++				while (scope.pendingAdmissions.size > 0) {
++					await Promise.all(scope.pendingAdmissions);
++				}
++				if (scope.admissionError && !scope.hasAgentMessageTask) throw scope.admissionError.cause;
++			},
+ 		};
+ 	}
+ }
+ 
+-/**
+- * Route a started prompt's resolution into its `prompt_result`: `false` without
+- * extension-scheduled agent work completes locally, agent work settles through
+- * the run, and a rejection is reported via `onError` and as a failed result.
+- */
++/** Report completion independently of the input acknowledgement barrier. */
+ export function reportPromptResult(input: {
+ 	ticket: RpcPromptTicket;
+ 	prompt: Promise<boolean>;
+@@ -282,47 +333,91 @@ export function reportPromptResult(input: {
+ 	onError: (error: Error) => void;
+ 	hasExtensionAgentMessageTask?: () => boolean;
+ 	waitForExtensionAgentMessageTasks?: () => Promise<void>;
++	wasAdmitted?: () => boolean;
+ }): void {
+ 	void input.prompt
+ 		.then(async agentInvoked => {
+-			if (!agentInvoked) await input.waitForExtensionAgentMessageTasks?.();
++			await input.waitForExtensionAgentMessageTasks?.();
+ 			if (agentInvoked || input.hasExtensionAgentMessageTask?.()) input.results.settle(input.ticket);
+-			else input.results.completeLocal(input.ticket);
++			else input.results.discard(input.ticket);
+ 		})
+ 		.catch(cause => {
++			if (input.wasAdmitted && !input.wasAdmitted()) {
++				input.results.discard(input.ticket);
++				return;
++			}
+ 			const error = cause instanceof Error ? cause : new Error(String(cause));
+-			input.onError(error);
+-			input.results.fail(input.ticket, error.message);
++			input.results.fail(input.ticket, error.message, () => input.onError(error));
+ 		});
+ }
+ 
+ /**
+- * Start a prompt under extension-message tracking and report its `prompt_result`.
+- *
+- * `startPrompt` receives an admission callback to forward as
+- * `PromptOptions.onPromptAdmitted`. The returned promise resolves once the
+- * prompt is admitted, or once it settles without ever being admitted; it never
+- * rejects, since a failure is already routed to `onError` and the failed
+- * `prompt_result`. Await it to acknowledge the command only after admission.
++ * Observe the whole input path, including input hooks and locally handled
++ * commands. Direct admission can release an in-flight prompt. Local paths
++ * wait for their hooks/handlers and nested admissions, never nested full turns.
+  */
++export async function watchRpcInputAdmission(input: {
++	startInput: (onPromptAdmitted: (inputDisposition?: RpcInputDisposition) => void) => Promise<RpcInputDisposition>;
++	extensionUserMessageTracker: RpcExtensionUserMessageTracker;
++	report?: {
++		ticket: RpcPromptTicket;
++		results: RpcPromptResults;
++		onError: (error: Error) => void;
++	};
++}): Promise<RpcInputAck> {
++	const ready = Promise.withResolvers<void>();
++	let directDisposition: RpcInputDisposition | undefined;
++	const tracked = input.extensionUserMessageTracker.watchPrompt(() =>
++		input.startInput((disposition = "admitted") => {
++			directDisposition = disposition;
++			ready.resolve();
++		}),
++	);
++	if (input.report) {
++		reportPromptResult({
++			...input.report,
++			prompt: tracked.prompt.then(() => directDisposition !== undefined),
++			hasExtensionAgentMessageTask: tracked.hasAgentMessageTask,
++			waitForExtensionAgentMessageTasks: tracked.waitForAgentMessageTasks,
++			wasAdmitted: () => directDisposition !== undefined || tracked.hasAgentMessageTask(),
++		});
++	}
++	void tracked.prompt.then(
++		() => ready.resolve(),
++		() => ready.resolve(),
++	);
++	await ready.promise;
++	try {
++		await tracked.waitForAgentMessageAdmissions();
++	} catch (error) {
++		// A sibling extension failure cannot withdraw input already delivered.
++		// Its own extension_send error still reports through the runtime.
++		if (directDisposition === undefined) throw error;
++	}
++	if (directDisposition !== undefined) {
++		return { inputDisposition: directDisposition, agentInvoked: true };
++	}
++	const disposition = await tracked.prompt;
++	const agentInvoked = tracked.hasAgentMessageTask();
++	// A resolved SDK call without its admission callback is not proof of delivery.
++	return {
++		inputDisposition:
++			(!agentInvoked && tracked.hasCancelledAgentMessage()) || disposition === "admitted" ? "cancelled" : disposition,
++		agentInvoked,
++	};
++}
++
++/** Start a full-turn prompt while acknowledging only its causal admission. */
+ export function watchAndReportPromptResult(input: {
+ 	ticket: RpcPromptTicket;
+ 	startPrompt: (onPromptAdmitted: () => void) => Promise<boolean>;
+ 	results: RpcPromptResults;
+ 	onError: (error: Error) => void;
+ 	extensionUserMessageTracker: RpcExtensionUserMessageTracker;
+-}): Promise<void> {
+-	const admitted = Promise.withResolvers<void>();
+-	const trackedPrompt = input.extensionUserMessageTracker.watchPrompt(() => input.startPrompt(admitted.resolve));
+-	reportPromptResult({
+-		ticket: input.ticket,
+-		prompt: trackedPrompt.prompt,
+-		results: input.results,
+-		onError: input.onError,
+-		hasExtensionAgentMessageTask: trackedPrompt.hasAgentMessageTask,
+-		waitForExtensionAgentMessageTasks: trackedPrompt.waitForAgentMessageTasks,
++}): Promise<RpcInputAck> {
++	return watchRpcInputAdmission({
++		startInput: async onPromptAdmitted => ((await input.startPrompt(onPromptAdmitted)) ? "cancelled" : "local"),
++		extensionUserMessageTracker: input.extensionUserMessageTracker,
++		report: { ticket: input.ticket, results: input.results, onError: input.onError },
+ 	});
+-	const settled = () => admitted.resolve();
+-	void trackedPrompt.prompt.then(settled, settled);
+-	return admitted.promise;
+ }

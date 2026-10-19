@@ -1,0 +1,286 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: samnolak <258669251+samnolak@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 21:42:07 +0300
+Subject: [PATCH] background job output
+
+What: Preserve the repository-owned background job output.
+Why: Ombra embeds multiple concurrent sessions and renders native host features.
+Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
+
+diff --git a/src/async/job-manager.ts b/src/async/job-manager.ts
+index 98d5487a024f6e8d0bd75cb8018b44c53aec0377..abafe6f9e586fea030f67e6e527644cad302b35f 100644
+--- a/src/async/job-manager.ts
++++ b/src/async/job-manager.ts
+@@ -2,6 +2,8 @@ import type { ImageContent } from "@oh-my-pi/pi-ai";
+ import { logger } from "@oh-my-pi/pi-utils";
+ import type { StructuredSubagentOutput } from "@oh-my-pi/pi-tui/tools/task";
+ import type { OutputMeta } from "@oh-my-pi/pi-tui/tools/output-meta";
++import { AgentRegistry } from "../registry/agent-registry";
++import { JOB_OUTPUT_BUDGET_BYTES, JobOutputLog } from "./job-output";
+ 
+ const DELIVERY_RETRY_BASE_MS = 500;
+ const DELIVERY_RETRY_MAX_MS = 30_000;
+@@ -96,6 +98,8 @@ export interface AsyncJob {
+ 	progressText?: string;
+ 	/** Latest tool-render details reported by the running job. */
+ 	latestDetails?: AsyncJobDetails;
++	/** Output the job streamed (a bash job's stdout/stderr), bounded; absent for jobs that never stream. */
++	output?: JobOutputLog;
+ 	/**
+ 	 * Registry id of the agent that registered the job (e.g. "Main",
+ 	 * "AuthLoader"). Used by scoped cancel/list APIs so a subagent's teardown
+@@ -186,6 +190,11 @@ export interface AsyncJobManagerOptions {
+ 	 * small value to assert eviction without real-time waits.
+ 	 */
+ 	consumedResultEvictionMs?: number;
++	/**
++	 * Output bytes all job logs may hold together (see {@link JOB_OUTPUT_BUDGET_BYTES}).
++	 * Defaults to that constant; tests override it to exercise eviction.
++	 */
++	outputBudgetBytes?: number;
+ }
+ 
+ interface AsyncJobDelivery {
+@@ -249,21 +258,23 @@ export interface AsyncJobFilter {
+ }
+ 
+ export class AsyncJobManager {
+-	static #instance: AsyncJobManager | undefined;
++	static #instances = new WeakMap<AgentRegistry, AsyncJobManager>();
+ 
+-	/** Legacy pointer to the first live root; child routing uses the parent's scoped manager instead. */
++	/** Instance shared by the current session tree's protocol handlers and tools. */
+ 	static instance(): AsyncJobManager | undefined {
+-		return AsyncJobManager.#instance;
++		return AsyncJobManager.#instances.get(AgentRegistry.global());
+ 	}
+ 
+-	/** Install or clear the process-global instance. */
++	/** Install or clear the current session tree's instance. */
+ 	static setInstance(value: AsyncJobManager | undefined): void {
+-		AsyncJobManager.#instance = value;
++		const registry = AgentRegistry.global();
++		if (value) AsyncJobManager.#instances.set(registry, value);
++		else AsyncJobManager.#instances.delete(registry);
+ 	}
+ 
+-	/** Reset the process-global instance. Test-only. */
++	/** Reset the current session tree's instance. Test-only. */
+ 	static resetForTests(): void {
+-		AsyncJobManager.#instance = undefined;
++		AsyncJobManager.#instances.delete(AgentRegistry.global());
+ 	}
+ 
+ 	readonly #jobs = new Map<string, AsyncJob>();
+@@ -285,6 +296,9 @@ export class AsyncJobManager {
+ 	#deliveryLoop: Promise<void> | undefined;
+ 	#deliveryQueueChanged = Promise.withResolvers<void>();
+ 	#disposed = false;
++	readonly #outputBudgetBytes: number;
++	/** Output bytes held by every job's log together. */
++	#outputBytes = 0;
+ 
+ 	#filterJobs(jobs: Iterable<AsyncJob>, filter?: AsyncJobFilter): AsyncJob[] {
+ 		if (!filter) return Array.from(jobs);
+@@ -315,6 +329,7 @@ export class AsyncJobManager {
+ 			0,
+ 			Math.floor(options.consumedResultEvictionMs ?? CONSUMED_RESULT_EVICTION_MS),
+ 		);
++		this.#outputBudgetBytes = Math.max(0, Math.floor(options.outputBudgetBytes ?? JOB_OUTPUT_BUDGET_BYTES));
+ 	}
+ 
+ 	/** Effective running-job cap (at least 1), resolved at check time. */
+@@ -342,6 +357,8 @@ export class AsyncJobManager {
+ 			jobId: string;
+ 			signal: AbortSignal;
+ 			reportProgress: (text: string, details?: AsyncJobDetails) => Promise<void>;
++			/** Append streamed output to the job's bounded log (see {@link AsyncJob.output}). */
++			appendOutput: (text: string) => void;
+ 			/** Clear the queued flag once the job actually starts executing. */
+ 			markRunning: () => void;
+ 		}) => Promise<string | AsyncJobRunResult>,
+@@ -402,6 +419,13 @@ export class AsyncJobManager {
+ 					jobId: id,
+ 					signal: abortController.signal,
+ 					reportProgress,
++					appendOutput: text => {
++						const log = (job.output ??= new JobOutputLog());
++						const before = log.retainedBytes;
++						log.append(text);
++						this.#outputBytes += log.retainedBytes - before;
++						if (this.#outputBytes > this.#outputBudgetBytes) this.#trimOutputLogs();
++					},
+ 					markRunning: () => {
+ 						job.queued = false;
+ 					},
+@@ -1001,10 +1025,39 @@ export class AsyncJobManager {
+ 		this.#watchedJobs.delete(jobId);
+ 		this.#consumedJobResults.delete(jobId);
+ 		const job = this.#jobs.get(jobId);
+-		if (job) this.#runRetainedArtifactsCleanup(job);
++		if (job) {
++			this.#runRetainedArtifactsCleanup(job);
++			this.#outputBytes -= job.output?.retainedBytes ?? 0;
++		}
+ 		return this.#jobs.delete(jobId);
+ 	}
+ 
++	/**
++	 * Bring the logs back under the shared budget: settled jobs (oldest first)
++	 * give up their whole output, then the running job holding the most is
++	 * trimmed from its oldest bytes. Offsets stay valid; readers see the loss
++	 * as skipped bytes.
++	 */
++	#trimOutputLogs(): void {
++		const held = Array.from(this.#jobs.values()).filter(job => (job.output?.retainedBytes ?? 0) > 0);
++		const settled = held
++			.filter(job => job.status !== "running")
++			.sort((a, b) => (a.endTime ?? a.startTime) - (b.endTime ?? b.startTime));
++		for (const job of settled) {
++			if (this.#outputBytes <= this.#outputBudgetBytes) return;
++			this.#outputBytes -= job.output!.retainedBytes;
++			job.output!.release(job.output!.retainedBytes);
++		}
++		const running = held.filter(job => job.status === "running");
++		while (this.#outputBytes > this.#outputBudgetBytes) {
++			const largest = running.reduce((a, b) => (b.output!.retainedBytes > a.output!.retainedBytes ? b : a));
++			const log = largest.output!;
++			const before = log.retainedBytes;
++			log.release(this.#outputBytes - this.#outputBudgetBytes);
++			this.#outputBytes -= before - log.retainedBytes;
++		}
++	}
++
+ 	/**
+ 	 * Arm (or re-arm) this job's eviction timer. The default delay is the full
+ 	 * retention window; a consumed result passes the shorter
+diff --git a/src/async/job-output.ts b/src/async/job-output.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..4023a127a4080ffc82a54a85b01c73578da645c4
+--- /dev/null
++++ b/src/async/job-output.ts
+@@ -0,0 +1,124 @@
++/**
++ * Append-only output of one background job, addressed by UTF-8 byte offsets
++ * from the job's first output byte. Only the newest
++ * {@link JOB_OUTPUT_RETAINED_BYTES} stay in memory; older bytes keep their
++ * offsets, so a reader's cursor stays valid and learns how much it missed.
++ */
++
++/** Newest output bytes a job keeps in memory. */
++export const JOB_OUTPUT_RETAINED_BYTES = 1024 * 1024;
++/** Output bytes every job's log may hold together; settled jobs give theirs up first. */
++export const JOB_OUTPUT_BUDGET_BYTES = 16 * 1024 * 1024;
++
++/** One bounded read of a job's output. */
++export interface JobOutputSlice {
++	/** Byte offset of `text`'s first byte (a character boundary). */
++	fromByte: number;
++	/** Offset after `text`; pass it as the next `fromByte`. */
++	nextByte: number;
++	text: string;
++}
++
++function isContinuationByte(byte: number | undefined): boolean {
++	return byte !== undefined && (byte & 0xc0) === 0x80;
++}
++
++export class JobOutputLog {
++	readonly #capacity: number;
++	#chunks: Buffer[] = [];
++	#retained = 0;
++	#total = 0;
++	#lastOutputAt: number | undefined;
++
++	constructor(capacity = JOB_OUTPUT_RETAINED_BYTES) {
++		this.#capacity = Math.max(4, Math.floor(capacity));
++	}
++
++	/** Bytes the job has printed since it started. */
++	get totalBytes(): number {
++		return this.#total;
++	}
++
++	/** Offset of the oldest byte still held; earlier bytes were dropped. */
++	get startByte(): number {
++		return this.#total - this.#retained;
++	}
++
++	/** Bytes held in memory. */
++	get retainedBytes(): number {
++		return this.#retained;
++	}
++
++	/** When the job last printed (epoch ms), if ever. */
++	get lastOutputAt(): number | undefined {
++		return this.#lastOutputAt;
++	}
++
++	append(text: string, now = Date.now()): void {
++		if (text.length === 0) return;
++		const bytes = Buffer.from(text, "utf8");
++		this.#chunks.push(bytes);
++		this.#retained += bytes.length;
++		this.#total += bytes.length;
++		this.#lastOutputAt = now;
++		this.release(this.#retained - this.#capacity);
++	}
++
++	/** Drops up to `bytes` of the oldest held output; offsets of what stays are unchanged. */
++	release(bytes: number): void {
++		let drop = Math.min(Math.max(0, bytes), this.#retained);
++		while (drop > 0) {
++			const first = this.#chunks[0]!;
++			const cut = Math.min(first.length, drop);
++			if (cut === first.length) this.#chunks.shift();
++			else this.#chunks[0] = first.subarray(cut);
++			this.#retained -= cut;
++			drop -= cut;
++		}
++	}
++
++	/**
++	 * Up to `maxBytes` of output starting at `fromByte`, clamped to what is held
++	 * and aligned to whole UTF-8 characters: a character cut by the page end
++	 * moves to the next read, except that a page always holds at least one whole
++	 * character (so `nextByte` advances whenever there is more to read).
++	 */
++	read(fromByte: number, maxBytes: number): JobOutputSlice {
++		const held = this.#bytes();
++		let start = Math.min(Math.max(fromByte, this.startByte), this.#total) - this.startByte;
++		while (start < held.length && isContinuationByte(held[start])) start++;
++		let end = Math.min(held.length, start + Math.max(0, maxBytes));
++		if (end < held.length) {
++			while (end > start && isContinuationByte(held[end])) end--;
++			if (end === start && start < held.length) {
++				end = start + 1;
++				while (end < held.length && isContinuationByte(held[end])) end++;
++			}
++		}
++		const offset = this.startByte;
++		return { fromByte: offset + start, nextByte: offset + end, text: held.subarray(start, end).toString("utf8") };
++	}
++
++	/**
++	 * The last `maxBytes` of what is held from a character boundary; when that
++	 * holds no whole character, the last character (so never empty while output is held).
++	 */
++	tail(maxBytes: number): JobOutputSlice {
++		const held = this.#bytes();
++		let start = Math.max(0, held.length - Math.max(0, maxBytes));
++		while (start < held.length && isContinuationByte(held[start])) start++;
++		if (start === held.length) {
++			while (start > 0 && isContinuationByte(held[start - 1])) start--;
++			if (start > 0) start--;
++			// The oldest held bytes may be the cut-off end of a character: never start inside it
++			while (start < held.length && isContinuationByte(held[start])) start++;
++		}
++		const offset = this.startByte;
++		return { fromByte: offset + start, nextByte: offset + held.length, text: held.subarray(start).toString("utf8") };
++	}
++
++	#bytes(): Buffer {
++		if (this.#chunks.length > 1) this.#chunks = [Buffer.concat(this.#chunks, this.#retained)];
++		return this.#chunks[0] ?? Buffer.alloc(0);
++	}
++}

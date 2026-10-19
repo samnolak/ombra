@@ -101,7 +101,7 @@ pack's `omp/node_modules`. From the repository root, after preparing that stagin
 
 ```sh
 OMBRA_ENGINE_ROOT="$PWD/.temp/ownership-runtime/engine" \
-  .temp/runtime-installer-final/ombra-engine-18.8.0-bun-1.4.2-v1/bun/bun \
+  .temp/runtime-installer-final/ombra-engine-18.12.2-bun-1.4.2-v1/bun/bun \
   test runtime/tests/session-ownership.test.ts runtime/tests/structured-approval.test.ts
 dotnet test avalonia/tests/Ombra.Tests/Ombra.Tests.csproj \
   --filter 'FullyQualifiedName~ConversationStateTests|FullyQualifiedName~DraftDeletionTests|FullyQualifiedName~DraftFolderRecoveryTests'

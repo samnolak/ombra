@@ -14,6 +14,11 @@ import type {
 /** Drops the accumulated snapshot a streaming event carries; `done` and `error` have none. */
 function withoutPartial(event: AssistantMessageEvent): RpcDeltaMessageUpdateFrame["assistantMessageEvent"] {
 	if (!("partial" in event)) return event;
+	if (event.type === "thinking_end") {
+		const { partial, ...increment } = event;
+		const content = partial.content[event.contentIndex];
+		return content?.type === "thinking" && content.narration ? { ...increment, narration: true } : increment;
+	}
 	const { partial: _partial, ...increment } = event;
 	return increment;
 }

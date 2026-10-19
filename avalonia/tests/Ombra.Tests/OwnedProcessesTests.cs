@@ -8,7 +8,7 @@ namespace Ombra.Tests;
 public sealed class OwnedProcessesTests
 {
     private static readonly string Rt = Path.Combine(Path.GetTempPath(), "ombra-owned-process-tests", "runtimes");
-    private static readonly string Bun = Path.Combine(Rt, "ombra-engine-18.8.0-bun-1.4.2-v1", "bun", "bun");
+    private static readonly string Bun = Path.Combine(Rt, "ombra-engine-18.12.2-bun-1.4.2-v1", "bun", "bun");
     private const int Self = 100;
 
     private static OwnedProcesses With(params Info[] all) => new(Rt, () => all);

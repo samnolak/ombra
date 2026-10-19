@@ -41,6 +41,7 @@ describe("shared-engine session isolation", () => {
 		expect(args[0]).toBe("--model=anthropic/claude-opus-4-5");
 		expect(() => parseEngineSessionArgs(["--profile", "other"])).toThrow("session option");
 		expect(() => parseEngineSessionArgs(["--resume"])).toThrow("requires a session");
+		expect(() => parseEngineSessionArgs(["--restore", "/project/chat.jsonl"])).toThrow("session option");
 		expect(() => parseEngineSessionArgs(["--no-session", "--continue"])).toThrow("cannot be combined");
 	});
 

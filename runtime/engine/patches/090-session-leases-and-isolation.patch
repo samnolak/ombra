@@ -1,0 +1,1138 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: samnolak <258669251+samnolak@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 21:42:08 +0300
+Subject: [PATCH] session leases and isolation
+
+What: Preserve the repository-owned session leases and isolation.
+Why: Ombra embeds multiple concurrent sessions and renders native host features.
+Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
+
+diff --git a/src/session/session-context.ts b/src/session/session-context.ts
+index 0aa8c0faf4fec0b3391adc50b4d56fce0c9aced5..6f907821a7bba3bdd73cc4ac7f5552afad4bdebb 100644
+--- a/src/session/session-context.ts
++++ b/src/session/session-context.ts
+@@ -133,6 +133,7 @@ export interface SessionContext {
+ export function getRestorableSessionModels(
+ 	models: Readonly<Record<string, string>>,
+ 	lastModelChangeRole: string | undefined,
++	allowFallback = true,
+ ): string[] {
+ 	const defaultModel = models.default;
+ 	if (
+@@ -145,7 +146,7 @@ export function getRestorableSessionModels(
+ 
+ 	const roleModel = models[lastModelChangeRole];
+ 	if (!roleModel) return defaultModel ? [defaultModel] : [];
+-	if (!defaultModel || roleModel === defaultModel) return [roleModel];
++	if (!allowFallback || !defaultModel || roleModel === defaultModel) return [roleModel];
+ 	return [roleModel, defaultModel];
+ }
+ 
+diff --git a/src/session/session-lease-error.ts b/src/session/session-lease-error.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1d18bfbae1f036d83c6a309e2fc13e9ff3285103
+--- /dev/null
++++ b/src/session/session-lease-error.ts
+@@ -0,0 +1,13 @@
++import type { SessionLeaseHolder } from "./session-storage";
++
++/** Another writer holds the session's lease: open it read-only, or ask that writer to let go. */
++export class SessionLeaseHeldError extends Error {
++	readonly code = "session_lease_held";
++	readonly data: { sessionId: string; holder: SessionLeaseHolder | null };
++
++	constructor(sessionId: string, holder: SessionLeaseHolder | undefined, message = "The session is open in another window") {
++		super(message);
++		this.name = "SessionLeaseHeldError";
++		this.data = { sessionId, holder: holder ?? null };
++	}
++}
+diff --git a/src/session/session-loader.ts b/src/session/session-loader.ts
+index affeba9ceb953f7f88eaa2ba06ec1f3564d2d217..79c32ffaef377434b31247893c35e55d63719ba8 100644
+--- a/src/session/session-loader.ts
++++ b/src/session/session-loader.ts
+@@ -701,8 +701,13 @@ export function resolveBlobRefsInEntriesSync(entries: FileEntry[], blobStore: Bl
+  * provider-context builder which drops them. Does NOT create a writer or take
+  * the session lock — safe to call against a file another session is writing.
+  */
+-export async function loadSessionMessagesReadOnly(filePath: string): Promise<AgentMessage[]> {
+-	const entries = await loadEntriesFromFile(filePath);
++export async function loadSessionMessagesReadOnly(filePath: string, options?: { strict?: boolean; signal?: AbortSignal }): Promise<AgentMessage[]> {
++	options?.signal?.throwIfAborted();
++	const loaded = await loadSessionFile(filePath, undefined, { throwIfMissing: options?.strict });
++	options?.signal?.throwIfAborted();
++	if (options?.strict && (loaded.invalidHeader || loaded.malformedRecords > 0 || loaded.entries.length === 0))
++		throw new Error("The session file is empty or contains corrupt records; no partial transcript was loaded");
++	const entries = loaded.entries;
+ 	if (entries.length === 0) return [];
+ 	migrateToCurrentVersion(entries);
+ 	for (const entry of entries) repairTruncatedSnapcompactFrames(entry);
+@@ -723,5 +728,6 @@ export async function loadSessionMessagesReadOnly(filePath: string): Promise<Age
+ 			: message,
+ 	);
+ 	await resolveBlobRefs(displayMessages, blobs);
++	options?.signal?.throwIfAborted();
+ 	return displayMessages;
+ }
+diff --git a/src/session/session-manager.ts b/src/session/session-manager.ts
+index 6280c73708bad5de7b0c0edce37de299c9803f65..f40cc0c60603e8154ebf81213ec678486253e42c 100644
+--- a/src/session/session-manager.ts
++++ b/src/session/session-manager.ts
+@@ -112,6 +112,8 @@ import { loadPinnedSessionIds, sortPinnedFirst } from "./session-pins";
+ import {
+ 	FileSessionStorage,
+ 	MemorySessionStorage,
++	type SessionLeaseAuthority,
++	type SessionLeaseHolder,
+ 	type SessionStorage,
+ 	type SessionStorageWriter,
+ 	SessionWriteConflictError,
+@@ -1008,6 +1010,14 @@ export class SessionManager {
+ 	 * after {@link close} gave the claim up.
+ 	 */
+ 	#sessionClaim: { sessionId: string; release: (() => void) | undefined } | undefined;
++	/**
++	 * The session id whose claim this manager gave up for another writer's
++	 * takeover: it is never claimed again here, so the next write moves this
++	 * session to a sibling, exactly as for any session open elsewhere.
++	 */
++	#yieldedSessionId: string | undefined;
++	/** Owners of the takeover answer (the RPC runtime); none: {@link #yieldLease} by default. */
++	#leaseTakeoverHandlers = new Set<(requester: SessionLeaseHolder | undefined) => void>();
+ 	/**
+ 	 * The background artifact copy a move or branch to `sessionFile` started (see
+ 	 * {@link #moveOffSessionFile}, {@link createBranchedSession}). Never rejects.
+@@ -1092,22 +1102,97 @@ export class SessionManager {
+ 
+ 	/**
+ 	 * Hold this process's ownership claim on `#sessionId`, moving it off a
+-	 * previous session. Only write paths claim, so the first process to write a
+-	 * session owns it and inspection (`omp share`, `--export`, `render`) never
+-	 * does. A failed claim is retried on the next write, so a writer takes over
+-	 * once the owner closed the session or exited.
++	 * previous session. Write paths claim (an RPC open claims up front through
++	 * {@link claimWriterLease}), so the first process to write a session owns it
++	 * and inspection (`omp share`, `--export`, `render`) never does. A failed
++	 * claim is retried on the next write, so a writer takes over once the owner
++	 * closed the session or exited — except after this manager yielded it.
+ 	 */
+-	#claimSession(): void {
++	#claimSession(authority?: SessionLeaseAuthority): void {
+ 		const sessionId = this.#sessionId;
+ 		const sessionFile = this.#sessionFile;
+ 		if (!this.#persist || !sessionFile || !this.#storage.claimSession) return;
+ 		const current = this.#sessionClaim;
+ 		if (current?.sessionId === sessionId && current.release) return;
+ 		if (current && current.sessionId !== sessionId) current.release?.();
++		if (this.#yieldedSessionId === sessionId) {
++			this.#sessionClaim = { sessionId, release: undefined };
++			return;
++		}
+ 		// The storage also checks that the path still holds this session: if
+ 		// another session was moved onto it, the claim fails and the next write
+ 		// moves this session to a sibling instead of appending into that journal.
+-		this.#sessionClaim = { sessionId, release: this.#storage.claimSession(sessionId, sessionFile) ?? undefined };
++		const release = (authority
++			? authority.claimSession(sessionId, sessionFile)
++			: this.#storage.claimSession(sessionId, sessionFile)) ?? undefined;
++		const unsubscribe =
++			release && this.#storage.onSessionLeaseTakeover?.(sessionId, requester => this.#onLeaseTakeover(sessionId, requester));
++		this.#sessionClaim = {
++			sessionId,
++			release:
++				release &&
++				(() => {
++					unsubscribe?.();
++					release();
++				}),
++		};
++	}
++
++	/** Another writer asked for this session: the registered owner answers, else {@link #yieldLease}. */
++	#onLeaseTakeover(sessionId: string, requester: SessionLeaseHolder | undefined): void {
++		if (this.#sessionClaim?.sessionId !== sessionId || !this.#sessionClaim.release) return;
++		logger.warn("Another writer asked for this session", { sessionFile: this.#sessionFile, requester });
++		if (this.#leaseTakeoverHandlers.size === 0) {
++			void this.#yieldLease(sessionId);
++			return;
++		}
++		for (const handler of this.#leaseTakeoverHandlers) {
++			try {
++				handler(requester);
++			} catch (error) {
++				logger.warn("Session takeover handler failed", { error: String(error) });
++			}
++		}
++	}
++
++	/**
++	 * Let another writer have this session: finish queued writes, then release
++	 * the claim for good. This manager keeps working; its next write continues
++	 * in a sibling file ("open-elsewhere"), so the journal never has two writers.
++	 */
++	async #yieldLease(sessionId: string): Promise<void> {
++		this.#yieldedSessionId = sessionId;
++		await this.#scheduleDiskWork(() => this.#storage.drain(), { ignorePriorError: true }).catch(() => undefined);
++		const claim = this.#sessionClaim;
++		if (claim?.sessionId !== sessionId) return;
++		claim.release?.();
++		this.#sessionClaim = { sessionId, release: undefined };
++	}
++
++	/**
++	 * Take the writer lease now instead of at the first write, so a client can
++	 * open the session read-only while another writer holds it. True when this
++	 * manager owns it, or persists nowhere that has leases.
++	 */
++	claimWriterLease(authority?: SessionLeaseAuthority): boolean {
++		if (!this.#persist || !this.#sessionFile || !this.#storage.claimSession) return true;
++		this.#claimSession(authority);
++		return this.#sessionClaim?.sessionId === this.#sessionId && this.#sessionClaim.release !== undefined;
++	}
++
++	/** Who holds this session's writer lease when this manager does not (display only). */
++	sessionLeaseHolder(): SessionLeaseHolder | undefined {
++		return this.#storage.sessionLeaseHolder?.(this.#sessionId);
++	}
++
++	/**
++	 * Answer other writers' takeover requests yourself (instead of yielding the
++	 * lease after queued writes): the handler must end this session's writes,
++	 * e.g. by closing it, which releases the claim.
++	 */
++	onLeaseTakeover(handler: (requester: SessionLeaseHolder | undefined) => void): () => void {
++		this.#leaseTakeoverHandlers.add(handler);
++		return () => this.#leaseTakeoverHandlers.delete(handler);
+ 	}
+ 
+ 	/**
+@@ -2317,14 +2402,14 @@ export class SessionManager {
+ 		}
+ 	}
+ 	/** Switch to a different session file (resume / branch). */
+-	async setSessionFile(sessionFile: string): Promise<void> {
+-		await this.#setSessionFile(sessionFile);
++	async setSessionFile(sessionFile: string, options?: { writerLease?: SessionLeaseAuthority }): Promise<void> {
++		await this.#setSessionFile(sessionFile, undefined, options);
+ 	}
+ 
+ 	async #setSessionFile(
+ 		sessionFile: string,
+ 		loadedSession?: SessionLoadResult,
+-		options?: { throwIfMissing?: boolean; newSession?: NewSessionOptions },
++		options?: { throwIfMissing?: boolean; newSession?: NewSessionOptions; writerLease?: SessionLeaseAuthority },
+ 	): Promise<void> {
+ 		await this.#drainAndCloseWriter();
+ 		this.#clearDiskError();
+@@ -2352,6 +2437,9 @@ export class SessionManager {
+ 		this.#rememberBreadcrumb(this.#cwd, resolvedSessionFile);
+ 
+ 		const { entries: fileEntries, titleSlot } = loaded;
++		if (options?.writerLease && fileEntries[0]?.id !== options.writerLease.sessionId) {
++			throw new Error(`Session does not match its delegated writer lease: ${resolvedSessionFile}`);
++		}
+ 		if (fileEntries.length === 0) {
+ 			if (options?.throwIfMissing) {
+ 				throw new Error(
+@@ -2409,6 +2497,9 @@ export class SessionManager {
+ 		this.#artifactManagerSessionFile = null;
+ 
+ 		if (this.sanitizeLoadedOpenAIResponsesReplayMetadata()) this.#rewriteRequired = true;
++		if (options?.writerLease && !this.claimWriterLease(options.writerLease)) {
++			throw new Error(`Cannot acquire delegated session writer lease: ${resolvedSessionFile}`);
++		}
+ 	}
+ 
+ 	/**
+@@ -2427,6 +2518,13 @@ export class SessionManager {
+ 	/** Delete a session file and its artifact directory. ENOENT is treated as success. */
+ 	async dropSession(sessionPath: string): Promise<void> {
+ 		await this.#drainAndCloseWriter();
++		// Give up only our own claim after pending writes have drained. Storage
++		// reacquires the lifetime lease for deletion; a competing writer wins
++		// cleanly (explicit busy), never an unprotected unlink.
++		if (sessionPath === this.#sessionFile) {
++			this.#sessionClaim?.release?.();
++			this.#sessionClaim = undefined;
++		}
+ 		try {
+ 			await this.#storage.deleteSessionWithArtifacts(sessionPath);
+ 		} catch (err) {
+@@ -2897,56 +2995,60 @@ export class SessionManager {
+ 	/** Flush, then close the append writer. */
+ 	async close(): Promise<void> {
+ 		if (!this.#persist) return;
+-		// Closing gives up this process's ownership claim; a later write reclaims it.
+-		const claim = this.#sessionClaim;
+-		claim?.release?.();
+-		if (claim) claim.release = undefined;
+-		// A prior `flushSync` can self-conflict with this manager's own
+-		// unconfirmed deferred publish; drain despite the latch so that
+-		// publish can still confirm before we give up on the transcript.
+-		await this.#scheduleDiskWork(
+-			async () => {
+-				const hadWriter = this.#writer !== undefined;
+-				await this.#closeWriterHandle();
+-				if (hadWriter || (this.#sessionFile && this.#storage.existsSync(this.#sessionFile)))
+-					this.#fileIsCurrent = true;
+-			},
+-			{ ignorePriorError: true },
+-		);
+-		await this.#pendingArtifactCopy?.done;
+-		await this.#dropIfEmptyAndNoDraft();
+-		// Wait for any queued backing writes (IndexedSessionStorage per-path
+-		// tail) to become durable so a graceful shutdown does not exit while
+-		// a fire-and-forget publish is still on the wire.
+-		await this.#scheduleDiskWork(
+-			async () => {
+-				await this.#storage.drain();
+-			},
+-			{ ignorePriorError: true },
+-		);
+-		if (
+-			this.#diskFailure &&
+-			this.#sessionFile &&
+-			this.#storage.defersSyncPublish &&
+-			!this.#entriesReleased &&
+-			this.#shouldHaveSessionFile()
+-		) {
+-			// Deferred-publish only: a synchronous backend's drain() is a
+-			// no-op, so any failure there is a genuine external conflict or a
+-			// permanent write failure, not a self-race this retry can catch
+-			// up on. seal() disabled the ordinary mid-life repair path, so
+-			// close() issues the terminal write directly instead.
+-			const operationError = this.#diskFailure;
+-			const sessionFile = this.#sessionFile;
++		// Keep ownership through the final queued write and artifact copy. Releasing
++		// at entry lets a revived manager race this manager's still-running tail.
++		try {
++			// A prior `flushSync` can self-conflict with this manager's own
++			// unconfirmed deferred publish; drain despite the latch so that
++			// publish can still confirm before we give up on the transcript.
+ 			await this.#scheduleDiskWork(
+ 				async () => {
+-					await this.#publishAuthoritativeBody(sessionFile, operationError);
+-					this.#clearDiskError();
++					const hadWriter = this.#writer !== undefined;
++					await this.#closeWriterHandle();
++					if (hadWriter || (this.#sessionFile && this.#storage.existsSync(this.#sessionFile)))
++						this.#fileIsCurrent = true;
++				},
++				{ ignorePriorError: true },
++			);
++			await this.#pendingArtifactCopy?.done;
++			// Wait for any queued backing writes (IndexedSessionStorage per-path
++			// tail) to become durable so a graceful shutdown does not exit while
++			// a fire-and-forget publish is still on the wire.
++			await this.#scheduleDiskWork(
++				async () => {
++					await this.#storage.drain();
+ 				},
+ 				{ ignorePriorError: true },
+-			).catch(() => undefined);
++			);
++			if (
++				this.#diskFailure &&
++				this.#sessionFile &&
++				this.#storage.defersSyncPublish &&
++				!this.#entriesReleased &&
++				this.#shouldHaveSessionFile()
++			) {
++				// Deferred-publish only: a synchronous backend's drain() is a
++				// no-op, so any failure there is a genuine external conflict or a
++				// permanent write failure, not a self-race this retry can catch
++				// up on. seal() disabled the ordinary mid-life repair path, so
++				// close() issues the terminal write directly instead.
++				const operationError = this.#diskFailure;
++				const sessionFile = this.#sessionFile;
++				await this.#scheduleDiskWork(
++					async () => {
++						await this.#publishAuthoritativeBody(sessionFile, operationError);
++						this.#clearDiskError();
++					},
++					{ ignorePriorError: true },
++				).catch(() => undefined);
++			}
++			if (this.#diskFailure) throw this.#diskFailure;
++		} finally {
++			this.#sessionClaim?.release?.();
++			this.#sessionClaim = undefined;
+ 		}
+-		if (this.#diskFailure) throw this.#diskFailure;
++		// Opportunistic deletion reacquires ownership and refuses another writer.
++		await this.#dropIfEmptyAndNoDraft();
+ 	}
+ 
+ 	/**
+@@ -4195,7 +4297,13 @@ export class SessionManager {
+ 		filePath: string,
+ 		sessionDir?: string,
+ 		storage: SessionStorage = new FileSessionStorage(),
+-		options?: { initialCwd?: string; parentSession?: string; suppressBreadcrumb?: boolean; throwIfMissing?: boolean },
++		options?: {
++			initialCwd?: string;
++			parentSession?: string;
++			suppressBreadcrumb?: boolean;
++			throwIfMissing?: boolean;
++			writerLease?: SessionLeaseAuthority;
++		},
+ 	): Promise<SessionManager> {
+ 		const probed = await loadSessionFile(filePath, storage, { throwIfMissing: options?.throwIfMissing });
+ 		const header = probed.entries.find(entry => entry.type === "session") as SessionHeader | undefined;
+@@ -4226,6 +4334,7 @@ export class SessionManager {
+ 		await manager.#setSessionFile(filePath, loaded, {
+ 			throwIfMissing: options?.throwIfMissing,
+ 			newSession: { parentSession: options?.parentSession },
++			writerLease: options?.writerLease,
+ 		});
+ 		return manager;
+ 	}
+@@ -4258,12 +4367,16 @@ export class SessionManager {
+ 		recordedCwd: string,
+ 		cwd: string,
+ 		sessionDir?: string,
++		writerLease?: SessionLeaseAuthority,
+ 	): Promise<SessionManager> {
+ 		// Anchor at the missing recorded cwd: `open` otherwise falls back to the
+ 		// launch cwd, which would make the `moveTo` below a no-op whenever the move
+ 		// target equals it. moveTo never chdirs, so the stale cwd is only the
+ 		// relocation source, not a directory we enter.
+-		const manager = await SessionManager.open(sessionPath, sessionDir, undefined, { initialCwd: recordedCwd });
++		const manager = await SessionManager.open(sessionPath, sessionDir, undefined, {
++			initialCwd: recordedCwd,
++			writerLease,
++		});
+ 		try {
+ 			await manager.moveTo(cwd, sessionDir);
+ 		} catch (error) {
+diff --git a/src/session/session-model-error.ts b/src/session/session-model-error.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..abef28a4dae2c56fcd2c2ee3c73bfc74eed14b0e
+--- /dev/null
++++ b/src/session/session-model-error.ts
+@@ -0,0 +1,12 @@
++/** A saved model remains unavailable after provider and extension discovery. */
++export class SessionModelUnavailableError extends Error {
++	readonly code = "session_model_unavailable";
++	readonly data: { provider: string; modelId: string; selector: string };
++
++	constructor(selector: string) {
++		super(`Could not restore model ${selector}`);
++		this.name = "SessionModelUnavailableError";
++		const slash = selector.indexOf("/");
++		this.data = { provider: slash < 0 ? "" : selector.slice(0, slash), modelId: slash < 0 ? selector : selector.slice(slash + 1), selector };
++	}
++}
+diff --git a/src/session/session-storage.ts b/src/session/session-storage.ts
+index f99022eab3917f646fce4adf1628c6c52e2c9e34..73500281a9261659a7de891ba5c10d86e3b6aca3 100644
+--- a/src/session/session-storage.ts
++++ b/src/session/session-storage.ts
+@@ -11,7 +11,7 @@ import { openCloexecSync } from "@oh-my-pi/pi-utils/fs-open";
+ import * as logger from "@oh-my-pi/pi-utils/logger";
+ import { peekFileEnds } from "@oh-my-pi/pi-utils/peek-file";
+ import { Snowflake } from "@oh-my-pi/pi-utils/snowflake";
+-import { toError } from "@oh-my-pi/pi-utils/type-guards";
++import { isRecord, toError } from "@oh-my-pi/pi-utils/type-guards";
+ import { isAssistantMessageLine } from "./session-entries";
+ import {
+ 	overlayTitleSlotContent,
+@@ -219,9 +219,9 @@ export interface SessionStorage {
+ 	 */
+ 	withSessionFileLockSync?<T>(sessionPath: string, operation: () => T): T;
+ 	/**
+-	 * Claim this process's ownership of the session `sessionId` it writes to
++	 * Claim one writer's ownership of the session `sessionId` it writes to
+ 	 * `sessionPath`, until the returned release callback runs. Returns `null`
+-	 * while another live process holds the claim, or when `sessionPath` now
++	 * while another writer (including one in this process) holds the claim, or when `sessionPath` now
+ 	 * holds a different session (another session was moved onto it), so the
+ 	 * caller's appends would land in that session's journal; `SessionManager`
+ 	 * then moves its session to a sibling instead of writing that file.
+@@ -229,6 +229,13 @@ export interface SessionStorage {
+ 	 * another process writes a session.
+ 	 */
+ 	claimSession?(sessionId: string, sessionPath: string): (() => void) | null;
++	/** Who holds `sessionId`'s lease (display only); optional on the same terms as {@link claimSession}. */
++	sessionLeaseHolder?(sessionId: string): SessionLeaseHolder | undefined;
++	/**
++	 * Call `handler` once when another writer asks for the claim this process
++	 * holds on `sessionId`. Returns the unsubscribe.
++	 */
++	onSessionLeaseTakeover?(sessionId: string, handler: (requester: SessionLeaseHolder | undefined) => void): () => void;
+ 	/**
+ 	 * Atomically delete a session and its artifacts only when `shouldDelete`
+ 	 * accepts the current session content. Optional because backends without a
+@@ -532,12 +539,12 @@ function isPidAlive(pid: number): boolean {
+ }
+ 
+ /**
+- * This process's ownership leases by session id, shared by every
+- * `FileSessionStorage` instance: managers in one process share one lease per
+- * session and only ever contend with other processes. The OS reclaims a lease
+- * when its process exits, so a crashed owner never blocks a later claim.
++ * Writer ownership leases by session id, shared by every FileSessionStorage
++ * instance. A second manager in the same process must contend just like a
++ * second process; sharing the OS lease would allow concurrent journal writers.
++ * The OS reclaims the lease when its process exits.
+  */
+-const sessionLeases = new Map<string, { lease: FileLockHandle; holders: number }>();
++const sessionLeases = new Map<string, FileLockHandle>();
+ 
+ const TEST_SESSION_OWNERS_DIR_ENV = "PI_TEST_SESSION_OWNERS_DIR";
+ 
+@@ -581,7 +588,8 @@ function readSessionHeaderIdSync(sessionPath: string): string | undefined {
+ 		} finally {
+ 			fs.closeSync(fd);
+ 		}
+-	} catch {
++	} catch (error) {
++		if (!isEnoent(error)) throw error;
+ 		return undefined;
+ 	}
+ 	if (parseTitleSlotFromContent(prefix)) prefix = prefix.slice(prefix.indexOf("\n") + 1);
+@@ -608,27 +616,227 @@ function readSessionHeaderIdSync(sessionPath: string): string | undefined {
+  * probed.
+  */
+ export function tryAcquireSessionLease(sessionId: string): FileLockHandle | null {
+-	const name = /^[A-Za-z0-9_-]{1,128}$/.test(sessionId)
+-		? sessionId
+-		: `h-${Bun.hash.wyhash(sessionId).toString(16).padStart(16, "0")}`;
+-	const lockPath = path.join(sessionOwnersDir(), name);
++	const name = sessionLeaseName(sessionId);
+ 	// Linux (abstract socket) and Windows (named mutex) locks never touch the
+ 	// filesystem; elsewhere the lock is a `flock` sidecar in that directory. The
+ 	// sidecars are empty and never removed: unlinking a flock file can split one
+ 	// lease between a holder of the old inode and a creator of a new one.
+ 	if (process.platform !== "linux" && process.platform !== "win32") {
+-		const dir = path.dirname(lockPath);
+-		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+-		// The test-run dir sits in the shared OS temp dir, where another local
+-		// user could pre-create it or plant a symlink: refuse anything but a
+-		// directory this user owns that nobody else can enter.
++		return tryAcquireFileLock(path.join(privateSessionOwnersDir(), name));
++	}
++	return tryAcquireFileLock(path.join(sessionOwnersDir(), name));
++}
++
++/** Lease file stem: ids read from a file are untrusted, so anything but a plain token is hashed. */
++function sessionLeaseName(sessionId: string): string {
++	return /^[A-Za-z0-9_-]{1,128}$/.test(sessionId)
++		? sessionId
++		: `h-${Bun.hash.wyhash(sessionId).toString(16).padStart(16, "0")}`;
++}
++
++/**
++ * The session owners directory, created when missing. The test-run dir sits in
++ * the shared OS temp dir, where another local user could pre-create it or
++ * plant a symlink: refuse anything but a directory this user owns that nobody
++ * else can enter.
++ */
++function privateSessionOwnersDir(): string {
++	const dir = sessionOwnersDir();
++	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
++	if (process.platform !== "win32") {
+ 		const st = fs.lstatSync(dir);
+ 		const uid = process.getuid?.();
+ 		if (!st.isDirectory() || (uid !== undefined && st.uid !== uid) || (st.mode & 0o077) !== 0) {
+ 			throw new Error(`Session ownership lease directory ${dir} is not a private directory owned by this user`);
+ 		}
+ 	}
+-	return tryAcquireFileLock(lockPath);
++	return dir;
++}
++
++// ─── Lease holders and takeover ──────────────────────────────────────────────
++//
++// The OS lease above decides who writes. Next to it, the holder publishes who
++// it is (`<lease>.holder.json`, display only: a crash can leave it stale, so it
++// is read only while the lease is held and its pid is alive). Another process
++// asks the holder to let go by writing `<lease>.takeover.json`; holders that
++// subscribed (see `onSessionLeaseTakeover`) poll for it, finish their writes
++// and release. Nothing is ever taken by force: a holder that does not answer
++// (an older omp, a hung process) keeps the lease.
++//
++// A request names the claim it is for (a random id the holder publishes with
++// each claim) and when it was made: one left behind by a requester that went
++// away is never obeyed by a later holder, and expires after the requester's
++// longest wait. Each requester withdraws only its own request.
++
++/** How long "Open here" waits for the holder; a request older than this is abandoned. */
++export const SESSION_TAKEOVER_WAIT_MS = 30_000;
++
++/** Who holds a session's writer lease, as that process published it. */
++export interface SessionLeaseHolder {
++	/** This process's lease identity (random per process). */
++	id: string;
++	/** `ombra` for the desktop app's engine; `omp` for the terminal and CLI. */
++	kind: string;
++	pid: number;
++	label?: string;
++	/** When the lease was taken (ISO 8601). */
++	since: string;
++}
++
++const leaseIdentity: { id: string; kind: string; label?: string } = { id: Snowflake.next() as string, kind: "omp" };
++
++/** Name this process in the holder record of every lease it takes from now on. */
++export function setSessionLeaseIdentity(kind: string, label?: string): void {
++	leaseIdentity.kind = kind;
++	if (label) leaseIdentity.label = label;
++	else delete leaseIdentity.label;
++}
++
++/** This process's identity, as a holder record taken now. */
++export function currentSessionLeaseHolder(): SessionLeaseHolder {
++	return {
++		id: leaseIdentity.id,
++		kind: leaseIdentity.kind,
++		pid: process.pid,
++		...(leaseIdentity.label ? { label: leaseIdentity.label } : {}),
++		since: new Date().toISOString(),
++	};
++}
++
++function leaseSidecarPath(sessionId: string, suffix: "holder" | "takeover"): string {
++	return path.join(privateSessionOwnersDir(), `${sessionLeaseName(sessionId)}.${suffix}.json`);
++}
++
++function parseLeaseHolder(value: unknown): SessionLeaseHolder | undefined {
++	if (!isRecord(value)) return undefined;
++	const { id, kind, pid, label, since } = value;
++	if (typeof id !== "string" || typeof kind !== "string" || typeof since !== "string") return undefined;
++	if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0) return undefined;
++	return { id, kind, pid, since, ...(typeof label === "string" && label ? { label } : {}) };
++}
++
++function readSidecar(file: string): Record<string, unknown> | undefined {
++	try {
++		const value: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
++		return isRecord(value) ? value : undefined;
++	} catch {
++		return undefined;
++	}
++}
++
++function writeLeaseSidecar(file: string, record: object): void {
++	const temp = `${file}.${process.pid}.${Snowflake.next()}.tmp`;
++	fs.writeFileSync(temp, JSON.stringify(record), { mode: 0o600 });
++	fs.renameSync(temp, file);
++}
++
++/** This process's current claim of each session it holds: the id published with it, and when it was taken. */
++const leaseClaims = new Map<string, { claim: string; at: number }>();
++
++/**
++ * The process holding `sessionId`'s lease, as it published itself; `undefined`
++ * when the record is missing or stale (an older omp, a crashed holder).
++ */
++export function readSessionLeaseHolder(sessionId: string): SessionLeaseHolder | undefined {
++	if (sessionLeases.has(sessionId)) return currentSessionLeaseHolder();
++	const record = readSidecar(leaseSidecarPath(sessionId, "holder"));
++	const holder = parseLeaseHolder(record);
++	return holder && holder.pid !== process.pid && isPidAlive(holder.pid) ? holder : undefined;
++}
++
++/** Whether nobody, in this process or another, holds `sessionId`'s lease right now. */
++export function isSessionLeaseFree(sessionId: string): boolean {
++	if (sessionLeases.has(sessionId)) return false;
++	const probe = tryAcquireSessionLease(sessionId);
++	if (!probe) return false;
++	probe.release();
++	return true;
++}
++
++/**
++ * Ask the current holder of `sessionId`'s lease to release it; `requester` is
++ * shown to that holder. Returns the request's id for
++ * {@link withdrawSessionLeaseTakeover}.
++ */
++export function requestSessionLeaseTakeover(sessionId: string, requester = currentSessionLeaseHolder()): string {
++	const own = leaseClaims.get(sessionId)?.claim;
++	const published = readSidecar(leaseSidecarPath(sessionId, "holder"))?.claim;
++	const claim = own ?? (typeof published === "string" ? published : undefined);
++	const nonce = Snowflake.next() as string;
++	writeLeaseSidecar(leaseSidecarPath(sessionId, "takeover"), {
++		requester,
++		nonce,
++		at: Date.now(),
++		...(claim ? { claim } : {}),
++	});
++	return nonce;
++}
++
++/** Withdraw the takeover request `nonce` (granted, or given up); another requester's request stays. */
++export function withdrawSessionLeaseTakeover(sessionId: string, nonce: string): void {
++	const file = leaseSidecarPath(sessionId, "takeover");
++	if (readSidecar(file)?.nonce !== nonce) return;
++	try {
++		fs.unlinkSync(file);
++	} catch {}
++}
++
++type SessionLeaseTakeoverHandler = (requester: SessionLeaseHolder | undefined) => void;
++
++const takeoverHandlers = new Map<string, SessionLeaseTakeoverHandler>();
++let takeoverPoll: NodeJS.Timeout | undefined;
++const TAKEOVER_POLL_MS = 250;
++
++/**
++ * Answer pending takeover requests for the leases this process holds (run
++ * every {@link TAKEOVER_POLL_MS} while a handler is registered; exported so
++ * tests drive it without a clock). A request for another claim, from before
++ * this claim, or older than {@link SESSION_TAKEOVER_WAIT_MS} is removed unanswered.
++ */
++export function checkSessionLeaseTakeoversNow(): void {
++	for (const [sessionId, handler] of takeoverHandlers) {
++		// Only a current holder answers; a request for a lease this process gave up waits for its holder.
++		const mine = leaseClaims.get(sessionId);
++		if (!sessionLeases.has(sessionId) || !mine) continue;
++		const file = leaseSidecarPath(sessionId, "takeover");
++		const request = readSidecar(file);
++		if (!request) continue;
++		try {
++			fs.unlinkSync(file);
++		} catch {}
++		const at = typeof request.at === "number" ? request.at : 0;
++		const current =
++			Date.now() - at <= SESSION_TAKEOVER_WAIT_MS &&
++			(typeof request.claim === "string" ? request.claim === mine.claim : at >= mine.at);
++		if (!current) {
++			logger.warn("Dropped a stale session takeover request", { sessionId });
++			continue;
++		}
++		takeoverHandlers.delete(sessionId);
++		try {
++			handler(parseLeaseHolder(request.requester));
++		} catch (error) {
++			logger.warn("Session lease takeover handler failed", { sessionId, error: String(error) });
++		}
++	}
++	if (takeoverHandlers.size === 0 && takeoverPoll) {
++		clearInterval(takeoverPoll);
++		takeoverPoll = undefined;
++	}
++}
++
++/**
++ * Call `handler` once when another process (or session) asks for `sessionId`'s
++ * lease while this process holds it. The handler owns the answer: it releases
++ * the lease when its writes are done. Returns the unsubscribe.
++ */
++export function onSessionLeaseTakeover(sessionId: string, handler: SessionLeaseTakeoverHandler): () => void {
++	takeoverHandlers.set(sessionId, handler);
++	takeoverPoll ??= setInterval(checkSessionLeaseTakeoversNow, TAKEOVER_POLL_MS);
++	takeoverPoll.unref?.();
++	return () => {
++		if (takeoverHandlers.get(sessionId) === handler) takeoverHandlers.delete(sessionId);
++	};
+ }
+ 
+ /** Approximate size (UTF-16 units synchronously, bytes through a sink) buffered per staging-file write when streaming a body. */
+@@ -676,6 +884,49 @@ async function writeLinesToFile(target: string, lines: readonly string[]): Promi
+ 	await sink.end();
+ }
+ 
++/**
++ * Explicit authority for one compound operation's writer lease. Only managers
++ * handed this object may borrow it; independent managers still contend normally,
++ * even in the same process. Closing the authority prevents new borrowers, and
++ * the OS lease stays held until every already-borrowed writer has drained.
++ */
++export class SessionLeaseAuthority {
++	#borrowers = 0;
++	#closed = false;
++	readonly #releaseLease: () => void;
++
++	private constructor(
++		readonly sessionId: string,
++		releaseLease: () => void,
++	) {
++		this.#releaseLease = releaseLease;
++	}
++
++	static acquire(sessionId: string, sessionPath: string): SessionLeaseAuthority | null {
++		const release = new FileSessionStorage().claimSession(sessionId, sessionPath);
++		return release ? new SessionLeaseAuthority(sessionId, release) : null;
++	}
++
++	claimSession(sessionId: string, sessionPath: string): (() => void) | null {
++		if (this.#closed || sessionId !== this.sessionId) return null;
++		const onDisk = readSessionHeaderIdSync(sessionPath);
++		if (onDisk !== undefined && onDisk !== sessionId) return null;
++		this.#borrowers++;
++		let released = false;
++		return () => {
++			if (released) return;
++			released = true;
++			if (--this.#borrowers === 0 && this.#closed) this.#releaseLease();
++		};
++	}
++
++	release(): void {
++		if (this.#closed) return;
++		this.#closed = true;
++		if (this.#borrowers === 0) this.#releaseLease();
++	}
++}
++
+ export class FileSessionStorage implements SessionStorage {
+ 	#assertExpectedSize(fpath: string, expectedSize: number | null | undefined): void {
+ 		if (expectedSize === undefined) return;
+@@ -1286,60 +1537,126 @@ export class FileSessionStorage implements SessionStorage {
+ 	/**
+ 	 * The lease is an OS lock (abstract socket, named mutex, or `flock` sidecar
+ 	 * under ~/.omp/run/session-owners), so the kernel drops a dead owner's claim.
+-	 * Never throws: a lock that cannot be taken for another reason counts as
+-	 * owned, so it never moves a session off its file.
++	 * Lock-provider failures propagate: local-only exclusion cannot protect a
++	 * journal from another process and must never authorize a write. The holder
++	 * record next to it only names this process for display.
+ 	 */
+ 	claimSession(sessionId: string, sessionPath: string): (() => void) | null {
+ 		const onDisk = readSessionHeaderIdSync(sessionPath);
+ 		if (onDisk !== undefined && onDisk !== sessionId) return null;
+-		let held = sessionLeases.get(sessionId);
+-		if (!held) {
+-			let lease: FileLockHandle | null;
+-			try {
+-				lease = tryAcquireSessionLease(sessionId);
+-			} catch (err) {
+-				logger.debug("Session ownership lease unavailable", { sessionId, error: toError(err).message });
+-				return () => {};
+-			}
+-			if (!lease) return null;
+-			held = { lease, holders: 0 };
+-			sessionLeases.set(sessionId, held);
++		if (sessionLeases.has(sessionId)) return null;
++		const lease = tryAcquireSessionLease(sessionId);
++		if (!lease) return null;
++		sessionLeases.set(sessionId, lease);
++		// Takeover requests name this claim; one made for an earlier holder is never obeyed here.
++		const claim = { claim: Snowflake.next() as string, at: Date.now() };
++		leaseClaims.set(sessionId, claim);
++		let holderFile: string | undefined;
++		try {
++			holderFile = leaseSidecarPath(sessionId, "holder");
++			writeLeaseSidecar(holderFile, { ...currentSessionLeaseHolder(), claim: claim.claim });
++		} catch (error) {
++			logger.warn("Could not publish the session lease holder", { sessionId, error: String(error) });
+ 		}
+-		const claim = held;
+-		claim.holders++;
+ 		let released = false;
+ 		return () => {
+ 			if (released) return;
+ 			released = true;
+-			if (--claim.holders > 0) return;
+-			sessionLeases.delete(sessionId);
+-			claim.lease.release();
++			// Withdrawn while still held, so it never removes the next holder's record.
++			if (holderFile) {
++				try {
++					fs.unlinkSync(holderFile);
++				} catch {}
++			}
++			if (leaseClaims.get(sessionId) === claim) leaseClaims.delete(sessionId);
++			if (sessionLeases.get(sessionId) === lease) sessionLeases.delete(sessionId);
++			lease.release();
+ 		};
+ 	}
+ 
++	sessionLeaseHolder(sessionId: string): SessionLeaseHolder | undefined {
++		return readSessionLeaseHolder(sessionId);
++	}
++
++	onSessionLeaseTakeover(sessionId: string, handler: (requester: SessionLeaseHolder | undefined) => void): () => void {
++		return onSessionLeaseTakeover(sessionId, handler);
++	}
++
++	/** Deletion participates in the same lifetime ownership protocol as writers. */
++	#acquireDeletionLease(sessionPath: string): () => void {
++		if (!sessionPath.endsWith(".jsonl")) throw new Error(`Not a session file: ${sessionPath}`);
++		const id = readSessionHeaderIdSync(sessionPath);
++		if (!id) {
++			fs.statSync(sessionPath); // Preserve ENOENT for idempotent manager deletion.
++			throw new Error(`Cannot establish session ownership for deletion: ${sessionPath}`);
++		}
++		const release = this.claimSession(id, sessionPath);
++		if (!release) throw new Error(`Session is busy in another live writer; nothing was deleted: ${sessionPath}`);
++		try {
++			if (readSessionHeaderIdSync(sessionPath) !== id)
++				throw new Error(`Session changed while acquiring deletion ownership: ${sessionPath}`);
++			return release;
++		} catch (error) {
++			release();
++			throw error;
++		}
++	}
++
++	/** A parent deletion also removes nested subagent journals in its artifacts. */
++	#acquireDeletionTree(sessionPath: string): () => void {
++		const releases = [this.#acquireDeletionLease(sessionPath)];
++		const releaseAll = () => { for (const release of releases.reverse()) release(); };
++		try {
++			const artifacts = sessionPath.slice(0, -6);
++			let directories: string[] = [];
++			try {
++				if (fs.lstatSync(artifacts).isDirectory()) directories = [artifacts];
++			} catch (error) {
++				if (!isEnoent(error)) throw error;
++			}
++			while (directories.length) {
++				const directory = directories.pop()!;
++				for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
++					const file = path.join(directory, entry.name);
++					if (entry.isDirectory()) directories.push(file);
++					else if (entry.isFile() && entry.name.endsWith(".jsonl") && readSessionHeaderIdSync(file))
++						releases.push(this.#acquireDeletionLease(file));
++				}
++			}
++			return releaseAll;
++		} catch (error) {
++			releaseAll();
++			throw error;
++		}
++	}
++
+ 	/**
+ 	 * Conditionally delete under the same cross-process lock used by the first
+ 	 * durable append to a draft-only session.
+ 	 */
+-	deleteSessionWithArtifactsIf(sessionPath: string, shouldDelete: (content: string) => boolean): Promise<boolean> {
+-		const deleted = this.withSessionFileLockSync(sessionPath, () => {
+-			const content = fs.readFileSync(sessionPath, "utf-8");
+-			if (!shouldDelete(content)) return false;
++	async deleteSessionWithArtifactsIf(sessionPath: string, shouldDelete: (content: string) => boolean): Promise<boolean> {
++		const release = this.#acquireDeletionTree(sessionPath);
++		try {
++			return this.withSessionFileLockSync(sessionPath, () => {
++				const content = fs.readFileSync(sessionPath, "utf-8");
++				if (!shouldDelete(content)) return false;
+ 
+-			fs.unlinkSync(sessionPath);
+-			const artifactsDir = sessionPath.slice(0, -6);
+-			try {
+-				fs.rmSync(artifactsDir, { recursive: true, force: true });
+-			} catch (err) {
+-				const error = toError(err);
+-				throw new Error(
+-					`Session file deleted but failed to remove artifacts directory ${artifactsDir}: ${error.message}`,
+-					{ cause: error },
+-				);
+-			}
+-			return true;
+-		});
+-		return Promise.resolve(deleted);
++				fs.unlinkSync(sessionPath);
++				const artifactsDir = sessionPath.slice(0, -6);
++				try {
++					fs.rmSync(artifactsDir, { recursive: true, force: true });
++				} catch (err) {
++					const error = toError(err);
++					throw new Error(
++						`Session file deleted but failed to remove artifacts directory ${artifactsDir}: ${error.message}`,
++						{ cause: error },
++					);
++				}
++				return true;
++			});
++		} finally {
++			release();
++		}
+ 	}
+ 
+ 	/**
+@@ -1347,41 +1664,44 @@ export class FileSessionStorage implements SessionStorage {
+ 	 * Artifacts are stored in a sibling directory with the same name minus .jsonl extension.
+ 	 */
+ 	async deleteSessionWithArtifacts(sessionPath: string): Promise<void> {
+-		// Delete the session file itself
+-		await this.unlink(sessionPath);
+-
+-		// Compute artifacts directory: /path/to/session.jsonl -> /path/to/session
+-		const artifactsDir = sessionPath.slice(0, -6);
+-
+-		// Delete artifacts directory if it exists. Missing directories are fine, but
+-		// surface real cleanup failures because the session file is already gone.
++		const release = this.#acquireDeletionTree(sessionPath);
+ 		try {
+-			await fsp.rm(artifactsDir, { recursive: true, force: true });
+-		} catch (err) {
+-			const error = toError(err);
+-			throw new Error(
+-				`Session file deleted but failed to remove artifacts directory ${artifactsDir}: ${error.message}`,
+-				{
+-					cause: error,
+-				},
+-			);
+-		}
++			// Hold ownership until the journal and all associated artifacts are gone.
++			await this.unlink(sessionPath);
++
++			// Compute artifacts directory: /path/to/session.jsonl -> /path/to/session
++			const artifactsDir = sessionPath.slice(0, -6);
+ 
+-		// Remove EPERM-rewrite leftovers (`<name>.jsonl.<snowflake>.bak`): the
+-		// picker scan would otherwise resurrect the deleted session from the
+-		// newest stale backup (#11499). Best-effort — a locked file warns
+-		// instead of failing the delete the user asked for.
+-		const base = path.basename(sessionPath);
+-		for (const bak of this.listFilesSync(path.dirname(sessionPath), "*.bak")) {
+-			if (!path.basename(bak).startsWith(`${base}.`)) continue;
++			// Delete artifacts directory if it exists. Missing directories are fine, but
++			// surface real cleanup failures because the session file is already gone.
+ 			try {
+-				await fsp.unlink(bak);
++				await fsp.rm(artifactsDir, { recursive: true, force: true });
+ 			} catch (err) {
+-				logger.warn("Failed to remove stale session backup during delete", {
+-					path: bak,
+-					error: toError(err).message,
+-				});
++				const error = toError(err);
++				throw new Error(
++					`Session file deleted but failed to remove artifacts directory ${artifactsDir}: ${error.message}`,
++					{ cause: error },
++				);
+ 			}
++
++			// Remove EPERM-rewrite leftovers (`<name>.jsonl.<snowflake>.bak`): the
++			// picker scan would otherwise resurrect the deleted session from the
++			// newest stale backup (#11499). Best-effort — a locked file warns
++			// instead of failing the delete the user asked for.
++			const base = path.basename(sessionPath);
++			for (const bak of this.listFilesSync(path.dirname(sessionPath), "*.bak")) {
++				if (!path.basename(bak).startsWith(`${base}.`)) continue;
++				try {
++					await fsp.unlink(bak);
++				} catch (err) {
++					logger.warn("Failed to remove stale session backup during delete", {
++						path: bak,
++						error: toError(err).message,
++					});
++				}
++			}
++		} finally {
++			release();
+ 		}
+ 	}
+ }
+diff --git a/src/session/session-tools.ts b/src/session/session-tools.ts
+index d0e605f6733040da90554ce5151c7f655239d94e..18bf1734a9f9f5ae700ab0f73cba080cfcbd1c56 100644
+--- a/src/session/session-tools.ts
++++ b/src/session/session-tools.ts
+@@ -1069,7 +1069,7 @@ export class SessionTools {
+ 				xdevReadAvailable &&
+ 				xdevWriteAvailable &&
+ 				!isPresentationPinned(name) &&
+-				isMountableUnderXdev(tool),
++				isMountableUnderXdev(tool, this.#xdev),
+ 		);
+ 		const mountNames = new Set(mountCandidates.map(({ name }) => name));
+ 		const tools: AgentTool[] = [];
+diff --git a/src/session/session-transfer.ts b/src/session/session-transfer.ts
+index fe0d01485bd416cb4701a46173f71f3ca902a558..c788815b7f0d69d457d3004bb89ad4ef2ad37450 100644
+--- a/src/session/session-transfer.ts
++++ b/src/session/session-transfer.ts
+@@ -42,7 +42,7 @@ import type { FileEntry, SessionEntry, SessionHeader } from "./session-entries";
+ import { findSessionFiles } from "./session-listing";
+ import { loadEntriesFromFile, parseSessionContent, readSessionHeaderId } from "./session-loader";
+ import { SessionManager } from "./session-manager";
+-import { FileSessionStorage } from "./session-storage";
++import { SessionLeaseAuthority } from "./session-storage";
+ 
+ /** Archive format version written by {@link packSession} and the only one {@link unpackSession} reads. */
+ export const SESSION_ARCHIVE_VERSION = 1;
+@@ -213,14 +213,14 @@ async function requireSessionId(file: string): Promise<string> {
+  * {@link SessionManager.moveTo} uses — or refuse while another live omp process
+  * writes it.
+  */
+-function claimSessionOrRefuse(id: string, file: string, action: string): () => void {
+-	const release = new FileSessionStorage().claimSession(id, file);
+-	if (!release) {
++function claimSessionOrRefuse(id: string, file: string, action: string): SessionLeaseAuthority {
++	const authority = SessionLeaseAuthority.acquire(id, file);
++	if (!authority) {
+ 		throw new SessionTransferError(
+ 			`Cannot ${action} ${file}: another live omp process writes this session. Exit it first. Nothing was changed.`,
+ 		);
+ 	}
+-	return release;
++	return authority;
+ }
+ 
+ function collectBlobHashes(text: string, into: Set<string>): void {
+@@ -281,7 +281,7 @@ export async function packSession(sessionFile: string, outPath: string): Promise
+ 		if (!isEnoent(error)) throw error;
+ 	}
+ 
+-	const release = claimSessionOrRefuse(id, source, "pack");
++	const authority = claimSessionOrRefuse(id, source, "pack");
+ 	try {
+ 		const journal = await fs.promises.readFile(source);
+ 		const journalText = journal.toString("utf8");
+@@ -330,7 +330,7 @@ export async function packSession(sessionFile: string, outPath: string): Promise
+ 		await writeArchiveAtomically(archivePath, members);
+ 		return { archivePath, id, missingBlobs };
+ 	} finally {
+-		release();
++		authority.release();
+ 	}
+ }
+ 
+@@ -613,14 +613,20 @@ export async function unpackSession(archivePath: string, options: UnpackSessionO
+ 			return { ...placed, mode: "forked" };
+ 		}
+ 
+-		const releases: (() => void)[] = [];
++		const authority = claimSessionOrRefuse(id, stagedFile, "replace");
+ 		try {
+-			for (const file of localCopies) releases.push(claimSessionOrRefuse(id, file, "replace"));
++			// All copies and the relocation belong to this one operation. Do not
++			// release the OS lease between setting them aside and placing the journal.
++			for (const file of localCopies) {
++				const release = authority.claimSession(id, file);
++				if (!release) throw new SessionTransferError(`Session changed before replacement: ${file}`);
++				release();
++			}
+ 			const aside = await setAside(localCopies);
+ 			let placed: { sessionFile: string; id: string };
+ 			try {
+ 				placed = await placeSession(
+-					() => SessionManager.openRelocated(stagedFile, recordedCwd, cwd, sessionDir),
++					() => SessionManager.openRelocated(stagedFile, recordedCwd, cwd, sessionDir, authority),
+ 					arrival,
+ 				);
+ 			} catch (error) {
+@@ -632,7 +638,7 @@ export async function unpackSession(archivePath: string, options: UnpackSessionO
+ 			logger.info("Unpacked session", { mode, replaced: localCopies, ...placed });
+ 			return { ...placed, mode };
+ 		} finally {
+-			for (const release of releases) release();
++			authority.release();
+ 		}
+ 	} finally {
+ 		await staging.remove().catch(error => {
+@@ -653,11 +659,12 @@ export async function markSessionMoved(sessionFile: string, label: string): Prom
+ 	const to = label.trim();
+ 	if (!to) throw new SessionTransferError("The move label must not be empty.");
+ 	const id = await requireSessionId(target);
+-	const release = claimSessionOrRefuse(id, target, "mark moved");
++	const authority = claimSessionOrRefuse(id, target, "mark moved");
+ 	try {
+ 		const manager = await SessionManager.open(target, path.dirname(target), undefined, {
+ 			throwIfMissing: true,
+ 			suppressBreadcrumb: true,
++			writerLease: authority,
+ 		});
+ 		try {
+ 			await appendTransferNotice(manager, { kind: "departed", to });
+@@ -665,7 +672,7 @@ export async function markSessionMoved(sessionFile: string, label: string): Prom
+ 			await manager.close();
+ 		}
+ 	} finally {
+-		release();
++		authority.release();
+ 	}
+ }
+ 

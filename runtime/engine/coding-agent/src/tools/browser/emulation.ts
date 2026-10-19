@@ -45,9 +45,9 @@ export interface EmulationNetworkConditions {
 
 /** Independently mergeable device, network, and media overrides for a browser tab. */
 export interface BrowserEmulateOptions {
-	/** Override viewport dimensions. */
+	/** Override CSS dimensions and optional device scale; on Ombra cmux surfaces this changes the visible pane's device mode. */
 	viewport?: EmulationViewport;
-	/** Emulate a Puppeteer `KnownDevices` profile. */
+	/** Device name from `tab.devices()`: a Puppeteer `KnownDevices` profile or an Ombra cmux surface preset. */
 	device?: string;
 	/** Override coordinates, or clear the override with `null`. */
 	geolocation?: EmulationGeolocation | null;
