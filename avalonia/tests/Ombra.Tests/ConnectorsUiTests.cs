@@ -133,13 +133,14 @@ public sealed class ConnectorsUiTests
     private static Button MenuItem(Button owner, string name) =>
         ((Flyout)owner.Flyout!).Content is Control c ? c.GetLogicalDescendants().OfType<Button>().Single(b => b.Name == name) : throw new InvalidOperationException(name);
 
-    /// <summary>Runs <paramref name="body"/> with the app in <paramref name="language"/> (en or ru), then back in English.</summary>
+    /// <summary>Runs <paramref name="body"/> with the app in <paramref name="language"/> (en or ru), then back in the suite's language.</summary>
     private static async Task InLanguage(string language, Func<Task> body)
     {
         var settingsPath = Path.Combine(TestProcesses.TempDir("plugins-ui-" + language), "settings.json");
+        var previous = Loc.Current;
         Loc.Load(language, settingsPath);
         try { await body(); }
-        finally { Loc.Load("en", settingsPath); }
+        finally { Loc.Load(previous, settingsPath); }
     }
 
     [AvaloniaFact]

@@ -1,13 +1,16 @@
+using Avalonia.Headless.XUnit;
 using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore;
 
 namespace Ombra.Tests;
 
-/// <summary>How a dialog ended (ConversationState.RecordAnswer writes it in English): shown in the UI's language.</summary>
+/// <summary>How a dialog ended (ConversationState.RecordAnswer writes it in English): shown in the UI's language.
+/// On the UI thread like every other test that swaps <see cref="Loc"/>'s global language: a thread-pool test restoring
+/// its language in the middle of an Avalonia test's switched one broke that test.</summary>
 public sealed class NoticeLocalizationTests
 {
-    [Theory]
+    [AvaloniaTheory]
     [InlineData("Approved by you — bash", "Одобрено вами — bash")]
     [InlineData("Denied by you — task", "Отклонено вами — task")]
     [InlineData("Denied by you — bash: “not now”", "Отклонено вами — bash: «not now»")]
