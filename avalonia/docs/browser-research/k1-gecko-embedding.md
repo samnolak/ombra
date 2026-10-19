@@ -177,6 +177,12 @@ with `initialOpenWindowInfo`, opener from `parent.top.embedderElement.documentGl
 property bag through `Services.ww`) come to the opener's pane as new Ombra tabs; `window.close()` in such a page
 (BrowserElementParent's `DOMWindowClose` on the `<browser>`) closes the embed window and the tab. The input method
 composes in Ombra (MarkedText / Text, the candidate window at TextRect), and Nightly's cursor comes back as Cursor.
+Nightly ends a composition itself while the input method still composes in Ombra (it commits it when the focus moves or
+the window goes inactive, or nothing editable takes it); the input method's empty MarkedText after that is nothing
+(`ZenEmbedHost.mm` `OnMarkedText` asks the window's `TextInputHandler` whether it composes). It used to reach
+`IMEInputHandler::SetMarkedText` with no composition and crash Nightly (MOZ_RELEASE_ASSERT(isSome()) in
+`DispatchCompositionCommitEvent`, 2026-10-19: the new-tab checks' probe after an app switch);
+`NightlyRuntimeTests.AnEmptyCompositionWithoutOneInNightlyIsNothing` and the acceptance's `ime-ended-*` checks cover it.
 `ContextMenuChild` asks the `LoginManager` actor for every context menu, so that actor is registered for the
 `zen-embed` group too (`src/toolkit/modules/ActorManagerParent-sys-mjs.patch`); without it no context menu reached the
 parent. A closed window's last messages are ignored by the runtime (Nightly never reuses a window id), else a closed
