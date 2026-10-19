@@ -28,12 +28,21 @@ internal static class NightlyProtocol
     // Protocol 4 (K1 cutover): Ombra → Nightly 40–49, Nightly → Ombra 120–129.
     public const int Quit = 40, DialogReply = 41, DownloadCancel = 42, OpenBrowserWindow = 43;
     public const int Dialog = 120, DialogClosed = 121, Download = 122;
+    // Drags (protocol 4): Ombra → Nightly 44–45, Nightly → Ombra 123–124 (desktop ZenEmbedHost.mm, "Drags").
+    public const int DragTarget = 44, DragSource = 45, DragStarted = 123, DragStatus = 124;
     /// <summary>Bytes of a DialogReply's JSON (kMaxText).</summary>
     public const int MaxReply = MaxText;
     /// <summary>UTF-16 units of text a Text or MarkedText message carries.</summary>
     public const int MaxInputText = 64;
 
     public enum MouseKind { Down = 1, Up = 2, Move = 3, Exit = 4 }
+
+    /// <summary>An AppKit drag over a pane (<see cref="DragTargetMessage"/>).</summary>
+    public enum DragPhase : uint { Enter = 1, Over = 2, Exit = 3, Drop = 4 }
+
+    /// <summary>The window's own drag as Ombra carries it on (<see cref="DragSourceMessage"/>): Ombra's AppKit drag runs
+    /// it now, it ended (with an operation), or the user cancelled it.</summary>
+    public enum DragSourceState : uint { Carried = 1, Ended = 2, Cancelled = 3 }
 
     /// <summary>Device (protocol 4): JSON of the emulated device (<see cref="DeviceMessage"/>), empty to end the device mode.
     /// Theme (protocol 4): Ombra's appearance for the whole runtime (<see cref="ThemeMessage"/>).</summary>
@@ -305,6 +314,36 @@ internal static class NightlyProtocol
         return m;
     }
 
+    /// <summary>
+    /// An AppKit drag over the pane at a window point: entered, moved, left or dropped. <paramref name="operations"/>: the
+    /// NSDragOperation mask its source allows; its data is on the system's drag pasteboard. Nightly answers DragStatus.
+    /// </summary>
+    public static byte[] DragTargetMessage(uint windowId, DragPhase phase, double x, double y, ulong operations, ulong modifiers)
+    {
+        var m = New(DragTarget, 64);
+        U32(m, 24, windowId);
+        U32(m, 28, (uint)phase);
+        F64(m, 32, x);
+        F64(m, 40, y);
+        U64(m, 48, operations);
+        U64(m, 56, modifiers);
+        return m;
+    }
+
+    /// <summary>The window's own drag (DragStarted) left the pane and Ombra's AppKit drag carries it on, or that drag ended
+    /// with <paramref name="operation"/> (NSDragOperation) at a window point (outside the pane too).</summary>
+    public static byte[] DragSourceMessage(uint windowId, DragSourceState state, double x, double y, ulong operation, ulong modifiers)
+    {
+        var m = New(DragSource, 64);
+        U32(m, 24, windowId);
+        U32(m, 28, (uint)state);
+        F64(m, 32, x);
+        F64(m, 40, y);
+        U64(m, 48, operation);
+        U64(m, 56, modifiers);
+        return m;
+    }
+
     // ── Nightly → Ombra (offsets in the received message; a complex message's port descriptor is at 28) ──
 
     public readonly record struct HelloInfo(uint Version, int Pid);
@@ -318,6 +357,13 @@ internal static class NightlyProtocol
     public readonly record struct PopupInfo(uint WindowId, uint PopupId, string Json);
     /// <summary>A rectangle of the window's content in points, top-left origin.</summary>
     public readonly record struct TextRectInfo(uint WindowId, double X, double Y, double Width, double Height);
+    /// <summary>
+    /// A drag began in the window: its image (PNG at the window's backing scale; empty when there is none) drawn at
+    /// <paramref name="Image"/> (window points, top-left origin) while the pointer is at (<paramref name="PointerX"/>,
+    /// <paramref name="PointerY"/>); its data is on the named pasteboard <paramref name="Pasteboard"/>.
+    /// </summary>
+    public readonly record struct DragStartedInfo(uint WindowId, byte[] Png, (double X, double Y, double Width, double Height) Image,
+        double PointerX, double PointerY, ulong Operations, string Pasteboard);
 
     public static int Id(ReadOnlySpan<byte> m) => BinaryPrimitives.ReadInt32LittleEndian(m[20..]);
     public static int Size(ReadOnlySpan<byte> m) => (int)BinaryPrimitives.ReadUInt32LittleEndian(m[4..]);
@@ -352,6 +398,22 @@ internal static class NightlyProtocol
 
     /// <summary>Where the composition's caret is (the input method's candidate window goes there).</summary>
     public static TextRectInfo ReadTextRect(ReadOnlySpan<byte> m) => new(R32(m, 24), RF64(m, 32), RF64(m, 40), RF64(m, 48), RF64(m, 56));
+
+    /// <summary>A DragStarted whose image the channel copied into <paramref name="payload"/>; null when it does not fit.</summary>
+    public static DragStartedInfo? ReadDragStarted(ReadOnlySpan<byte> m, byte[]? payload)
+    {
+        if (m.Length < 240) return null;
+        var imageLength = R32(m, 48);
+        var nameLength = R32(m, 52);
+        if (imageLength > (payload?.Length ?? 0) || nameLength > 128) return null;
+        return new DragStartedInfo(R32(m, 44), imageLength == 0 ? [] : payload.AsSpan(0, (int)imageLength).ToArray(),
+            (RF64(m, 56), RF64(m, 64), RF64(m, 72), RF64(m, 80)), RF64(m, 88), RF64(m, 96), R64(m, 104),
+            Encoding.UTF8.GetString(m.Slice(112, (int)nameLength)));
+    }
+
+    /// <summary>(window, NSDragOperation, ended) of a DragStatus: what a drop there would do; ended once the window's own
+    /// drag is over.</summary>
+    public static (uint WindowId, ulong Operation, bool Ended) ReadDragStatus(ReadOnlySpan<byte> m) => (R32(m, 24), R64(m, 32), (R32(m, 28) & 1) != 0);
 
     /// <summary>Null when the lengths do not fit the message.</summary>
     public static LocationInfo? ReadLocation(ReadOnlySpan<byte> m)

@@ -315,6 +315,35 @@ device mode is `Command` op 7, Ombra's appearance op 8):
   unreadable shot). Relaunch with a profile holding 3 saved extra windows: 4 stray windows trapped, their tabs in the
   Browser page, 0 on screen.
 
+### 1d. Drag and drop (protocol 4, ids 44–45 / 123–124, 2026-10-19)
+
+Before: every drag in the Browser page began an AppKit drag from the off-screen embedded window. No drop target ever saw
+it (no dragover/drop, so no tab into a folder, no reorder, no link into the sidebar), its drag image stuck on screen over
+other windows, the page's drag session stayed stuck (dragstart, no dragend), and a tab dropped on a folder was torn off
+into a separate Nightly window (dragend with dropEffect none).
+
+Now (desktop `ZenEmbedHost.mm` "Drags", `nsDragService.mm` → `ZenEmbedHost::BeginDrag`, `nsCocoaWindow.mm`
+`doDragAction:` reads the embedder's event, `-[ChildView endDragSessionAt:operation:event:]`):
+- A drag that starts in an embedded window runs on the pane's mouse: the Mouse messages with the button held call the
+  view's NSDraggingDestination methods with a stand-in NSDraggingInfo (`ZenEmbedDragInfo`, its pasteboard a named one per
+  runtime), dragover repeats every 100 ms while the pointer rests, the release drops, Escape cancels, Ombra's
+  deactivation cancels. DragStarted{PNG image, its frame, the press, pasteboard} lets `NightlyPane` draw the drag image
+  under the pointer and show AppKit's drag cursors (DragStatus).
+- When the pointer leaves the pane, Ombra carries the drag on as its own AppKit drag (`Nightly/NightlyDrag.cs`): each
+  type is read from Nightly's pasteboard only when a destination asks (promised files at the destination's paste
+  location); DragSource{carried, ended/cancelled} ends Nightly's session.
+- An AppKit drag over the pane (Finder's files, other apps' text, the carried drag coming back) reaches the window as
+  DragTarget{enter, over, exit, drop}; its data is the system drag pasteboard. The window-level file drop (composer) no
+  longer takes drops over the Browser page.
+- A press in the pane is released and dragged there wherever the pointer goes (as AppKit sends to the pressed window).
+
+Driven in the real window (driver `drag X1 Y1 X2 Y2`, Marionette for the chrome's state): tab into a folder, tab
+reorder, link from the page into the sidebar (a new tab), tab to the pinned section, tab to the next space at the
+sidebar's edge, in-page HTML5 DnD (dragover ×14, drop "from-src", dragend move); no stuck session, one window.
+`NightlyAcceptance.DragDrop.cs` (`DragDropChecks`, driver `dnd`): browser-window-drag-page, -drag-out, -drag-files.
+Not verifiable here (no Accessibility, no HID drag): the carried drag's drop into another app; AppKit ends it at once
+without a held button.
+
 ## 2. Gecko facts the options rely on (file:line in `engine/`)
 
 - macOS defaults: GPU process on (`StaticPrefList.yaml:10484-10493`). Native CoreAnimation compositor on

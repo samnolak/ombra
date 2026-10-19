@@ -115,6 +115,12 @@ internal interface INightlyView
     void OnDialog(uint dialogId, string json);
     /// <summary>Nightly withdrew question <paramref name="dialogId"/> (navigation, page closed): its card goes.</summary>
     void OnDialogClosed(uint dialogId);
+    /// <summary>A drag began in the pane's window (its image, where its data is): the pane draws the image under the
+    /// pointer and carries the drag on as its own AppKit drag once the pointer leaves it.</summary>
+    void OnDragStarted(NightlyProtocol.DragStartedInfo drag) { }
+    /// <summary>What a drop where the drag is would do (NSDragOperation); <paramref name="ended"/>: the window's own drag
+    /// is over.</summary>
+    void OnDragStatus(ulong operation, bool ended) { }
 }
 
 /// <summary>
@@ -591,6 +597,13 @@ internal sealed class NightlyRuntime : IDisposable
                 break;
             case NightlyProtocol.Download:
                 if (NightlyProtocol.ReadDialog(bytes, m.Payload) is { } download) Post(() => OnDownload(download.DialogId, download.Json));
+                break;
+            case NightlyProtocol.DragStarted:
+                if (NightlyProtocol.ReadDragStarted(bytes, m.Payload) is { } drag) Post(() => ViewOf(drag.WindowId)?.OnDragStarted(drag));
+                break;
+            case NightlyProtocol.DragStatus when bytes.Length >= 40:
+                var (dragWindow, operation, ended) = NightlyProtocol.ReadDragStatus(bytes);
+                Post(() => ViewOf(dragWindow)?.OnDragStatus(operation, ended));
                 break;
         }
     }

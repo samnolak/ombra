@@ -7,6 +7,7 @@ using Avalonia.Input;
 using Avalonia.Input.TextInput;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Rendering.Composition;
 using Avalonia.Threading;
@@ -74,6 +75,17 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
     private (nint Event, double Timestamp)? _keySent, _keyDeferred;
     private readonly NightlyFrames _frames = new();
     private long _lastUserInput;
+    // The window's own drag (DragStarted): its image under the pointer (Nightly's window is never on screen, so AppKit
+    // draws none), carried on as Ombra's AppKit drag once the pointer leaves the pane (NightlyDrag).
+    private NightlyProtocol.DragStartedInfo? _drag;
+    private bool _dragCarried;
+    private readonly Image _dragImage = new() { Stretch = Stretch.Fill };
+    private readonly Canvas _dragLayer = new() { IsHitTestVisible = false, IsVisible = false };
+    // The page's pointer shape while a drag shows its own (AppKit's arrow, copy or link).
+    private Cursor? _pageCursor;
+    private Point _pointer;
+    // What a drop where an AppKit drag is over the pane would do (Nightly's last DragStatus, NSDragOperation).
+    private ulong _dropOperation;
 
     public NightlyPane()
     {
@@ -94,6 +106,8 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         _popups = new NightlyPopupPresenter(AnswerPopup);
         _ime = new ImeClient(this);
         Children.Add(_host);
+        _dragLayer.Children.Add(_dragImage);
+        Children.Add(_dragLayer);
         Children.Add(_popups.Layer);
         Children.Add(_overlay);
         WireInput();
@@ -419,6 +433,7 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         if (_visual is not null) _visual.Size = default;
         _popups.Close();
         _composing = _cancelComposition = false;
+        EndDrag();
         foreach (var cts in _dialogs.Values) cts.Cancel();
         _dialogs.Clear();
     }
@@ -558,7 +573,156 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         if (_runtime is { } runtime && _windowId != 0) runtime.Send(NightlyProtocol.PopupChoiceMessage(_windowId, popupId, index));
     }
 
-    void INightlyView.OnCursor(int cursor) => _host.Cursor = CursorFor(cursor);
+    void INightlyView.OnCursor(int cursor)
+    {
+        // During the window's own drag the pointer is the drag's (AppKit's); the page's comes back after it.
+        if (_drag is not null) _pageCursor = CursorFor(cursor);
+        else _host.Cursor = CursorFor(cursor);
+    }
+
+    // ── drags (desktop ZenEmbedHost.mm, "Drags") ──
+
+    void INightlyView.OnDragStarted(NightlyProtocol.DragStartedInfo drag)
+    {
+        if (_drag is null) _pageCursor = _host.Cursor;
+        _drag = drag;
+        _dragCarried = false;
+        var old = _dragImage.Source as IDisposable;
+        _dragImage.Source = drag.Png.Length > 0 ? new Bitmap(new MemoryStream(drag.Png)) : null;
+        old?.Dispose();
+        _host.Cursor = DragCursors[0];
+        PlaceDragImage();
+    }
+
+    void INightlyView.OnDragStatus(ulong operation, bool ended)
+    {
+        _dropOperation = operation;
+        if (ended) EndDrag();
+        else if (_drag is not null && !_dragCarried) _host.Cursor = DragCursors[DragCursorIndex(operation)];
+    }
+
+    /// <summary>The pointer AppKit shows over a drag: the arrow, with a plus where a drop copies, a link arrow where it links.</summary>
+    private static readonly Cursor[] DragCursors =
+        [new(StandardCursorType.Arrow), new(StandardCursorType.DragCopy), new(StandardCursorType.DragLink)];
+
+    private static int DragCursorIndex(ulong operation) =>
+        NightlyDrag.Effect(operation) switch { DragDropEffects.Copy => 1, DragDropEffects.Link => 2, _ => 0 };
+
+    /// <summary>The window's drag is over: its image goes, the page's pointer comes back.</summary>
+    private void EndDrag()
+    {
+        if (_drag is null) return;
+        _drag = null;
+        _dragCarried = false;
+        _dragLayer.IsVisible = false;
+        var old = _dragImage.Source as IDisposable;
+        _dragImage.Source = null;
+        old?.Dispose();
+        _host.Cursor = _pageCursor;
+        _pageCursor = null;
+    }
+
+    /// <summary>The drag image where AppKit would draw it: at the same place relative to the pointer as when it began.</summary>
+    private void PlaceDragImage()
+    {
+        if (_drag is not { } d || _dragCarried || _dragImage.Source is null || d.Image.Width <= 0 || d.Image.Height <= 0)
+        {
+            _dragLayer.IsVisible = false;
+            return;
+        }
+        var image = DragImageRect(d, _pointer);
+        _dragImage.Width = image.Width;
+        _dragImage.Height = image.Height;
+        Canvas.SetLeft(_dragImage, image.X);
+        Canvas.SetTop(_dragImage, image.Y);
+        _dragLayer.IsVisible = true;
+    }
+
+    private Rect DragImageRect(NightlyProtocol.DragStartedInfo d, Point pointer)
+    {
+        var s = _shown.Width > 0 && _frameWidth > 0 ? _shown.Width / (_frameWidth / _geckoScale) : 1;
+        return new Rect(pointer.X + (d.Image.X - d.PointerX) * s, pointer.Y + (d.Image.Y - d.PointerY) * s, d.Image.Width * s, d.Image.Height * s);
+    }
+
+    /// <summary>
+    /// The pointer left the pane during the window's own drag: Nightly's window lets it go (dragleave, as at a window's
+    /// edge), and Ombra's AppKit drag of the same data carries it on over other windows and apps (Finder, Notes, Ombra's
+    /// own); where that one ends the window's drag ends (dragend).
+    /// </summary>
+    private void CarryDrag(Point at, KeyModifiers modifiers)
+    {
+        if (_drag is not { } drag || _runtime is not { } runtime || _windowId == 0) return;
+        _dragCarried = true;
+        _dragLayer.IsVisible = false;
+        var window = _windowId;
+        var flags = MacModifiers(modifiers);
+        var g = ToGeckoAnywhere(at) ?? (-1, -1);
+        SendMouse(NightlyProtocol.MouseKind.Move, 0, g, modifiers, 0);
+        runtime.Send(NightlyProtocol.DragSourceMessage(window, NightlyProtocol.DragSourceState.Carried, g.X, g.Y, 0, flags));
+        var began = BeginAppKitDrag(drag, at, (operation, cancelled) =>
+        {
+            Services.ClientLog.Shared.Write("nightly", $"carried drag of window {window} ended: operation {operation}{(cancelled ? ", cancelled" : "")}");
+            runtime.Send(NightlyProtocol.DragSourceMessage(window,
+                cancelled ? NightlyProtocol.DragSourceState.Cancelled : NightlyProtocol.DragSourceState.Ended, g.X, g.Y, operation, flags));
+        });
+        Services.ClientLog.Shared.Write("nightly", $"drag of window {window} left the pane: {(began ? "carried on by an AppKit drag" : "AppKit refused a drag")}");
+        if (!began) runtime.Send(NightlyProtocol.DragSourceMessage(window, NightlyProtocol.DragSourceState.Ended, g.X, g.Y, 0, flags));
+    }
+
+    /// <summary>Ombra's AppKit drag from the view under the pointer, with the mouse event being handled (the one that left
+    /// the pane); the drag image where the pane drew it. False when AppKit refused (no button held).</summary>
+    private unsafe bool BeginAppKitDrag(NightlyProtocol.DragStartedInfo drag, Point at, Action<ulong, bool> ended)
+    {
+        if (_top is null || _top.TryGetPlatformHandle() is not { Handle: not 0 } handle) return false;
+        var nsWindow = NightlyCocoa.WindowOf(handle.Handle);
+        var ev = MacObjC.Send(MacObjC.Send(MacObjC.Cls("NSApplication"), "sharedApplication"), "currentEvent");
+        var content = nsWindow == 0 ? 0 : MacObjC.Send(nsWindow, "contentView");
+        if (ev == 0 || content == 0) return false;
+        var location = ((delegate* unmanaged<nint, nint, MacRuntime.CGPoint>)MacObjC.MsgSend)(ev, MacObjC.Sel("locationInWindow"));
+        var view = ((delegate* unmanaged<nint, nint, MacRuntime.CGPoint, nint>)MacObjC.MsgSend)(content, MacObjC.Sel("hitTest:"), location);
+        if (view == 0) view = content;
+        var image = DragImageRect(drag, at);
+        var topLeft = _host.TranslatePoint(image.TopLeft, _top) ?? default;
+        var frame = ViewRect(content, view, new Rect(topLeft, image.Size));
+        return NightlyDrag.Begin(view, ev, drag.Pasteboard, drag.Png, frame,
+            (operation, _, cancelled) => Dispatcher.UIThread.Post(() => ended(operation, cancelled)));
+    }
+
+    /// <summary>A rectangle of the window's client area (DIP, top-left origin) in <paramref name="view"/>'s coordinates.</summary>
+    private static unsafe MacRuntime.CGRect ViewRect(nint content, nint view, Rect client)
+    {
+        var bounds = ((delegate* unmanaged<nint, nint, MacRuntime.CGRect>)MacObjC.MsgSend)(content, MacObjC.Sel("bounds"));
+        var flipped = MacObjC.SendBool(content, "isFlipped");
+        MacRuntime.CGPoint InView(double x, double y)
+        {
+            var inContent = new MacRuntime.CGPoint(x, flipped ? y : bounds.Height - y);
+            var inWindow = ((delegate* unmanaged<nint, nint, MacRuntime.CGPoint, nint, MacRuntime.CGPoint>)MacObjC.MsgSend)(
+                content, MacObjC.Sel("convertPoint:toView:"), inContent, 0);
+            return ((delegate* unmanaged<nint, nint, MacRuntime.CGPoint, nint, MacRuntime.CGPoint>)MacObjC.MsgSend)(
+                view, MacObjC.Sel("convertPoint:fromView:"), inWindow, 0);
+        }
+        var a = InView(client.X, client.Y);
+        var b = InView(client.Right, client.Bottom);
+        return new MacRuntime.CGRect(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y), Math.Abs(b.X - a.X), Math.Abs(b.Y - a.Y));
+    }
+
+    /// <summary>An AppKit drag over the pane (Finder's files, another app's text, Ombra's carried drag): Nightly's window
+    /// takes it at the pointer; the drop does what Nightly last said (DragStatus). The window's file drop (the composer)
+    /// does not get it.</summary>
+    private void OnAppKitDrag(DragEventArgs e, NightlyProtocol.DragPhase phase)
+    {
+        e.Handled = true;
+        var allowed = e.DragEffects;
+        if (_runtime is not { } runtime || _windowId == 0 || ToGeckoAnywhere(e.GetPosition(_host)) is not { } g)
+        {
+            e.DragEffects = DragDropEffects.None;
+            return;
+        }
+        if (phase == NightlyProtocol.DragPhase.Enter) _dropOperation = NightlyDrag.None;
+        if (phase == NightlyProtocol.DragPhase.Drop) NoteUserInput();
+        runtime.Send(NightlyProtocol.DragTargetMessage(_windowId, phase, g.X, g.Y, NightlyDrag.Operations(allowed), MacModifiers(e.KeyModifiers)));
+        e.DragEffects = phase == NightlyProtocol.DragPhase.Exit ? DragDropEffects.None : NightlyDrag.Effect(_dropOperation) & allowed;
+    }
 
     void INightlyView.OnTextRect(NightlyProtocol.TextRectInfo rect)
     {
@@ -678,6 +842,14 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         return ((p.X - _shown.X) * gw / _shown.Width, (p.Y - _shown.Y) * gh / _shown.Height);
     }
 
+    /// <summary>Any point of the pane in Nightly's window (points, top-left origin), outside the frame too; null without one.</summary>
+    private (double X, double Y)? ToGeckoAnywhere(Point p)
+    {
+        if (_shown.Width <= 0 || _shown.Height <= 0) return null;
+        double gw = _frameWidth / _geckoScale, gh = _frameHeight / _geckoScale;
+        return ((p.X - _shown.X) * gw / _shown.Width, (p.Y - _shown.Y) * gh / _shown.Height);
+    }
+
     /// <summary>A rectangle of Nightly's window (points, top-left origin) in the pane.</summary>
     private Rect FromGecko(double x, double y, double width, double height)
     {
@@ -723,18 +895,40 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         {
             var button = e.InitialPressMouseButton switch { MouseButton.Right => 1, MouseButton.Middle => 2, _ => 0 };
             NoteUserInput();
-            if (ToGecko(e.GetPosition(_host)) is { } g) SendMouse(NightlyProtocol.MouseKind.Up, button, g, e.KeyModifiers, 1);
+            // A press the window got is released there wherever the pointer is now, as AppKit sends it to the window
+            // that got the press (outside it too).
+            if ((_pressedButton >= 0 ? ToGeckoAnywhere(e.GetPosition(_host)) : ToGecko(e.GetPosition(_host))) is { } g)
+                SendMouse(NightlyProtocol.MouseKind.Up, button, g, e.KeyModifiers, 1);
             _pressedButton = -1;
             e.Handled = true;
         };
         _host.PointerMoved += (_, e) =>
         {
-            if (ToGecko(e.GetPosition(_host)) is { } g) SendMouse(NightlyProtocol.MouseKind.Move, _pressedButton, g, e.KeyModifiers, 0);
+            var at = e.GetPosition(_host);
+            _pointer = at;
+            if (_drag is not null && !_dragCarried)
+            {
+                if (!new Rect(_host.Bounds.Size).Contains(at))
+                {
+                    CarryDrag(at, e.KeyModifiers);
+                    return;
+                }
+                PlaceDragImage();
+            }
+            // With a button held the window follows the pointer outside its frame too (a selection, a drag).
+            if ((_pressedButton >= 0 ? ToGeckoAnywhere(at) : ToGecko(at)) is { } g)
+                SendMouse(NightlyProtocol.MouseKind.Move, _pressedButton, g, e.KeyModifiers, 0);
         };
         _host.PointerExited += (_, e) =>
         {
             if (_pressedButton < 0) SendMouse(NightlyProtocol.MouseKind.Exit, -1, (-1, -1), e.KeyModifiers, 0);
         };
+        // AppKit drags over the pane (files from Finder, Ombra's own carried drag) are the window's: Nightly's view takes
+        // them as if it were on screen (DragTarget), and says what a drop would do (OnDragStatus).
+        _host.AddHandler(DragDrop.DragEnterEvent, (_, e) => OnAppKitDrag(e, NightlyProtocol.DragPhase.Enter));
+        _host.AddHandler(DragDrop.DragOverEvent, (_, e) => OnAppKitDrag(e, NightlyProtocol.DragPhase.Over));
+        _host.AddHandler(DragDrop.DragLeaveEvent, (_, e) => OnAppKitDrag(e, NightlyProtocol.DragPhase.Exit));
+        _host.AddHandler(DragDrop.DropEvent, (_, e) => OnAppKitDrag(e, NightlyProtocol.DragPhase.Drop));
         // macOS sends scroll events through NightlyScrollMonitor (with their phases); this is only what reaches Avalonia anyway.
         _host.PointerWheelChanged += (_, e) => e.Handled = true;
         _host.KeyDown += (_, e) => OnKey(e, down: true);

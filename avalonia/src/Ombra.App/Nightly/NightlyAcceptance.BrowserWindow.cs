@@ -123,6 +123,8 @@ internal static partial class NightlyAcceptance
             Check("browser-window-single", single, detail);
             await Task.Delay(600);
             Shot("p-browser-window-after");
+            // Drags run on the pane's mouse: in the page, out of the pane, files from Finder (NightlyAcceptance.DragDrop.cs).
+            await DragDropChecks(pane);
             await SpacesChecks(pane);
             vm.ShowChatsCommand.Execute(null);
             Check("browser-window-hidden", await Until(() => !pane.IsEffectivelyVisible && Named<Border>("Sidebar") is not null, 10)
@@ -396,9 +398,6 @@ internal static partial class NightlyAcceptance
                     LogNightlyWindows(pane?.RuntimePid ?? 0);
                     break;
                 case "activate":
-                case "session": // SessionChecks: the window's tabs back after Nightly quits, and after a crash
-                    await SessionChecks();
-                    break;
                     Activate();
                     await Task.Delay(300);
                     break;
@@ -408,16 +407,17 @@ internal static partial class NightlyAcceptance
                 case "swipe" when pane is not null: // swipe X Y left|right: a horizontal two-finger swipe at a pane point
                     Swipe(pane, new Point(D(1), D(2)), parts[3] == "left" ? -1 : 1);
                     break;
-                case "newwindows" when pane is not null:
-                    // NewWindowChecks on their own (their PASS/FAIL lines in the log).
-                    await NewWindowChecks(pane);
-                    break;
-                case "dialogs" when pane is not null:
-                    // DialogChecks on their own (their PASS/FAIL lines in the log).
-                    await DialogChecks(pane);
-                    break;
                 case "spaces" when pane is not null: // SpacesChecks on the window as it is (one space, the white page shown)
                     await SpacesChecks(pane);
+                    break;
+                case "session": // SessionChecks: the window's tabs back after Nightly quits, and after a crash
+                    await SessionChecks();
+                    break;
+                case "down" or "move" or "up" or "drag" when pane is not null:
+                    await DragCommand(line, pane);
+                    break;
+                case "dnd" when pane is not null: // DragDropChecks on their own (their PASS/FAIL lines in the log)
+                    await DragDropChecks(pane);
                     break;
                 case "sheet" when pane is not null:
                     // The Browser page's sheet against the Chats page's at this size and theme (SheetMatches); NAME's shots.
@@ -432,6 +432,14 @@ internal static partial class NightlyAcceptance
                     // The window's top-left on the desktop (Avalonia's Position: a second display is another origin).
                     window.Position = new PixelPoint((int)D(1), (int)D(2));
                     await Task.Delay(1200);
+                    break;
+                case "newwindows" when pane is not null:
+                    // NewWindowChecks on their own (their PASS/FAIL lines in the log).
+                    await NewWindowChecks(pane);
+                    break;
+                case "dialogs" when pane is not null:
+                    // DialogChecks on their own (their PASS/FAIL lines in the log).
+                    await DialogChecks(pane);
                     break;
                 case "newtabs":
                     // NewTabChecks on their own (their PASS/FAIL lines in the log); the Browser page first shows here.
