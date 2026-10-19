@@ -17,7 +17,7 @@ public sealed partial class ConversationState
     /// <summary>Runtime entries sent to omp that no snapshot listed yet: an older snapshot must not drop them.</summary>
     private readonly HashSet<long> _awaitingEngine = [];
     /// <summary>Queued input whose delivery echo already removed its chip; a snapshot still listing it must not bring it back.</summary>
-    private List<(QueueKind Kind, string Text, bool HasImages)> _deliveredQueued = [];
+    private List<(QueueKind Kind, string Text, bool HasImages, bool LiveSteered)> _deliveredQueued = [];
     private long _queueUpdateReadAt;
     /// <summary>This omp reports its queue: a delivery echo then removes only the chip with its exact text, since the
     /// snapshot already took a delivered chip whose text omp expanded.</summary>
@@ -32,7 +32,8 @@ public sealed partial class ConversationState
     private void OnQueueUpdate(JsonElement j, long readAt)
     {
         if (!j.TryGetProperty("steering", out var steering) || !j.TryGetProperty("followUp", out var followUp)) return;
-        ApplyEngineQueue(Strings(steering), Strings(followUp), readAt);
+        var liveSteered = j.TryGetProperty("liveSteered", out var live) && live.ValueKind == JsonValueKind.Number && live.TryGetInt32(out var count) ? count : 0;
+        ApplyEngineQueue(Strings(steering), Strings(followUp), readAt, liveSteered);
 
         static string[] Strings(JsonElement a) => a.ValueKind == JsonValueKind.Array
             ? [.. a.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.String).Select(e => e.GetString()!)]
@@ -40,18 +41,18 @@ public sealed partial class ConversationState
     }
 
     /// <summary>Mirrors omp's queue snapshot read at <paramref name="readAt"/>; an older read than the last applied one is ignored.</summary>
-    public void ApplyEngineQueue(IReadOnlyList<string> steering, IReadOnlyList<string> followUp, long readAt)
+    public void ApplyEngineQueue(IReadOnlyList<string> steering, IReadOnlyList<string> followUp, long readAt, int liveSteered = 0)
     {
         if (readAt < _queueUpdateReadAt) return;
         _queueUpdateReadAt = readAt;
         _engineReportsQueue = true;
-        var engine = steering.Select(t => (Kind: QueueKind.Steer, Text: t))
-            .Concat(followUp.Select(t => (Kind: QueueKind.FollowUp, Text: t))).ToList();
+        var engine = steering.Select((t, index) => (Kind: QueueKind.Steer, Text: t, LiveSteered: index < liveSteered))
+            .Concat(followUp.Select(t => (Kind: QueueKind.FollowUp, Text: t, LiveSteered: false))).ToList();
 
-        var stillListed = new List<(QueueKind, string, bool)>();
+        var stillListed = new List<(QueueKind, string, bool, bool)>();
         foreach (var d in _deliveredQueued)
         {
-            var i = engine.FindIndex(e => Lists(e.Text, d.Text, d.HasImages));
+            var i = engine.FindIndex(e => (!d.LiveSteered || e.LiveSteered) && Lists(e.Text, d.Text, d.HasImages));
             if (i < 0) continue;
             engine.RemoveAt(i);
             stillListed.Add(d);
@@ -61,22 +62,22 @@ public sealed partial class ConversationState
         var local = new List<int>();
         for (var i = 0; i < _queued.Count; i++)
             if (!_queued[i].Recovered && !_queued[i].Deferred && _queued[i].Kind != QueueKind.BuiltinCommand) local.Add(i);
-        var kinds = new Dictionary<int, QueueKind>();
-        var unmatched = new List<(QueueKind Kind, string Text)>();
+        var kinds = new Dictionary<int, (QueueKind Kind, bool LiveSteered)>();
+        var unmatched = new List<(QueueKind Kind, string Text, bool LiveSteered)>();
         // Same kind and text first; then the text under the other kind (omp promoted it); then, in order, the same
         // kind (omp expanded a template, so the chip text differs from what was sent).
         foreach (var e in engine)
         {
             var at = local.FindIndex(i => !kinds.ContainsKey(i) && _queued[i].Kind == e.Kind && Lists(e.Text, _queued[i]));
             if (at < 0) unmatched.Add(e);
-            else kinds[local[at]] = e.Kind;
+            else kinds[local[at]] = (e.Kind, e.LiveSteered);
         }
         for (var n = 0; n < unmatched.Count;)
         {
             var e = unmatched[n];
             var at = local.FindIndex(i => !kinds.ContainsKey(i) && Lists(e.Text, _queued[i]));
             if (at < 0) { n++; continue; }
-            kinds[local[at]] = e.Kind;
+            kinds[local[at]] = (e.Kind, e.LiveSteered);
             unmatched.RemoveAt(n);
         }
         for (var n = 0; n < unmatched.Count;)
@@ -84,7 +85,7 @@ public sealed partial class ConversationState
             var e = unmatched[n];
             var at = local.FindIndex(i => !kinds.ContainsKey(i) && _queued[i].Kind == e.Kind && !_awaitingEngine.Contains(_queued[i].Seq));
             if (at < 0) { n++; continue; }
-            kinds[local[at]] = e.Kind;
+            kinds[local[at]] = (e.Kind, e.LiveSteered);
             unmatched.RemoveAt(n);
         }
 
@@ -96,7 +97,11 @@ public sealed partial class ConversationState
             if (kinds.TryGetValue(i, out var kind))
             {
                 _awaitingEngine.Remove(q.Seq);
-                if (kind != q.Kind) { _queued[i] = q with { Kind = kind }; changed = true; }
+                if (kind.Kind != q.Kind || kind.LiveSteered != q.LiveSteered)
+                {
+                    _queued[i] = q with { Kind = kind.Kind, LiveSteered = kind.LiveSteered };
+                    changed = true;
+                }
             }
             else if (!HoldQueueRemovals && !_awaitingEngine.Contains(q.Seq))
             {
@@ -106,7 +111,7 @@ public sealed partial class ConversationState
         }
         foreach (var e in unmatched)
         {
-            _queued.Add(new QueuedMessage(++_queueSeq, e.Kind, e.Text, []));
+            _queued.Add(new QueuedMessage(++_queueSeq, e.Kind, e.Text, []) { LiveSteered = e.LiveSteered });
             changed = true;
         }
         if (!changed) return;
@@ -127,7 +132,7 @@ public sealed partial class ConversationState
     private void DeliverQueued(QueuedMessage q)
     {
         _awaitingEngine.Remove(q.Seq);
-        _deliveredQueued.Add((q.Kind, q.Text, q.Images.Count > 0));
+        _deliveredQueued.Add((q.Kind, q.Text, q.Images.Count > 0, q.LiveSteered));
         RemoveQueued(q.Seq);
         if (_deliveredQueued.Count > 32) _deliveredQueued.RemoveAt(0);
     }

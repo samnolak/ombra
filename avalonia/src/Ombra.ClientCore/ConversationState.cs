@@ -24,6 +24,7 @@ public sealed partial class ConversationState
 
     private readonly List<Row> _rows = [];
     private readonly Dictionary<string, Row> _toolsByCallId = [];
+    private readonly HashSet<string> _resumedToolCallIds = new(StringComparer.Ordinal);
     private readonly HashSet<string> _liveIrcMessages = new(StringComparer.Ordinal);
     private readonly Queue<DebugEntry> _debug = new();
     private Row? _streamingAssistant;
@@ -234,6 +235,7 @@ public sealed partial class ConversationState
         public TranscriptItem Item = item;
         public StringBuilder? Text;
         public StringBuilder? Thinking;
+        public int ThinkingBlockStart;
         public MonotonicTime Elapsed;
         public bool Dirty;
     }
@@ -284,6 +286,7 @@ public sealed partial class ConversationState
         _rows.Clear();
         _retryNotice = null;
         _toolsByCallId.Clear();
+        _resumedToolCallIds.Clear();
         _liveIrcMessages.Clear();
         _newFileCalls.Clear();
         _historyOrphanTools.Clear();
@@ -442,7 +445,7 @@ public sealed partial class ConversationState
     {
         var index = _queued.FindIndex(q => q.Seq == sequence);
         if (index < 0 || _queued[index].Recovered) return;
-        _queued[index] = _queued[index] with { Recovered = true, Images = images ?? _queued[index].Images };
+        _queued[index] = _queued[index] with { Recovered = true, LiveSteered = false, Images = images ?? _queued[index].Images };
         QueueChanged?.Invoke();
         Touch();
     }
@@ -486,7 +489,7 @@ public sealed partial class ConversationState
         for (var i = 0; i < _queued.Count; i++)
             if (!_queued[i].Recovered && (includeDeferred || !_queued[i].Deferred))
             {
-                _queued[i] = _queued[i] with { Recovered = true };
+                _queued[i] = _queued[i] with { Recovered = true, LiveSteered = false };
                 changed = true;
             }
         if (!changed) return;
@@ -532,11 +535,11 @@ public sealed partial class ConversationState
             if (local.Recovered || local.Deferred) continue;
             if (matched.Contains(local.Seq) || truncated ||
                 (imagesDropped && restored.Any(returned => SameText(local, returned))))
-                _queued[i] = local with { Recovered = true };
+                _queued[i] = local with { Recovered = true, LiveSteered = false };
             else _queued.RemoveAt(i);
         }
         foreach (var returned in unknown)
-            _queued.Add(returned with { Seq = ++_queueSeq, Recovered = true });
+            _queued.Add(returned with { Seq = ++_queueSeq, Recovered = true, LiveSteered = false });
         QueueChanged?.Invoke();
         Touch();
 
@@ -573,6 +576,10 @@ public sealed partial class ConversationState
         switch (frame.Type)
         {
             case "agent_start":
+                _resumedToolCallIds.Clear();
+                if (j.TryGetProperty("resumedToolCallIds", out var resumed) && resumed.ValueKind == JsonValueKind.Array)
+                    foreach (var call in resumed.EnumerateArray())
+                        if (call.ValueKind == JsonValueKind.String) _resumedToolCallIds.Add(call.GetString()!);
                 AwaitingSettle = false;
                 RunGeneration++;
                 // A replaced run's late start (its abort is still settling) must not end the replacement's guard.
@@ -956,8 +963,16 @@ public sealed partial class ConversationState
             case "text_delta":
                 row.Text!.Append(Str(e, "delta"));
                 break;
+            case "thinking_start":
+                row.ThinkingBlockStart = row.Thinking!.Length;
+                return;
             case "thinking_delta":
                 row.Thinking!.Append(Str(e, "delta"));
+                break;
+            case "thinking_end" when Bool(e, "narration"):
+                // Anthropic identifies user-facing prose only when its signature closes the block.
+                row.Thinking!.Length = row.ThinkingBlockStart;
+                row.Text!.Append(Str(e, "content"));
                 break;
             default:
                 return;
@@ -1019,8 +1034,12 @@ public sealed partial class ConversationState
         var args = hasArgs ? Compact(a) : "";
         var name = Str(j, "toolName") ?? "tool";
         var written = hasArgs ? WrittenContent(name, a) : null;
-        _toolsByCallId[id] = Add(new ToolItem(0, id, name, Truncate(args, MaxArgsChars), ToolStatus.Running, null, hasArgs ? ToolSummary(name, a) : "",
-            written, now) { Changes = hasArgs ? WrittenChange(id, name, a, written, live: true) : null });
+        var tool = new ToolItem(0, id, name, Truncate(args, MaxArgsChars), ToolStatus.Running, null, hasArgs ? ToolSummary(name, a) : "",
+            written, now) { Changes = hasArgs ? WrittenChange(id, name, a, written, live: true) : null };
+        if (_resumedToolCallIds.Remove(id) && _toolsByCallId.TryGetValue(id, out var resumed))
+            Set(resumed, tool with { Key = resumed.Key });
+        else
+            _toolsByCallId[id] = Add(tool);
         _toolsByCallId[id].Elapsed = MonotonicTime.Start(_clock);
     }
 
@@ -1170,6 +1189,7 @@ public sealed partial class ConversationState
                 var approval = method == "select" && j.TryGetProperty("approval", out var a) ? ApprovalRequest.Parse(a) : null;
                 var kind = method switch
                 {
+                    "select" when approval is not null => DialogKind.Approval,
                     "select" when options is [{ Label: "Approve" }, { Label: "Deny" }] => DialogKind.Approval,
                     "select" => DialogKind.Select,
                     "confirm" => DialogKind.Confirm,
@@ -1459,7 +1479,7 @@ public sealed partial class ConversationState
 
     private static string Raw(JsonElement e, string name) => e.TryGetProperty(name, out var p) ? p.ToString() : "?";
 
-    /// <summary>Concatenates content parts of one kind (<c>text</c> or <c>thinking</c>); a string content counts as text.</summary>
+    /// <summary>Concatenates displayed text or thinking; provider-marked narration belongs to the answer, not reasoning.</summary>
     internal static string ContentText(JsonElement message, string kind)
     {
         if (!message.TryGetProperty("content", out var c)) return "";
@@ -1467,8 +1487,11 @@ public sealed partial class ConversationState
         if (c.ValueKind != JsonValueKind.Array) return "";
         var sb = new StringBuilder();
         foreach (var part in c.EnumerateArray())
-            if (Str(part, "type") == kind && Str(part, kind) is { } s)
-                sb.Append(s);
+        {
+            var type = Str(part, "type");
+            var displayedKind = type == "thinking" && Bool(part, "narration") ? "text" : type;
+            if (displayedKind == kind && type is not null && Str(part, type) is { } s) sb.Append(s);
+        }
         return sb.ToString();
     }
 

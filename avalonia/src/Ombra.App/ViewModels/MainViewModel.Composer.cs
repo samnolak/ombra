@@ -53,6 +53,9 @@ public sealed partial class QueuedItemViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(Kind));
             OnPropertyChanged(nameof(Tooltip));
             OnPropertyChanged(nameof(CanSendNow));
+            OnPropertyChanged(nameof(CanWithdraw));
+            RemoveCommand.NotifyCanExecuteChanged();
+            EditCommand.NotifyCanExecuteChanged();
             SendNowCommand.NotifyCanExecuteChanged();
         }
     }
@@ -66,17 +69,19 @@ public sealed partial class QueuedItemViewModel : ObservableObject, IDisposable
         QueueKind.BuiltinCommand => Loc.T("Command"),
         _ => Loc.T("Queued"),
     };
-    public string Tooltip => Model.Kind == QueueKind.Steer
-        ? Loc.T("omp reads this at its next step. ↑ in the empty message box edits it.")
-        : Loc.T("Sent when omp finishes its current work. ↑ in the empty message box edits it.");
+    public string Tooltip => Model.LiveSteered ? Loc.T("omp already has that message.")
+        : Model.Kind == QueueKind.Steer
+            ? Loc.T("omp reads this at its next step. ↑ in the empty message box edits it.")
+            : Loc.T("Sent when omp finishes its current work. ↑ in the empty message box edits it.");
 
     /// <summary>Only omp's follow-up queue can be promoted; a steer is already read at the next step.</summary>
     public bool CanSendNow => Model is { Kind: QueueKind.FollowUp, Recovered: false };
+    public bool CanWithdraw => !Model.LiveSteered;
     public string SendNowTooltip => Loc.T("Send now: omp reads this at its next step instead of after its current work.");
 
     [RelayCommand(CanExecute = nameof(CanSendNow))] private Task SendNow() => _owner.SendQueuedNowAsync(this);
-    [RelayCommand] private Task Remove() => _owner.WithdrawQueuedAsync(this, edit: false);
-    [RelayCommand] private Task Edit() => _owner.WithdrawQueuedAsync(this, edit: true);
+    [RelayCommand(CanExecute = nameof(CanWithdraw))] private Task Remove() => _owner.WithdrawQueuedAsync(this, edit: false);
+    [RelayCommand(CanExecute = nameof(CanWithdraw))] private Task Edit() => _owner.WithdrawQueuedAsync(this, edit: true);
 
     public void Dispose()
     {
@@ -459,7 +464,9 @@ public sealed partial class MainViewModel
     public bool EditLastQueued()
     {
         if (QueuedMessages.Count == 0 || ComposerText.Length > 0 || Attachments.Count > 0 || PastedTexts.Count > 0) return false;
-        _ = WithdrawQueuedAsync(QueuedMessages[^1], edit: true);
+        var last = QueuedMessages.LastOrDefault(q => q.CanWithdraw);
+        if (last is null) return false;
+        _ = WithdrawQueuedAsync(last, edit: true);
         return true;
     }
 
@@ -471,6 +478,7 @@ public sealed partial class MainViewModel
     /// </summary>
     internal async Task WithdrawQueuedAsync(QueuedItemViewModel item, bool edit)
     {
+        if (!item.CanWithdraw) return;
         var open = _open;
         if (!_withdrawing.Add((open.Controller, item.Model.Seq))) return;
         try

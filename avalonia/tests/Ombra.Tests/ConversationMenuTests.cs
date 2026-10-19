@@ -227,6 +227,35 @@ public sealed class ConversationMenuTests
     }
 
     [AvaloniaFact]
+    public async Task Live_steering_disables_withdrawal_without_hiding_the_pending_message()
+    {
+        await using var vm = Model();
+        using var queue = new QueuedItemViewModel(new QueuedMessage(1, QueueKind.Steer, "already sent", []), vm);
+        Assert.True(queue.EditCommand.CanExecute(null));
+        Assert.True(queue.RemoveCommand.CanExecute(null));
+        queue.Model = queue.Model with { LiveSteered = true };
+        Assert.False(queue.CanWithdraw);
+        Assert.False(queue.EditCommand.CanExecute(null));
+        Assert.False(queue.RemoveCommand.CanExecute(null));
+        var target = new Border { DataContext = queue, Height = 80, Background = Avalonia.Media.Brushes.Gray };
+        ConversationMenus.SetKind(target, ConversationMenuKind.Queue);
+        var window = Show(vm, target);
+        try
+        {
+            var menu = Open(window, target);
+            Assert.False(Item(menu, "Edit").IsEnabled);
+            Assert.False(Item(menu, "Remove").IsEnabled);
+            Assert.False(Item(menu, "Send now").IsEnabled);
+            Assert.Equal("already sent", queue.Text);
+            menu.Hide();
+            queue.Model = queue.Model with { LiveSteered = false };
+            Assert.True(queue.EditCommand.CanExecute(null));
+            Assert.True(queue.RemoveCommand.CanExecute(null));
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
     public async Task Image_save_preserves_original_bytes_and_surfaces_picker_and_write_errors()
     {
         await using var vm = Model();

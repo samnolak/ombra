@@ -36,6 +36,9 @@ public sealed record QueuedMessage(long Seq, QueueKind Kind, string Text, IReadO
 {
     public string? SubmissionId { get; init; }
     public bool Recovered { get; init; }
+    /// <summary>Already sent into the provider's streaming response; remains visible until its transcript echo.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool LiveSteered { get; init; }
     [System.Text.Json.Serialization.JsonIgnore]
     public bool Deferred => Kind is QueueKind.BuiltinCommand or QueueKind.DeferredFollowUp;
 }

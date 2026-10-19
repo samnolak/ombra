@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Ombra.Rpc;
 using Ombra.ClientCore;
 
 namespace Ombra.Tests;
@@ -6,6 +8,19 @@ namespace Ombra.Tests;
 public sealed class ApprovalTests
 {
     private static readonly TimeSpan Wait = TimeSpan.FromSeconds(20);
+
+    [Fact]
+    public void Typed_approval_with_upstream_session_option_is_not_a_generic_question()
+    {
+        const string json = """{"type":"extension_ui_request","id":"approval-session","method":"select","title":"Allow tool: bash","options":["Approve","Approve bash for this session","Deny"],"approval":{"tool":"bash","risk":"exec","command":"echo hi","scopes":["once","session"]}}""";
+        using var document = JsonDocument.Parse(json);
+        var state = new ConversationState();
+        state.Apply(new RpcFrame("extension_ui_request", null, document.RootElement.Clone(), 1, json.Length), DateTimeOffset.UtcNow);
+        var dialog = Assert.Single(state.Snapshot().Dialogs);
+        Assert.Equal(DialogKind.Approval, dialog.Kind);
+        Assert.NotNull(dialog.Approval);
+        Assert.True(dialog.Approval.AllowsSession);
+    }
 
     private static async Task<(SessionController s, PendingDialog d)> StartWithPendingApprovalAsync(string scenario = "approval")
     {

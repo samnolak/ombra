@@ -173,11 +173,103 @@ public sealed class EngineQueueAndMessageIdTests
     }
 
     [Fact]
+    public async Task Withdrawal_rechecks_live_steering_even_when_the_clicked_chip_predates_it()
+    {
+        await using var controller = new SessionController(
+            TestProcesses.FakeFactory("normal", TestProcesses.TempDir("live-steering-sessions")),
+            new LaunchRequest(TestProcesses.TempDir("live-steering-project")));
+        QueuedMessage clicked = null!;
+        controller.Mutate(s =>
+        {
+            clicked = s.Enqueue(QueueKind.Steer, "same", []);
+            s.Enqueue(QueueKind.Steer, "same", []);
+            s.ApplyEngineQueue(["same", "same"], [], 1, liveSteered: 1);
+        });
+        Assert.False(clicked.LiveSteered);
+        // No process is connected: the guard must return before attempting the text-matching wire command.
+        Assert.Null(await controller.RemoveQueuedAsync(clicked));
+        Assert.Equal(2, controller.Snapshot().Queued.Count);
+    }
+
+    [Fact]
+    public void Live_steering_stays_listed_until_echo_without_consuming_an_undelivered_duplicate()
+    {
+        var s = new ConversationState();
+        var first = s.Enqueue(QueueKind.Steer, "same", [Image("first.png")]);
+        var second = s.Enqueue(QueueKind.Steer, "same", []);
+        s.Apply(F("""{"type":"queue_update","steering":["same","same"],"followUp":[],"liveSteered":1}"""), T);
+        var queued = s.Snapshot().Queued;
+        Assert.True(queued.Single(q => q.Seq == first.Seq).LiveSteered);
+        Assert.False(queued.Single(q => q.Seq == second.Seq).LiveSteered);
+        s.Apply(F("""{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"same"}]}}"""), T);
+        Assert.Equal(second.Seq, Assert.Single(s.Snapshot().Queued).Seq);
+        Assert.Equal("first.png", Assert.Single(Assert.Single(s.Snapshot().Items.OfType<UserItem>()).Images).Name);
+        s.Apply(Queue(["same"], []), T);
+        Assert.False(Assert.Single(s.Snapshot().Queued).LiveSteered);
+    }
+
+    [Fact]
+    public void Get_state_live_steering_marks_the_same_chips_and_recovery_clears_the_flag()
+    {
+        var state = OmpSessionState.Parse(JsonDocument.Parse(
+            """{"queuedMessages":{"steering":["sent","pending"],"followUp":["later"],"liveSteered":1}}""").RootElement);
+        var (steering, followUp, liveSteered) = state.QueuedMessages!.Value;
+        var s = new ConversationState();
+        s.ApplyEngineQueue(steering, followUp, 10, liveSteered);
+        Assert.Equal([true, false, false], s.Snapshot().Queued.Select(q => q.LiveSteered));
+        s.ApplyEngineQueue(steering, followUp, 9, 0);
+        Assert.True(s.Snapshot().Queued[0].LiveSteered);
+        s.RecoverQueue();
+        Assert.All(s.Snapshot().Queued, q => { Assert.True(q.Recovered); Assert.False(q.LiveSteered); });
+    }
+
+    [Fact]
+    public void Narration_is_answer_text_in_deltas_final_messages_and_history()
+    {
+        var s = new ConversationState();
+        s.Apply(F("""{"type":"message_start","messageId":"n","message":{"role":"assistant","content":[]}}"""), T);
+        s.Apply(F("""{"type":"message_update","messageId":"n","assistantMessageEvent":{"type":"thinking_delta","delta":"private"}}"""), T);
+        s.Apply(F("""{"type":"message_update","messageId":"n","assistantMessageEvent":{"type":"thinking_start","contentIndex":1}}"""), T);
+        s.Apply(F("""{"type":"message_update","messageId":"n","assistantMessageEvent":{"type":"thinking_delta","contentIndex":1,"delta":"Checking now. "}}"""), T);
+        s.Apply(F("""{"type":"message_update","messageId":"n","assistantMessageEvent":{"type":"thinking_end","contentIndex":1,"content":"Checking now. ","narration":true}}"""), T);
+        s.Apply(F(Delta("n", "Done.")), T);
+        var streamed = Assert.Single(s.Snapshot().Items.OfType<AssistantItem>());
+        Assert.Equal("Checking now. Done.", streamed.Text);
+        Assert.Equal("private", streamed.Thinking);
+        const string message = """{"role":"assistant","content":[{"type":"thinking","thinking":"private"},{"type":"thinking","thinking":"Checking now. ","narration":true},{"type":"text","text":"Done."}],"stopReason":"stop"}""";
+        s.Apply(F("""{"type":"message_end","messageId":"n","message":""" + message + "}"), T);
+        var final = Assert.Single(s.Snapshot().Items.OfType<AssistantItem>());
+        Assert.Equal(streamed.Text, final.Text);
+        Assert.Equal(streamed.Thinking, final.Thinking);
+        Assert.Equal(0, s.Snapshot().StreamMismatches);
+        s.ReplaceHistory(JsonDocument.Parse("[" + message + "]").RootElement);
+        var history = Assert.Single(s.Snapshot().Items.OfType<AssistantItem>());
+        Assert.Equal(final.Text, history.Text);
+        Assert.Equal(final.Thinking, history.Thinking);
+    }
+
+    [Fact]
+    public void A_resumed_tool_call_reuses_its_history_row()
+    {
+        var s = new ConversationState();
+        s.ReplaceHistory(JsonDocument.Parse("""[{"role":"assistant","content":[{"type":"toolCall","id":"call","name":"read","arguments":{"path":"file"}}]}]""").RootElement);
+        var original = Assert.Single(s.Snapshot().Items.OfType<ToolItem>());
+        s.Apply(F("""{"type":"agent_start","resumedToolCallIds":["call"]}"""), T);
+        s.Apply(F("""{"type":"tool_execution_start","toolCallId":"call","toolName":"read","args":{"path":"file"}}"""), T);
+        var running = Assert.Single(s.Snapshot().Items.OfType<ToolItem>());
+        Assert.Equal(original.Key, running.Key);
+        Assert.Equal(ToolStatus.Running, running.Status);
+        s.Apply(F("""{"type":"tool_execution_end","toolCallId":"call","toolName":"read","result":{"content":[{"type":"text","text":"result"}]},"isError":false}"""), T);
+        Assert.Equal(ToolStatus.Succeeded, Assert.Single(s.Snapshot().Items.OfType<ToolItem>()).Status);
+    }
+
+    [Fact]
     public void Get_state_reports_queued_messages_and_an_older_read_is_ignored()
     {
         var state = OmpSessionState.Parse(JsonDocument.Parse(
             """{"isStreaming":true,"queuedMessages":{"steering":["s"],"followUp":["f1","f2"]}}""").RootElement);
-        var (steering, followUp) = state.QueuedMessages!.Value;
+        var (steering, followUp, liveSteered) = state.QueuedMessages!.Value;
+        Assert.Equal(0, liveSteered);
         Assert.Equal(["s"], steering);
         Assert.Equal(["f1", "f2"], followUp);
         Assert.Null(OmpSessionState.Parse(JsonDocument.Parse("""{"isStreaming":false}""").RootElement).QueuedMessages);

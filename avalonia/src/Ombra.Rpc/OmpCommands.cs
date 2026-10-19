@@ -31,8 +31,8 @@ public sealed record OmpSessionState(
     public bool GoalSupported { get; init; }
     /// <summary>The session's goal (<c>get_state.goal</c>); null when it has none (or omp has no goal mode).</summary>
     public OmpGoal? Goal { get; init; }
-    /// <summary>omp's queue as chip texts (<c>queuedMessages</c>, the same snapshot as <c>queue_update</c>); null from an omp without it.</summary>
-    public (IReadOnlyList<string> Steering, IReadOnlyList<string> FollowUp)? QueuedMessages { get; init; }
+    /// <summary>omp's queue snapshot; the leading <c>LiveSteered</c> steering chips have reached the provider and cannot be withdrawn.</summary>
+    public (IReadOnlyList<string> Steering, IReadOnlyList<string> FollowUp, int LiveSteered)? QueuedMessages { get; init; }
     /// <summary>
     /// Nothing is running, compacting or queued. Uses <c>isSettled</c> when omp provides it (upstream after
     /// 18.2.0); 18.2.0 has no such field, so the three 18.2.0 fields are combined.
@@ -69,7 +69,7 @@ public sealed record OmpSessionState(
             QueuedMessages = d.TryGetProperty("queuedMessages", out var qm) && qm.ValueKind == JsonValueKind.Object
                 && qm.TryGetProperty("steering", out var qs) && qs.ValueKind == JsonValueKind.Array
                 && qm.TryGetProperty("followUp", out var qf) && qf.ValueKind == JsonValueKind.Array
-                ? (Texts(qs), Texts(qf)) : null,
+                ? (Texts(qs), Texts(qf), qm.TryGetProperty("liveSteered", out var live) && live.ValueKind == JsonValueKind.Number && live.TryGetInt32(out var count) ? Math.Clamp(count, 0, qs.GetArrayLength()) : 0) : null,
         };
     }
 
