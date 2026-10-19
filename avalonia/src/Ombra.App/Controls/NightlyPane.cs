@@ -113,6 +113,14 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
     public bool IsBrowserWindow { get; init; }
 
     /// <summary>
+    /// For a browser window: whether its shortcuts are its own also while Ombra's keyboard focus is elsewhere in the
+    /// window, on nothing that takes keys (the rail after a click on it, or no element: the page showed before the
+    /// pane could take the focus). The key then gives the pane the keyboard first, so what is typed next (the URL after
+    /// ⌘T) reaches the window too. Unset: only while the pane has the keyboard.
+    /// </summary>
+    public Func<bool>? TakesShortcutsUnfocused { get; init; }
+
+    /// <summary>
     /// The page opened a window (<c>window.open</c>, <c>target=_blank</c>, "Open link in new tab"): its id, for a new
     /// pane's <see cref="AdoptWindow"/>. Without a listener the window is closed.
     /// </summary>
@@ -552,7 +560,18 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
 
     void INightlyView.OnCursor(int cursor) => _host.Cursor = CursorFor(cursor);
 
-    void INightlyView.OnTextRect(NightlyProtocol.TextRectInfo rect) => _ime.SetCaret(FromGecko(rect.X, rect.Y, rect.Width, rect.Height));
+    void INightlyView.OnTextRect(NightlyProtocol.TextRectInfo rect)
+    {
+        TextRects++;
+        LastTextRect = new Rect(rect.X, rect.Y, rect.Width, rect.Height);
+        _ime.SetCaret(FromGecko(rect.X, rect.Y, rect.Width, rect.Height));
+    }
+
+    /// <summary>How many times Nightly said where its composition is, and the last place (its window's points, top-left
+    /// origin): development checks see where the keyboard's editor is.</summary>
+    internal int TextRects { get; private set; }
+
+    internal Rect LastTextRect { get; private set; }
 
     void INightlyView.OnPopupWindow(uint windowId)
     {
@@ -752,12 +771,16 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
     // ── NightlyShortcutMonitor.ITarget (a browser window's ⌘ and Control shortcuts) ──
 
     bool NightlyShortcutMonitor.ITarget.TakesShortcut(nint nsWindow) =>
-        !_closed && _runtime is not null && _windowId != 0 && _host.IsFocused && IsEffectivelyVisible
+        !_closed && _runtime is not null && _windowId != 0 && IsEffectivelyVisible
+        && (_host.IsFocused || (IsBrowserWindow && TakesShortcutsUnfocused?.Invoke() == true))
         && _top?.TryGetPlatformHandle() is { Handle: not 0 } handle && NightlyCocoa.WindowOf(handle.Handle) == nsWindow;
 
     void NightlyShortcutMonitor.ITarget.Shortcut(in NightlyCocoa.KeyEvent key)
     {
         if (_runtime is null || _windowId == 0) return;
+        // A shortcut taken while Ombra's focus was elsewhere (TakesShortcutsUnfocused): the keys after it are the
+        // window's too. Focusing activates the window in Gecko before the key arrives (SendFocus).
+        if (!_host.IsFocused) _host.Focus();
         _keySent = key.Identity;
         NoteUserInput();
         TakeActive();

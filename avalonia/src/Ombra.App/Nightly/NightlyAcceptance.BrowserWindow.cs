@@ -433,6 +433,10 @@ internal static partial class NightlyAcceptance
                     window.Position = new PixelPoint((int)D(1), (int)D(2));
                     await Task.Delay(1200);
                     break;
+                case "newtabs":
+                    // NewTabChecks on their own (their PASS/FAIL lines in the log); the Browser page first shows here.
+                    await NewTabChecks(0);
+                    break;
                 default:
                     Log($"DRIVE unknown or not possible now: {line}");
                     break;

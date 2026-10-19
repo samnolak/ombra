@@ -90,7 +90,9 @@ public sealed partial class MainWindow
         if (e.Handled || Vm is not { } vm) return;
         var command = this.GetPlatformSettings()?.HotkeyConfiguration.CommandModifiers ?? KeyModifiers.Control;
         var focused = FocusManager?.GetFocusedElement() as Visual;
-        var browser = vm.ShowBrowserPage ? BrowserPanel
+        // With Nightly the Browser page is its window, whose shortcuts reach it first (NightlyShortcutMonitor): the
+        // built-in preview under it is hidden, and a new tab or the address box there would show nowhere.
+        var browser = vm.ShowBrowserPage ? (vm.Browser.UseNightly ? null : BrowserPanel)
             : focused?.GetSelfAndVisualAncestors().OfType<Controls.PreviewPanel>().FirstOrDefault();
         browser?.HandleBrowserShortcut(e);
         if (e.Handled) return;
@@ -107,10 +109,11 @@ public sealed partial class MainWindow
         }
         else if (e.KeyModifiers == command && e.Key is Key.L or Key.Escape)
         {
-            // The browser owns its address shortcut, including when web content has focus.
+            // The browser owns its address shortcut, including when web content has focus. Nightly's window takes its
+            // ⌘L itself (NightlyShortcutMonitor); one that reaches Ombra (an overlay had the keyboard) stays put.
             if (e.Key == Key.L && vm.ShowBrowserPage)
             {
-                BrowserPanel.FocusAddress();
+                if (!vm.Browser.UseNightly) BrowserPanel.FocusAddress();
                 e.Handled = true;
                 return;
             }
