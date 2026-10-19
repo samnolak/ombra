@@ -362,6 +362,9 @@ Now (desktop `ZenEmbedHost.mm` "Drags", `nsDragService.mm` → `ZenEmbedHost::Be
   runtime), dragover repeats every 100 ms while the pointer rests, the release drops, Escape cancels, Ombra's
   deactivation cancels. DragStarted{PNG image, its frame, the press, pasteboard} lets `NightlyPane` draw the drag image
   under the pointer and show AppKit's drag cursors (DragStatus).
+  Cancellation synthesizes Escape when no Escape event is available (focus loss or a lost release), matching the
+  carried-drag cancellation path: Gecko must set `mozUserCancelled`, not just `dropEffect: none`, or tab dragend
+  treats the interrupted drag as a split-view drop.
 - When the pointer leaves the pane, Ombra carries the drag on as its own AppKit drag (`Nightly/NightlyDrag.cs`): each
   type is read from Nightly's pasteboard only when a destination asks (promised files at the destination's paste
   location); DragSource{carried, ended/cancelled} ends Nightly's session.
@@ -373,7 +376,9 @@ Now (desktop `ZenEmbedHost.mm` "Drags", `nsDragService.mm` → `ZenEmbedHost::Be
 Driven in the real window (driver `drag X1 Y1 X2 Y2`, Marionette for the chrome's state): tab into a folder, tab
 reorder, link from the page into the sidebar (a new tab), tab to the pinned section, tab to the next space at the
 sidebar's edge, in-page HTML5 DnD (dragover ×14, drop "from-src", dragend move); no stuck session, one window.
-`NightlyAcceptance.DragDrop.cs` (`DragDropChecks`, driver `dnd`): browser-window-drag-page, -drag-out, -drag-files.
+`NightlyAcceptance.DragDrop.cs` (`DragDropChecks`, driver `dnd`): browser-window-drag-page, -drag-out, -drag-files,
+plus Finder activation mid-drag and Escape cancellation (`mozUserCancelled`, no drop), then a normal drop after cancellation.
+Driver `deactivate` activates Finder without releasing a held drag; `activate` returns focus to Ombra.
 Not verifiable here (no Accessibility, no HID drag): the carried drag's drop into another app; AppKit ends it at once
 without a held button.
 

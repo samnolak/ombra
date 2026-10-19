@@ -40,8 +40,36 @@ internal static partial class NightlyAcceptance
             Check("browser-window-drag-page", loaded && await Until(() => Body(60, 110), 5), $"body luma={luma:0} (blue: dropped, dragend move)");
             Shot("p-browser-window-drag-page");
 
+            await Drag(At, W * 0.32, H * 0.2, W * 0.85, H * 0.2, 16, 0, async () =>
+            {
+                Check("browser-window-drag-focus-started", await Until(() => Body(240, 256), 5),
+                    "dragstart reset the previous result before switching apps");
+                AnotherAppTakesFocus();
+                Check("browser-window-drag-deactivated", await Until(() => !window.IsActive, 5),
+                    "Finder takes focus while the mouse button is held");
+                await Task.Delay(300);
+            });
+            Activate();
+            await Until(() => window.IsActive, 5);
+            Check("browser-window-drag-focus-cancel", await Until(() => Body(160, 190), 5),
+                $"body luma={luma:0} (cyan: mozUserCancelled, dropEffect none, no drop)");
+
+            await Drag(At, W * 0.32, H * 0.2, W * 0.85, H * 0.2, 16, 0, async () =>
+            {
+                Check("browser-window-drag-escape-started", await Until(() => Body(240, 256), 5),
+                    "dragstart reset the previous cancellation result");
+                KeyPress("\x1b", 0x35, 0);
+                await Task.Delay(300);
+            });
+            Check("browser-window-drag-escape-cancel", await Until(() => Body(160, 190), 5),
+                $"body luma={luma:0} (cyan: mozUserCancelled, dropEffect none, no drop)");
+
+            await Drag(At, W * 0.32, H * 0.2, W * 0.85, H * 0.2, 16, 0);
+            Check("browser-window-drag-after-cancel", await Until(() => Body(60, 110), 5),
+                $"body luma={luma:0} (blue: normal drop still works after cancellation)");
+
             await Drag(At, W * 0.32, H * 0.2, -30, H * 0.2, 16, 0);
-            Check("browser-window-drag-out", await Until(() => Body(110, 150), 5), $"body luma={luma:0} (grey: dragend none, the drag carried out of the pane)");
+            Check("browser-window-drag-out", await Until(() => Body(110, 150) || Body(160, 190), 5), $"body luma={luma:0} (grey/cyan: dragend none, the drag carried out of the pane)");
 
             await DropFile(At(W * 0.85, H * 0.85), file);
             Check("browser-window-drag-files", await Until(() => Body(0, 30), 5), $"body luma={luma:0} (black: the page got dnd-file.txt)");
@@ -59,8 +87,8 @@ internal static partial class NightlyAcceptance
             <script>
             let dropped = "";
             const paint = c => document.body.style.background = c;
-            src.ondragstart = e => { dropped = ""; e.dataTransfer.setData("text/plain", "from-src"); e.dataTransfer.effectAllowed = "copyMove"; };
-            src.ondragend = e => paint(e.dataTransfer.dropEffect == "move" && dropped == "from-src" ? "#0000ff" : e.dataTransfer.dropEffect == "none" ? "#808080" : "#ff0");
+            src.ondragstart = e => { dropped = ""; paint("#fff"); e.dataTransfer.setData("text/plain", "from-src"); e.dataTransfer.effectAllowed = "copyMove"; };
+            src.ondragend = e => paint(e.dataTransfer.mozUserCancelled && e.dataTransfer.dropEffect == "none" && !dropped ? "#00ffff" : e.dataTransfer.dropEffect == "move" && dropped == "from-src" ? "#0000ff" : e.dataTransfer.dropEffect == "none" ? "#808080" : "#ff0");
             for (const z of [dst, files]) { z.ondragenter = z.ondragover = e => e.preventDefault(); }
             dst.ondrop = e => { e.preventDefault(); dropped = e.dataTransfer.getData("text/plain"); };
             files.ondrop = e => { e.preventDefault(); const f = e.dataTransfer.files[0]; f && f.text().then(t => paint(f.name == "dnd-file.txt" && t.startsWith("hello-dnd") ? "#000" : "#f0f")); };
@@ -170,7 +198,8 @@ internal static partial class NightlyAcceptance
             }
         }
 
-        private async Task Drag(Func<double, double, CGPoint> at, double x1, double y1, double x2, double y2, int steps, ulong flags)
+        private async Task Drag(Func<double, double, CGPoint> at, double x1, double y1, double x2, double y2, int steps, ulong flags,
+            Func<Task>? beforeRelease = null)
         {
             Post(MouseEvent(5, at(x1, y1), 0));
             Post(DragMouseEvent(1, at(x1, y1), flags));
@@ -187,6 +216,7 @@ internal static partial class NightlyAcceptance
                 Post(DragMouseEvent(6, at(x2, y2), flags));
                 await Task.Delay(50);
             }
+            if (beforeRelease is not null) await beforeRelease();
             Post(DragMouseEvent(2, at(x2, y2), flags));
             await Task.Delay(100);
         }
