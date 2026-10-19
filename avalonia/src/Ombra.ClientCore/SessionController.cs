@@ -1012,6 +1012,13 @@ public sealed partial class SessionController : IAsyncDisposable
     public async Task<IReadOnlyList<ImageAttachment>?> RemoveQueuedAsync(QueuedMessage message, CancellationToken ct = default, bool recover = false)
     {
         ct.ThrowIfCancellationRequested();
+        lock (_lock)
+        {
+            // A chip snapshot can predate live steering. Never withdraw an identical later queue entry instead.
+            var current = _state.Queued.FirstOrDefault(q => q.Seq == message.Seq && !q.Recovered);
+            if (current is null || current.LiveSteered) return null;
+            message = current;
+        }
         if (message.Deferred)
         {
             lock (_lock)
@@ -1032,7 +1039,7 @@ public sealed partial class SessionController : IAsyncDisposable
             Mutate(s =>
             {
                 // The wire command withdraws the first matching text, not the chip's local sequence number.
-                bool Matches(QueuedMessage q) => !q.Recovered && q.Kind == message.Kind && q.Text == message.Text;
+                bool Matches(QueuedMessage q) => !q.Recovered && !q.LiveSteered && q.Kind == message.Kind && q.Text == message.Text;
                 var withdrawn = restoredImages.Count > 0 ? s.Queued.FirstOrDefault(q => Matches(q) && SameImages(q.Images, restoredImages)) : null;
                 withdrawn ??= s.Queued.FirstOrDefault(Matches);
                 if (restoredImages.Count == 0) restoredImages = withdrawn?.Images ?? message.Images;
@@ -1108,7 +1115,7 @@ public sealed partial class SessionController : IAsyncDisposable
                         s.ApplyUsageLimit(state);
                         s.ApplyPlanModeState(state.PlanMode, readAt);
                         s.ApplyGoalState(state, readAt, Now);
-                        if (state.QueuedMessages is { } engineQueue) s.ApplyEngineQueue(engineQueue.Steering, engineQueue.FollowUp, readAt);
+                        if (state.QueuedMessages is { } engineQueue) s.ApplyEngineQueue(engineQueue.Steering, engineQueue.FollowUp, readAt, engineQueue.LiveSteered);
                         if (s.HistoryThinkingReadAt <= readAt) s.ThinkingLevel = state.ThinkingLevel;
                         if (s.HistoryTitleReadAt <= readAt) s.SessionName = state.SessionName ?? s.SessionName;
                         if (s.HistoryMutationReadAt <= readAt)

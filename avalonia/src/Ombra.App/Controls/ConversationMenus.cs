@@ -71,9 +71,9 @@ public static class ConversationMenus
                 return ImageMenu(attachment.Preview, vm, attachment);
             case ConversationMenuKind.Queue when control.DataContext is QueuedItemViewModel queue:
                 return ContextMenus.Menu(Copy(() => queue.Text),
-                    new(Loc.T("Edit"), "IconCompose", _ => queue.EditCommand.Execute(null), writable),
+                    new(Loc.T("Edit"), "IconCompose", _ => queue.EditCommand.Execute(null), () => !vm.IsReadOnly && queue.CanWithdraw),
                     new(Loc.T("Send now"), "IconArrowUp", _ => queue.SendNowCommand.Execute(null), () => !vm.IsReadOnly && queue.CanSendNow),
-                    new(Loc.T("Remove"), "IconClose", _ => queue.RemoveCommand.Execute(null), writable));
+                    new(Loc.T("Remove"), "IconClose", _ => queue.RemoveCommand.Execute(null), () => !vm.IsReadOnly && queue.CanWithdraw));
             case ConversationMenuKind.Paste when control.DataContext is PastedTextViewModel paste:
                 return ContextMenus.Menu(Copy(() => paste.Text),
                     new(Loc.T("Preview"), "IconFileText", c => PreviewPaste(c, paste)),
