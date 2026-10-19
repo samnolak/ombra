@@ -498,7 +498,12 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         var runtime = _runtime;
         var window = _windowId;
         if (runtime is null || window == 0) return;
-        if (Page is not { } page || _closed)
+        // The Browser page's window keeps Nightly's own dialogs; only the system's open and save panels are Ombra's (a
+        // sheet on its window, NightlyFilePanel), then the keyboard goes back to the page as it would in Nightly.
+        var panel = IsBrowserWindow ? NightlyFilePanel.Parse(json) : null;
+        var storage = panel is null ? null : TopLevel.GetTopLevel(this)?.StorageProvider;
+        if (storage is null) panel = null;
+        if (panel is null && Page is null || _closed)
         {
             await runtime.ReplyDialogAsync(window, dialogId, "{}");
             return;
@@ -508,7 +513,9 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         string answer;
         try
         {
-            answer = await NightlyDialogs.AnswerAsync(page, dialogId, json, _pageUrl, d => runtime.TrackDownload(window, d), cts.Token);
+            answer = panel is not null
+                ? await NightlyFilePanel.ShowAsync(storage!, panel)
+                : await NightlyDialogs.AnswerAsync(Page!, dialogId, json, _pageUrl, d => runtime.TrackDownload(window, d), cts.Token);
         }
         catch (Exception e)
         {
@@ -521,6 +528,7 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         }
         // Withdrawn meanwhile (its window gone or Nightly closed it): Nightly no longer waits.
         if (!cts.IsCancellationRequested && _windowId == window) await runtime.ReplyDialogAsync(window, dialogId, answer);
+        if (panel is not null && IsEffectivelyVisible) FocusPage();
     }
 
     void INightlyView.OnDialogClosed(uint dialogId)
