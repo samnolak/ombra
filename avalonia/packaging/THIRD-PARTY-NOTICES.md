@@ -3,7 +3,7 @@
 Ombra is distributed under the MIT License (`LICENSE`). It is an independent client for omp (oh-my-pi),
 including project-maintained derivatives when shipped; it is not an official product of the omp authors,
 the Bun authors, Anthropic or OpenAI. The managed engine uses the complete owned `ombra-engine-v1`
-coding-agent source artifact derived from upstream 18.8.0, base `4ef97c8826ee012829a3e756b693a2a16a414f47`.
+coding-agent source artifact derived from upstream 18.12.2, base `1d5aff90b057ce7dbfe32ea557a527c1b3144b72`.
 The embedded pack manifest records its source SHA256. This local derivative is not a separately published fork release.
 
 ## Bundled in this package

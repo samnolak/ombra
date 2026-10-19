@@ -138,7 +138,7 @@ UI changes the layout audit screenshots (`OMBRA_REVIEW_DIR`) and `tools/verify/p
 | Path | What it is |
 |---|---|
 | [`avalonia/`](avalonia) | The client: `src/Ombra.Rpc` (process, stdio, framing), `src/Ombra.ClientCore` (state, session control), `src/Ombra.App` (view models, UI, platform adapters), `tests/`, `tools/` (packaging, verification, stand-in model), `packaging/`, `docs/` |
-| [`runtime/packs/`](runtime/packs) | The pinned omp runtime pack (omp 18.8.0 on Bun 1.4.2) that the client builds in and installs |
+| [`runtime/packs/`](runtime/packs) | The pinned omp runtime pack (omp 18.12.2 on Bun 1.4.2) that the client builds in and installs |
 | [`harness/`](harness) | The `harness` omp profile template, used by the client's real-omp tests ([docs/harness.md](docs/harness.md)) |
 
 Documentation for contributors: [PROJECT_STATE.md](avalonia/docs/PROJECT_STATE.md) (state, architecture, decisions,

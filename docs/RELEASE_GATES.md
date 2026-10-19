@@ -1,7 +1,11 @@
 # Release gates: Ombra + Nightly
 
 RC QA, 2026-10-18 (agent RcQa). Machine: macOS 26.6.2, Apple silicon (arm64), .NET SDK 10.0.401, Rust 1.99.0,
-Bun 1.4.2 (pinned runtime pack `ombra-engine-18.8.0-bun-1.4.2-v1`), Docker via colima (Postgres 17).
+Bun 1.4.2 (previous 18.8.0 runtime pack), Docker via colima (Postgres 17).
+
+The engine pin subsequently moved to `ombra-engine-18.12.2-bun-1.4.2-v1` (2026-10-19).
+The 18.8.0 installation, package-size and offline-bundle results below remain historical evidence.
+The separate upgrade evidence below must not be confused with the older RC's green gates.
 
 Owner decisions (2026-10-18): **the release ships on macOS only**; **no Apple Developer ID** — Ombra and Nightly are
 signed ad hoc and pinned by cdhash (agent ReleaseTrust), so macOS shows a Gatekeeper warning on first open (documented
@@ -11,6 +15,57 @@ ReleaseNightly, section at the end of this file).
 
 Counts are passed / failed / skipped. Every command runs from the repository root unless stated; environment:
 `DOTNET_ROOT=$HOME/.dotnet DOTNET_HOST_PATH=$HOME/.dotnet/dotnet PATH=$HOME/.cargo/bin:/opt/homebrew/bin:$PATH`.
+
+## Engine upstream reproducibility gate
+
+Before release, run `python3 runtime/engine/patcher.py --check`, followed by
+`python3 runtime/generate-engine-artifact.py --check`. The first gate integrity-verifies
+every pinned upstream npm tarball and requires `upstream.json` plus the ordered mail
+patches to reproduce the checked-in `coding-agent/` source exactly. The second gate
+checks that the build artifact reflects that owned source. Both run in Avalonia CI;
+builds themselves continue to use checked-in source and never fetch/reapply upstream.
+These commands are required gates, not a claim that this document's historical RC
+results exercised the newly added patcher.
+
+After an upstream rebase, also repeat the engine Bun tests, protocol/runtime contract
+tests, real-engine smoke, and bundled/offline package gates listed below with the
+new dependency/pack pins. Resolve/export source edits before regenerating the artifact;
+see [the engine workflow](../runtime/engine/README.md) for import/export, conflict
+continuation, empty/upstream patch handling, and corporate CA configuration.
+
+### 18.12.2 upgrade evidence (2026-10-19)
+
+- Exact upstream packages: all 18 `@oh-my-pi/*` tarballs at both 18.8.0 and 18.12.2
+  fetched and SHA512-verified. Real `patcher.py rebase 18.12.2` completed; the final
+  21-patch series and `generate-engine-artifact.py --check` both reproduce the owned tree.
+- Owned engine/coding-agent/runtime contract suite: **193 passed, 0 failed**,
+  979 assertions across 30 files, in an isolated HOME.
+- Installed host self-check: protocol **1**, omp **18.12.2**. Frozen Bun install
+  accepted the lockfile unchanged; Bun remains **1.4.2**.
+- Real installed-engine RPC + desktop acceptance smoke with the local stand-in model:
+  **17 passed, 0 failed**, including the new typed approval/session-option regression.
+  The engine tests additionally exercise plan review, `navigate_tree`, editor/MCP
+  host bridges, queue recovery, approvals and background jobs.
+- Full pristine-upstream test harness over the owned source: **178 passed / 22 failed
+  command chunks** (200 total, 754.8 seconds). This is **not a green upstream gate**.
+  Differences include exclusive writer leases versus overlapping fixture writers,
+  session-scoped Python/registry state, typed approvals and mandatory critical-pattern
+  prompting, RPC admission/result contracts, required deferred-tool state, the
+  stdin-only Biome contract, and a non-vendored Python SDK generator unable to decode
+  the owned elicitation union. A long isolated HOME also exceeds a HUD fixture's
+  fixed preview width. Do not weaken production safety/isolation to satisfy these
+  upstream-only fixtures; see the compatibility review in `runtime/engine/README.md`.
+- Final local macOS arm64 ZIP: **263,918,776 bytes**; bundled engine **437 MiB**.
+  SHA256: `df2afb0ef16f33e248ce39361a0aa9a64487b4b404eb5ceffe0e2ebb4ad4a80e`.
+  The older recorded ZIP is only rounded to 264.0 MB: the new ZIP is approximately
+  **0.08 MB smaller**, not an exact byte-for-byte size comparison. The recorded
+  installed-engine size falls from 515 to 437 MiB (about 78 MiB).
+  This is a local ad-hoc signed build, not a published/notarized release.
+- Final ZIP unpacked with `ditto`; `--self-test --install-runtime` in a fresh HOME
+  under `sandbox-exec` denying non-loopback outbound traffic: **PASS**, all eight
+  checks passed (including embedded engine RPC v2 startup/shutdown). Strict deep
+  code-signature verification also passed after the offline run.
+
 
 ## 1. Passing on macOS (this RC run)
 
@@ -26,7 +81,7 @@ Counts are passed / failed / skipped. Every command runs from the repository roo
 | Engine artifact | `python3 runtime/generate-engine-artifact.py --check` | **OK** |
 | Runtime contract tests | `OMBRA_ENGINE_ROOT=<engine copy> OMBRA_HISTORY_RPC_DIR=<engine copy>/coding-agent/src/modes/rpc bun test runtime/tests/{mcp-oauth,structured-approval,session-ownership,read-session,rpc-messages-backward}.test.ts` | **28 / 0** (5 files) |
 | Real omp smoke (installer + real engine, stand-in model) | `OMBRA_ARTIFACTS_PATH=… avalonia/tools/ci/real-omp-smoke.sh <work>` | runtime install **1 / 0**; RealOmp + Acceptance **16 / 0**; perf-lite headless: warm 10k history open **1323 ms** (budget 1500), stream 30 s 113.7 fps, p95 17.99 ms, footprint drift +0.24 % |
-| **First run works offline** (engine bundled; agent EngineBundle, 2026-10-19, local `0.0.99-engine` build) | `dotnet publish … -r osx-arm64 -o <pub>`; `avalonia/tools/package/package.sh osx-arm64 <pub> <dist> <version>`; `avalonia/tools/package/smoke.sh osx-arm64 <dist> <work> <version>` (unpacks with `ditto -x -k`, isolated HOME/`OMBRA_RUNTIME_DIR`, `--self-test --install-runtime` under proxy variables to a closed port **and** `sandbox-exec` denying all outbound connections but loopback) | **PASS**: `runtime` = "bundled with the app at Ombra.app/Contents/Resources/engine/ombra-engine-18.8.0-bun-1.4.2-v1", no `runtime-install`, nothing in the runtimes folder but `.transpiler-cache`; omp ready over RPC, stopped, no process left; GUI start/close Ready; `codesign --verify --deep --strict` passes before and after the engine ran (nothing written into the bundle; bun keeps Oven's Developer ID signature, the 9 npm .node/.dylib are signed with the app's identity, hardened runtime). Package 264.0 MB (without the engine 108.6 MB; with the unpruned engine ≈ 420 MB); app unpacked 778 MB (engine 515 MiB, unpruned 1017 MiB). Pruned pack, read-only (`chmod -R a-w`): host `--self-check`, a real session with the stand-in model running the `read` tool, the local ONNX title model (`falcon-h1-90m` through transformers.js → onnxruntime-node) generating a title; file list and mtimes unchanged afterwards. Required for every macOS release package. |
+| **First run works offline** (engine bundled; agent EngineBundle, 2026-10-19, local `0.0.99-engine` build) | `dotnet publish … -r osx-arm64 -o <pub>`; `avalonia/tools/package/package.sh osx-arm64 <pub> <dist> <version>`; `avalonia/tools/package/smoke.sh osx-arm64 <dist> <work> <version>` (unpacks with `ditto -x -k`, isolated HOME/`OMBRA_RUNTIME_DIR`, `--self-test --install-runtime` under proxy variables to a closed port **and** `sandbox-exec` denying all outbound connections but loopback) | **PASS**: `runtime` reported the previous 18.8.0 pack bundled under `Ombra.app/Contents/Resources/engine`, no `runtime-install`, nothing in the runtimes folder but `.transpiler-cache`; omp ready over RPC, stopped, no process left; GUI start/close Ready; `codesign --verify --deep --strict` passes before and after the engine ran (nothing written into the bundle; bun keeps Oven's Developer ID signature, the 9 npm .node/.dylib are signed with the app's identity, hardened runtime). Package 264.0 MB (without the engine 108.6 MB; with the unpruned engine ≈ 420 MB); app unpacked 778 MB (engine 515 MiB, unpruned 1017 MiB). Pruned pack, read-only (`chmod -R a-w`): host `--self-check`, a real session with the stand-in model running the `read` tool, the local ONNX title model (`falcon-h1-90m` through transformers.js → onnxruntime-node) generating a title; file list and mtimes unchanged afterwards. Required for every macOS release package. |
 | Nightly mochitests (dev build, headless) | `./mach test zen/teams/tests zen/gallery/tests zen/tests/tabs zen/tests/ui zen/tests/library --headless --setpref security.sandbox.content.mac.testing_read_path1=<desktop>/src/` | gallery **165 / 0**, teams **33 / 0**, library **199 / 0**, ui **66 / 0**, tabs without `browser_drag_drop_vertical.js` **162 / 0** (auto groups, load queue, unloader); see §4 |
 | Nightly mochitests (packaged release app, BuildID 20261019095634) | `./mach mochitest --appname <dist>/ombra-release/Nightly.app/Contents/MacOS/nightly --headless --setpref security.sandbox.content.mac.testing_read_path1=<desktop>/ zen/tests/ui zen/tests/library zen/teams/tests zen/gallery/tests <tabs files without drag_drop_vertical>` | gallery **165 / 0**, teams **39 / 0** (full run under load 38 / 1: `browser_team_share.js` "the Open button shows its label (0px)"; the file alone 39 / 0 twice, the manifest again 39 / 0), library **199 / 0**, tabs **162 / 0**, ui **66 / 0**; upstream exception `browser_drag_drop_vertical.js` (§4) |
 | Feature smoke, all sections incl. `team` (real server), `team-share`, `shared-marks`, `progress`, `git-bell` | `avalonia/tools/verify/feature-smoke/run.sh <work> <installed runtime>` | see §1.1 |

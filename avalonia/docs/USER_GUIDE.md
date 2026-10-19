@@ -27,7 +27,7 @@ folder of the same name, with the licence notices and this guide. Every archive 
 before you install (`sha256sum -c ombra-….tar.gz.sha256` on Linux, `shasum -a 256 -c …` on macOS, `Get-FileHash` on
 Windows).
 
-**The agent engine is part of the app.** The package carries the pinned engine (`ombra-engine-18.8.0-bun-1.4.2-v1`:
+**The agent engine is part of the app.** The package carries the pinned engine (`ombra-engine-18.12.2-bun-1.4.2-v1`:
 Bun 1.4.2, the integrity-locked npm dependencies and Ombra's own coding-agent sources, checked when the package was
 built), so the first start downloads nothing and works offline. On macOS it is inside *Ombra.app*
 (`Contents/Resources/engine`) and signed with the app; elsewhere it is the `engine` folder beside the executable.
@@ -60,7 +60,7 @@ project yet), so the OS warns on first start:
    (a package without the engine, a development build run from source, or an x64 package on an Apple silicon Mac, which
    picks the native Bun) does the startup card offer to set it up: the client downloads the pinned Bun 1.4.2 and npm
    dependencies, verifies their integrity, then installs its complete owned coding-agent sources and shared host into
-   `ombra-engine-18.8.0-bun-1.4.2-v1` in the runtimes folder (about 550 MB on disk). **Settings → Advanced → Repair
+   `ombra-engine-18.12.2-bun-1.4.2-v1` in the runtimes folder (size varies by platform). **Settings → Advanced → Repair
    engine** does the same download for an app that carries its engine; the repaired copy is then used instead of the
    app's own. Older packs are retained, not modified or silently launched as a fallback. No separate omp application
    is required for GUI chats.
