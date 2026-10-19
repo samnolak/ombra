@@ -445,15 +445,15 @@ internal sealed class NightlyRuntime : IDisposable
         start.Environment["NIGHTLY_TEAMS_SERVICE"] = NightlyTeamLink.EmbedServiceName; // its shares go through this Ombra
         start.Environment["MOZ_APP_NO_DOCK"] = "1"; // a background runtime: no Dock icon, no menu bar
         start.Environment["MOZ_LOG"] = Environment.GetEnvironmentVariable("OMBRA_NIGHTLY_MOZ_LOG") is { Length: > 0 } log ? log : "ZenEmbed:3";
+        // Not the app's reaper's (OwnedProcesses): its SIGTERM at Ombra's quit, or at the start after a crash, would end
+        // Nightly at once, its session unwritten. Nightly quits as a user would when asked (Quit) or when Ombra is gone.
+        start.Environment.Remove(Ombra.ClientCore.OwnedProcesses.OwnerVariable);
         foreach (var name in new[] { "MOZ_HEADLESS", "MOZ_NO_REMOTE", "XRE_PROFILE_PATH", "NIGHTLY_EMBED_BROWSER_PANE" })
             if (!_panes[first].IsBrowserWindow || name != "NIGHTLY_EMBED_BROWSER_PANE") start.Environment.Remove(name);
         var process = Process.Start(start) ?? throw new InvalidOperationException("Nightly did not start.");
         process.ErrorDataReceived += (_, e) =>
         {
             if (e.Data?.Contains("ZenEmbed", StringComparison.Ordinal) == true) Services.ClientLog.Shared.Write("nightly", e.Data);
-        // Not the app's reaper's (OwnedProcesses): its SIGTERM at Ombra's quit, or at the start after a crash, would end
-        // Nightly at once, its session unwritten. Nightly quits as a user would when asked (Quit) or when Ombra is gone.
-        start.Environment.Remove(Ombra.ClientCore.OwnedProcesses.OwnerVariable);
         };
         process.OutputDataReceived += (_, _) => { };
         process.BeginErrorReadLine();
@@ -495,6 +495,11 @@ internal sealed class NightlyRuntime : IDisposable
             "user_pref(\"widget.macos.native-context-menus\", false);",
             "user_pref(\"zen.widget.macos.window-vibrancy\", false);",
             "user_pref(\"browser.tabs.closeWindowWithLastTab\", false);",
+            // The Browser page is one window: a page's popup (window.open with a size, an OAuth sign-in) opens as a
+            // tab of it, its opener kept, not as a Nightly window outside Ombra (any other new window: ZenEmbedHost's
+            // stray windows, whose tabs ZenEmbedBrowser moves into the Browser page's window).
+            "user_pref(\"browser.link.open_newwindow\", 3);",
+            "user_pref(\"browser.link.open_newwindow.restriction\", 0);",
             // Zen's automatic scheme, which follows ui.systemUsesDarkTheme (Ombra's appearance; DarkTheme).
             "user_pref(\"zen.view.window.scheme\", 2);",
         }) prefs.AppendLine(line);
