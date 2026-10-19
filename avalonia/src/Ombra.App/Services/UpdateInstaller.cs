@@ -115,17 +115,7 @@ public sealed class UpdateInstaller
         {
             var unpacked = Path.Combine(staging, "package");
             Directory.CreateDirectory(unpacked);
-            if (package.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) || package.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase))
-            {
-                await using var file = File.OpenRead(package);
-                await using var gz = new GZipStream(file, CompressionMode.Decompress);
-                await TarFile.ExtractToDirectoryAsync(gz, unpacked, overwriteFiles: false, ct).ConfigureAwait(false);
-            }
-            else if (package.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-            {
-                await Task.Run(() => ZipFile.ExtractToDirectory(package, unpacked, overwriteFiles: false), ct).ConfigureAwait(false);
-            }
-            else throw new InvalidDataException($"unknown package type: {Path.GetFileName(package)}");
+            await UnpackAsync(package, unpacked, ct).ConfigureAwait(false);
 
             var tops = Directory.GetDirectories(unpacked).Where(d => Path.GetFileName(d) != "__MACOSX").ToList();
             if (tops.Count != 1) throw new InvalidDataException("the package does not hold exactly one app folder");
@@ -135,6 +125,8 @@ public sealed class UpdateInstaller
                           ?? throw new InvalidDataException("the package holds no .app bundle");
             var exe = Path.Combine(newRoot, Executable);
             if (!File.Exists(exe)) throw new InvalidDataException($"the package has no {Executable}");
+            if (IsBundle && OperatingSystem.IsMacOS())
+                await VerifyCodeSignatureAsync(newRoot, ct).ConfigureAwait(false);
             if (!OperatingSystem.IsWindows())
                 File.SetUnixFileMode(exe, File.GetUnixFileMode(exe) | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
 
@@ -154,6 +146,43 @@ public sealed class UpdateInstaller
             if (!ok) TryDelete(staging);
             TryDeleteFile(package);
         }
+    }
+
+    /// <summary>
+    /// Unpacks a <c>.tar.gz</c> or <c>.zip</c> package into <paramref name="destination"/>. On macOS a zip is unpacked
+    /// with <c>ditto</c>: the release zip carries the code signature of the bundle's non-Mach-O files (the .dll files)
+    /// in extended attributes stored as AppleDouble entries, which <see cref="ZipFile"/> drops, breaking the signature.
+    /// </summary>
+    internal static async Task UnpackAsync(string package, string destination, CancellationToken ct)
+    {
+        if (package.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) || package.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase))
+        {
+            await using var file = File.OpenRead(package);
+            await using var gz = new GZipStream(file, CompressionMode.Decompress);
+            await TarFile.ExtractToDirectoryAsync(gz, destination, overwriteFiles: false, ct).ConfigureAwait(false);
+        }
+        else if (package.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            if (OperatingSystem.IsMacOS())
+            {
+                var psi = new ProcessStartInfo("/usr/bin/ditto");
+                foreach (var a in new[] { "-x", "-k", package, destination }) psi.ArgumentList.Add(a);
+                var r = await RuntimeInstaller.RunProcessAsync(psi, TimeSpan.FromMinutes(5), ct).ConfigureAwait(false);
+                if (r.ExitCode != 0) throw new InvalidDataException($"could not unpack the package (ditto exit {r.ExitCode}): {r.Output.Trim()}");
+            }
+            else await Task.Run(() => ZipFile.ExtractToDirectory(package, destination, overwriteFiles: false), ct).ConfigureAwait(false);
+        }
+        else throw new InvalidDataException($"unknown package type: {Path.GetFileName(package)}");
+    }
+
+    /// <summary>Refuses an unpacked macOS bundle whose code signature does not verify (macOS would deny its permissions).</summary>
+    internal static async Task VerifyCodeSignatureAsync(string bundle, CancellationToken ct)
+    {
+        var psi = new ProcessStartInfo("/usr/bin/codesign");
+        foreach (var a in new[] { "--verify", "--deep", "--strict", bundle }) psi.ArgumentList.Add(a);
+        var r = await RuntimeInstaller.RunProcessAsync(psi, TimeSpan.FromMinutes(2), ct).ConfigureAwait(false);
+        if (r.ExitCode != 0)
+            throw new InvalidDataException($"the new version's code signature is not valid, so it was not installed: {r.Output.Trim()}");
     }
 
     /// <summary>

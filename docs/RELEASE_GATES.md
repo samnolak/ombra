@@ -180,6 +180,7 @@ sha256 `e65925bb8721a45b54ff70fa4e7f37051b53fa4df0eca62ca1be4dcc4cfe3924`, Ombra
 | Team link, Nightly pinning another Ombra cdhash | `untrusted` |
 | Team link, different Nightly binary at the known path | Ombra: `refused pid …: not the pinned Nightly` |
 | Unit tests `NightlyTeamShareTests`, `NightlyCutoverTests` (manifest/cdhash parsing, real Mach round trip refused on a mismatching cdhash) | 33 / 0 / 1 |
+| Update from the previous version keeps a valid signature: after the in-app update `codesign --verify --deep --strict` passes on the installed `Ombra.app` (the updater unpacks the zip with `ditto -x -k` so the `.dll` signatures in extended attributes survive, and refuses a bundle that fails this check; `UpdateInstallTests.A_signed_bundle_zipped_with_ditto_keeps_a_valid_signature_when_unpacked`) | required |
 
 Found by the run and fixed: `ZenTeamLinkWorker.js` `satisfies()` read `kSecGuestAttributeAudit.value` (throws on a
 pointer), so every signed-peer check of the team link failed; never exercised before because only the unsigned pref
