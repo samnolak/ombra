@@ -340,6 +340,14 @@ Before: every drag in the Browser page began an AppKit drag from the off-screen 
 it (no dragover/drop, so no tab into a folder, no reorder, no link into the sidebar), its drag image stuck on screen over
 other windows, the page's drag session stayed stuck (dragstart, no dragend), and a tab dropped on a folder was torn off
 into a separate Nightly window (dragend with dropEffect none).
+- **Open in app (2026-10-19).** A link Ombra opens in the Browser page (`OpenInBrowserPage`), or one clicked or typed
+  there, to a site whose desktop app is installed (Zoom `/j/`, Figma files, Толк rooms, `t.me`, Teams, Slack, …) goes to
+  that app through LaunchServices; the tab opened for it closes, so the page shows what it showed. Nightly decides
+  (`src/zen/open-in-app/`, documented in the desktop repo's `prefs/README.md`); Ombra still switches to the Browser
+  page first. Acceptance `OpenInAppChecks` (`NightlyAcceptance.OpenInApp.cs`, driver `openinapp`): an AppleScript
+  probe claims the scheme of a known app this Mac lacks (Zoom's here), Ombra's link and a click on the page reach it
+  with the app URL and the page keeps its colour; the probe is unregistered and deleted afterwards.
+
 
 Now (desktop `ZenEmbedHost.mm` "Drags", `nsDragService.mm` → `ZenEmbedHost::BeginDrag`, `nsCocoaWindow.mm`
 `doDragAction:` reads the embedder's event, `-[ChildView endDragSessionAt:operation:event:]`):
