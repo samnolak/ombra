@@ -234,6 +234,25 @@ headless `--screenshot` with a `.temp/` profile and `-no-remote`.
 by cdhash, no unsigned switch; NightlyAcceptance ru 96 / 0, en 95 / 1 (`ime-pinyin-commit`) and 95 / 1
 (`cursor-pointer`, foreign mouse moves in the log): each check passed in at least one en run.
 
+**Integration pin (2026-10-20, not published).** Desktop `0de05d006702710ac64ad09049b59336e037147b`:
+incremental `./mach build` passed (0 compiler warnings), then `MOZ_PKG_DIR=ombra-release ./mach package`
+and `pack-nightly.py --app <dmg>` passed, including strict signature verification.
+BuildID `20261019233341`, version `1.23.2b`, protocol 4; archive
+`nightly-runtime-1.23.2b-20261019233341.zip` (130533684 B), SHA-256
+`1715ea706ab39a94759459ff9c93e3468831a51271bdfc1a6e66875ebc206d4f`,
+cdhash `cfd956b47d1c6899b2d2ca3c449dad76985e69c3`.
+The pin names the future release `nightly-1.23.2b-20261019233341`; the owner must publish its archive
+(retained in `.temp/nightly-runtime/`). No tag or release was created. `dist/ombra-release` was removed;
+`dist/Nightly.app` was preserved.
+
+Ombra Release solution build passed with 0 errors and 9 existing AVLN5001 `Watermark` warnings.
+`generate-engine-artifact.py --check` passed; `engine/patcher.py --check` matched 18.12.2 + 21 patches.
+After updating the pin, `dotnet test --filter NightlyRuntimeTests`: **15 passed / 0 failed / 4 skipped**;
+the four real-runtime tests were not enabled. Full en/ru headless suites were launched in parallel with
+separate artifacts and `--blame-hang-timeout 4m`, but are not a green release gate: the owner requested
+stopping the overlong runs at handoff. Their partial results and outstanding failures are in the integration handoff.
+Merge-interleaved test declarations and documentation section order were repaired in `c6423a4`.
+
 ## Release trust: ad-hoc signatures pinned by cdhash
 
 (agent ReleaseTrust, 2026-10-18; design in [SECURITY.md › Ombra ↔ Nightly trust](../SECURITY.md#ombra--nightly-trust-macos).)
