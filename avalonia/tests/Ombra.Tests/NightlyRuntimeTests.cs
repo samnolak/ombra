@@ -98,7 +98,9 @@ public sealed partial class NightlyRuntimeTests
         }
     }
 
-    /// <summary>user.js: no "Update Complete!" toast on the runtime's first start, and the appearance's current state.</summary>
+    /// <summary>user.js: no "Update Complete!" toast on the runtime's first start, a page's popup a tab of the Browser
+    /// page's window (not a Nightly window outside Ombra), the previous session resumed as in a standalone Nightly (Zen
+    /// keeps only the pinned tabs otherwise), and the appearance's current state.</summary>
     [Fact]
     public void UserPrefsCarryTheToastAndTheTheme()
     {
@@ -111,6 +113,8 @@ public sealed partial class NightlyRuntimeTests
             var prefs = File.ReadAllText(Path.Combine(profile, "user.js"));
             Assert.Contains("user_pref(\"zen.updates.show-update-notification\", false);", prefs);
             Assert.Contains("user_pref(\"ui.systemUsesDarkTheme\", 0);", prefs);
+            Assert.Contains("user_pref(\"browser.startup.page\", 3);", prefs);
+            Assert.Contains("user_pref(\"browser.sessionstore.resume_from_crash\", true);", prefs);
 
             runtime.DarkTheme = true;
             runtime.WriteUserPrefs();
@@ -125,6 +129,37 @@ public sealed partial class NightlyRuntimeTests
 
     [Fact]
     public void ReadsNightlysMessages()
+    /// <summary>Nightly does not carry the app's owner mark: the reaper's SIGTERM at Ombra's quit (OwnedProcesses) would
+    /// end it before it writes its session.</summary>
+    [Fact]
+    public async Task TheRuntimeIsNotMarkedForTheAppsReaper()
+    {
+        Assert.SkipUnless(OperatingSystem.IsMacOS(), "the runtime is macOS");
+        var profile = Directory.CreateTempSubdirectory("ombra-runtime-env-").FullName;
+        var binary = Path.Combine(profile, "nightly.sh");
+        File.WriteAllText(binary, "#!/bin/sh\nenv > \"$PWD/env.tmp\" && mv \"$PWD/env.tmp\" \"$PWD/env.txt\"\nexec sleep 30\n");
+        File.SetUnixFileMode(binary, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var mark = Environment.GetEnvironmentVariable(Ombra.ClientCore.OwnedProcesses.OwnerVariable);
+        Environment.SetEnvironmentVariable(Ombra.ClientCore.OwnedProcesses.OwnerVariable, Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var serial = new Serial();
+        var runtime = new NightlyRuntime(new NightlyRuntimeOptions(binary, profile, null, null, null, false), serial.Post);
+        try
+        {
+            serial.Run(() => runtime.Register(new RecordingView(runtime)));
+            var env = Path.Combine(profile, "env.txt");
+            await Until(() => File.Exists(env), "the stand-in started", 15);
+            var lines = File.ReadAllLines(env);
+            Assert.Contains(lines, l => l.StartsWith("NIGHTLY_EMBED_SERVICE=", StringComparison.Ordinal));
+            Assert.DoesNotContain(lines, l => l.StartsWith(Ombra.ClientCore.OwnedProcesses.OwnerVariable + "=", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(Ombra.ClientCore.OwnedProcesses.OwnerVariable, mark);
+            serial.Run(runtime.Dispose);
+            Directory.Delete(profile, true);
+        }
+    }
+
     {
         var location = new byte[40 + 12];
         BinaryPrimitives.WriteInt32LittleEndian(location.AsSpan(20), NightlyProtocol.Location);
