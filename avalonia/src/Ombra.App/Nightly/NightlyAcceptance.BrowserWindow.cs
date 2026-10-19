@@ -126,9 +126,10 @@ internal static partial class NightlyAcceptance
             // Drags run on the pane's mouse: in the page, out of the pane, files from Finder (NightlyAcceptance.DragDrop.cs).
             await DragDropChecks(pane);
             await SpacesChecks(pane);
+            await FrameChecks(pane);
             vm.ShowChatsCommand.Execute(null);
-            Check("browser-window-hidden", await Until(() => !pane.IsEffectivelyVisible && Named<Border>("Sidebar") is not null, 10)
-                && BrowserWindow() == pane, $"panes={Panes().Count}");
+            Check("browser-window-hidden", await Until(() => !pane.IsEffectivelyVisible && !pane.LayerShown && Named<Border>("Sidebar") is not null, 10)
+                && BrowserWindow() == pane, $"panes={Panes().Count} layer shown={pane.LayerShown}");
             await SessionChecks();
         }
 
@@ -446,7 +447,7 @@ internal static partial class NightlyAcceptance
                     await NewTabChecks(0);
                     break;
                 default:
-                    Log($"DRIVE unknown or not possible now: {line}");
+                    if (!await PerfCommand(parts, pane)) Log($"DRIVE unknown or not possible now: {line}");
                     break;
             }
         }
@@ -457,7 +458,7 @@ internal static partial class NightlyAcceptance
             Log($"state page={vm.ShowBrowserPage} sidebar={vm.ShowSidebar} useNightly={vm.Browser.UseNightly} active={window.IsActive} panes={Panes().Count} "
                 + $"visible={visible.Count} focused={window.FocusManager?.GetFocusedElement()?.GetType().Name}");
             foreach (var p in Panes())
-                Log($"  pane browser={p.IsBrowserWindow} visible={p.IsEffectivelyVisible} window={p.WindowId} frames={p.FramesShown} "
+                Log($"  pane browser={p.IsBrowserWindow} visible={p.IsEffectivelyVisible} layer={p.LayerShown} window={p.WindowId} frames={p.FramesShown} "
                     + $"layout={p.FrameLayout} bounds={p.Bounds} matches={Matches(p)} pid={p.RuntimePid}");
             foreach (var p in Panes().Where(p => p.IsEffectivelyVisible))
                 Log($"  pane origin={p.TranslatePoint(default, window)} lightsShown={((Views.MainWindow)window).TrafficLightsShown} fullscreen={window.WindowState == WindowState.FullScreen}");

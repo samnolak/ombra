@@ -41,13 +41,6 @@ internal static unsafe class NightlyCocoa
         return (inView.X, MacObjC.SendBool(content, "isFlipped") ? inView.Y : Bounds(content).Height - inView.Y);
     }
 
-    /// <summary>A shared event on the system's default Metal device (+1), for Metal's IOSurface imports; 0 without Metal.</summary>
-    public static nint NewMetalSharedEvent()
-    {
-        var device = MTLCreateSystemDefaultDevice();
-        return device == 0 ? 0 : MacObjC.Send(device, "newSharedEvent");
-    }
-
     /// <summary>A key <c>NSEvent</c> as AppKit delivered it (<see cref="CurrentKeyEvent"/>).</summary>
     /// <param name="Identity">The event object and its timestamp: the same native event for every callback it causes.</param>
     /// <param name="Type">NSEventType: 10 key down, 11 key up, 12 flags changed.</param>
@@ -80,7 +73,4 @@ internal static unsafe class NightlyCocoa
 
     private static MacRuntime.CGRect Bounds(nint view) =>
         ((delegate* unmanaged<nint, nint, MacRuntime.CGRect>)MacObjC.MsgSend)(view, MacObjC.Sel("bounds"));
-
-    [DllImport("/System/Library/Frameworks/Metal.framework/Metal")]
-    private static extern nint MTLCreateSystemDefaultDevice();
 }

@@ -1038,7 +1038,6 @@
     "Nightly did not connect within {0} seconds.": "Nightly не подключился за {0} с.",
     "Nightly exited unexpectedly (code {0}).": "Nightly неожиданно завершился (код {0}).",
     "Nightly is not running.": "Nightly не запущен.",
-    "Nightly needs GPU rendering (OpenGL or Metal), and this window renders in software.": "Nightly нужна отрисовка на GPU (OpenGL или Metal), а это окно рисуется программно.",
     "Nightly stopped: {0} Restarting…": "Nightly остановился: {0} Перезапуск…",
     "No": "Нет",
     "No SSH hosts saved yet.": "Сохранённых SSH-хостов пока нет.",
