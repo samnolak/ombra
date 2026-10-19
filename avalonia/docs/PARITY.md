@@ -156,9 +156,9 @@ extension commands that omp lists itself keep going to omp.
 | `/shake [elide\|images\|thinking]` | yes | **Done (typed)** |
 | `/handoff [focus]` | yes (background) | **Done** — session menu › Hand off… (omp writes a handoff document and goes on from it *in the same session*; it is not a new session over RPC) |
 | `/retry` | yes (starts a turn) | **Done** — session menu › Retry the last turn; the retried turn shows like any run |
-| `/branch`, `/rewind` | TUI (RPC `branch`) | **Done** — session menu › Rewind…, also what typing `/branch` or `/rewind` opens (`get_branch_messages` + `branch`: a new session from before the chosen message, the message back in the box, the old session kept) |
+| `/branch`, `/rewind` | TUI (RPC `navigate_tree`, owned engine) | **Done** — session menu › Rewind…, **Rewind to here** on a message, also what typing `/branch` or `/rewind` opens (`get_branch_messages` + `navigate_tree`: in place, as omp's own Esc Esc rewind — the same session file goes on from before the chosen message, what came after stays in it as a branch, the message back in the box; no new session file, no second chat in the list). RPC `branch` (a new file holding a copy of the whole history) is no longer used |
 | `/fork` | TUI (RPC `fork`) | **Done** — chat menu › Fork (also what typing `/fork` does: the whole conversation in a new session) and **Fork from here** on a reply (its hover action and right-click menu: a new session up to that reply, `get_entries` finds its entry); the original session stays; omp's `session_busy` refusal shows on the card |
-| `/tree` | TUI | **Via omp terminal** (session tree navigation). Plan: needs an RPC for `navigateTree` |
+| `/tree` | TUI | **Via omp terminal** (session tree navigation). The owned engine's RPC `navigate_tree` moves the leaf; a GUI tree view is not built |
 | `/pin [session id]` | yes | **Done** — session menu › Pin / Unpin session; pinned sessions are listed first in the sidebar with a pin |
 | `/move <path>` | yes | **Done** — session menu › Move to another folder… (the window follows omp to the new folder) |
 | `/wt`, `/worktree [branch]` | yes | **Done** — *Workspace* area |
@@ -245,7 +245,7 @@ extension commands that omp lists itself keep going to omp.
 | `abort_and_restore_queue` | **Implemented in beta R0.2** — Stop withdraws runtime queued text/images into editable recovery; local originals survive limited payloads, nothing is automatically resent |
 | `abort_and_prompt` | **Done** — "Stop and send" (Alt+Shift+Enter) while omp works; a refused prompt returns its text and images to the message box. `promote_queued_message`: "Send now" on a queued follow-up |
 | `new_session`, `switch_session` | **Done** — sidebar |
-| `branch`, `get_branch_messages` | **Done** — session menu › Rewind… |
+| `navigate_tree`, `get_branch_messages` | **Done** — session menu › Rewind…, a message's Rewind to here (in place) |
 | `fork`, `get_entries` | **Done** — chat menu › Fork, a reply's Fork from here (`get_entries` maps the reply to its message entry) |
 | `get_state` | **Done** — model, thinking, session name, todos, context ring, model options, queue settle |
 | `set_fast_mode` | **Done** — Model menu › Fast mode |

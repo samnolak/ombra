@@ -569,7 +569,7 @@ project yet), so the OS warns on first start:
   area, an Ombra icon there offers **Show Ombra**, **New Chat** and **Quit** (which asks first while omp works,
   as closing the window does).
 - **In the conversation** — **Retry** on a failed reply. Point at a reply's end (*Worked for 12s · 3 tools*) for
-  **Copy** (as Markdown); point at one of your messages for **Copy** and **Rewind to here** (a new session from
+  **Copy** (as Markdown); point at one of your messages for **Copy** and **Rewind to here** (this chat goes on from
   before it, the message back in the box, like *Rewind…* in the session menu). The conversation
   follows a streaming reply while you are at its end: the reply grows at the bottom and nothing above it moves.
   Scroll up (wheel, trackpad, scroll bar or keys) and it stays exactly where you are for as long as the reply goes
@@ -662,8 +662,9 @@ report on a card above the message box:
 - **Fresh provider session** — the next reply opens a new session with the model provider and sends the whole
   conversation again (useful when a provider's cached state went wrong); nothing changes on screen.
 - **Retry the last turn** — runs the last turn again after it failed or was stopped.
-- **Rewind…** — pick one of your messages: a new session goes on from before it and the message comes back into
-  the box to change and send. The earlier session stays in the list.
+- **Rewind…** — pick one of your messages: this chat goes on from before it and the message comes back into the box
+  to change and send. It stays one chat in one session file: what came after is kept in that file as a branch (omp's
+  `/tree` in a terminal shows it), and no second chat appears in the list. **Fork** makes a separate copy instead.
 - **Export as HTML** — one page with the whole conversation; **Open** or **Show in folder**.
 - **Share a link…** — says first what happens: omp uploads an encrypted copy of the whole conversation (tool output
   included) to its share server (or a secret gist, per omp's settings), and anyone with the link can read it. After

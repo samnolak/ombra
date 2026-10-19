@@ -39,8 +39,8 @@ public partial class MainViewModel
     }
 
     /// <summary>
-    /// Rewind to before one of your messages (omp's <c>branch</c>, as Rewind… in the session menu): a new session goes on
-    /// from the conversation before it, and the message comes back into the box to change and send.
+    /// Rewind to before one of your messages (omp's <c>navigate_tree</c>, as Rewind… in the session menu): this chat goes on
+    /// in place from the conversation before it, and the message comes back into the box to change and send.
     /// The row is matched by text from the end: earlier same-text messages may not yet be loaded.
     /// </summary>
     [RelayCommand(CanExecute = nameof(CanRewindTo))]
@@ -67,12 +67,12 @@ public partial class MainViewModel
         RequestCatalogRefresh();
         if (text is null)
         {
-            card.Finish(false, Loc.T("Not rewound"), Loc.T("omp did not start the new session; the conversation shows why."),
+            card.Finish(false, Loc.T("Not rewound"), Loc.T("omp did not rewind; the conversation shows why."),
                 secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
             return;
         }
         PutInComposer(open, text, images);
-        card.Finish(true, Loc.T("Rewound"), Loc.T("A new session goes on from before that message; the earlier one is kept in the sessions list. Your message is back in the box."),
+        card.Finish(true, Loc.T("Rewound"), Loc.T("This chat goes on from before that message, and your message is back in the box. What came after stays in the session file as a branch (omp's /tree)."),
             secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
 
     }

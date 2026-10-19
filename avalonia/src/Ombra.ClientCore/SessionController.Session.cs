@@ -182,17 +182,18 @@ public sealed partial class SessionController
     }
 
     /// <summary>
-    /// Rewinds to before one of the user's messages (<c>branch</c>, what omp's /branch and its extensions use): omp
-    /// starts a new session file with the conversation up to that message — the old session stays as it was — and the
-    /// window loads it. Returns the message's text (to edit and send again); null when omp or an extension declined.
+    /// Rewinds to before one of the user's messages in place (<c>navigate_tree</c>, what omp's own /branch, /rewind and
+    /// Esc Esc do): the same session file goes on from the conversation before that message, and what came after stays in
+    /// it as a branch (omp's /tree). No new session file and no second chat in the list. The window reloads the history.
+    /// Returns the message's text (to edit and send again); null when omp or an extension declined.
     /// </summary>
     public async Task<string?> RewindAsync(string entryId, CancellationToken ct = default)
     {
         string? text = null;
         await SessionChangeAsync(async conn =>
         {
-            var r = await conn.RequestAsync("branch", w => w.WriteString("entryId", entryId), TimeSpan.FromMinutes(10), ct).ConfigureAwait(false);
-            if (!r.Success) throw new RpcCommandException("branch", r.Error ?? "unknown error");
+            var r = await conn.RequestAsync("navigate_tree", w => w.WriteString("targetId", entryId), TimeSpan.FromMinutes(10), ct).ConfigureAwait(false);
+            if (!r.Success) throw new RpcCommandException("navigate_tree", r.Error ?? "unknown error", r.Code);
             if (r.Data is { ValueKind: JsonValueKind.Object } d && d.TryGetProperty("cancelled", out var c) && c.ValueKind == JsonValueKind.True)
             {
                 Mutate(s => s.AddNotice(NoticeLevel.Warning, "An extension cancelled the rewind."));

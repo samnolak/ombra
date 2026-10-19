@@ -278,7 +278,7 @@ public sealed partial class MainViewModel
         ShowCard(card);
     }
 
-    // ───────────── Rewind (omp's /branch over RPC) ─────────────
+    // ───────────── Rewind (omp's /branch, /rewind in place: navigate_tree over RPC) ─────────────
 
     [RelayCommand(CanExecute = nameof(CanActOnSession))]
     private async Task RewindAsync()
@@ -296,7 +296,7 @@ public sealed partial class MainViewModel
             return;
         }
         card.State = SessionCardState.Ask;
-        card.Message = Loc.T("Pick one of your messages: omp starts a new session with the conversation before it, and the message comes back into the box to change and send. This session stays as it is in the list.");
+        card.Message = Loc.T("Pick one of your messages: this chat goes on from before it, and the message comes back into the box to change and send. What came after stays in the session file as a branch; Fork keeps a separate copy instead.");
         var rows = open == _open ? Rows.ToList() : [];
         card.SetChoices(messages.Select((m, i) => (m, i)).Reverse().Select(x => new SessionCardChoice(OneLine(x.m.Text), "", new AsyncRelayCommand(async () =>
         {
@@ -312,12 +312,12 @@ public sealed partial class MainViewModel
             RequestCatalogRefresh();
             if (text is null)
             {
-                card.Finish(false, Loc.T("Not rewound"), Loc.T("omp did not start the new session; the conversation shows why."),
+                card.Finish(false, Loc.T("Not rewound"), Loc.T("omp did not rewind; the conversation shows why."),
                     secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
                 return;
             }
             PutInComposer(open, text, images); // MainViewModel.Transcript.cs
-            card.Finish(true, Loc.T("Rewound"), Loc.T("A new session goes on from before that message; the earlier one is kept in the sessions list. Your message is back in the box."),
+            card.Finish(true, Loc.T("Rewound"), Loc.T("This chat goes on from before that message, and your message is back in the box. What came after stays in the session file as a branch (omp's /tree)."),
                 secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
         }))));
         card.Secondary = new SessionCardAction(Loc.T("Cancel"), new RelayCommand(CloseSessionCard));

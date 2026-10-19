@@ -607,6 +607,11 @@ export interface BranchResult {
 	cancelled: boolean;
 }
 
+export interface NavigateTreeResult {
+	text?: string;
+	cancelled: boolean;
+}
+
 export interface TokenUsage {
 	input: number;
 	output: number;
@@ -1765,6 +1770,10 @@ export interface ForkParams {
 	entryId?: string;
 }
 
+export interface NavigateTreeParams {
+	targetId: string;
+}
+
 export interface GetBranchMessagesResult {
 	messages: BranchMessage[];
 }
@@ -1917,6 +1926,7 @@ export interface RpcWireCommands {
 	switch_session: { params: SwitchSessionParams; result: CancellationResult };
 	branch: { params: BranchParams; result: BranchResult };
 	fork: { params: ForkParams; result: CancellationResult };
+	navigate_tree: { params: NavigateTreeParams; result: NavigateTreeResult };
 	get_branch_messages: { params: undefined; result: GetBranchMessagesResult };
 	get_last_assistant_text: { params: undefined; result: GetLastAssistantTextResult };
 	set_session_name: { params: SetSessionNameParams; result: undefined };

@@ -324,6 +324,12 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 		result: "CancellationResult",
 	},
 	{
+		name: "navigate_tree",
+		doc: "Move the leaf in place, in the same session file (the TUI's /tree and Esc Esc rewind, no summary): a user message rewinds past itself and its text comes back; the abandoned path stays as a sibling branch. Refused with `session_busy` while the session works.",
+		params: { targetId: "string" },
+		result: "NavigateTreeResult",
+	},
+	{
 		name: "get_branch_messages",
 		doc: "List user messages that can be branched from.",
 		result: { messages: "BranchMessage[]" },
