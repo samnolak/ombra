@@ -9,18 +9,21 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
-using Avalonia.Rendering.Composition;
+using Avalonia.Rendering.SceneGraph;
+using Avalonia.Skia;
 using Avalonia.Threading;
 using Ombra.App.Localization;
 using Ombra.App.Nightly;
 using Ombra.App.Platform.Mac;
+using SkiaSharp;
 
 namespace Ombra.App.Controls;
 
 /// <summary>
 /// A page shown by the embedded Nightly runtime (Settings › General › Agent browser: Nightly, experimental; macOS).
-/// Nightly renders the pane's own chrome-less window off screen and sends each frame as an IOSurface; the pane imports
-/// every surface once (<see cref="ICompositionGpuInterop"/>), shows each frame 1:1 (surface pixels / Nightly's backing
+/// Nightly renders the pane's own chrome-less window off screen and sends each frame as an IOSurface; the pane shows
+/// each frame as a Core Animation layer under Avalonia's view (<see cref="NightlyLayer"/>), through a hole it clears in
+/// what Avalonia draws, 1:1 (surface pixels / Nightly's backing
 /// scale = DIP, origin on a device pixel; letterboxed only while a resize is in flight, never stretched or cropped;
 /// scaled down, aspect kept, only for a <see cref="Viewport"/> larger than the room the pane gets) and sends mouse,
 /// scroll (with phases, <see cref="NightlyScrollMonitor"/>), keys, text, focus and its size and screen back.
@@ -46,21 +49,16 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
     // tab for each).
     private readonly List<Uri> _pendingUrls = [];
 
-    private ICompositionGpuInterop? _interop;
-    private CompositionDrawingSurface? _surface;
-    private CompositionSurfaceVisual? _visual;
-    private ICompositionImportedGpuSemaphore? _semaphore;
-    private ulong _semaphoreValue;
-    private bool _renderingReady;
-    private readonly Dictionary<uint, (ICompositionImportedGpuImage Image, int Width, int Height)> _images = [];
-    private readonly List<(NightlyProtocol.SurfaceInfo Info, nint Surface)> _waitingSurfaces = [];
-    private bool _settingUp;
+    // The frames: a Core Animation layer under Avalonia's view, seen through the hole _host clears where the frame is.
+    private NightlyLayer? _layer;
+    // The frame the layer shows, held from Nightly until a newer one replaces it.
+    private NightlyProtocol.FrameInfo? _shownFrame;
 
     private int _frameWidth, _frameHeight;
     private double _geckoScale = 2;
     private Rect _shown;
     private bool _hasFrame;
-    // The latest frame that could not be shown when it came (the GPU import not set up yet, or the pane hidden), kept
+    // The latest frame that could not be shown when it came (the layer not set up yet, or the pane hidden), kept
     // from Nightly until it can: a page that paints once and then stays still would otherwise never show.
     private NightlyProtocol.FrameInfo? _heldFrame;
     private (double W, double H, (double X, double Y)? Origin) _lastResize;
@@ -111,6 +109,11 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         Children.Add(_popups.Layer);
         Children.Add(_overlay);
         WireInput();
+        LayoutUpdated += (_, _) =>
+        {
+            if (_layer is null) EnsureLayer();
+            PlaceLayer();
+        };
         ShowStatus(Loc.T("Starting Nightly…"), retry: false);
         Agent = new NightlyAgent(this, _frames);
     }
@@ -174,6 +177,12 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
 
     /// <summary>Frames shown so far.</summary>
     public int FramesShown { get; private set; }
+
+    /// <summary>The frames' layer is on screen in the window (development checks).</summary>
+    internal bool LayerShown => _layer?.IsShown == true;
+
+    /// <summary>Records when frames arrive and are shown (development checks); null records nothing.</summary>
+    internal NightlyFrameTiming? Timing { get; set; }
 
     /// <summary>Where the last frame is drawn in the pane (DIP) and its size in surface pixels.</summary>
     public (Rect Shown, int Width, int Height) FrameLayout => (_shown, _frameWidth, _frameHeight);
@@ -254,7 +263,8 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         if (_runtime is { } runtime && _token != 0) runtime.Unregister(_token);
         _runtime = null;
         OnDetached();
-        DropWaitingSurfaces();
+        _layer?.Remove();
+        _layer = null;
     }
 
     // ── lifetime ──
@@ -278,11 +288,11 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         if (IsBrowserWindow) NightlyShortcutMonitor.Add(this);
     }
 
-    // The surface's composition visual exists once the pane's children are attached too: set up after the first layout.
+    // The layer goes into the window's view once the pane is in a laid out window.
     protected override void OnLoaded(Avalonia.Interactivity.RoutedEventArgs e)
     {
         base.OnLoaded(e);
-        if (!_closed) _ = SetUpAsync();
+        if (!_closed) SetUp();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
@@ -301,58 +311,27 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
             }
         }
         _top = null;
+        _layer?.Remove(); // the pane may come back in another window
+        _layer = null;
     }
 
-    private async Task SetUpAsync()
+    private void SetUp()
     {
-        if (_settingUp) return;
-        _settingUp = true;
-        try
-        {
-            await SetUpRenderingAsync();
-        }
-        finally
-        {
-            _settingUp = false;
-        }
+        EnsureLayer();
         if (_runtime is null && !_closed) Connect();
     }
 
-    private async Task SetUpRenderingAsync()
+    /// <summary>Puts the layer under the window's Avalonia view (again, when the pane came back in another window); a
+    /// window not on screen yet has no view, so this runs again after layout passes and frames until it has.</summary>
+    private void EnsureLayer()
     {
-        if (!_renderingReady && ElementComposition.GetElementVisual(_host) is { } hostVisual)
-        {
-            var interop = await hostVisual.Compositor.TryGetCompositionGpuInterop();
-            if (_closed) return;
-            if (interop is null || !interop.SupportedImageHandleTypes.Contains(KnownPlatformGraphicsExternalImageHandleTypes.IOSurfaceRef))
-            {
-                ShowStatus(Loc.T("Nightly needs GPU rendering (OpenGL or Metal), and this window renders in software."), retry: false);
-                return;
-            }
-            var sync = interop.GetSynchronizationCapabilities(KnownPlatformGraphicsExternalImageHandleTypes.IOSurfaceRef);
-            if (!sync.HasFlag(CompositionGpuImportedImageSynchronizationCapabilities.Automatic))
-            {
-                // Metal imports IOSurfaces with timeline semaphores only. Nightly presents finished frames, so the pane's own
-                // shared event just chains the updates (wait n, signal n + 1).
-                var sharedEvent = NightlyCocoa.NewMetalSharedEvent();
-                if (sharedEvent == 0)
-                {
-                    ShowStatus(Loc.T("Nightly needs GPU rendering (OpenGL or Metal), and this window renders in software."), retry: false);
-                    return;
-                }
-                _semaphore = interop.ImportSemaphore(new PlatformHandle(sharedEvent, KnownPlatformGraphicsExternalSemaphoreHandleTypes.MetalSharedEvent));
-            }
-            _interop = interop;
-            _surface = hostVisual.Compositor.CreateDrawingSurface();
-            _visual = hostVisual.Compositor.CreateSurfaceVisual();
-            _visual.Surface = _surface;
-            _visual.Size = default;
-            ElementComposition.SetElementChildVisual(_host, _visual);
-            _renderingReady = true;
-            foreach (var (info, surface) in _waitingSurfaces) Import(info, surface);
-            _waitingSurfaces.Clear();
-            ShowHeldFrame();
-        }
+        if (_closed || _top?.TryGetPlatformHandle() is not { Handle: not 0 } handle || _layer?.IsUnder(handle.Handle) == true) return;
+        _layer?.Remove();
+        _layer = NightlyLayer.Under(handle.Handle);
+        if (_layer is null) return;
+        if (_shownFrame is { } shown && _frames.Surface(shown.SurfaceId) is var surface and not 0) _layer.Show(surface);
+        LayoutFrame();
+        ShowHeldFrame();
     }
 
     private void Connect()
@@ -426,11 +405,11 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         _windowId = 0;
         _hasFrame = false;
         _heldFrame = null; // its window is gone
-        foreach (var (image, _, _) in _images.Values) _ = image.DisposeAsync();
-        _images.Clear();
+        _shownFrame = null;
+        _layer?.Show(0);
         _frames.Clear();
         _frameWidth = _frameHeight = 0;
-        if (_visual is not null) _visual.Size = default;
+        PlaceLayer();
         _popups.Close();
         _composing = _cancelComposition = false;
         EndDrag();
@@ -445,69 +424,54 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
 
     void INightlyView.OnSurface(NightlyProtocol.SurfaceInfo info, nint surface)
     {
-        if (_closed) NightlyMach.CFRelease(surface);
-        else
-        {
-            _frames.AddSurface(info, surface);
-            if (!_renderingReady) _waitingSurfaces.Add((info, surface));
-            else Import(info, surface);
-        }
+        if (!_closed) _frames.AddSurface(info, surface); // its own reference
+        NightlyMach.CFRelease(surface);
     }
 
     void INightlyView.OnFrame(NightlyProtocol.FrameInfo frame)
     {
+        Timing?.Received();
         _frames.SetLatest(frame);
         if (_heldFrame is { } older)
         {
             _heldFrame = null;
             _runtime?.ReleaseFrame(older.WindowId, older.Seq);
         }
-        if (!_renderingReady || !IsEffectivelyVisible) _heldFrame = frame;
+        if (_layer is null) EnsureLayer();
+        if (_layer is null || !IsEffectivelyVisible) _heldFrame = frame;
         else Show(frame);
     }
 
     private void ShowHeldFrame()
     {
-        if (_heldFrame is not { } frame || !_renderingReady || !IsEffectivelyVisible) return;
+        if (_heldFrame is not { } frame || _layer is null || !IsEffectivelyVisible) return;
         _heldFrame = null;
         Show(frame);
     }
 
-    private async void Show(NightlyProtocol.FrameInfo frame)
+    /// <summary>The layer shows <paramref name="frame"/> from now on; the one it showed goes back to Nightly.</summary>
+    private void Show(NightlyProtocol.FrameInfo frame)
     {
-        var runtime = _runtime;
-        try
+        var received = Timing is null ? 0 : NightlyFrameTiming.Now();
+        var surface = _frames.Surface(frame.SurfaceId);
+        if (_layer is null || surface == 0 || frame.WindowId != _windowId)
         {
-            if (_surface is null || !_images.TryGetValue(frame.SurfaceId, out var entry)) return;
-            await entry.Image.ImportCompleted;
-            // A newer pool (Nightly resized the window) replaced and disposed this surface's import meanwhile: the frame
-            // is out of date, and updating with a disposed image throws (PlatformGraphicsContextLostException).
-            if (_closed || !_images.TryGetValue(frame.SurfaceId, out var current) || current.Image != entry.Image) return;
-            if (_semaphore is { } semaphore)
-            {
-                var v = _semaphoreValue++;
-                await _surface.UpdateWithTimelineSemaphoresAsync(entry.Image, semaphore, v, semaphore, v + 1);
-            }
-            else await _surface.UpdateAsync(entry.Image);
-            if (frame.WindowId != _windowId) return;
-            _frameWidth = frame.Width;
-            _frameHeight = frame.Height;
-            FramesShown++;
-            LayoutFrame();
-            if (!_hasFrame)
-            {
-                _hasFrame = true;
-                _overlay.IsVisible = false;
-            }
+            _runtime?.ReleaseFrame(frame.WindowId, frame.Seq);
+            return;
         }
-        catch (Exception e)
+        _layer.Show(surface);
+        if (_shownFrame is { } replaced) _runtime?.ReleaseFrame(replaced.WindowId, replaced.Seq);
+        _shownFrame = frame;
+        _frameWidth = frame.Width;
+        _frameHeight = frame.Height;
+        FramesShown++;
+        Timing?.Shown(frame, received);
+        if (!_hasFrame)
         {
-            Services.ClientLog.Shared.Write("nightly", e);
+            _hasFrame = true;
+            _overlay.IsVisible = false;
         }
-        finally
-        {
-            runtime?.ReleaseFrame(frame.WindowId, frame.Seq);
-        }
+        LayoutFrame();
     }
 
     void INightlyView.OnLocation(NightlyProtocol.LocationInfo location)
@@ -745,41 +709,6 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
 
     void INightlyView.OnWindowClosed() => PageClosed?.Invoke();
 
-    private void Import(NightlyProtocol.SurfaceInfo info, nint surface)
-    {
-        try
-        {
-            var image = _interop!.ImportImage(
-                new PlatformHandle(surface, KnownPlatformGraphicsExternalImageHandleTypes.IOSurfaceRef),
-                new PlatformGraphicsExternalImageProperties
-                {
-                    Width = info.Width, Height = info.Height, Format = PlatformGraphicsExternalImageFormat.B8G8R8A8UNorm, TopLeftOrigin = true,
-                });
-            if (_images.Remove(info.SurfaceId, out var replaced)) _ = replaced.Image.DisposeAsync();
-            _images[info.SurfaceId] = (image, info.Width, info.Height);
-            // Nightly sends the pool again after a size change: imports of other sizes are done with.
-            foreach (var (id, old) in _images.Where(p => p.Value.Width != info.Width || p.Value.Height != info.Height).ToList())
-            {
-                _ = old.Image.DisposeAsync();
-                _images.Remove(id);
-            }
-        }
-        catch (Exception e)
-        {
-            Services.ClientLog.Shared.Write("nightly", e);
-        }
-        finally
-        {
-            NightlyMach.CFRelease(surface); // the import holds its own reference
-        }
-    }
-
-    private void DropWaitingSurfaces()
-    {
-        foreach (var (_, surface) in _waitingSurfaces) NightlyMach.CFRelease(surface);
-        _waitingSurfaces.Clear();
-    }
-
     private void ShowStatus(string text, bool retry)
     {
         _status.Text = text;
@@ -820,7 +749,11 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
 
     private void LayoutFrame()
     {
-        if (_frameWidth == 0 || _visual is null || _top is null) return;
+        if (_frameWidth == 0 || _top is null)
+        {
+            PlaceLayer();
+            return;
+        }
         double s = _top.RenderScaling, bw = _host.Bounds.Width, bh = _host.Bounds.Height;
         double w = _frameWidth / s, h = _frameHeight / s;
         var fit = Math.Min(1, Math.Min(bw / w, bh / h));
@@ -830,8 +763,19 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         // fills it exactly once scaled must not move by a rounding error).
         double x = Math.Max(0, Math.Floor((bw - w) / 2 * s) / s), y = Math.Max(0, Math.Floor((bh - h) / 2 * s) / s);
         _shown = new Rect(x, y, w, h);
-        _visual.Offset = new Vector3D(x, y, 0);
-        _visual.Size = new Vector(w, h);
+        PlaceLayer();
+    }
+
+    /// <summary>
+    /// The layer where the frame is drawn in the window, and the hole over it in what Avalonia draws; both gone while the
+    /// pane has no frame or is not shown (after every layout pass too: the pane moves or hides with what holds it).
+    /// </summary>
+    private void PlaceLayer()
+    {
+        var shown = _hasFrame && _top is not null && IsEffectivelyVisible && _shown.Width > 0;
+        var at = shown ? _host.TranslatePoint(_shown.TopLeft, _top!) : null;
+        _layer?.Place(at is { } p ? new Rect(p, _shown.Size) : default, _top?.RenderScaling ?? 2, hidden: at is null || _layer is null);
+        _host.Hole = at is not null && _layer is not null ? _shown : default;
     }
 
     /// <summary>A point of the pane in Nightly's window (points, top-left origin); null on the letterbox bars.</summary>
@@ -1234,14 +1178,55 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
     }
 
     /// <summary>
-    /// The pane's own surface (the frames' visual is its child), separate from the status overlay above it. It paints a
-    /// transparent rectangle so that it is hit-tested over its whole area: the frames are a composition visual, which
-    /// hit-testing does not see, and without it the pointer, the keyboard focus and the scroll monitor's hit test all
-    /// landed on the pane's background instead.
+    /// The pane's own surface, separate from the status overlay above it. It paints a transparent rectangle so that it
+    /// is hit-tested over its whole area (the frames are a layer under Avalonia's view, which hit-testing does not see:
+    /// without it the pointer, the keyboard focus and the scroll monitor's hit test all landed on the pane's background),
+    /// and clears <see cref="Hole"/> in what Avalonia draws (through the clips and corners of what holds the pane), so
+    /// the layer shows there under whatever is drawn over the pane.
     /// </summary>
     private sealed class Surface : Control
     {
-        public override void Render(DrawingContext context) => context.FillRectangle(Brushes.Transparent, new Rect(Bounds.Size));
+        private Rect _hole;
+
+        /// <summary>Where the frame is (DIP of the surface); empty: none.</summary>
+        public Rect Hole
+        {
+            get => _hole;
+            set
+            {
+                if (value == _hole) return;
+                _hole = value;
+                InvalidateVisual();
+            }
+        }
+
+        public override void Render(DrawingContext context)
+        {
+            context.FillRectangle(Brushes.Transparent, new Rect(Bounds.Size));
+            if (_hole.Width > 0 && _hole.Height > 0) context.Custom(new ClearOp(_hole));
+        }
+    }
+
+    /// <summary>Clears a rectangle to transparent (Skia's clear blend), whatever was drawn under it in the window.</summary>
+    private sealed class ClearOp(Rect bounds) : ICustomDrawOperation
+    {
+        public Rect Bounds { get; } = bounds;
+
+        public bool HitTest(Point p) => false;
+
+        public bool Equals(ICustomDrawOperation? other) => other is ClearOp o && o.Bounds == Bounds;
+
+        public void Dispose()
+        {
+        }
+
+        public void Render(ImmediateDrawingContext context)
+        {
+            if (context.TryGetFeature<ISkiaSharpApiLeaseFeature>() is not { } feature) return;
+            using var lease = feature.Lease();
+            using var paint = new SKPaint { BlendMode = SKBlendMode.Clear };
+            lease.SkCanvas.DrawRect(new SKRect((float)Bounds.X, (float)Bounds.Y, (float)Bounds.Right, (float)Bounds.Bottom), paint);
+        }
     }
 
     // ── keys: Avalonia's physical key → macOS virtual key code and the NSEvent characters of keys that type none ──

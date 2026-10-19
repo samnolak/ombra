@@ -261,6 +261,12 @@ internal sealed class NightlyFrames : IDisposable
         lock (_gate) _latest = frame.SurfaceId;
     }
 
+    /// <summary>The surface with this id (the reference stays this list's), 0 when there is none.</summary>
+    public nint Surface(uint surfaceId)
+    {
+        lock (_gate) return _surfaces.TryGetValue(surfaceId, out var s) ? s.Surface : 0;
+    }
+
     public bool HasFrame
     {
         get

@@ -314,6 +314,25 @@ device mode is `Command` op 7, Ombra's appearance op 8):
   windows on screen; the colour checks require the probe to have read the page's cyan first (no false PASS from an
   unreadable shot). Relaunch with a profile holding 3 saved extra windows: 4 stray windows trapped, their tabs in the
   Browser page, 0 on screen.
+- **Frames as a Core Animation layer (2026-10-19).** The Browser page lagged: Avalonia's OpenGL import of each Nightly
+  frame went through Apple's GL-on-Metal driver, which re-uploads the whole IOSurface on the CPU (`GLDTextureRec::
+  uploadTextureLevel` → `agxsTwiddleAddressCommon`, ~40 % of a core in a `sample` of Ombra at 146 fps, 2520×1704 px),
+  and each frame cost an Ombra window redraw on top. Nightly's frames waited for Ombra's Release (3 in flight), so
+  only part of Gecko's composites were shown. `NightlyPane` now shows the frame's IOSurface as the contents of a layer
+  under Avalonia's view (`Nightly/NightlyLayer.cs`, a layer-hosting NSView below `AvnView`), and clears a hole in
+  what Avalonia draws where the frame is (Skia clear blend in the pane's surface), so cards, popups and the sheet's
+  rounded corners and hairline Avalonia draws stay above the page. The GPU import path and its Metal semaphore are
+  gone. Measured on the Browser page (dev Nightly, same pages, standalone dev Nightly as the reference,
+  `NightlyAcceptance.Perf.cs` driver commands `pan`/`keys`/`stats`, ScreenCaptureKit window probe for latency):
+  trackpad scroll shown 78–87 → 159–160 fps (Gecko 134–159, standalone 148–160), Nightly present → shown
+  p50 20–24 / p95 30–38 ms → 0.1 ms (Core Animation shows it at the next refresh), key → pixels in a textarea p50
+  39 → 11 ms (standalone 16 ms), sidebar hover p50 40 → 16 ms (standalone 22 ms), Ombra CPU while scrolling 55–57 →
+  19–27 %, CSS animation 81 → 7 %, video 38 → 3 %. Acceptance `browser-window-frames` pans a long page and wants
+  ≥ 90 % of Nightly's frames on screen at ≥ 120 fps (159–160 fps, 191–193 of 192–194 measured);
+  `browser-window-overlay` puts a box in the window's adorner layer over the pane and finds its colour in a window shot;
+  `browser-window-hidden` wants the layer hidden on the Chats page. Driven checks (driver `frames`) also passed after a
+  resize, in full screen, after ⌘M and back, on the other display, and after Nightly was killed and restarted; 5 min of
+  pans kept Ombra's IOSurface regions at 18–19 and its footprint at 519–520 MB.
 
 ### 1d. Drag and drop (protocol 4, ids 44–45 / 123–124, 2026-10-19)
 
