@@ -59,6 +59,13 @@ public sealed class App : Application
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException) { o = options; }
                 return installer.ApplyDefaultTo(o);
             }
+            // bun install reaches the registry through the same network as the engine: same corporate trust (CorporateTrust)
+            installer.NetworkEnvironment = () =>
+            {
+                var env = new Dictionary<string, string?>();
+                Ombra.ClientCore.Network.CorporateTrust.Apply(env, Current(), Environment.GetEnvironmentVariable);
+                return env;
+            };
             // omp's browser tool drives the preview panel — over Tern (TernHost: tabs with trusted native input) or cmux
             // (AgentBrowserBridge, also the fallback a Tern-less omp finds) — and is made the agent's default for every omp
             // started here unless the setting is off (AgentBrowserDefaults)

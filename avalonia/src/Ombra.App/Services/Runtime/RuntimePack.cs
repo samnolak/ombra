@@ -111,6 +111,9 @@ public sealed class RuntimeInstaller
     private const string Marker = "installed.json";
     /// <summary>Written into every folder this installer creates: only such folders are ever removed as leftovers.</summary>
     private const string WorkMarker = ".ombra-runtime-work";
+    /// <summary>Bun's codes for a certificate chain it cannot verify: what an HTTPS-inspecting network causes.</summary>
+    private static readonly string[] CertificateErrors =
+        ["SELF_SIGNED_CERT_IN_CHAIN", "UNABLE_TO_GET_ISSUER_CERT_LOCALLY", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "DEPTH_ZERO_SELF_SIGNED_CERT"];
     private readonly HttpClient _http;
     private readonly string _registry;
     private readonly IReadOnlyDictionary<string, BunBuild> _builds;
@@ -135,6 +138,13 @@ public sealed class RuntimeInstaller
 
     /// <summary>How long the download may go without a byte before it fails as stalled; shorter in tests.</summary>
     public TimeSpan StallTimeout { get; init; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Variables the user's network trust settings add for Bun (Settings › Advanced › Corporate network certificates,
+    /// <see cref="Ombra.ClientCore.Network.CorporateTrust"/>), read at each install: <c>bun install</c> fetches the pinned
+    /// packages through the same network as the engine, so it gets the same trust. Null: none.
+    /// </summary>
+    public Func<IReadOnlyDictionary<string, string?>>? NetworkEnvironment { get; set; }
 
     /// <summary>The installed pack, or null when there is none or it is incomplete.</summary>
     public InstalledRuntime? FindInstalled()
@@ -289,10 +299,15 @@ public sealed class RuntimeInstaller
             install.Environment["BUN_INSTALL_CACHE_DIR"] = cache; // no writes to the user's global Bun cache
             install.Environment[InstalledRuntime.TranspilerCacheVariable] = InstalledRuntime.TranspilerCacheIn(staging);
             install.Environment["DO_NOT_TRACK"] = "1";
+            var trust = NetworkEnvironment?.Invoke() ?? new Dictionary<string, string?>();
+            foreach (var (key, value) in trust) install.Environment[key] = value;
             var result = await Run(install, TimeSpan.FromMinutes(20), ct).ConfigureAwait(false);
             await File.WriteAllTextAsync(Path.Combine(staging, "install.log"), result.Output, ct).ConfigureAwait(false);
             if (result.ExitCode != 0)
-                throw new IOException($"bun install failed (exit {result.ExitCode}):\n{Tail(result.Output, 12)}");
+                throw new IOException($"bun install failed (exit {result.ExitCode}):\n{Tail(result.Output, 12)}"
+                    + (trust.Count == 0 && CertificateErrors.Any(result.Output.Contains)
+                        ? "\n\n" + Loc.T("Your network inspects HTTPS connections. Turn on Settings › Advanced › Corporate network certificates, then repair the engine.")
+                        : ""));
             TryDelete(cache);
 
             progress?.Report(new RuntimeInstallProgress(Loc.T("Installing verified owned engine")));

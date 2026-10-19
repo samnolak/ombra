@@ -50,7 +50,8 @@ public sealed class RuntimeInstallerTests
     }
 
     /// <summary>Scripted Bun installs an untouched dependency CLI; the owned host self-check reports its protocol.</summary>
-    internal sealed class FakeBun(int installExit = 0, string version = RuntimePack.OmpVersion, Action<string>? afterInstall = null, int protocolVersion = 1)
+    internal sealed class FakeBun(int installExit = 0, string version = RuntimePack.OmpVersion, Action<string>? afterInstall = null, int protocolVersion = 1,
+        string installFailure = "resolving…\nerror: IntegrityCheckFailed for \"left-pad\"\n")
     {
         public List<ProcessStartInfo> Calls { get; } = [];
 
@@ -60,7 +61,7 @@ public sealed class RuntimeInstallerTests
             var args = psi.ArgumentList.ToList();
             if (args[0] == "install")
             {
-                if (installExit != 0) return Task.FromResult(new ProcessResult(installExit, "resolving…\nerror: IntegrityCheckFailed for \"left-pad\"\n"));
+                if (installExit != 0) return Task.FromResult(new ProcessResult(installExit, installFailure));
                 var cli = Path.Combine(psi.WorkingDirectory, RuntimePack.HistoricalCliEntry);
                 Directory.CreateDirectory(Path.GetDirectoryName(cli)!);
                 File.WriteAllText(cli, "// unmodified npm dependency");
@@ -172,6 +173,42 @@ public sealed class RuntimeInstallerTests
         Assert.Contains("IntegrityCheckFailed", e.Message);
         Assert.Equal(before, Installer(root, tgz, new FakeBun()).FindInstalled());
         Assert.Empty(Leftovers(root));
+    }
+
+    [Fact]
+    public async Task Bun_install_gets_the_corporate_trust_the_engine_gets()
+    {
+        var root = TestProcesses.TempDir("rt-trust");
+        var bundle = Path.Combine(root, "corporate-ca.pem");
+        File.WriteAllText(bundle, "pem");
+        var settings = new OmpRuntimeOptions { CorporateTrust = Ombra.ClientCore.Network.CorporateTrust.PemMode, CorporateTrustBundle = bundle };
+        var bun = new FakeBun();
+        var installer = Installer(Path.Combine(root, "rt"), Tarball(), bun);
+        installer.NetworkEnvironment = () =>
+        {
+            var env = new Dictionary<string, string?>();
+            Ombra.ClientCore.Network.CorporateTrust.Apply(env, settings, _ => null);
+            return env;
+        };
+        await installer.InstallAsync(null, CancellationToken.None);
+        Assert.Equal(bundle, bun.Calls[0].Environment[Ombra.ClientCore.Network.CorporateTrust.ExtraCaVariable]);
+    }
+
+    [Fact]
+    public async Task A_certificate_failure_without_corporate_trust_points_to_the_setting()
+    {
+        var hint = Loc.T("Your network inspects HTTPS connections. Turn on Settings › Advanced › Corporate network certificates, then repair the engine.");
+        var certFailure = "error: SELF_SIGNED_CERT_IN_CHAIN downloading package manifest is-number\n";
+        var e = await Assert.ThrowsAsync<IOException>(() =>
+            Installer(TestProcesses.TempDir("rt-cert"), Tarball(), new FakeBun(installExit: 1, installFailure: certFailure)).InstallAsync(null, CancellationToken.None));
+        Assert.Contains("SELF_SIGNED_CERT_IN_CHAIN", e.Message);
+        Assert.Contains(hint, e.Message);
+
+        // With trust already applied the setting is not the answer
+        var trusted = Installer(TestProcesses.TempDir("rt-cert-on"), Tarball(), new FakeBun(installExit: 1, installFailure: certFailure));
+        trusted.NetworkEnvironment = () => new Dictionary<string, string?> { ["NODE_USE_SYSTEM_CA"] = "1" };
+        e = await Assert.ThrowsAsync<IOException>(() => trusted.InstallAsync(null, CancellationToken.None));
+        Assert.DoesNotContain(hint, e.Message);
     }
 
     [Fact]

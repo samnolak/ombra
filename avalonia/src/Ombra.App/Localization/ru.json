@@ -2163,6 +2163,7 @@
     "Yes": "Да",
     "Yesterday, {0}": "вчера, {0}",
     "You already use your own certificate file: ": "Вы уже используете собственный файл сертификатов: ",
+    "Your network inspects HTTPS connections. Turn on Settings › Advanced › Corporate network certificates, then repair the engine.": "Ваша сеть проверяет HTTPS-соединения. Включите «Настройки › Дополнительно › Сертификаты корпоративной сети», затем нажмите «Восстановить движок».",
     "Your own answer": "Свой ответ",
     "Your own setting chooses another certificate store, so the app won't add anything: ": "Ваш собственный параметр выбирает другое хранилище сертификатов, поэтому приложение ничего не добавит: ",
     "Your providers": "Ваши провайдеры",
