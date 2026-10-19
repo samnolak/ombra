@@ -40,6 +40,10 @@ continuation, empty/upstream patch handling, and corporate CA configuration.
   21-patch series and `generate-engine-artifact.py --check` both reproduce the owned tree.
 - Owned engine/coding-agent/runtime contract suite: **193 passed, 0 failed**,
   979 assertions across 30 files, in an isolated HOME.
+- Full `Ombra.Tests`: **English 2285 / 0 / 45** (24m42s), **Russian
+  2285 / 0 / 45** (22m46s). These runs began before the final one-line typed
+  approval classification fix; that fix and its new regression test were
+  covered by the separate **17 / 0** real-RPC/acceptance run on the updated build.
 - Installed host self-check: protocol **1**, omp **18.12.2**. Frozen Bun install
   accepted the lockfile unchanged; Bun remains **1.4.2**.
 - Real installed-engine RPC + desktop acceptance smoke with the local stand-in model:
