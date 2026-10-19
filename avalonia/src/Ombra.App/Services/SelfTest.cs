@@ -69,7 +69,16 @@ public static class SelfTest
         });
 
         var platform = Platform.RuntimePlatform.Key(out var description);
-        var installer = new RuntimeInstaller(new HttpClient { Timeout = Timeout.InfiniteTimeSpan }, RuntimePack.DefaultRoot, platform);
+        var installer = new RuntimeInstaller(new HttpClient { Timeout = Timeout.InfiniteTimeSpan }, RuntimePack.DefaultRoot, platform)
+        {
+            NetworkEnvironment = () =>
+            {
+                var env = new Dictionary<string, string?>();
+                var settings = new ClientSettingsStore(args.ConfigPath ?? Environment.GetEnvironmentVariable(OmpRuntimeOptions.ConfigEnvVar) ?? OmpRuntimeOptions.DefaultConfigPath);
+                Ombra.ClientCore.Network.CorporateTrust.Apply(env, settings.Load(), Environment.GetEnvironmentVariable);
+                return env;
+            },
+        };
         InstalledRuntime? runtime = installer.FindInstalled();
         if (runtime is null && args.InstallRuntime)
             await TryAsync(checks, "runtime-install", true, async () =>
