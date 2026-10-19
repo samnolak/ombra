@@ -5,5 +5,6 @@
   "sha256": "e7d3377ab5b02440aa7bce96c09335142f7bb6d4aaf37a12b0d7a870b1af14fe",
   "size": 130510619,
   "archive": "nightly-runtime-1.23.2b-20261019095634.zip",
+  "url": "https://github.com/samnolak/nightly-browser/releases/download/nightly-1.23.2b-20261019095634/nightly-runtime-1.23.2b-20261019095634.zip",
   "cdhash": "7949beed0cb694710b8cea90dc764dc2f8768926"
 }
