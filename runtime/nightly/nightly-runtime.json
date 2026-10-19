@@ -1,10 +1,10 @@
 {
   "version": "1.23.2b",
-  "buildId": "20261019095634",
+  "buildId": "20261019154359",
   "protocol": 4,
-  "sha256": "e7d3377ab5b02440aa7bce96c09335142f7bb6d4aaf37a12b0d7a870b1af14fe",
-  "size": 130510619,
-  "archive": "nightly-runtime-1.23.2b-20261019095634.zip",
-  "url": "https://github.com/samnolak/nightly-browser/releases/download/nightly-1.23.2b-20261019095634/nightly-runtime-1.23.2b-20261019095634.zip",
-  "cdhash": "7949beed0cb694710b8cea90dc764dc2f8768926"
+  "sha256": "3cbdd5ab9dcb68a4f4a8fedf4c32a8e705426824d7c401600d70a82f7ab410e5",
+  "size": 130511187,
+  "archive": "nightly-runtime-1.23.2b-20261019154359.zip",
+  "url": "https://github.com/samnolak/nightly-browser/releases/download/nightly-1.23.2b-20261019154359/nightly-runtime-1.23.2b-20261019154359.zip",
+  "cdhash": "07a6865c1c72819919fd66bd0cb71f16e0498e0c"
 }
