@@ -50,17 +50,15 @@ internal static partial class FeatureSmoke
             vm.OpenSettingsFromRailCommand.Execute(null);
             await TitleBarCase("settings-dark");
             vm.CloseSettingsCommand.Execute(null);
+            // The Team and Browser pages have no chats sidebar (nor ⌘B): one case each, the page's sheet after the rail
             vm.OpenTeamPageCommand.Execute(null);
+            Check("title-bar-team-no-sidebar", !vm.ShowSidebar && !vm.ToggleSidebarCommand.CanExecute(null));
             await TitleBarCase("team-dark");
-            SetSidebar(false);
-            await TitleBarCase("team-no-sidebar-dark");
-            SetSidebar(true);
             vm.OpenBrowserPageCommand.Execute(null);
+            Check("title-bar-browser-no-sidebar", !vm.ShowSidebar && !vm.ToggleSidebarCommand.CanExecute(null));
             await TitleBarCase("browser-dark");
-            SetSidebar(false);
             vm.SettingsTheme = "light";
-            await TitleBarCase("browser-no-sidebar-light");
-            SetSidebar(true);
+            await TitleBarCase("browser-light");
             vm.ShowChatsCommand.Execute(null);
 
             window.Width = 700;

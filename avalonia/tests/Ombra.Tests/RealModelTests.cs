@@ -30,7 +30,7 @@ public sealed class RealModelTests
         var route = Environment.GetEnvironmentVariable("OMBRA_REAL_MODEL_ROUTE");
         if (path is null || route is null || !File.Exists(path)) return null;
         Assert.DoesNotContain("flash-next", route, StringComparison.OrdinalIgnoreCase); // the stand-in's route name
-        return (OmpRuntimeOptions.Load(path), route);
+        return (TestProcesses.LoadIsolated(path, "OMBRA_REAL_MODEL_CONFIG"), route);
     }
 
     private static void Report(string line)

@@ -36,6 +36,7 @@ internal static partial class FeatureSmoke
     {
         if (!OperatingSystem.IsMacOS() || Environment.GetEnvironmentVariable("OMBRA_FEATURE_SMOKE") is not { Length: > 0 } dir) return;
         Directory.CreateDirectory(dir);
+        RefuseUnlessIsolated(dir);
         _ = Task.Run(async () =>
         {
             while (true)
@@ -52,6 +53,37 @@ internal static partial class FeatureSmoke
                 if (started) return;
             }
         });
+    }
+
+    /// <summary>
+    /// Before the app starts anything: the run's own settings (OMBRA_CONFIG, readable — an unreadable one makes the app
+    /// fall back to the defaults, the user's omp profile and real model), an omp home and agent folder of its own, and
+    /// the app's chats and teams in the run's folder. Otherwise the smoke writes why in smoke.log and the app exits.
+    /// </summary>
+    private static void RefuseUnlessIsolated(string dir)
+    {
+        var problems = new List<string>();
+        if (Environment.GetEnvironmentVariable(OmpRuntimeOptions.ConfigEnvVar) is not { Length: > 0 } config)
+            problems.Add($"{OmpRuntimeOptions.ConfigEnvVar} is not set: the app would use the user's settings");
+        else
+        {
+            try
+            {
+                var launch = OmpRuntimeOptions.Load(config).ToLaunchSpec();
+                problems.AddRange(Verify.HarnessIsolation.Problems(launch.Environment, Environment.GetEnvironmentVariable,
+                    Environment.GetEnvironmentVariable(ChatFolders.RootEnvVar) ?? "", Environment.GetEnvironmentVariable("OMBRA_TEAMS_DIR") ?? ""));
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                problems.Add($"the settings {config} cannot be read ({e.Message}): the app would run on the defaults, the user's omp profile");
+            }
+        }
+        if (problems.Count == 0) return;
+        File.WriteAllLines(Path.Combine(dir, "smoke.log"), [
+            .. problems.Select(p => $"{DateTime.Now:HH:mm:ss.fff} FAIL isolation {p}"),
+            $"{DateTime.Now:HH:mm:ss.fff} RESULT FAIL passed=0 failed={problems.Count} (refused to start: not isolated from the user's folders)",
+        ]);
+        Environment.Exit(3);
     }
 
     private sealed partial class Run(Window window, MainViewModel vm, string dir)

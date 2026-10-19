@@ -126,6 +126,17 @@ public sealed class LayoutAuditTests
                     page.ScrollToHome();
                 }
             }
+            // The rail's pages: in the sidebar's and the conversation's place (no chats sidebar beside them)
+            vm.CloseSettingsCommand.Execute(null);
+            foreach (var (open, name) in new (Action, string)[] { (() => vm.OpenTeamPageCommand.Execute(null), "team"), (() => vm.OpenBrowserPageCommand.Execute(null), "browser") })
+            {
+                open();
+                await Settle(400);
+                Assert.False(vm.ShowSidebar, name);
+                Assert.False(w.FindControl<Border>("Sidebar")!.IsVisible, name);
+                a.Take(w, $"{tag}-{name}-page");
+            }
+            vm.ShowChatsCommand.Execute(null);
             await vm.DisposeAsync();
             w.Close();
 

@@ -20,6 +20,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The real-omp tests refuse settings whose omp would write the user's own ~/.omp (shared with the feature smoke) -->
+    <Compile Include="..\..\tools\verify\HarnessIsolation.cs" Link="HarnessIsolation.cs" />
     <Using Include="Xunit" />
     <!-- As in Ombra.App (docs/PLATFORM_NOTES.md): macOS TLS via Network.framework, so the tests run the app's TLS stack. -->
     <RuntimeHostConfigurationOption Include="System.Net.Security.UseNetworkFramework" Value="true" />

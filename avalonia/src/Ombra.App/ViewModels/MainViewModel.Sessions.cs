@@ -50,9 +50,10 @@ public sealed partial class MainViewModel
     [NotifyPropertyChangedFor(nameof(ShowSidebar))]
     private bool _sidebarShownWhileNarrow;
 
-    /// <summary>Wide: the user's choice. Narrow: hidden unless the user opened it. Never beside the settings page,
-    /// which has its own navigation in its place, nor beside the Browser page: the browser's own sidebar is there.</summary>
-    public bool ShowSidebar => !IsSettingsOpen && !IsBrowserPageOpen && (IsNarrow ? SidebarShownWhileNarrow : IsSidebarVisible);
+    /// <summary>Wide: the user's choice. Narrow: hidden unless the user opened it. Only beside the conversation
+    /// (<see cref="IsChatsRailOn"/>): never beside the settings page, which has its own navigation in its place, nor
+    /// beside the Team or Browser page, pages of their own that take the sidebar's width too.</summary>
+    public bool ShowSidebar => IsChatsRailOn && (IsNarrow ? SidebarShownWhileNarrow : IsSidebarVisible);
 
     // Shortcuts as the platform writes them (⌘ on macOS, Ctrl elsewhere), for tooltips and the sidebar's hints.
     public static string HideSidebarTip { get; } = Loc.F("Hide sidebar ({0})", CommandKey("B"));
@@ -133,7 +134,8 @@ public sealed partial class MainViewModel
         else IsSessionSearchOpen = true;
     }
 
-    [RelayCommand]
+    /// <summary>⌘B and the panel buttons: only where there is a sidebar (the conversation); off on the pages.</summary>
+    [RelayCommand(CanExecute = nameof(IsChatsRailOn))]
     private void ToggleSidebar()
     {
         if (IsNarrow) SidebarShownWhileNarrow = !SidebarShownWhileNarrow;

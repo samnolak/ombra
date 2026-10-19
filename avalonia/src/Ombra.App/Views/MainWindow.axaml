@@ -2564,8 +2564,9 @@
       </Panel>
     </Border>
 
-    <!-- ── Team (the rail's Team, MainViewModel.Team.cs; Views/Team/TeamPage): the team, its members and my devices, on a
-         sheet under the band; the band's row is empty (on macOS the title bar: it moves the window) ── -->
+    <!-- ── Team (the rail's Team, MainViewModel.Team.cs; Views/Team/TeamPage): the team, its members and my devices, in the
+         conversation's and the sidebar's place as the Browser page (no chats sidebar beside it: ShowSidebar), on a sheet
+         under the band; the band's row is empty (on macOS the title bar: it moves the window) ── -->
     <Border x:Name="TeamPageHost" Grid.Column="2" Classes="page" IsVisible="{Binding ShowTeamPage}">
       <Panel>
         <Border Height="{DynamicResource GuiChromeBand}" VerticalAlignment="Top" Background="Transparent"

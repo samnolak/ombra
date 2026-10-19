@@ -11,6 +11,7 @@ internal static class TestEnvironment
     {
         OneTempFolderPerRun();
         KeepChatsOutOfTheUsersDataFolder();
+        KeepTeamsOutOfTheUsersDataFolder();
         // The mouse and the accessibility settings on the desk running the tests are not the tests'
         Ombra.App.Platform.SystemPointer.Override = () => null;
         Ombra.App.Platform.ReducedMotion.Override = false;
@@ -63,4 +64,9 @@ internal static class TestEnvironment
     /// <summary>Every window a test opens makes chat folders (a new chat, the spare omp's): never in the user's data folder.</summary>
     private static void KeepChatsOutOfTheUsersDataFolder() =>
         Environment.SetEnvironmentVariable(ChatFolders.RootEnvVar, TestProcesses.TempDir("chats"));
+
+    /// <summary>A window that opens the Team page (or reads the team account at start) uses this teams root, never the
+    /// user's (~/Library/Application Support/Ombra/teams); a test may still point it at a folder of its own.</summary>
+    private static void KeepTeamsOutOfTheUsersDataFolder() =>
+        Environment.SetEnvironmentVariable("OMBRA_TEAMS_DIR", TestProcesses.TempDir("teams"));
 }

@@ -32,6 +32,9 @@ public partial class MainViewModel
         OnPropertyChanged(nameof(IsTeamRailOn));
         OnPropertyChanged(nameof(ShowTeamPage));
         OnPropertyChanged(nameof(ShowPet));
+        // The sidebar is the conversation's: no page (settings, Team, Browser) has it, nor ⌘B and its menu item
+        OnPropertyChanged(nameof(ShowSidebar));
+        ToggleSidebarCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>The rail's Settings: the settings as last left, but not on the page the rail has its own button for.</summary>

@@ -56,7 +56,6 @@ public partial class MainViewModel
     partial void OnIsSettingsOpenChanged(bool value)
     {
         foreach (var c in SettingsCategories) c.IsCurrent = c.Key == SettingsCategory;
-        OnPropertyChanged(nameof(ShowSidebar)); // the settings page's own navigation takes the sidebar's place
         OnRailChanged();
         if (value) SettingsCategoryShown?.Invoke(SettingsCategory);
     }

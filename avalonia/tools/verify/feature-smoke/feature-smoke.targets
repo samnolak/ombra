@@ -6,5 +6,7 @@
   </PropertyGroup>
   <ItemGroup Condition="'$(MSBuildProjectName)' == 'Ombra.App'">
     <Compile Include="$(MSBuildThisFileDirectory)FeatureSmoke*.cs" />
+    <!-- The smoke refuses to start when omp or the app would use the user's own folders (FeatureSmoke.Init) -->
+    <Compile Include="$(MSBuildThisFileDirectory)../HarnessIsolation.cs" />
   </ItemGroup>
 </Project>

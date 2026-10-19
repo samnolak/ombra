@@ -57,6 +57,9 @@ internal static partial class FeatureSmoke
             var t = vm.Team;
             vm.OpenTeamPageCommand.Execute(null);
             Check("team-rail", vm.ShowTeamPage && vm.IsTeamRailOn && t.IsSignedOut, $"signedIn={t.IsSignedIn}");
+            // A page of its own, as the Browser page: no chats sidebar beside it, nor ⌘B to bring one
+            Check("team-no-chats-sidebar", !vm.ShowSidebar && !window.GetVisualDescendants().OfType<Border>().Single(b => b.Name == "Sidebar").IsVisible
+                && !vm.ToggleSidebarCommand.CanExecute(null), $"showSidebar={vm.ShowSidebar}");
             await Themed("50-team-signed-out");
 
             t.ServerAddress = address;

@@ -66,7 +66,20 @@ internal static class TestProcesses
     public static OmpRuntimeOptions? RealOmp()
     {
         var path = Environment.GetEnvironmentVariable("OMBRA_TEST_CONFIG");
-        return path is null || !File.Exists(path) ? null : OmpRuntimeOptions.Load(path);
+        return path is null || !File.Exists(path) ? null : LoadIsolated(path, "OMBRA_TEST_CONFIG");
+    }
+
+    /// <summary>Settings for a real omp, refused (the test fails, nothing starts) when that omp would use the user's own
+    /// home or agent folder — its sessions would show as chats in the user's Ombra — or the app the user's chats and
+    /// teams folders (<see cref="Ombra.Verify.HarnessIsolation"/>).</summary>
+    public static OmpRuntimeOptions LoadIsolated(string path, string variable)
+    {
+        var options = OmpRuntimeOptions.Load(path);
+        var problems = Ombra.Verify.HarnessIsolation.Problems(options.ToLaunchSpec().Environment, Environment.GetEnvironmentVariable,
+            ChatFolders.DefaultRoot, Environment.GetEnvironmentVariable("OMBRA_TEAMS_DIR") ?? "");
+        if (problems.Count > 0)
+            throw new InvalidOperationException($"{variable} ({path}) is not isolated from the user's folders: " + string.Join("; ", problems));
+        return options;
     }
 
     public static async Task<T> Eventually<T>(Func<T> read, Func<T, bool> until, TimeSpan timeout, string what)
