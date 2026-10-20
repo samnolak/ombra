@@ -36,7 +36,7 @@ if (scenario == "recorder-fails")
     return 1;
 }
 // Not RPC: omp's CLI subcommands ("cli plugin list --json"). FAKE_OMP_CLI names a JSON file mapping the joined
-// arguments to {"stdout": "...", "stderr": "...", "exit": 0}; each call is appended to FAKE_OMP_CLI_LOG.
+// arguments to {"stdout": "...", "stderr": "...", "exit": 0, "delayMs": 0}; each call is appended to FAKE_OMP_CLI_LOG.
 if (scenario == "cli")
 {
     var line = string.Join(' ', args.Skip(1));
@@ -48,6 +48,7 @@ if (scenario == "cli")
     // 5-hour and weekly windows, resets relative to now, like a signed-in Claude Max and ChatGPT Plus account
     if (hit is null && line == "usage --json") { Console.Out.Write(FakeUsageJson()); return 0; }
     if (hit is null) { Console.Error.WriteLine($"fake omp: no answer for \"{line}\""); return 1; }
+    if (hit["delayMs"]?.GetValue<int>() is { } delayMs) Thread.Sleep(delayMs);
     Console.Out.Write(hit["stdout"]?.GetValue<string>() ?? "");
     Console.Error.Write(hit["stderr"]?.GetValue<string>() ?? "");
     return hit["exit"]?.GetValue<int>() ?? 0;

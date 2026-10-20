@@ -501,6 +501,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             Servers.Clear();
             OtherTools = "";
             LoadError = "";
+            IsLoading = false;
             HasLoaded = true;
             NotifyList();
             return;
@@ -571,6 +572,10 @@ public sealed partial class ConnectorsViewModel : ObservableObject
                 ApplySessionState(row, keepTest: false);
                 Servers.Add(row);
             }
+            // The list is read: the loading line goes (its rows' file details follow when omp's CLI answers, which
+            // can take seconds or, stuck, the CLI's whole wait)
+            IsLoading = false;
+            HasLoaded = true;
             NotifyList();
             // The user file's place comes from omp's CLI (profiles, XDG): its rows get their details when it answers.
             await pathTask;

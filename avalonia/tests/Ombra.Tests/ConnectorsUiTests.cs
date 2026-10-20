@@ -92,9 +92,9 @@ public sealed class ConnectorsUiTests
     }
 
     private static async Task<(MainWindow w, ConnectorsFlowTests.Setup t)> Open(double width, double height,
-        Dictionary<string, string>? commands = null, Dictionary<string, object>? cli = null, bool projectFiles = true)
+        Dictionary<string, string>? commands = null, Dictionary<string, object>? cli = null, bool projectFiles = true, int configPathDelayMs = 0)
     {
-        var t = await ConnectorsFlowTests.StartAsync(commands, cli, start: false, projectFiles: projectFiles);
+        var t = await ConnectorsFlowTests.StartAsync(commands, cli, start: false, projectFiles: projectFiles, configPathDelayMs: configPathDelayMs);
         var w = new MainWindow { DataContext = t.Vm, Width = width, Height = height };
         w.Show();
         t.Vm.OnWindowOpened();
@@ -222,6 +222,31 @@ public sealed class ConnectorsUiTests
         Assert.Contains(w.GetVisualDescendants().OfType<TextBlock>(), x => x.IsEffectivelyVisible && x.Text == Loc.T("Requires folder trust"));
         await Close(w, t);
     }
+
+    [AvaloniaTheory]
+    [InlineData("en")]
+    [InlineData("ru")]
+    public Task The_loading_line_goes_once_the_servers_are_listed_while_omps_cli_still_answers(string language) => InLanguage(language, async () =>
+    {
+        // omp config path (the user file's place, for the rows' details) answers seconds after /mcp list
+        var (w, t) = await Open(1180, 760, cli: PluginsFlowTests.Cli(), configPathDelayMs: 4000);
+        var c = t.Vm.Connectors;
+        _ = t.Vm.OpenConnectorsPageCommand.ExecuteAsync(null);
+        await Until(() => c.Servers.Count == 5, "servers listed");
+        await Settle(200);
+        var echo = c.Servers.Single(s => s.Name == "echo");
+        Assert.False(echo.HasExtras); // the CLI has not answered yet
+        var loading = w.GetVisualDescendants().OfType<TextBlock>().Single(x => x.Name == "ConnectorsLoading");
+        Assert.Equal(Loc.T("Loading MCP servers from omp…"), loading.Text);
+        Assert.True(c.ShowList);
+        Assert.False(c.ShowLoading);
+        Assert.False(loading.IsEffectivelyVisible);
+
+        await Until(() => echo.HasExtras, "user file details", 30);
+        await Settle(200);
+        Assert.False(loading.IsEffectivelyVisible);
+        await Close(w, t);
+    });
 
     [AvaloniaTheory]
     [InlineData("en")]

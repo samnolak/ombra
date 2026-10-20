@@ -12,6 +12,7 @@
 # <installed-runtime-dir>: a runtime the client installed (ombra-engine-…-v1 with bun/ and omp/node_modules).
 # Result: <work-dir>/shots/smoke.log (PASS/FAIL per check, RESULT line) and screenshots next to it.
 # OMBRA_SMOKE_LANGUAGE=ru runs the window in that language (default: the system's).
+# OMBRA_AGENT_BROWSER=tern serves omp's browser tool over Tern instead of cmux (the "agent-browser" section times it).
 set -euo pipefail
 export OMBRA_TEST_NO_ACTIVATE=${OMBRA_TEST_NO_ACTIVATE:-1}
 WORK=${1:?work dir}; RT=${2:?installed runtime dir}; ONLY=${3:-}
