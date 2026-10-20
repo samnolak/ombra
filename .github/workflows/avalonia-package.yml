@@ -93,6 +93,8 @@ jobs:
         run: python3 ../runtime/engine/patcher.py --check
       - name: Owned engine artifact is current
         run: python3 ../runtime/generate-engine-artifact.py --check
+      - name: Native platform gate regressions (all six RIDs)
+        run: python3 tools/package/test-native-platform.py
       - name: .NET 10 SDK
         run: |
           if dotnet --list-sdks 2>/dev/null | grep -q '^10\.'; then dotnet --version; exit 0; fi
@@ -139,6 +141,11 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: tools/package/package.sh "$RID" "$RUNNER_TEMP/pub" "$RUNNER_TEMP/dist" "$VERSION"
+      - name: Audit shipped archive native platform (including cross-builds)
+        run: |
+          archive="$RUNNER_TEMP/dist/ombra-$VERSION-$RID.zip"
+          [ "${RID%%-*}" != linux ] || archive="$RUNNER_TEMP/dist/ombra-$VERSION-$RID.tar.gz"
+          python3 tools/package/native-platform.py "$RID" "$archive"
       - name: Signing script check (Windows; throwaway self-signed certificate on a copy, never shipped)
         if: runner.os == 'Windows'
         shell: pwsh

@@ -73,6 +73,7 @@ case "$RID" in
     chmod +x "$D/Ombra" "$D/OmpGui" "$D/install-desktop-entry.sh"
     engine "$D/engine"
     docs "$D"
+    python3 "$HERE/tools/package/native-platform.py" "$RID" "$D" --prune
     echo "linux: no code signature (verify the archive with its .sha256 / SHA256SUMS)" > "$SIGNING"
     ARCHIVE="$OUT/$NAME.tar.gz"
     tar -C "$STAGE" -czf "$ARCHIVE" "$NAME"
@@ -83,6 +84,7 @@ case "$RID" in
     cp "$D/Ombra.exe" "$D/OmpGui.exe"
     engine "$D/engine"
     docs "$D"
+    python3 "$HERE/tools/package/native-platform.py" "$RID" "$D" --prune
     "$HERE/tools/package/sign.sh" windows "$D" "$SIGNING"
     ARCHIVE="$OUT/$NAME.zip"
     if command -v 7z >/dev/null; then (cd "$STAGE" && 7z a -tzip -mx=7 "$ARCHIVE" "$NAME" >/dev/null)
@@ -110,6 +112,7 @@ case "$RID" in
     done
     iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/ombra.icns"
     docs "$STAGE/$NAME"
+    python3 "$HERE/tools/package/native-platform.py" "$RID" "$APP" --prune
     "$HERE/tools/package/sign.sh" macos "$APP" "$SIGNING"
     ARCHIVE="$OUT/$NAME.zip"
     (cd "$STAGE" && ditto -c -k --sequesterRsrc --keepParent "$NAME" "$ARCHIVE")
@@ -117,6 +120,10 @@ case "$RID" in
     ;;
   *) echo "unknown rid $RID"; exit 1 ;;
 esac
+
+# Inspect the actual shipped bytes, after signing/notarization may have rewritten the archive.
+# This also gates cross-built RIDs, where the app/engine self-test cannot execute on the runner.
+python3 "$HERE/tools/package/native-platform.py" "$RID" "$ARCHIVE"
 
 (cd "$OUT" && sha "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256")
 ls -la "$ARCHIVE"; cat "$ARCHIVE.sha256" "$SIGNING" "$ENGINE_REC"

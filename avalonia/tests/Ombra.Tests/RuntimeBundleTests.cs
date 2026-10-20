@@ -220,7 +220,22 @@ public sealed class RuntimeBundleTests
     [InlineData("darwin-aarch64", "darwin", "arm64")]
     [InlineData("darwin-x64-baseline", "darwin", "x64")]
     [InlineData("linux-aarch64", "linux", "arm64")]
+    [InlineData("linux-x64", "linux", "x64")]
+    [InlineData("windows-aarch64", "win32", "arm64")]
     [InlineData("windows-x64", "win32", "x64")]
-    public void Prune_keeps_the_binding_node_loads_for_the_platform(string platform, string os, string arch) =>
+    public void Prune_keeps_the_binding_node_loads_for_the_platform(string platform, string os, string arch)
+    {
         Assert.Equal((os, arch), RuntimePrune.NodeTarget(platform));
+        var omp = TestProcesses.TempDir("rt-prune-platform");
+        var nm = Path.Combine(omp, "node_modules");
+        foreach (var target in new[] { "darwin/arm64", "darwin/x64", "linux/x64", "linux/arm64", "win32/x64", "win32/arm64" })
+            Put(nm, $"onnxruntime-node/bin/napi-v6/{target}/onnxruntime_binding.node");
+
+        RuntimePrune.Prune(omp, platform, CancellationToken.None);
+
+        var bindingRoot = Path.Combine(nm, "onnxruntime-node", "bin", "napi-v6");
+        Assert.Equal([os], Directory.EnumerateDirectories(bindingRoot).Select(Path.GetFileName));
+        Assert.Equal([arch], Directory.EnumerateDirectories(Path.Combine(bindingRoot, os)).Select(Path.GetFileName));
+        Assert.True(File.Exists(Path.Combine(bindingRoot, os, arch, "onnxruntime_binding.node")));
+    }
 }

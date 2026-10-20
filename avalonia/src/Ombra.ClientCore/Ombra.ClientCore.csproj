@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <RootNamespace>Ombra.ClientCore</RootNamespace>
+    <!-- Carry the publish RID through to the native Ombra.Core.Interop dependency. -->
+    <IsRidAgnostic>false</IsRidAgnostic>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Ombra.Rpc\Ombra.Rpc.csproj" />
