@@ -61,6 +61,7 @@ public sealed partial class ChatConnectorViewModel : ObservableObject
     public bool CanReconnect => !NeedsSignIn && Server.Status is "failed" or "disconnected" && !IsSigningIn && !IsReconnecting;
 
     [RelayCommand] private Task SignIn() => _page.SignInAsync(Name);
+    [RelayCommand] private Task SignInInDefaultBrowser() => _page.SignInAsync(Name, defaultBrowser: true);
     [RelayCommand] private Task CancelSignIn() => _page.CancelSignInAsync(Name);
     [RelayCommand] private Task Reconnect() => _page.ReconnectAsync(Name);
 }

@@ -238,7 +238,7 @@
                       <ctl:Icon Data="{StaticResource IconKey}" Size="16" VerticalAlignment="Center" Margin="0,0,10,0" />
                       <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" VerticalAlignment="Center" />
                       <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" Margin="12,0,0,0" VerticalAlignment="Center">
-                        <Button Classes="accent" Content="{Binding SignInLabel}" Command="{Binding SignInCommand}"
+                        <Button Classes="accent" Content="{Binding SignInLabel}" Command="{Binding SignInCommand}" ctl:ContextMenus.DefaultBrowserSignIn="{Binding SignInInDefaultBrowserCommand}"
                                 AutomationProperties.Name="{Binding Server, StringFormat={loc:T 'Sign in to {0}'}}" />
                         <Button Classes="flat" Content="{loc:T 'Dismiss'}" Command="{Binding DismissCommand}" />
                       </StackPanel>
@@ -286,7 +286,7 @@
                             <TextBlock Text="{Binding AuthText}" />
                           </StackPanel>
                         </Border>
-                        <Button Classes="accent" Content="{Binding SignInLabel}" Command="{Binding SignInCommand}" IsVisible="{Binding SuggestSignIn}"
+                        <Button Classes="accent" Content="{Binding SignInLabel}" Command="{Binding SignInCommand}" ctl:ContextMenus.DefaultBrowserSignIn="{Binding SignInInDefaultBrowserCommand}" IsVisible="{Binding SuggestSignIn}"
                                 AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Sign in to {0}'}}" />
                         <Button Content="{loc:T 'Cancel sign-in'}" Command="{Binding CancelSignInCommand}" IsVisible="{Binding IsSigningIn}"
                                 ToolTip.Tip="{loc:T 'Finish the sign-in in your browser. omp connects as soon as it’s done.'}"

@@ -87,8 +87,8 @@
             </Grid>
           </Border>
           <TextBlock Classes="tertiary" Text="{Binding FileNote}" IsVisible="{Binding IsFromProjectFile}" TextWrapping="Wrap" />
-          <!-- Sign in: omp opens the server's sign-in page in the browser and answers when it's done -->
-          <Button Classes="accent" HorizontalAlignment="Left" Content="{Binding SignInLabel}" Command="{Binding SignInCommand}" IsVisible="{Binding SuggestSignIn}"
+          <!-- Sign in: omp's sign-in page opens in Ombra's browser (its menu: the default browser); omp answers when it's done -->
+          <Button Classes="accent" HorizontalAlignment="Left" Content="{Binding SignInLabel}" Command="{Binding SignInCommand}" ctl:ContextMenus.DefaultBrowserSignIn="{Binding SignInInDefaultBrowserCommand}" IsVisible="{Binding SuggestSignIn}"
                   AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Sign in to {0}'}}" />
           <Border Classes="conn-inset" IsVisible="{Binding IsSigningIn}">
             <Grid ColumnDefinitions="*,Auto">
@@ -273,7 +273,7 @@
                 AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Test {0}'}}" />
         <Button x:Name="EditServerButton" Classes="outline" Content="{loc:T 'Edit…'}" Command="{Binding EditCommand}" IsEnabled="{Binding CanEdit}"
                 AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Edit {0}'}}" />
-        <Button x:Name="SignInAgainButton" Classes="outline" Content="{loc:T 'Sign in again'}" Command="{Binding SignInCommand}" IsVisible="{Binding CanSignInAgain}"
+        <Button x:Name="SignInAgainButton" Classes="outline" Content="{loc:T 'Sign in again'}" Command="{Binding SignInCommand}" ctl:ContextMenus.DefaultBrowserSignIn="{Binding SignInInDefaultBrowserCommand}" IsVisible="{Binding CanSignInAgain}"
                 AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Sign in to {0} again'}}" />
         <Button x:Name="ReconnectServerButton" Classes="outline" Content="{loc:T 'Reconnect'}" Command="{Binding ReconnectCommand}" IsVisible="{Binding CanReconnect}"
                 ToolTip.Tip="{loc:T 'omp connects to it again, from its entry in mcp.json as it is now'}"

@@ -11,7 +11,7 @@ namespace Ombra.App.ViewModels;
 /// </summary>
 public sealed partial class MainViewModel
 {
-    public PreviewViewModel Browser => field ??= NewBrowser();
+    public PreviewViewModel Browser => field ??= NewUserBrowser();
 
     /// <summary>The Browser page is the one shown (unless settings are open over it).</summary>
     [ObservableProperty]
@@ -22,7 +22,8 @@ public sealed partial class MainViewModel
 
     partial void OnIsBrowserPageOpenChanged(bool value) => OnRailChanged();
 
-    private PreviewViewModel NewBrowser()
+    /// <summary>A browser of the user's own (the Browser page, the sign-in window): the agent's pane's engine choice.</summary>
+    private PreviewViewModel NewUserBrowser()
     {
         // The agent's pane's site permissions and download folder (one file, one owner): the same object.
         var b = new PreviewViewModel(Preview.SiteSettings)

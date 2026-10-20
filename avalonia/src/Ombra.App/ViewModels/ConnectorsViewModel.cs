@@ -247,6 +247,7 @@ public sealed partial class McpServerRowViewModel : ObservableObject
     [RelayCommand] private void CancelRemove() => IsConfirmingRemove = false;
     [RelayCommand] private Task Remove() => _page.RemoveAsync(this);
     [RelayCommand] private Task SignIn() => _page.SignInAsync(Name);
+    [RelayCommand] private Task SignInInDefaultBrowser() => _page.SignInAsync(Name, defaultBrowser: true);
     [RelayCommand] private Task CancelSignIn() => _page.CancelSignInAsync(Name);
     [RelayCommand] private Task Reconnect() => _page.ReconnectAsync(Name);
     [RelayCommand] private Task SignOut() => _page.SignOutAsync(Name);
@@ -262,6 +263,7 @@ public sealed partial class McpAuthPromptViewModel(ConnectorsViewModel page, Mcp
     public string SignInLabel => Expired ? Loc.T("Sign in again") : Loc.T("Sign in");
 
     [RelayCommand] private Task SignIn() => page.SignInAsync(Server);
+    [RelayCommand] private Task SignInInDefaultBrowser() => page.SignInAsync(Server, defaultBrowser: true);
     [RelayCommand] private void Dismiss() => page.DismissPrompt(Server);
 }
 
@@ -1073,10 +1075,10 @@ public sealed partial class ConnectorsViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Signs in to a connector: omp sends its sign-in page, which opens in the default browser (MainViewModel.Mcp.cs),
-    /// and answers when the user finished there or cancelled.
+    /// Signs in to a connector: omp sends its sign-in page, which opens in Ombra (or the default browser with
+    /// <paramref name="defaultBrowser"/>; MainViewModel.Mcp.cs), and answers when the user finished there or cancelled.
     /// </summary>
-    internal async Task SignInAsync(string name)
+    internal async Task SignInAsync(string name, bool defaultBrowser = false)
     {
         var session = _owner.Session;
         var row = Servers.FirstOrDefault(r => r.Name == name);
@@ -1095,7 +1097,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
         }
         try
         {
-            var server = await _owner.SignInToConnectorAsync(name);
+            var server = await _owner.SignInToConnectorAsync(name, defaultBrowser);
             if (server is not null) ApplyLive(session, [server]);
             Say(server is { Status: "connected", ToolCount: > 0 }
                 ? Loc.Plural(server.ToolCount, "Signed in to “{1}”: {0} tool ready.", "Signed in to “{1}”: {0} tools ready.", name)

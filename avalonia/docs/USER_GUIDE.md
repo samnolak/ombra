@@ -604,8 +604,11 @@ project yet), so the OS warns on first start:
   offers to install it. Only when the pane has no engine at all (the system's web engine is missing) does the link go
   to your default browser. ⌘-click (Ctrl-click on Windows and Linux) or right-click a link for **Open in preview**,
   **Open in Browser page**, **Open in default browser**, **Copy link** and **Share with team…**. Sign-in pages
-  (**Open in browser** on omp's sign-in card, an MCP server's sign-in) open in your default browser, where your
-  accounts and passkeys are. Files, folders and `mailto:` links open with the system as before.
+  (**Open** on omp's sign-in card, an MCP server's **Sign in**, `/mcp reauth <name>`) open in Ombra too: in a tab of
+  the chat's **Browser**, or — when you start the sign-in from Settings — in Ombra's own **Sign in** window; the
+  page's redirect back to omp (an address on this computer) completes there, and the tab or window closes once you
+  are signed in. For passkeys or a company's single sign-on use **Open in default browser** on the sign-in card, or
+  right-click a **Sign in** button. Files, folders and `mailto:` links open with the system as before.
 - **Paths in replies** — a path omp writes as code (`src/app.ts`, `src/app.ts:42`, `assets/logo.png`, `docs/`) or as
   a link to a local file is looked up in the chat's project when the pointer rests on it. If it exists it is
   underlined and shows a preview: a file's first lines (around the line when it names one, that line marked), an
@@ -918,8 +921,8 @@ their own below:
   per-model limits…) is listed with a note to edit `models.yml` itself, and can still be removed. After each change
   the shared engine restarts once all chats and sign-ins are idle; the new models then appear in the model chip.
   A `models.yml` that doesn't parse is shown with the error and left unchanged.
-  Then the providers you sign in to, each with **Sign in** or *Signed in*; the browser link and any code appear above
-  the message box. The sign-out button beside *Signed in* (its tooltip: *Sign out of …*) lists the accounts omp stored
+  Then the providers you sign in to, each with **Sign in** or *Signed in*; the sign-in link and any code appear above
+  the message box (**Open** shows the page in the chat's **Browser**, **Open in default browser** in your own). The sign-out button beside *Signed in* (its tooltip: *Sign out of …*) lists the accounts omp stored
   for that provider (the one in use marked *In use*); **Sign out** on one makes omp forget it. A provider signed in
   only by an API key in the environment or omp's settings has nothing stored to remove: the panel says so. The list
   appears while omp is running. API keys stay in omp's configuration: a key typed for a custom provider goes into
@@ -1062,9 +1065,11 @@ configuration you are editing.
   checks and saves it (`/mcp add`).
 - A server that uses OAuth shows its sign-in on its row: *Signed in*, *Signed out* or *Sign-in expired*. **Sign in**
   (also offered when a remote server refused the test with 401) asks omp to sign in: the server's sign-in page opens
-  in your default browser (your accounts and passkeys are there) — only for a sign-in you started here (or with
-  `/mcp reauth <name>` in the message box), and only an `https` page or one on this computer — and the row says
-  *Connected · N tools* when you're done, without a restart. **Sign in again** on the server's page signs in anew;
+  in Ombra's **Sign in** window (from the chat's connectors list: a tab of the chat's **Browser**) — only for a
+  sign-in you started here (or with `/mcp reauth <name>` in the message box), and only an `https` page or one on this
+  computer. The page hands the sign-in back to omp on this computer right there; the window (or tab) closes and the
+  row says *Connected · N tools*, without a restart. Right-click **Sign in** for **Open in default browser** when the
+  sign-in needs your passkeys or your company's single sign-on. **Sign in again** on the server's page signs in anew;
   **Sign out** there has omp forget the sign-in it keeps; **Cancel** stops a sign-in waiting on the browser. When the
   server refuses the sign-in (for example a client registration it does not allow), the row shows omp's reason. A
   link omp opens on its own stays on the link card for you to open. When omp finds that a server needs you to sign in
