@@ -108,7 +108,7 @@ case "$RID" in
     chmod +x "$APP/Contents/MacOS/Ombra" "$APP/Contents/MacOS/OmpGui"
     engine "$APP/Contents/Resources/engine"
     sed "s/VERSION/${VERSION%%-*}/g" "$PKG/Info.plist" > "$APP/Contents/Info.plist"
-    cp "$HERE/src/Ombra.App/Assets/ombra.icns" "$APP/Contents/Resources/ombra.icns"
+    cp "$PKG/macos/ombra.icns" "$APP/Contents/Resources/ombra.icns"
     docs "$STAGE/$NAME"
     python3 "$HERE/tools/package/native-platform.py" "$RID" "$APP" --prune
     "$HERE/tools/package/sign.sh" macos "$APP" "$SIGNING"
