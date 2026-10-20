@@ -223,7 +223,7 @@ index aacb7e0d3ca756db58a6c1212eb910c9df54cf2a..af65e3a2d294d976f4c822c4d0da1aaa
  	}
  
 diff --git a/src/modes/rpc/rpc-mode.ts b/src/modes/rpc/rpc-mode.ts
-index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2d73aa7a7 100644
+index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef37670edbe 100644
 --- a/src/modes/rpc/rpc-mode.ts
 +++ b/src/modes/rpc/rpc-mode.ts
 @@ -19,8 +19,12 @@ import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
@@ -405,7 +405,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  }
  
  /**
-@@ -422,6 +436,14 @@ const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>([
+@@ -422,6 +436,15 @@ const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>([
  	"predict_word",
  	"live_start",
  	"btw_cancel",
@@ -416,11 +416,12 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
 +	"get_mcp_servers",
 +	"mcp_login",
 +	"mcp_login_cancel",
++	"mcp_logout",
 +	"mcp_reconnect",
  ]);
  
  /**
-@@ -450,8 +472,13 @@ const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>([
+@@ -450,8 +473,13 @@ const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>([
   *   Errors from `handleCommand` on a command dispatched inline propagate; the
   *   caller is expected to wrap them.
   */
@@ -436,7 +437,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  	// Regular RPC command. The transport contract states each remaining frame
  	// is an {@link RpcCommand}; `handleCommand`'s `default` arm surfaces
  	// unknown discriminants as an error response, so we do not shape-check
-@@ -471,6 +498,7 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
+@@ -471,6 +499,7 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
  	if (
  		BACKGROUND_COMMANDS.has(command.type) ||
  		command.type === "prompt" ||
@@ -444,7 +445,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  		command.type === "steer" ||
  		command.type === "follow_up" ||
  		command.type === "steer_subagent"
-@@ -480,7 +508,11 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
+@@ -480,7 +509,11 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
  				deps.output(await deps.handleCommand(command));
  			} catch (err: unknown) {
  				const message = err instanceof Error ? err.message : String(err);
@@ -457,7 +458,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  			}
  		})();
  		deps.trackBackgroundTask?.(task);
-@@ -488,7 +520,8 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
+@@ -488,7 +521,8 @@ export function dispatchRpcInputFrame(parsed: unknown, deps: RpcInputFrameDeps):
  	}
  
  	return (async () => {
@@ -467,7 +468,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  	})();
  }
  
-@@ -572,6 +605,7 @@ export class RpcInputDispatcher {
+@@ -572,6 +606,7 @@ export class RpcInputDispatcher {
  	readonly #afterSerialCommand: (() => Promise<void>) | undefined;
  	readonly #acceptInput: ((command: RpcCommand) => void) | undefined;
  
@@ -475,7 +476,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  	constructor(options: {
  		deps: RpcInputFrameDeps;
  		afterSerialCommand?: () => Promise<void>;
-@@ -583,22 +617,29 @@ export class RpcInputDispatcher {
+@@ -583,22 +618,29 @@ export class RpcInputDispatcher {
  	}
  
  	/** Accept a parsed input frame without blocking the stdin reader. */
@@ -510,7 +511,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  			);
  			this.#tail = task.catch(() => {});
  			this.#tasks.add(task);
-@@ -608,9 +649,15 @@ export class RpcInputDispatcher {
+@@ -608,9 +650,15 @@ export class RpcInputDispatcher {
  		} catch (err: unknown) {
  			const message = err instanceof Error ? err.message : String(err);
  			this.#deps.output(this.#deps.errorResponse(undefined, "parse", `Failed to parse command: ${message}`));
@@ -526,7 +527,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  	/** Await every accepted serial command, including commands queued before EOF. */
  	async drain(): Promise<void> {
  		while (this.#tasks.size > 0) {
-@@ -618,13 +665,17 @@ export class RpcInputDispatcher {
+@@ -618,13 +666,17 @@ export class RpcInputDispatcher {
  		}
  	}
  
@@ -547,7 +548,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  		} finally {
  			await this.#afterSerialCommand?.();
  		}
-@@ -873,9 +924,17 @@ export async function handleRpcSessionChange(
+@@ -873,9 +925,17 @@ export async function handleRpcSessionChange(
  		}
  
  		case "switch_session": {
@@ -566,7 +567,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  			return { type: "switch_session", data: { cancelled } };
  		}
  
-@@ -892,6 +951,15 @@ export async function handleRpcSessionChange(
+@@ -892,6 +952,15 @@ export async function handleRpcSessionChange(
  			if (!cancelled) subagentRegistry?.clear();
  			return { type: "fork", data: { cancelled } };
  		}
@@ -582,7 +583,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  	}
  	throw new Error("Unsupported RPC session change command");
  }
-@@ -1054,9 +1122,22 @@ export function requestRpcSelect(
+@@ -1054,9 +1123,22 @@ export function requestRpcSelect(
  			title,
  			options: labels,
  			...(optionDetails ? { optionDetails } : {}),
@@ -606,7 +607,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  	);
  }
  
-@@ -1314,7 +1395,9 @@ export function registerRpcPersistenceSurface(
+@@ -1314,7 +1396,9 @@ export function registerRpcPersistenceSurface(
  	});
  	const unsubscribeNotices = session.sessionManager.onPersistenceNotice(notice => {
  		const message = formatPersistenceNotice(notice);
@@ -617,7 +618,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  		process.stderr.write(`${message}\n`);
  	});
  	return () => {
-@@ -1333,42 +1416,41 @@ export interface RpcModeOptions {
+@@ -1333,42 +1417,41 @@ export interface RpcModeOptions {
  	input?: ReadableStream<Uint8Array>;
  	/** Builds `live_start` sessions; defaults to the real {@link LiveSessionController}. */
  	createLiveSession?: RpcLiveSessionFactory;
@@ -690,7 +691,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  		if (isRecord(obj) && obj.type === "response" && obj.command === "negotiate_protocol" && obj.success === true)
  			frameEncoder.setProtocolVersion(2);
  	};
-@@ -1394,6 +1476,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1394,6 +1477,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  	const btw = new RpcBtwController(session, output);
  	// A continuation abandoned while waiting leaves nothing to end the activity stretch: re-check settlement.
  	const goalController = new RpcGoalController(session, () => void settleWatcher.check());
@@ -699,7 +700,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  	// A scheduled or held goal turn will start a turn: every settle report treats it as busy,
  	// and any report of "not settled" for that reason is later closed by `session_settled`.
  	const goalTurnScheduled = watchedScheduledTurnProbe(
-@@ -1407,9 +1491,14 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1407,9 +1492,14 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  	const pendingExtensionRequests = new RpcPendingExtensionRequests();
  	const hostToolBridge = new RpcHostToolBridge(output);
  	const hostUriBridge = new RpcHostUriBridge(output);
@@ -714,7 +715,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  
  	// Shutdown request flag (wrapped in object to allow mutation with const)
  	const shutdownState = { requested: false };
-@@ -1621,120 +1710,83 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1621,120 +1711,83 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  	const onPromptError = (id: string | undefined, command: string) => (promptError: Error) =>
  		output(error(id, command, promptError.message));
  
@@ -892,7 +893,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  	};
  
  	const getAvailableCommands = async () => buildAvailableSlashCommands(session);
-@@ -1755,107 +1807,100 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1755,107 +1808,101 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  
  	const inputGate = new RpcUserInputGate();
  	type OrderedUserInput = Extract<RpcCommand, { type: "prompt" | "steer" | "follow_up" | "abort_and_prompt" }>;
@@ -1026,6 +1027,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
 +							notifyConfigChanged: async () => {
 +								output({ type: "config_update", model: session.model, thinkingLevel: session.thinkingLevel });
 +							},
++							mcpConnectors: mcp,
 +						});
 +						if (!isCurrent()) return "cancelled";
 +						if (builtinResult !== false) {
@@ -1079,7 +1081,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  			case "negotiate_protocol": {
  				if (command.protocolVersion !== 2)
  					return error(id, "negotiate_protocol", `Unsupported RPC protocol version: ${command.protocolVersion}`);
-@@ -1873,17 +1918,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1873,17 +1920,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				try {
  					// Ack after admission, including hooks and skill image preparation, so a
  					// queue edit sent after this response finds the message.
@@ -1098,7 +1100,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  				} catch (promptSetupError) {
  					promptResults.discard(ticket);
  					throw promptSetupError;
-@@ -1892,8 +1927,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1892,8 +1929,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  
  			case "steer":
  			case "follow_up": {
@@ -1108,7 +1110,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  			}
  
  			case "remove_queued_message": {
-@@ -1906,7 +1940,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1906,7 +1942,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				return fitRemoveQueuedMessageResponse(
  					id,
  					session.takeQueuedMessage(command.message, command.queue),
@@ -1117,7 +1119,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  				);
  			}
  
-@@ -1930,36 +1964,39 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1930,36 +1966,39 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				const restored = session.clearQueue({ forInterrupt: true });
  				goalController.stopForHostAbort();
  				await session.abort({ reason: USER_INTERRUPT_LABEL });
@@ -1177,7 +1179,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  				}
  				const requestedModel =
  					command.type === "switch_session" ? await resolveRequestedRpcModel(session, command) : undefined;
-@@ -1974,9 +2011,13 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1974,9 +2013,13 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  					if (err instanceof SessionBusyError) return error(id, command.type, err.message, "session_busy");
  					throw err;
  				} finally {
@@ -1193,7 +1195,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  					});
  					// Respond only once this change's reattach (and any queued ahead of it) has run.
  					await goalController.settled();
-@@ -1984,9 +2025,11 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1984,9 +2027,11 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				if (!result.data.cancelled) {
  					inputGate.commitSessionChange(command);
  					// `branch` leaves a live run streaming to its normal yield; new/switch detach it.
@@ -1206,7 +1208,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  					await emitAvailableCommandsUpdate();
  				}
  				return success(id, result.type, result.data);
-@@ -2013,6 +2056,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2013,6 +2058,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  					// reopens a transcript with the same id.
  					if (session.sessionFile !== fileBeforeOpen) promptResults.abortOpen();
  					void settleWatcher.check();
@@ -1214,7 +1216,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  					await emitAvailableCommandsUpdate();
  				}
  				return success(id, "open_session", result);
-@@ -2023,8 +2067,10 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2023,8 +2069,10 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  			// =================================================================
  
  			case "get_state": {
@@ -1226,7 +1228,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  				const queuedMessages = session.getQueuedMessages();
  				const state: RpcSessionState = {
  					model: session.model,
-@@ -2065,6 +2111,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2065,6 +2113,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  					})),
  					contextUsage: session.getContextUsage(),
  					goal: session.getGoalModeState() ?? null,
@@ -1235,7 +1237,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  				};
  				return success(id, "get_state", state);
  			}
-@@ -2100,6 +2148,15 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2100,6 +2150,15 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				}
  			}
  
@@ -1251,7 +1253,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  			case "set_ask_dialog": {
  				rpcUiContext.askDialogEnabled = command.enabled === true;
  				return success(id, "set_ask_dialog", { enabled: rpcUiContext.askDialogEnabled });
-@@ -2263,6 +2320,40 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2263,6 +2322,40 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				return failure ? error(id, "steer_subagent", failure) : success(id, "steer_subagent");
  			}
  
@@ -1292,7 +1294,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  			// =================================================================
  			// Model
  			// =================================================================
-@@ -2446,6 +2537,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2446,6 +2539,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  			}
  
  			case "get_messages_page": {
@@ -1301,7 +1303,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  				if (session.isStreaming || session.isCompacting)
  					return error(id, "get_messages_page", RPC_MESSAGES_PAGE_BUSY_ERROR, "session_busy");
  				const messages = session.messages;
-@@ -2453,7 +2546,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2453,7 +2548,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  					return success(
  						id,
  						"get_messages_page",
@@ -1310,7 +1312,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  							messages,
  							{
  								sessionId: session.sessionId,
-@@ -2501,6 +2594,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2501,6 +2596,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				let authEmitted = false;
  				try {
  					await session.modelRegistry.authStorage.oauth.login(command.providerId, {
@@ -1318,7 +1320,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  						onAuth: info => {
  							authEmitted = true;
  							output({
-@@ -2577,6 +2671,35 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2577,6 +2673,37 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				return success(id, "logout", { remainingSource });
  			}
  
@@ -1331,6 +1333,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
 +
 +			case "mcp_login":
 +			case "mcp_login_cancel":
++			case "mcp_logout":
 +			case "mcp_reconnect": {
 +				if (command.type !== "mcp_reconnect" && typeof command.serverName !== "string")
 +					return error(id, command.type, "serverName must be a string");
@@ -1338,6 +1341,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
 +					if (command.type === "mcp_login") return success(id, "mcp_login", await mcp.login(command.serverName));
 +					if (command.type === "mcp_login_cancel")
 +						return success(id, "mcp_login_cancel", { cancelled: mcp.cancelLogin(command.serverName) });
++					if (command.type === "mcp_logout") return success(id, "mcp_logout", await mcp.logout(command.serverName));
 +					if (command.serverName !== undefined && typeof command.serverName !== "string")
 +						return error(id, command.type, "serverName must be a string");
 +					return success(id, "mcp_reconnect", { servers: await mcp.reconnect(command.serverName) });
@@ -1354,7 +1358,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  			// =================================================================
  			// Side questions (/btw)
  			// =================================================================
-@@ -2638,25 +2761,21 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2638,25 +2765,21 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  		}
  	};
  
@@ -1389,7 +1393,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2
  		errorResponse: error,
  		trackBackgroundTask: task => shutdownCoordinator.track(task),
  		pendingExtensionRequests,
-@@ -2670,33 +2789,103 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2670,33 +2793,103 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  		afterSerialCommand: () => shutdownCoordinator.checkShutdownRequested(),
  		acceptInput: command => inputGate.accept(command),
  	});
@@ -1632,7 +1636,7 @@ index 4bffa58191d0de52500033f621977dff3f3e2f83..fac4f0b658f0c69b9f22c0d3b051e0b5
  	return increment;
  }
 diff --git a/src/modes/rpc/rpc-types.ts b/src/modes/rpc/rpc-types.ts
-index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec4dc6ed86 100644
+index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..88974bb1a0adf9089cb0023da3559d4616ed9cc1 100644
 --- a/src/modes/rpc/rpc-types.ts
 +++ b/src/modes/rpc/rpc-types.ts
 @@ -14,16 +14,23 @@ import type { RestoredQueuedMessage } from "../../session/agent-session-types";
@@ -1703,22 +1707,24 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
  
  	// Login
  	| { id?: string; type: "get_login_providers" }
-@@ -142,7 +156,13 @@ export type RpcCommand =
+@@ -142,7 +156,15 @@ export type RpcCommand =
  	// Side questions (/btw); answers stream as `btw_delta` / `btw_record` frames
  	| { id?: string; type: "btw"; question: string; recordId?: string }
  	| { id?: string; type: "btw_cancel"; recordId?: string }
 -	| { id?: string; type: "get_btw_history" };
 +	| { id?: string; type: "get_btw_history" }
 +
-+	// MCP connectors: state, OAuth sign-in (the URL arrives as `open_url` with `mcpServer`), reconnect
++	// MCP connectors: state, OAuth sign-in (the URL arrives as `open_url` with `mcpServer`), sign-out,
++	// reconnect (re-reads the config files)
 +	| { id?: string; type: "get_mcp_servers" }
 +	| { id?: string; type: "mcp_login"; serverName: string }
 +	| { id?: string; type: "mcp_login_cancel"; serverName: string }
++	| { id?: string; type: "mcp_logout"; serverName: string }
 +	| { id?: string; type: "mcp_reconnect"; serverName?: string };
  
  // ============================================================================
  // RPC State
-@@ -194,6 +214,13 @@ export interface RpcSessionState {
+@@ -194,6 +216,13 @@ export interface RpcSessionState {
  	contextUsage?: ContextUsage;
  	/** Current goal-mode state; `null` when the session has no goal. */
  	goal: GoalModeState | null;
@@ -1732,7 +1738,7 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
  }
  
  export interface RpcAvailableSlashCommand {
-@@ -363,10 +390,67 @@ export interface RpcSubagentMessagesResult {
+@@ -363,10 +392,67 @@ export interface RpcSubagentMessagesResult {
  	messages: AgentMessage[];
  }
  
@@ -1800,7 +1806,7 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
  // Success responses with data
  export type RpcResponse =
  	// Protocol
-@@ -377,11 +461,14 @@ export type RpcResponse =
+@@ -377,11 +463,14 @@ export type RpcResponse =
  			success: true;
  			data: { protocolVersion: 2 };
  	  }
@@ -1818,7 +1824,7 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
  	| {
  			id?: string;
  			type: "response";
-@@ -391,7 +478,7 @@ export type RpcResponse =
+@@ -391,7 +480,7 @@ export type RpcResponse =
  	  }
  	| { id?: string; type: "response"; command: "promote_queued_message"; success: true; data: { promoted: boolean } }
  	| { id?: string; type: "response"; command: "abort"; success: true }
@@ -1827,7 +1833,7 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
  	| {
  			id?: string;
  			type: "response";
-@@ -413,6 +500,7 @@ export type RpcResponse =
+@@ -413,6 +502,7 @@ export type RpcResponse =
  	  }
  	| { id?: string; type: "response"; command: "set_slow_mode"; success: true; data: { enabled: boolean } }
  	| { id?: string; type: "response"; command: "goal"; success: true; data: RpcGoalResult }
@@ -1835,7 +1841,7 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
  	| { id?: string; type: "response"; command: "set_ask_dialog"; success: true; data: { enabled: boolean } }
  	| {
  			id?: string;
-@@ -474,6 +562,9 @@ export type RpcResponse =
+@@ -474,6 +564,9 @@ export type RpcResponse =
  			data: { cancelled: boolean };
  	  }
  	| { id?: string; type: "response"; command: "steer_subagent"; success: true }
@@ -1845,7 +1851,7 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
  
  	// Model
  	| {
-@@ -541,6 +632,13 @@ export type RpcResponse =
+@@ -541,6 +634,13 @@ export type RpcResponse =
  	| { id?: string; type: "response"; command: "switch_session"; success: true; data: { cancelled: boolean } }
  	| { id?: string; type: "response"; command: "branch"; success: true; data: { text: string; cancelled: boolean } }
  	| { id?: string; type: "response"; command: "fork"; success: true; data: { cancelled: boolean } }
@@ -1859,7 +1865,7 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
  	| {
  			id?: string;
  			type: "response";
-@@ -564,7 +662,7 @@ export type RpcResponse =
+@@ -564,7 +664,7 @@ export type RpcResponse =
  
  	// Messages
  	| { id?: string; type: "response"; command: "get_messages"; success: true; data: { messages: AgentMessage[] } }
@@ -1868,7 +1874,7 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
  
  	// Login
  	| {
-@@ -599,8 +697,15 @@ export type RpcResponse =
+@@ -599,8 +699,16 @@ export type RpcResponse =
  			data: { records: readonly BtwHistoryRecord[] };
  	  }
  
@@ -1878,6 +1884,7 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
 +	| { id?: string; type: "response"; command: "get_mcp_servers"; success: true; data: { servers: RpcMcpServerInfo[] } }
 +	| { id?: string; type: "response"; command: "mcp_login"; success: true; data: RpcMcpServerInfo }
 +	| { id?: string; type: "response"; command: "mcp_login_cancel"; success: true; data: { cancelled: boolean } }
++	| { id?: string; type: "response"; command: "mcp_logout"; success: true; data: RpcMcpServerInfo }
 +	| { id?: string; type: "response"; command: "mcp_reconnect"; success: true; data: { servers: RpcMcpServerInfo[] } }
 +
 +	// Error response (any command can fail); saved-model recovery carries structured identity.
@@ -1886,7 +1893,7 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
  
  // ============================================================================
  // Side question (/btw) frames (stdout)
-@@ -650,7 +755,10 @@ export type RpcMessageEventType = "message_start" | "message_update" | "message_
+@@ -650,7 +758,10 @@ export type RpcMessageEventType = "message_start" | "message_update" | "message_
   */
  export type RpcMessageEventFrame = Extract<AgentSessionEvent, { type: RpcMessageEventType }> & { messageId: string };
  
@@ -1898,7 +1905,7 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
  
  /** Raw-protocol opt-in projection; terminal subtype fields are preserved. */
  export type RpcDeltaMessageUpdateFrame = Omit<
-@@ -699,6 +807,8 @@ export type RpcExtensionUIRequest =
+@@ -699,6 +810,8 @@ export type RpcExtensionUIRequest =
  			title: string;
  			options: string[];
  			optionDetails?: RpcExtensionUISelectOptionDetail[];
@@ -1907,7 +1914,7 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
  			timeout?: number;
  	  }
  	| { type: "extension_ui_request"; id: string; method: "confirm"; title: string; message: string; timeout?: number }
-@@ -763,6 +873,21 @@ export type RpcExtensionUIRequest =
+@@ -763,6 +876,21 @@ export type RpcExtensionUIRequest =
  			 */
  			launchUrl?: string;
  			instructions?: string;
@@ -1929,7 +1936,7 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
  	  };
  
  // ============================================================================
-@@ -867,13 +992,59 @@ export interface RpcHostUriResult {
+@@ -867,13 +995,59 @@ export interface RpcHostUriResult {
  	error?: string;
  }
  
@@ -1990,7 +1997,7 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
  	| { type: "extension_ui_response"; id: string; confirmed: boolean }
  	| { type: "extension_ui_response"; id: string; cancelled: true; timedOut?: boolean }
  	/** Answers to an `ask` request, one per question in request order. */
-@@ -881,6 +1052,13 @@ export type RpcExtensionUIResponse =
+@@ -881,6 +1055,13 @@ export type RpcExtensionUIResponse =
  			type: "extension_ui_response";
  			id: string;
  			answers: Array<{ id: string; selectedOptions: string[]; customInput?: string }>;
@@ -2005,7 +2012,7 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..2b29201ab0fb9511954f58fb6e5ee0ec
  
  // ============================================================================
 diff --git a/src/modes/rpc/wire/commands.ts b/src/modes/rpc/wire/commands.ts
-index 580eb02ec33a6dc1de5f78b4cfe5525f9654d0b5..361ff3a4918bcae428cb6bf82e14c1c41e6e4087 100644
+index 580eb02ec33a6dc1de5f78b4cfe5525f9654d0b5..1e730e35609ed6ab23b6bf4dad10d2d37660cf06 100644
 --- a/src/modes/rpc/wire/commands.ts
 +++ b/src/modes/rpc/wire/commands.ts
 @@ -38,6 +38,29 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
@@ -2118,7 +2125,7 @@ index 580eb02ec33a6dc1de5f78b4cfe5525f9654d0b5..361ff3a4918bcae428cb6bf82e14c1c4
  		result: "MessagesPage",
  	},
  
-@@ -371,4 +426,33 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+@@ -371,4 +426,40 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
  		result: { records: "BtwHistoryRecord[]" },
  		unwrap: "records",
  	},
@@ -2144,8 +2151,15 @@ index 580eb02ec33a6dc1de5f78b4cfe5525f9654d0b5..361ff3a4918bcae428cb6bf82e14c1c4
 +		unwrap: "cancelled",
 +	},
 +	{
++		name: "mcp_logout",
++		doc: "Sign out of an MCP server: its stored OAuth credentials and config auth block are removed, then it reconnects signed out.",
++		params: { serverName: "string" },
++		result: "McpServerInfo",
++		timeoutMs: 120_000,
++	},
++	{
 +		name: "mcp_reconnect",
-+		doc: "Reconnect one server from its config, or without a name rediscover and reconnect them all.",
++		doc: "Re-read mcp.json and reconnect: one server, or without a name (or for a server new to the session) rediscover and reconnect them all.",
 +		params: { "serverName?": "string" },
 +		result: { servers: "McpServerInfo[]" },
 +		unwrap: "servers",
@@ -2315,7 +2329,7 @@ index b00c3930004891e0eebd85b5e9d160e1989ea5d0..469edb4a0b9084d66c885b5abc725cc0
  			"SessionInfoUpdateEvent",
  			"ConfigUpdateEvent",
 diff --git a/src/modes/rpc/wire/rpc-wire.generated.ts b/src/modes/rpc/wire/rpc-wire.generated.ts
-index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..e3bd6dfaf64df2a0b0527dd12bfce6c6ecdce24e 100644
+index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..4e3e8b0e6d49eb0bbafdb646cf21890d2c4ac4d5 100644
 --- a/src/modes/rpc/wire/rpc-wire.generated.ts
 +++ b/src/modes/rpc/wire/rpc-wire.generated.ts
 @@ -368,6 +368,11 @@ export interface ModelInfo {
@@ -2786,7 +2800,7 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..e3bd6dfaf64df2a0b0527dd12bfce6c6
  }
  
  export interface GetLoginProvidersResult {
-@@ -1788,16 +2097,43 @@ export interface GetBtwHistoryResult {
+@@ -1788,16 +2097,47 @@ export interface GetBtwHistoryResult {
  	records: BtwHistoryRecord[];
  }
  
@@ -2804,6 +2818,10 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..e3bd6dfaf64df2a0b0527dd12bfce6c6
 +
 +export interface McpLoginCancelResult {
 +	cancelled: boolean;
++}
++
++export interface McpLogoutParams {
++	serverName: string;
 +}
 +
 +export interface McpReconnectParams {
@@ -2833,7 +2851,7 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..e3bd6dfaf64df2a0b0527dd12bfce6c6
  	abort_and_restore_queue: { params: undefined; result: AbortAndRestoreQueueResult };
  	new_session: { params: NewSessionParams; result: CancellationResult };
  	open_session: { params: OpenSessionParams; result: OpenSessionResult };
-@@ -1805,6 +2141,7 @@ export interface RpcWireCommands {
+@@ -1805,6 +2145,7 @@ export interface RpcWireCommands {
  	set_fast_mode: { params: SetFastModeParams; result: FastModeResult };
  	set_slow_mode: { params: SetSlowModeParams; result: SetSlowModeResult };
  	goal: { params: GoalParams; result: GoalResult };
@@ -2841,7 +2859,7 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..e3bd6dfaf64df2a0b0527dd12bfce6c6
  	set_ask_dialog: { params: SetAskDialogParams; result: SetAskDialogResult };
  	get_available_commands: { params: undefined; result: GetAvailableCommandsResult };
  	get_entries: { params: GetEntriesParams; result: SessionEntries };
-@@ -1818,6 +2155,9 @@ export interface RpcWireCommands {
+@@ -1818,6 +2159,9 @@ export interface RpcWireCommands {
  	get_subagent_messages: { params: GetSubagentMessagesParams; result: SubagentMessages };
  	cancel_subagent: { params: CancelSubagentParams; result: CancelSubagentResult };
  	steer_subagent: { params: SteerSubagentParams; result: undefined };
@@ -2851,7 +2869,7 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..e3bd6dfaf64df2a0b0527dd12bfce6c6
  	live_start: { params: LiveStartParams; result: LiveStartResult };
  	live_stop: { params: undefined; result: undefined };
  	live_mute: { params: LiveMuteParams; result: LiveMuteResult };
-@@ -1842,6 +2182,7 @@ export interface RpcWireCommands {
+@@ -1842,6 +2186,7 @@ export interface RpcWireCommands {
  	switch_session: { params: SwitchSessionParams; result: CancellationResult };
  	branch: { params: BranchParams; result: BranchResult };
  	fork: { params: ForkParams; result: CancellationResult };
@@ -2859,17 +2877,18 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..e3bd6dfaf64df2a0b0527dd12bfce6c6
  	get_branch_messages: { params: undefined; result: GetBranchMessagesResult };
  	get_last_assistant_text: { params: undefined; result: GetLastAssistantTextResult };
  	set_session_name: { params: SetSessionNameParams; result: undefined };
-@@ -1857,4 +2198,8 @@ export interface RpcWireCommands {
+@@ -1857,4 +2202,9 @@ export interface RpcWireCommands {
  	btw: { params: BtwParams; result: BtwResult };
  	btw_cancel: { params: BtwCancelParams; result: BtwCancelResult };
  	get_btw_history: { params: undefined; result: GetBtwHistoryResult };
 +	get_mcp_servers: { params: undefined; result: GetMcpServersResult };
 +	mcp_login: { params: McpLoginParams; result: McpServerInfo };
 +	mcp_login_cancel: { params: McpLoginCancelParams; result: McpLoginCancelResult };
++	mcp_logout: { params: McpLogoutParams; result: McpServerInfo };
 +	mcp_reconnect: { params: McpReconnectParams; result: McpReconnectResult };
  }
 diff --git a/src/modes/rpc/wire/rpc-wire.schema.json b/src/modes/rpc/wire/rpc-wire.schema.json
-index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f833ef7d20 100644
+index c39e07b7da52e055d13494cdc033347580c61c86..b8380c840fce7d707afdfb43fee9a46568a038ff 100644
 --- a/src/modes/rpc/wire/rpc-wire.schema.json
 +++ b/src/modes/rpc/wire/rpc-wire.schema.json
 @@ -20,6 +20,39 @@
@@ -3015,7 +3034,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  			{
  				"name": "get_branch_messages",
  				"doc": "List user messages that can be branched from.",
-@@ -747,6 +835,50 @@
+@@ -747,6 +835,61 @@
  				"timeoutMs": null,
  				"completion": null,
  				"clientOmit": []
@@ -3054,8 +3073,19 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
 +				"clientOmit": []
 +			},
 +			{
++				"name": "mcp_logout",
++				"doc": "Sign out of an MCP server: its stored OAuth credentials and config auth block are removed, then it reconnects signed out.",
++				"params": "McpLogoutParams",
++				"result": "McpServerInfo",
++				"nullable": false,
++				"unwrap": null,
++				"timeoutMs": 120000,
++				"completion": null,
++				"clientOmit": []
++			},
++			{
 +				"name": "mcp_reconnect",
-+				"doc": "Reconnect one server from its config, or without a name rediscover and reconnect them all.",
++				"doc": "Re-read mcp.json and reconnect: one server, or without a name (or for a server new to the session) rediscover and reconnect them all.",
 +				"params": "McpReconnectParams",
 +				"result": "McpReconnectResult",
 +				"nullable": false,
@@ -3066,7 +3096,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  			}
  		]
  	},
-@@ -2148,6 +2280,21 @@
+@@ -2148,6 +2291,21 @@
  			],
  			"description": "Model descriptor: the client-relevant subset of the server's model record."
  		},
@@ -3088,7 +3118,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  		"QueueMode": {
  			"enum": [
  				"all",
-@@ -2468,6 +2615,96 @@
+@@ -2468,6 +2626,96 @@
  			],
  			"description": "Outcome of every `goal` op; both fields are null when the session has no goal."
  		},
@@ -3185,7 +3215,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  		"SlowModeScope": {
  			"enum": [
  				"session",
-@@ -2671,6 +2908,14 @@
+@@ -2671,6 +2919,14 @@
  					],
  					"description": "Current goal mode; null when the session has no goal.",
  					"default": null
@@ -3200,7 +3230,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  				}
  			},
  			"required": [
-@@ -2958,6 +3203,26 @@
+@@ -2958,6 +3214,26 @@
  				"cancelled"
  			]
  		},
@@ -3227,7 +3257,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  		"TokenUsage": {
  			"type": "object",
  			"properties": {
-@@ -3082,6 +3347,21 @@
+@@ -3082,6 +3358,21 @@
  				"nextCursor": {
  					"type": "string",
  					"description": "Opaque cursor for the next page; absent on the last page."
@@ -3249,7 +3279,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  				}
  			},
  			"required": [
-@@ -3297,65 +3577,198 @@
+@@ -3297,59 +3588,192 @@
  			],
  			"description": "Incremental subagent transcript read."
  		},
@@ -3361,13 +3391,8 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  				},
  				"status": {
 -					"$ref": "#/$defs/BtwStatus"
--				},
--				"createdAt": {
--					"type": "integer"
 +					"$ref": "#/$defs/JobStatus"
- 				},
--				"updatedAt": {
--					"type": "integer"
++				},
 +				"waitingForInput": {
 +					"type": "boolean"
 +				},
@@ -3471,16 +3496,10 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
 +				},
 +				"status": {
 +					"$ref": "#/$defs/BtwStatus"
-+				},
-+				"createdAt": {
-+					"type": "integer"
-+				},
-+				"updatedAt": {
-+					"type": "integer"
  				},
- 				"id": {
- 					"type": "string"
-@@ -3450,6 +3863,171 @@
+ 				"createdAt": {
+ 					"type": "integer"
+@@ -3450,6 +3874,171 @@
  			],
  			"description": "A stored credential `logout` can remove; `active` marks credentials the session may be using."
  		},
@@ -3652,7 +3671,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  		"HandoffResult": {
  			"type": "object",
  			"properties": {
-@@ -3461,11 +4039,43 @@
+@@ -3461,11 +4050,43 @@
  		"PromptAck": {
  			"type": "object",
  			"properties": {
@@ -3697,7 +3716,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  		},
  		"AutoCompactionReason": {
  			"enum": [
-@@ -4289,6 +4899,71 @@
+@@ -4289,6 +4910,71 @@
  			],
  			"description": "A session event, discriminated by `type`; `set_event_filter` selects which are sent."
  		},
@@ -3769,7 +3788,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  		"ReadyEvent": {
  			"type": "object",
  			"properties": {
-@@ -4722,6 +5397,122 @@
+@@ -4722,6 +5408,122 @@
  			],
  			"description": "Full side-question record on every lifecycle change (started, complete, cancelled, error); the last one per id wins."
  		},
@@ -3892,7 +3911,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  		"CommandOutputEvent": {
  			"type": "object",
  			"properties": {
-@@ -4862,6 +5653,85 @@
+@@ -4862,6 +5664,85 @@
  			],
  			"description": "One question of an `ask` request; hosts always offer free text besides `options`."
  		},
@@ -3978,7 +3997,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  		"SelectUiRequest": {
  			"type": "object",
  			"properties": {
-@@ -4889,6 +5759,10 @@
+@@ -4889,6 +5770,10 @@
  						"$ref": "#/$defs/SelectOptionDetail"
  					}
  				},
@@ -3989,13 +4008,10 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  				"timeout": {
  					"type": "integer"
  				}
-@@ -5192,16 +6066,55 @@
- 					"type": "string",
- 					"description": "Short loopback redirect to `url`; the truncation-safe copy target."
+@@ -5194,14 +6079,53 @@
  				},
--				"instructions": {
-+				"instructions": {
-+					"type": "string"
+ 				"instructions": {
+ 					"type": "string"
 +				},
 +				"mcpServer": {
 +					"type": "string",
@@ -4025,7 +4041,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
 +					"type": "string"
 +				},
 +				"message": {
- 					"type": "string"
++					"type": "string"
 +				},
 +				"fields": {
 +					"type": "array",
@@ -4048,7 +4064,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  		},
  		"ExtensionUiRequest": {
  			"anyOf": [
-@@ -5240,6 +6153,9 @@
+@@ -5240,6 +6164,9 @@
  				},
  				{
  					"$ref": "#/$defs/OpenUrlUiRequest"
@@ -4058,7 +4074,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  				}
  			],
  			"description": "Extension UI request, discriminated by `method`."
-@@ -5277,6 +6193,10 @@
+@@ -5277,6 +6204,10 @@
  				},
  				"value": {
  					"type": "string"
@@ -4069,7 +4085,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  				}
  			},
  			"required": [
-@@ -5352,6 +6272,54 @@
+@@ -5352,6 +6283,54 @@
  			],
  			"description": "Answers an `ask` request: one `AskAnswer` per question, in question order."
  		},
@@ -4124,7 +4140,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  		"ExtensionUiResponse": {
  			"anyOf": [
  				{
-@@ -5365,6 +6333,9 @@
+@@ -5365,6 +6344,9 @@
  				},
  				{
  					"$ref": "#/$defs/AnswersUiResponse"
@@ -4134,7 +4150,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  				}
  			],
  			"description": "Host reply to an extension UI request; variants share `type` and differ by their payload key."
-@@ -5717,6 +6688,9 @@
+@@ -5717,6 +6699,9 @@
  				{
  					"$ref": "#/$defs/ReadyEvent"
  				},
@@ -4144,7 +4160,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  				{
  					"$ref": "#/$defs/PromptResultEvent"
  				},
-@@ -5759,6 +6733,15 @@
+@@ -5759,6 +6744,15 @@
  				{
  					"$ref": "#/$defs/BtwRecordEvent"
  				},
@@ -4160,7 +4176,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  				{
  					"$ref": "#/$defs/CommandOutputEvent"
  				},
-@@ -5813,6 +6796,127 @@
+@@ -5813,6 +6807,127 @@
  				"protocolVersion"
  			]
  		},
@@ -4288,7 +4304,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  		"PromptParams": {
  			"type": "object",
  			"properties": {
-@@ -5989,6 +7093,26 @@
+@@ -5989,6 +7104,26 @@
  				"op"
  			]
  		},
@@ -4315,7 +4331,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  		"SetAskDialogParams": {
  			"type": "object",
  			"properties": {
-@@ -6252,6 +7376,59 @@
+@@ -6252,6 +7387,59 @@
  				"message"
  			]
  		},
@@ -4375,7 +4391,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  		"LiveStartParams": {
  			"type": "object",
  			"properties": {
-@@ -6498,6 +7675,17 @@
+@@ -6498,6 +7686,17 @@
  				}
  			}
  		},
@@ -4393,7 +4409,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  		"GetBranchMessagesResult": {
  			"type": "object",
  			"properties": {
-@@ -6571,6 +7759,13 @@
+@@ -6571,6 +7770,13 @@
  				},
  				"limit": {
  					"type": "integer"
@@ -4407,7 +4423,7 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
  				}
  			}
  		},
-@@ -6771,6 +7966,75 @@
+@@ -6771,6 +7977,86 @@
  			"required": [
  				"records"
  			]
@@ -4457,6 +4473,17 @@ index c39e07b7da52e055d13494cdc033347580c61c86..176c4072ce70cb3b29ddce35b91b50f8
 +			},
 +			"required": [
 +				"cancelled"
++			]
++		},
++		"McpLogoutParams": {
++			"type": "object",
++			"properties": {
++				"serverName": {
++					"type": "string"
++				}
++			},
++			"required": [
++				"serverName"
 +			]
 +		},
 +		"McpReconnectParams": {

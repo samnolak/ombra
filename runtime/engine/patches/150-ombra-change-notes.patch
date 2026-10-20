@@ -8,10 +8,10 @@ Why: Ombra embeds multiple concurrent sessions and renders native host features.
 Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
 
 diff --git a/CHANGELOG.md b/CHANGELOG.md
-index 8b299b899693383a7e24627e841874cafae0bd9a..b99702c321876da910a2d5381fea588536999ceb 100644
+index 8b299b899693383a7e24627e841874cafae0bd9a..b19a7694532f0b420502a7ccdfff733d83309999 100644
 --- a/CHANGELOG.md
 +++ b/CHANGELOG.md
-@@ -2,6 +2,43 @@
+@@ -2,6 +2,48 @@
  
  ## [Unreleased]
  
@@ -32,9 +32,14 @@ index 8b299b899693383a7e24627e841874cafae0bd9a..b99702c321876da910a2d5381fea5885
 +- `get_messages_page` takes `direction: "backward"`: newest page first, each page in chronological order, bounded to 768 KiB, with cursors pinned to the session, branch and message count (`stale_cursor` once they change).
 +- Shared-engine root commands: `engine_read_session` pages a stored session file (absolute `.jsonl` path, cursor, `limit` 1–256; at most four at once) without opening it, `engine_cancel_read` stops one, and `engine_delete_session` deletes a session with its artifacts.
 +- RPC `navigate_tree` (`RpcClient.navigateTree(targetId)`): the TUI's `/tree` and Esc Esc rewind for RPC hosts, without a summary. It moves the leaf in place, in the same session file: a user message rewinds past itself and its text and images come back, any other entry becomes the leaf, and the abandoned path stays in the file as a sibling branch. Refused with `session_busy` while the session works. Unlike `branch`, it writes no new session file holding a copy of the whole history.
++- MCP server entries take `oauth.clientName`, the `client_name` sent in dynamic client registration (default `oh-my-pi`; the Ombra engine host registers as `Ombra`). Pre-registered `oauth.clientId`/`oauth.clientSecret` still skip registration.
++- RPC `mcp_logout` signs out of an MCP server (its stored OAuth credentials and config auth block are removed, then it reconnects signed out). `mcp_reconnect` re-reads mcp.json even for a single server, and a name the session does not know yet (just added to mcp.json) rediscovers all servers.
++- In RPC hosts `/mcp reauth|login <name>` runs the same sign-in as `mcp_login` (the authorization URL arrives as `open_url` with `mcpServer`), `/mcp unauth|logout <name>` signs out, and `/mcp reconnect [name]` and `/mcp reload` re-read mcp.json and reconnect.
 +
 +### Fixed
 +
++- A dynamic client registration refused with 401/403 names the allowlist: "Figma refused client registration (Forbidden): this client is not on the server allowlist; set oauth.clientName or a pre-registered clientId". Figma's catalog-gated endpoint no longer falls through to a client-less authorization page.
++- A refused connection to Figma Desktop's Dev Mode MCP server (127.0.0.1:3845) reports "Figma desktop MCP server is not running: enable it in Figma → Preferences → Dev Mode MCP server (needs a Dev or Full seat)" instead of "Unable to connect".
 +- Compound session operations explicitly delegate their own writer lease: collab replicas retain their identity across live entries and resyncs, and session transfer markers and local-copy replacements no longer conflict with the operation's lease. Independent managers still cannot write, move or delete an owned journal.
 +- Parked subagents' settings overlays are no longer retained by the ambient settings proxy's bound-method cache; cached methods remain scoped to their owning settings instance.
 +- RPC `abort_and_prompt` no longer fails with "Agent is already processing" when a steer (for example a follow-up sent early with `promote_queued_message`) was still queued: the stopped run's queued input used to resume as the abort settled and take the session from the new prompt. The new prompt now runs next and queued input follows it.
@@ -55,7 +60,7 @@ index 8b299b899693383a7e24627e841874cafae0bd9a..b99702c321876da910a2d5381fea5885
  ## [18.12.2] - 2026-10-18
  
  ### Added
-@@ -786,7 +823,6 @@
+@@ -786,7 +828,6 @@
  - Corrected tool behavior and configuration documentation for `read`, background `bash`, Python evaluation, replace editing, goal removal, and `advisor.immuneTurns`.
  - Fixed custom glob backends from hanging indefinitely; scans now respect the tool deadline and report incomplete results when necessary.
  - Fixed `--resume <path>` from silently creating a new session for a missing path; it now reports the missing path, consistent with `--fork <path>` and `--resume <id>`.

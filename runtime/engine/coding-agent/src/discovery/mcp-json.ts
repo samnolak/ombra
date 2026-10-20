@@ -45,6 +45,7 @@ interface MCPConfigFile {
 			oauth?: {
 				clientId?: string;
 				clientSecret?: string;
+				clientName?: string;
 				redirectUri?: string;
 				callbackPort?: number;
 				callbackPath?: string;

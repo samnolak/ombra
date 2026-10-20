@@ -131,6 +131,39 @@ async function readRegistrationFailureDetail(response: Response): Promise<string
 	}
 }
 
+/**
+ * `client_name` sent in dynamic client registration when the server entry sets
+ * no `oauth.clientName`. Embedders (Ombra) name themselves once at startup.
+ */
+let defaultMcpOAuthClientName = "oh-my-pi";
+
+/** Set the process-wide default DCR `client_name` (an empty name keeps the current one). */
+export function setMcpOAuthClientName(name: string): void {
+	const trimmed = name.trim();
+	if (trimmed) defaultMcpOAuthClientName = trimmed;
+}
+
+/** The DCR `client_name` used when the server entry configures none. */
+export function getMcpOAuthClientName(): string {
+	return defaultMcpOAuthClientName;
+}
+
+/**
+ * Who runs a DCR endpoint, for refusal messages. Figma's endpoint admits only
+ * clients listed in its MCP catalog, so any 401/403 from it is an allowlist refusal.
+ */
+function registrationHost(endpoint: string): { label: string; figma: boolean } {
+	try {
+		const host = new URL(endpoint).hostname.toLowerCase();
+		const figma = host === "figma.com" || host.endsWith(".figma.com");
+		return { label: figma ? "Figma" : host, figma };
+	} catch {
+		return { label: "The server", figma: false };
+	}
+}
+
+const REGISTRATION_REFUSAL_STATUS: Record<number, string> = { 401: "Unauthorized", 403: "Forbidden" };
+
 function isLoopbackHostname(hostname: string): boolean {
 	return hostname === "localhost" || hostname === "127.0.0.1";
 }
@@ -308,6 +341,8 @@ export interface MCPOAuthConfig {
 	issuerUrl?: string;
 	/** Dynamic client registration endpoint advertised by the authorization server. */
 	registrationUrl?: string;
+	/** `client_name` for dynamic client registration (default: {@link getMcpOAuthClientName}). */
+	clientName?: string;
 	/** Client ID (optional when already embedded in authorization URL) */
 	clientId?: string;
 	/** Client secret (optional for PKCE flows) */
@@ -365,6 +400,8 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
 		status: number;
 		/** First line of the response body (or thrown error message), trimmed. */
 		detail?: string;
+		/** `client_name` the registration request carried. */
+		clientName: string;
 	};
 
 	constructor(
@@ -414,10 +451,11 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
 	async generateAuthUrl(state: string, redirectUri: string): Promise<{ url: string; instructions?: string }> {
 		if (!this.#resolvedClientId) {
 			await this.#tryRegisterClient(redirectUri);
-			// `unapproved_client` explicitly establishes that registration cannot
-			// produce the required client id. Other DCR failures stay on the
-			// clientless probe path because they may be transient or caused by
-			// unrelated registration metadata.
+			// `unapproved_client` (or a 401/403 from Figma's catalog-gated
+			// endpoint) explicitly establishes that registration cannot produce
+			// the required client id. Other DCR failures stay on the clientless
+			// probe path because they may be transient or caused by unrelated
+			// registration metadata.
 			if (!this.#resolvedClientId && this.#isDefinitiveRegistrationRejection()) {
 				throw this.#missingClientIdError();
 			}
@@ -624,9 +662,10 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
 		const registrationEndpoint = this.config.registrationUrl ?? (await this.#resolveRegistrationEndpoint());
 		if (!registrationEndpoint) return;
 
+		const clientName = this.config.clientName?.trim() || defaultMcpOAuthClientName;
 		try {
 			const registrationBody: Record<string, unknown> = {
-				client_name: "oh-my-pi",
+				client_name: clientName,
 				redirect_uris: [redirectUri],
 				grant_types: ["authorization_code", "refresh_token"],
 				response_types: ["code"],
@@ -652,6 +691,7 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
 					endpoint: registrationEndpoint,
 					status: response.status,
 					detail: await readRegistrationFailureDetail(response),
+					clientName,
 				};
 				return;
 			}
@@ -675,6 +715,7 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
 				endpoint: registrationEndpoint,
 				status: 0,
 				detail: error instanceof Error ? truncateDetail(error.message) : undefined,
+				clientName,
 			};
 		}
 	}
@@ -737,11 +778,15 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
 	 * HTTP status alone is insufficient: payload errors such as
 	 * `invalid_client_metadata` and `invalid_redirect_uri` do not establish that
 	 * the authorization endpoint requires a client id. Keep those on the
-	 * clientless probe path.
+	 * clientless probe path. Figma is the exception: its endpoint answers a
+	 * bare `Forbidden` to every client outside its MCP catalog (by `client_name`),
+	 * and its authorize page cannot work without a client id.
 	 */
 	#isDefinitiveRegistrationRejection(): boolean {
 		const failure = this.#registrationFailure;
-		return failure?.status === 403 && /\bunapproved_client\b/i.test(failure.detail ?? "");
+		if (!failure) return false;
+		if (failure.status === 403 && /\bunapproved_client\b/i.test(failure.detail ?? "")) return true;
+		return (failure.status === 401 || failure.status === 403) && registrationHost(failure.endpoint).figma;
 	}
 
 	/**
@@ -766,6 +811,14 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
 				: failure.detail
 					? `network error — ${failure.detail}`
 					: "network error";
+		if (REGISTRATION_REFUSAL_STATUS[failure.status]) {
+			// 401/403: the server knows the request and refuses this client (an allowlist by `client_name`).
+			return new Error(
+				`${registrationHost(failure.endpoint).label} refused client registration (${REGISTRATION_REFUSAL_STATUS[failure.status]}): ` +
+					"this client is not on the server allowlist; set oauth.clientName or a pre-registered clientId " +
+					`(POST ${failure.endpoint} as client_name ${JSON.stringify(failure.clientName)} → ${outcome}). ${manualHint}`,
+			);
+		}
 		return new Error(
 			`OAuth provider requires client_id, and dynamic client registration was rejected ` +
 				`(POST ${failure.endpoint} → ${outcome}). The server likely restricts registration to pre-approved clients. ${manualHint}`,

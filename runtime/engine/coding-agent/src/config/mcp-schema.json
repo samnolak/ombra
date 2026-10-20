@@ -88,6 +88,10 @@
         "clientSecret": {
           "type": "string"
         },
+        "clientName": {
+          "type": "string",
+          "description": "`client_name` sent in dynamic client registration (default: the host's name). Servers that allowlist clients by name (Figma) refuse unknown names."
+        },
         "scope": {
           "type": "string"
         },

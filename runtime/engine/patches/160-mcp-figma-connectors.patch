@@ -1,0 +1,447 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ombra engine maintainers <engine@ombra.local>
+Date: Sat, 1 Jan 2000 00:00:00 +0000
+Subject: [PATCH] MCP oauth.clientName for dynamic client registration (Ombra
+ registers as "Ombra"), allowlist refusal message for 401/403 registration
+ (Figma), Figma desktop server not-running message, shared sign-out used by
+ /mcp unauth and RPC mcp_logout
+
+What: MCP oauth.clientName for dynamic client registration (Ombra registers as "Ombra"), allowlist refusal message for 401/403 registration (Figma), Figma desktop server not-running message, shared sign-out used by /mcp unauth and RPC mcp_logout
+Why: Figma remote MCP admits only allowlisted client names; users need a clear error, an override and sign-in/out from Ombra
+Upstream-Status: Ombra-specific; clientName and refusal message could be submitted upstream
+
+diff --git a/src/capability/mcp.ts b/src/capability/mcp.ts
+index 4b12e9293ad71a00d3da63ddce2b85b3febcc33c..95569bbee1f1eecf55e4ff50bf9df3762095dad8 100644
+--- a/src/capability/mcp.ts
++++ b/src/capability/mcp.ts
+@@ -61,6 +61,7 @@ export interface MCPServer {
+ 	oauth?: {
+ 		clientId?: string;
+ 		clientSecret?: string;
++		clientName?: string;
+ 		scope?: string;
+ 		redirectUri?: string;
+ 		callbackPort?: number;
+diff --git a/src/config/mcp-schema.json b/src/config/mcp-schema.json
+index df83df574311511178278b1ca81579fc0f1b84b4..1e8e54173adb7a3acec1e04ef56c7cd4bbef493f 100644
+--- a/src/config/mcp-schema.json
++++ b/src/config/mcp-schema.json
+@@ -88,6 +88,10 @@
+         "clientSecret": {
+           "type": "string"
+         },
++        "clientName": {
++          "type": "string",
++          "description": "`client_name` sent in dynamic client registration (default: the host's name). Servers that allowlist clients by name (Figma) refuse unknown names."
++        },
+         "scope": {
+           "type": "string"
+         },
+diff --git a/src/discovery/builtin.ts b/src/discovery/builtin.ts
+index e68600459d5d76d36c53b82e60c155640d81bbc3..470c930fe0adfdaab340ed595b32891f9572ed4a 100644
+--- a/src/discovery/builtin.ts
++++ b/src/discovery/builtin.ts
+@@ -218,6 +218,7 @@ async function loadMCPServers(ctx: LoadContext): Promise<LoadResult<MCPServer>>
+ 					| {
+ 							clientId?: string;
+ 							clientSecret?: string;
++							clientName?: string;
+ 							redirectUri?: string;
+ 							callbackPort?: number;
+ 							callbackPath?: string;
+diff --git a/src/discovery/mcp-json.ts b/src/discovery/mcp-json.ts
+index a8d579bf2631cc5d5e40d3b87aa1fcc6446c8687..a292ba88f878173889c96817c181035b6ed61c08 100644
+--- a/src/discovery/mcp-json.ts
++++ b/src/discovery/mcp-json.ts
+@@ -45,6 +45,7 @@ interface MCPConfigFile {
+ 			oauth?: {
+ 				clientId?: string;
+ 				clientSecret?: string;
++				clientName?: string;
+ 				redirectUri?: string;
+ 				callbackPort?: number;
+ 				callbackPath?: string;
+diff --git a/src/mcp/oauth-client-name.test.ts b/src/mcp/oauth-client-name.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..0e81c5dce8b809223e2830485e1ff3bce5b549bf
+--- /dev/null
++++ b/src/mcp/oauth-client-name.test.ts
+@@ -0,0 +1,109 @@
++import { afterEach, describe, expect, test } from "bun:test";
++import type { FetchImpl } from "@oh-my-pi/pi-ai/types";
++import { connectToServer, FIGMA_DESKTOP_NOT_RUNNING } from "./client";
++import { getMcpOAuthClientName, MCPOAuthFlow, setMcpOAuthClientName } from "./oauth-flow";
++
++const REFUSAL =
++	"refused client registration (Forbidden): this client is not on the server allowlist; set oauth.clientName or a pre-registered clientId";
++
++/** A provider whose DCR endpoint answers `register`; records every registered client name and authorize probe. */
++function provider(origin: string, register: (clientName: string) => Response) {
++	const seen = { names: [] as string[], authorizeProbes: 0 };
++	const fetchImpl: FetchImpl = async (input, init) => {
++		const url = String(input);
++		if (url === `${origin}/register`) {
++			const body = JSON.parse(String(init?.body)) as { client_name: string };
++			seen.names.push(body.client_name);
++			return register(body.client_name);
++		}
++		if (url.startsWith(`${origin}/authorize?`)) {
++			seen.authorizeProbes++;
++			return new Response("Missing required parameter: client_id", { status: 400 });
++		}
++		throw new Error(`Unexpected fetch: ${url}`);
++	};
++	const flow = (config: { clientName?: string; clientId?: string } = {}) =>
++		new MCPOAuthFlow(
++			{
++				authorizationUrl: `${origin}/authorize`,
++				tokenUrl: `${origin}/token`,
++				registrationUrl: `${origin}/register`,
++				fetch: fetchImpl,
++				...config,
++			},
++			{},
++		);
++	return { seen, flow };
++}
++
++const registered = () => Response.json({ client_id: "issued-client" }, { status: 201 });
++
++describe("MCP dynamic client registration name", () => {
++	const original = getMcpOAuthClientName();
++	afterEach(() => setMcpOAuthClientName(original));
++
++	test("defaults to omp's name, follows the host's default and yields to oauth.clientName", async () => {
++		const { seen, flow } = provider("https://auth.example", registered);
++		await flow().generateAuthUrl("s", "http://127.0.0.1:53201/callback");
++		setMcpOAuthClientName("Ombra");
++		await flow().generateAuthUrl("s", "http://127.0.0.1:53201/callback");
++		await flow({ clientName: "  Claude Code " }).generateAuthUrl("s", "http://127.0.0.1:53201/callback");
++		setMcpOAuthClientName("   ");
++		expect(getMcpOAuthClientName()).toBe("Ombra");
++		expect(seen.names).toEqual(["oh-my-pi", "Ombra", "Claude Code"]);
++	});
++
++	test("a pre-registered client id skips registration", async () => {
++		const { seen, flow } = provider("https://auth.example", registered);
++		const { url } = await flow({ clientId: "pre-registered", clientName: "Ombra" }).generateAuthUrl(
++			"s",
++			"http://127.0.0.1:53202/callback",
++		);
++		expect(new URL(url).searchParams.get("client_id")).toBe("pre-registered");
++		expect(seen.names).toEqual([]);
++	});
++});
++
++describe("refused client registration", () => {
++	test("Figma's Forbidden is final: the allowlist message, no client-less authorize page", async () => {
++		const { seen, flow } = provider("https://api.figma.com/v1/oauth/mcp", () => new Response("Forbidden", { status: 403 }));
++		const attempt = flow({ clientName: "Ombra" }).generateAuthUrl("s", "http://127.0.0.1:53203/callback");
++		await expect(attempt).rejects.toThrow(`Figma ${REFUSAL}`);
++		await expect(attempt).rejects.toThrow(/client_name "Ombra" → HTTP 403 — Forbidden.*oauth\.clientId/s);
++		expect(seen.authorizeProbes).toBe(0);
++	});
++
++	test("elsewhere an explicit unapproved_client names the host and the allowlist", async () => {
++		const { flow } = provider("https://auth.example", () =>
++			Response.json({ error: "unapproved_client" }, { status: 403 }),
++		);
++		await expect(flow().generateAuthUrl("s", "http://127.0.0.1:53204/callback")).rejects.toThrow(
++			`auth.example ${REFUSAL}`,
++		);
++	});
++
++	test("elsewhere a bare 401 still probes the authorize page; one that needs a client id names the allowlist", async () => {
++		const { seen, flow } = provider("https://auth.example", () => new Response("nope", { status: 401 }));
++		await expect(flow().generateAuthUrl("s", "http://127.0.0.1:53205/callback")).rejects.toThrow(
++			"auth.example refused client registration (Unauthorized): this client is not on the server allowlist",
++		);
++		expect(seen.authorizeProbes).toBe(1);
++	});
++});
++
++describe("Figma desktop MCP server", () => {
++	test("a refused connection on 127.0.0.1:3845 says how to enable it", async () => {
++		const probe = await fetch("http://127.0.0.1:3845/mcp").then(
++			() => true,
++			() => false,
++		);
++		if (probe) return; // Figma Desktop is running its server on this machine: nothing to refuse.
++		const attempt = connectToServer("figma", { type: "http", url: "http://127.0.0.1:3845/mcp", timeout: 10_000 });
++		await expect(attempt).rejects.toThrow(FIGMA_DESKTOP_NOT_RUNNING);
++	});
++
++	test("other refused servers keep their own error", async () => {
++		const attempt = connectToServer("local", { type: "http", url: "http://127.0.0.1:9/mcp", timeout: 10_000 });
++		await expect(attempt).rejects.not.toThrow(FIGMA_DESKTOP_NOT_RUNNING);
++	});
++});
+diff --git a/src/mcp/oauth-flow.ts b/src/mcp/oauth-flow.ts
+index 1ad13d8209f51a5ceb327e4ae173181e73f6f447..48c03f45b1d13a1089a9ba1bbe707581a73478fd 100644
+--- a/src/mcp/oauth-flow.ts
++++ b/src/mcp/oauth-flow.ts
+@@ -131,6 +131,39 @@ async function readRegistrationFailureDetail(response: Response): Promise<string
+ 	}
+ }
+ 
++/**
++ * `client_name` sent in dynamic client registration when the server entry sets
++ * no `oauth.clientName`. Embedders (Ombra) name themselves once at startup.
++ */
++let defaultMcpOAuthClientName = "oh-my-pi";
++
++/** Set the process-wide default DCR `client_name` (an empty name keeps the current one). */
++export function setMcpOAuthClientName(name: string): void {
++	const trimmed = name.trim();
++	if (trimmed) defaultMcpOAuthClientName = trimmed;
++}
++
++/** The DCR `client_name` used when the server entry configures none. */
++export function getMcpOAuthClientName(): string {
++	return defaultMcpOAuthClientName;
++}
++
++/**
++ * Who runs a DCR endpoint, for refusal messages. Figma's endpoint admits only
++ * clients listed in its MCP catalog, so any 401/403 from it is an allowlist refusal.
++ */
++function registrationHost(endpoint: string): { label: string; figma: boolean } {
++	try {
++		const host = new URL(endpoint).hostname.toLowerCase();
++		const figma = host === "figma.com" || host.endsWith(".figma.com");
++		return { label: figma ? "Figma" : host, figma };
++	} catch {
++		return { label: "The server", figma: false };
++	}
++}
++
++const REGISTRATION_REFUSAL_STATUS: Record<number, string> = { 401: "Unauthorized", 403: "Forbidden" };
++
+ function isLoopbackHostname(hostname: string): boolean {
+ 	return hostname === "localhost" || hostname === "127.0.0.1";
+ }
+@@ -308,6 +341,8 @@ export interface MCPOAuthConfig {
+ 	issuerUrl?: string;
+ 	/** Dynamic client registration endpoint advertised by the authorization server. */
+ 	registrationUrl?: string;
++	/** `client_name` for dynamic client registration (default: {@link getMcpOAuthClientName}). */
++	clientName?: string;
+ 	/** Client ID (optional when already embedded in authorization URL) */
+ 	clientId?: string;
+ 	/** Client secret (optional for PKCE flows) */
+@@ -365,6 +400,8 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
+ 		status: number;
+ 		/** First line of the response body (or thrown error message), trimmed. */
+ 		detail?: string;
++		/** `client_name` the registration request carried. */
++		clientName: string;
+ 	};
+ 
+ 	constructor(
+@@ -414,10 +451,11 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
+ 	async generateAuthUrl(state: string, redirectUri: string): Promise<{ url: string; instructions?: string }> {
+ 		if (!this.#resolvedClientId) {
+ 			await this.#tryRegisterClient(redirectUri);
+-			// `unapproved_client` explicitly establishes that registration cannot
+-			// produce the required client id. Other DCR failures stay on the
+-			// clientless probe path because they may be transient or caused by
+-			// unrelated registration metadata.
++			// `unapproved_client` (or a 401/403 from Figma's catalog-gated
++			// endpoint) explicitly establishes that registration cannot produce
++			// the required client id. Other DCR failures stay on the clientless
++			// probe path because they may be transient or caused by unrelated
++			// registration metadata.
+ 			if (!this.#resolvedClientId && this.#isDefinitiveRegistrationRejection()) {
+ 				throw this.#missingClientIdError();
+ 			}
+@@ -624,9 +662,10 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
+ 		const registrationEndpoint = this.config.registrationUrl ?? (await this.#resolveRegistrationEndpoint());
+ 		if (!registrationEndpoint) return;
+ 
++		const clientName = this.config.clientName?.trim() || defaultMcpOAuthClientName;
+ 		try {
+ 			const registrationBody: Record<string, unknown> = {
+-				client_name: "oh-my-pi",
++				client_name: clientName,
+ 				redirect_uris: [redirectUri],
+ 				grant_types: ["authorization_code", "refresh_token"],
+ 				response_types: ["code"],
+@@ -652,6 +691,7 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
+ 					endpoint: registrationEndpoint,
+ 					status: response.status,
+ 					detail: await readRegistrationFailureDetail(response),
++					clientName,
+ 				};
+ 				return;
+ 			}
+@@ -675,6 +715,7 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
+ 				endpoint: registrationEndpoint,
+ 				status: 0,
+ 				detail: error instanceof Error ? truncateDetail(error.message) : undefined,
++				clientName,
+ 			};
+ 		}
+ 	}
+@@ -737,11 +778,15 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
+ 	 * HTTP status alone is insufficient: payload errors such as
+ 	 * `invalid_client_metadata` and `invalid_redirect_uri` do not establish that
+ 	 * the authorization endpoint requires a client id. Keep those on the
+-	 * clientless probe path.
++	 * clientless probe path. Figma is the exception: its endpoint answers a
++	 * bare `Forbidden` to every client outside its MCP catalog (by `client_name`),
++	 * and its authorize page cannot work without a client id.
+ 	 */
+ 	#isDefinitiveRegistrationRejection(): boolean {
+ 		const failure = this.#registrationFailure;
+-		return failure?.status === 403 && /\bunapproved_client\b/i.test(failure.detail ?? "");
++		if (!failure) return false;
++		if (failure.status === 403 && /\bunapproved_client\b/i.test(failure.detail ?? "")) return true;
++		return (failure.status === 401 || failure.status === 403) && registrationHost(failure.endpoint).figma;
+ 	}
+ 
+ 	/**
+@@ -766,6 +811,14 @@ export class MCPOAuthFlow extends OAuthCallbackFlow {
+ 				: failure.detail
+ 					? `network error — ${failure.detail}`
+ 					: "network error";
++		if (REGISTRATION_REFUSAL_STATUS[failure.status]) {
++			// 401/403: the server knows the request and refuses this client (an allowlist by `client_name`).
++			return new Error(
++				`${registrationHost(failure.endpoint).label} refused client registration (${REGISTRATION_REFUSAL_STATUS[failure.status]}): ` +
++					"this client is not on the server allowlist; set oauth.clientName or a pre-registered clientId " +
++					`(POST ${failure.endpoint} as client_name ${JSON.stringify(failure.clientName)} → ${outcome}). ${manualHint}`,
++			);
++		}
+ 		return new Error(
+ 			`OAuth provider requires client_id, and dynamic client registration was rejected ` +
+ 				`(POST ${failure.endpoint} → ${outcome}). The server likely restricts registration to pre-approved clients. ${manualHint}`,
+diff --git a/src/slash-commands/helpers/mcp.ts b/src/slash-commands/helpers/mcp.ts
+index de732839d7c96898cadde14fef73c7bff565829a..0e144fc36b3c463ed051b9b29527d90304fcf666 100644
+--- a/src/slash-commands/helpers/mcp.ts
++++ b/src/slash-commands/helpers/mcp.ts
+@@ -13,8 +13,9 @@ import { MCPManager } from "../../mcp/manager";
+ import { getSmitheryApiKey } from "../../mcp/smithery-auth";
+ import { searchSmitheryRegistry } from "../../mcp/smithery-registry";
+ import type { MCPServerConfig, MCPServerConnection } from "../../mcp/types";
++import type { RpcMcpServerInfo } from "../../modes/rpc/rpc-types";
+ import { parseCommandArgs } from "../../utils/command-args";
+-import type { ParsedSlashCommand, SlashCommandResult, SlashCommandRuntime } from "../types";
++import type { ParsedSlashCommand, SlashCommandResult, SlashCommandRuntime, SlashMcpConnectors } from "../types";
+ import { commandConsumed, errorMessage, parseNamedScopeArgs, parseSubcommand, usage } from "./parse";
+ 
+ type AcpMcpScope = "user" | "project";
+@@ -473,7 +474,10 @@ const MCP_HELP_TEXT = [
+ 	"  /mcp enable <name>                                      Enable a server",
+ 	"  /mcp disable <name>                                     Disable a server",
+ 	"  /mcp remove <name> [--scope project|user]               Remove a server",
+-	"  /mcp reload                                             Reload MCP runtime",
++	"  /mcp reload                                             Reload MCP runtime (re-reads mcp.json)",
++	"  /mcp reauth <name>                                      Sign in to a server again (RPC hosts)",
++	"  /mcp unauth <name>                                      Sign out of a server (RPC hosts)",
++	"  /mcp reconnect [name]                                   Re-read mcp.json and reconnect (RPC hosts)",
+ 	"  /mcp resources                                          List resources from all servers",
+ 	"  /mcp prompts                                            List prompts from all servers",
+ 	"  /mcp test <name>                                        Test connection to a server",
+@@ -485,6 +489,60 @@ const MCP_HELP_TEXT = [
+ 
+ const TUI_ONLY_MCP_VERBS = new Set(["reauth", "unauth", "smithery-login", "smithery-logout", "reconnect"]);
+ 
++/** Verbs an RPC host's connectors serve (`SlashCommandRuntime.mcpConnectors`). */
++const CONNECTOR_VERBS: Record<string, true> = {
++	reauth: true,
++	login: true,
++	unauth: true,
++	logout: true,
++	reconnect: true,
++	reload: true,
++};
++
++function describeConnector(info: RpcMcpServerInfo): string {
++	const tools = `${info.toolCount} tool${info.toolCount === 1 ? "" : "s"}`;
++	return `"${info.name}": ${info.status}, sign-in ${info.auth}, ${tools}${info.error ? ` — ${info.error}` : ""}`;
++}
++
++/**
++ * `/mcp reauth|login`, `unauth|logout`, `reconnect` and `reload` for hosts that
++ * serve MCP connectors (RPC): the same flows as `mcp_login`, `mcp_logout` and
++ * `mcp_reconnect`. Sign-in waits on the user's browser, so it runs in the
++ * background and reports when it settles.
++ */
++async function handleConnectorCommand(
++	verb: string,
++	rest: string,
++	runtime: SlashCommandRuntime,
++	connectors: SlashMcpConnectors,
++): Promise<SlashCommandResult> {
++	const name = rest.trim().split(/\s+/, 1)[0] || undefined;
++	if ((verb === "reauth" || verb === "login" || verb === "unauth" || verb === "logout") && !name) {
++		return usage(`Usage: /mcp ${verb} <name>`, runtime);
++	}
++	const run = async (): Promise<void> => {
++		try {
++			if (verb === "reauth" || verb === "login") {
++				await runtime.output(`Signing in to "${name}": continue in the browser page that opens.`);
++				await runtime.output(`Signed in to ${describeConnector(await connectors.login(name!))}`);
++			} else if (verb === "unauth" || verb === "logout") {
++				await runtime.output(`Signed out of ${describeConnector(await connectors.logout(name!))}`);
++			} else {
++				const servers = await connectors.reconnect(verb === "reload" ? undefined : name);
++				const shown = name && verb !== "reload" ? servers.filter(server => server.name === name) : servers;
++				await runtime.output(
++					shown.length ? `Reloaded MCP config:\n${shown.map(describeConnector).join("\n")}` : "Reloaded MCP config: no servers.",
++				);
++			}
++		} catch (err) {
++			await runtime.output(`/mcp ${verb}${name ? ` ${name}` : ""} failed: ${errorMessage(err)}`);
++		}
++	};
++	if ((verb === "reauth" || verb === "login") && runtime.runCommandInBackground) runtime.runCommandInBackground(run);
++	else await run();
++	return commandConsumed();
++}
++
+ /** ACP/text-mode `/mcp` handler. Shared by both dispatchers via the spec. */
+ export async function handleMcpAcp(
+ 	command: ParsedSlashCommand,
+@@ -501,6 +559,9 @@ export async function handleMcpAcp(
+ 			runtime,
+ 		);
+ 	}
++	if (runtime.mcpConnectors && Object.hasOwn(CONNECTOR_VERBS, verb)) {
++		return await handleConnectorCommand(verb, rest, runtime, runtime.mcpConnectors);
++	}
+ 	if (TUI_ONLY_MCP_VERBS.has(verb)) {
+ 		return usage(`/mcp ${verb} requires OAuth or browser flows only available in the TUI client.`, runtime);
+ 	}
+diff --git a/src/slash-commands/types.ts b/src/slash-commands/types.ts
+index 80dcec3366799fefe765ef938edb0aff511ed0ad..59b093515d0d32f03dbfd00a34f7921070c879e1 100644
+--- a/src/slash-commands/types.ts
++++ b/src/slash-commands/types.ts
+@@ -1,6 +1,7 @@
+ import type { Settings } from "../config/settings";
+ import type { SlashCommandIconName } from "@oh-my-pi/pi-tui/theme/symbols";
+ import type { InteractiveModeContext, SubmittedUserInput } from "../modes/types";
++import type { RpcMcpServerInfo } from "../modes/rpc/rpc-types";
+ import type { AgentSession } from "../session/agent-session";
+ import type { SessionManager } from "../session/session-manager";
+ 
+@@ -115,6 +116,19 @@ export interface SlashCommandRuntime {
+ 	 * (RPC) ignore the flag and always push.
+ 	 */
+ 	notifyConfigChanged?: (options?: { handledBySessionEvent?: boolean }) => Promise<void> | void;
++	/**
++	 * MCP connectors served by the host (RPC): `/mcp reauth|unauth|reconnect|reload`
++	 * run the same flows as `mcp_login`, `mcp_logout` and `mcp_reconnect`. Absent
++	 * in ACP, where those verbs stay TUI-only.
++	 */
++	mcpConnectors?: SlashMcpConnectors;
++}
++
++/** MCP connector actions an RPC host serves to `/mcp`. */
++export interface SlashMcpConnectors {
++	login(serverName: string): Promise<RpcMcpServerInfo>;
++	logout(serverName: string): Promise<RpcMcpServerInfo>;
++	reconnect(serverName?: string): Promise<RpcMcpServerInfo[]>;
+ }
+ 
+ /**

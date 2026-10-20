@@ -448,8 +448,15 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 		unwrap: "cancelled",
 	},
 	{
+		name: "mcp_logout",
+		doc: "Sign out of an MCP server: its stored OAuth credentials and config auth block are removed, then it reconnects signed out.",
+		params: { serverName: "string" },
+		result: "McpServerInfo",
+		timeoutMs: 120_000,
+	},
+	{
 		name: "mcp_reconnect",
-		doc: "Reconnect one server from its config, or without a name rediscover and reconnect them all.",
+		doc: "Re-read mcp.json and reconnect: one server, or without a name (or for a server new to the session) rediscover and reconnect them all.",
 		params: { "serverName?": "string" },
 		result: { servers: "McpServerInfo[]" },
 		unwrap: "servers",

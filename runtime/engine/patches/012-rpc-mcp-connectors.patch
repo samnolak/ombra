@@ -113,21 +113,24 @@ index 0000000000000000000000000000000000000000..0b899bdeff7ddf7b158e9730d66be3a2
 +});
 diff --git a/src/modes/rpc/rpc-mcp.ts b/src/modes/rpc/rpc-mcp.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..623f001f0fcc4a29a488fbb3105fb5bc26f111e0
+index 0000000000000000000000000000000000000000..0a0bf4663164324f25a8bfca333bfd499af6e068
 --- /dev/null
 +++ b/src/modes/rpc/rpc-mcp.ts
-@@ -0,0 +1,315 @@
+@@ -0,0 +1,375 @@
 +/**
 + * MCP connectors over RPC: per-server state with sign-in status, OAuth sign-in
-+ * started by the host (`mcp_login`), re-auth prompts, reconnect, and form
-+ * elicitation as `extension_ui_request { method: "elicit" }`.
++ * started by the host (`mcp_login`), sign-out (`mcp_logout`), re-auth prompts,
++ * reconnect that re-reads the config files, and form elicitation as
++ * `extension_ui_request { method: "elicit" }`.
 + *
 + * Nothing here opens a browser: the authorization URL goes to the host as
 + * `open_url` tagged with the server, only while the host's own `mcp_login`
-+ * runs. Credentials never leave the auth storage; frames carry names, states
-+ * and redacted errors only.
++ * (or the user's `/mcp reauth`) runs. The agent may only ask the host to offer
++ * a sign-in (`mcp_auth_required`). Credentials never leave the auth storage;
++ * frames carry names, states and redacted errors only.
 + */
 +import { Snowflake } from "@oh-my-pi/pi-utils";
++import { clearCache as clearFsCache } from "../../capability/fs";
 +import { connectToServer, disconnectServer } from "../../mcp/client";
 +import { loadAllMCPConfigs } from "../../mcp/config";
 +import type { MCPElicitationRequest, MCPElicitationResult } from "../../mcp/elicitation";
@@ -139,6 +142,7 @@ index 0000000000000000000000000000000000000000..623f001f0fcc4a29a488fbb3105fb5bc
 +	reauthorizeMcpServer,
 +	resolveMcpServerForAuth,
 +	runMcpOAuthFlow,
++	signOutMcpServer,
 +} from "../../mcp/oauth-reauth";
 +import { reloadSessionMcpServers } from "../../mcp/session-reload";
 +import { cfgMcpEnableProjectConfig } from "../../mcp/settings";
@@ -160,6 +164,14 @@ index 0000000000000000000000000000000000000000..623f001f0fcc4a29a488fbb3105fb5bc
 +const MAX_ERROR_CHARS = 500;
 +const CANCELLED_CODE = "mcp_login_cancelled";
 +const TIMEOUT_REASON = "MCP OAuth flow timed out";
++
++/** The live controller per MCP manager: the agent's connector tool reaches the host through it. */
++const controllers = new WeakMap<MCPManager, RpcMcpController>();
++
++/** The RPC connector controller serving `manager`, while an RPC runtime is attached to it. */
++export function getRpcMcpController(manager: MCPManager | undefined): RpcMcpController | undefined {
++	return manager ? controllers.get(manager) : undefined;
++}
 +
 +/**
 + * Whether a URL may be handed to the user's browser: https, or plain http only
@@ -209,6 +221,7 @@ index 0000000000000000000000000000000000000000..623f001f0fcc4a29a488fbb3105fb5bc
 +		this.#output = output;
 +		this.#dialog = dialog;
 +		if (!manager) return;
++		controllers.set(manager, this);
 +		// A tool-level OAuth challenge: tell the host, never start a browser flow on our own.
 +		manager.setAuthHandler(async serverName => {
 +			this.#challenged.add(serverName);
@@ -311,9 +324,55 @@ index 0000000000000000000000000000000000000000..623f001f0fcc4a29a488fbb3105fb5bc
 +		return true;
 +	}
 +
-+	/** One server (from its current config) or, without a name, every server rediscovered. */
++	/**
++	 * Sign out of one server: its stored credentials and the auth block in its
++	 * config go (as `/mcp unauth`), then it reconnects signed out.
++	 */
++	async logout(serverName: string): Promise<RpcMcpServerInfo> {
++		const manager = this.#require();
++		const target = await resolveMcpServerForAuth(this.#session.sessionManager.getCwd(), serverName, manager);
++		if (!target) throw new RpcMcpError(`MCP server "${serverName}" not found`);
++		this.#logins.get(serverName)?.abort("cancelled");
++		await signOutMcpServer(serverName, target, this.#session.modelRegistry.authStorage);
++		this.#challenged.delete(serverName);
++		this.#signedIn.delete(serverName);
++		// The refusal after sign-out is what the user asked for: no sign-in prompt for it.
++		this.#prompted.set(serverName, "signed_out");
++		if (target.config.enabled !== false) await this.#connect(manager, serverName);
++		return this.#info(manager, serverName);
++	}
++
++	/**
++	 * The agent asks the user to sign in: the host gets `mcp_auth_required` and
++	 * offers `mcp_login`; nothing opens until the user accepts.
++	 */
++	requestSignIn(serverName: string): RpcMcpServerInfo {
++		const manager = this.#require();
++		if (!manager.getAllServerNames().includes(serverName)) throw new RpcMcpError(`MCP server "${serverName}" not found`);
++		const info = this.#info(manager, serverName);
++		if (info.auth === "none" && info.transport === "stdio")
++			throw new RpcMcpError(`MCP server "${serverName}" runs locally (stdio) and has no OAuth sign-in`);
++		if (!this.#logins.has(serverName)) {
++			const reason = info.auth === "signed_out" || info.auth === "none" ? "signed_out" : "expired";
++			this.#prompted.set(serverName, reason);
++			this.#output({ type: "mcp_auth_required", serverName, reason });
++		}
++		return info;
++	}
++
++	/**
++	 * Re-read the config files and reconnect: without a name every server is
++	 * rediscovered (added, removed and edited entries take effect); with a name
++	 * only that server, unless the session does not know it yet (just added to
++	 * mcp.json), which needs the full rediscovery.
++	 */
 +	async reconnect(serverName?: string): Promise<RpcMcpServerInfo[]> {
 +		const manager = this.#require();
++		if (serverName !== undefined && !manager.getAllServerNames().includes(serverName)) {
++			const target = await resolveMcpServerForAuth(this.#session.sessionManager.getCwd(), serverName, manager);
++			if (!target) throw new RpcMcpError(`MCP server "${serverName}" not found`);
++			serverName = undefined;
++		}
 +		if (serverName === undefined) {
 +			this.#challenged.clear();
 +			this.#prompted.clear();
@@ -321,8 +380,6 @@ index 0000000000000000000000000000000000000000..623f001f0fcc4a29a488fbb3105fb5bc
 +			await manager.waitForPendingConnections();
 +			await this.#session.refreshMCPTools(manager.getTools());
 +		} else {
-+			if (!manager.getAllServerNames().includes(serverName))
-+				throw new RpcMcpError(`MCP server "${serverName}" not found`);
 +			this.#challenged.delete(serverName);
 +			this.#prompted.delete(serverName);
 +			await this.#connect(manager, serverName);
@@ -334,6 +391,7 @@ index 0000000000000000000000000000000000000000..623f001f0fcc4a29a488fbb3105fb5bc
 +		for (const login of this.#logins.values()) login.abort("RPC session closed");
 +		this.#logins.clear();
 +		this.#unsubscribe?.();
++		if (this.#manager && controllers.get(this.#manager) === this) controllers.delete(this.#manager);
 +		this.#manager?.setAuthHandler(undefined);
 +		this.#manager?.setElicitationHandler(undefined);
 +	}
@@ -348,6 +406,8 @@ index 0000000000000000000000000000000000000000..623f001f0fcc4a29a488fbb3105fb5bc
 +		const previous = manager.getServerConfig(name);
 +		const previousSource = manager.getSource(name);
 +		await manager.disconnectServer(name);
++		// mcp.json edited outside omp: drop the cached file contents first.
++		clearFsCache();
 +		const { configs, sources } = await loadAllMCPConfigs(this.#session.sessionManager.getCwd(), {
 +			enableProjectConfig: cfgMcpEnableProjectConfig.get(this.#session.settings),
 +			filterExa: true,
@@ -432,3 +492,94 @@ index 0000000000000000000000000000000000000000..623f001f0fcc4a29a488fbb3105fb5bc
 +		).catch(() => cancel);
 +	}
 +}
+diff --git a/src/slash-commands/helpers/mcp-connectors.test.ts b/src/slash-commands/helpers/mcp-connectors.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..dbf93156a8abee88832f34b2b32cb2b7a23a7785
+--- /dev/null
++++ b/src/slash-commands/helpers/mcp-connectors.test.ts
+@@ -0,0 +1,85 @@
++import { describe, expect, test } from "bun:test";
++import type { RpcMcpServerInfo } from "../../modes/rpc/rpc-types";
++import type { SlashCommandRuntime, SlashMcpConnectors } from "../types";
++import { handleMcpAcp } from "./mcp";
++
++const info = (name: string, auth: RpcMcpServerInfo["auth"]): RpcMcpServerInfo => ({
++	name,
++	transport: "http",
++	status: auth === "signed_in" ? "connected" : "failed",
++	toolCount: auth === "signed_in" ? 3 : 0,
++	auth,
++});
++
++/** A runtime whose host serves connectors (RPC) or not (ACP); records output, calls and background work. */
++function runtime(connectors: boolean) {
++	const output: string[] = [];
++	const calls: string[] = [];
++	const background: Promise<void>[] = [];
++	const served: SlashMcpConnectors = {
++		login: async name => {
++			calls.push(`login ${name}`);
++			if (name === "broken") throw new Error("Figma refused client registration (Forbidden)");
++			return info(name, "signed_in");
++		},
++		logout: async name => {
++			calls.push(`logout ${name}`);
++			return info(name, "signed_out");
++		},
++		reconnect: async name => {
++			calls.push(`reconnect ${name ?? "*"}`);
++			return [info("docs", "signed_in"), info("figma-remote", "signed_out")];
++		},
++	};
++	const value = {
++		cwd: "/tmp",
++		output: (text: string) => {
++			output.push(text);
++		},
++		refreshCommands: () => {},
++		runCommandInBackground: (task: () => Promise<void>) => {
++			background.push(task());
++		},
++		...(connectors ? { mcpConnectors: served } : {}),
++	} as unknown as SlashCommandRuntime; // Only the fields `/mcp` connector verbs read.
++	const run = async (args: string) => {
++		await handleMcpAcp({ name: "mcp", args, text: `/mcp ${args}` }, value);
++		await Promise.all(background.splice(0));
++	};
++	return { output, calls, run };
++}
++
++describe("/mcp connector verbs in RPC hosts", () => {
++	test("reauth and login run the host's sign-in in the background and report the result", async () => {
++		const r = runtime(true);
++		await r.run("reauth figma-remote");
++		await r.run("login broken");
++		expect(r.calls).toEqual(["login figma-remote", "login broken"]);
++		expect(r.output).toContain('Signed in to "figma-remote": connected, sign-in signed_in, 3 tools');
++		expect(r.output).toContain("/mcp login broken failed: Figma refused client registration (Forbidden)");
++	});
++
++	test("unauth signs out; reconnect and reload re-read the config", async () => {
++		const r = runtime(true);
++		await r.run("unauth docs");
++		await r.run("reconnect figma-remote");
++		await r.run("reload");
++		expect(r.calls).toEqual(["logout docs", "reconnect figma-remote", "reconnect *"]);
++		expect(r.output[0]).toBe('Signed out of "docs": failed, sign-in signed_out, 0 tools');
++		expect(r.output[1]).toBe('Reloaded MCP config:\n"figma-remote": failed, sign-in signed_out, 0 tools');
++		expect(r.output[2]?.split("\n")).toHaveLength(3);
++	});
++
++	test("a name is required to sign in or out", async () => {
++		const r = runtime(true);
++		await r.run("reauth");
++		expect(r.calls).toEqual([]);
++		expect(r.output).toEqual(["Usage: /mcp reauth <name>"]);
++	});
++
++	test("without host connectors (ACP) reauth stays TUI-only", async () => {
++		const r = runtime(false);
++		await r.run("reauth docs");
++		expect(r.output[0]).toContain("only available in the TUI client");
++	});
++});

@@ -739,6 +739,7 @@
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/mcp/json-rpc.ts" LogicalName="runtime-pack/engine/coding-agent/src/mcp/json-rpc.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/mcp/loader.ts" LogicalName="runtime-pack/engine/coding-agent/src/mcp/loader.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/mcp/manager.ts" LogicalName="runtime-pack/engine/coding-agent/src/mcp/manager.ts" WithCulture="false" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/mcp/oauth-client-name.test.ts" LogicalName="runtime-pack/engine/coding-agent/src/mcp/oauth-client-name.test.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/mcp/oauth-credentials.ts" LogicalName="runtime-pack/engine/coding-agent/src/mcp/oauth-credentials.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/mcp/oauth-discovery.ts" LogicalName="runtime-pack/engine/coding-agent/src/mcp/oauth-discovery.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/mcp/oauth-flow.ts" LogicalName="runtime-pack/engine/coding-agent/src/mcp/oauth-flow.ts" WithCulture="false" />
@@ -1326,6 +1327,7 @@
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/slash-commands/helpers/effort.ts" LogicalName="runtime-pack/engine/coding-agent/src/slash-commands/helpers/effort.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/slash-commands/helpers/logout.ts" LogicalName="runtime-pack/engine/coding-agent/src/slash-commands/helpers/logout.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/slash-commands/helpers/marketplace-manager.ts" LogicalName="runtime-pack/engine/coding-agent/src/slash-commands/helpers/marketplace-manager.ts" WithCulture="false" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/slash-commands/helpers/mcp-connectors.test.ts" LogicalName="runtime-pack/engine/coding-agent/src/slash-commands/helpers/mcp-connectors.test.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/slash-commands/helpers/mcp.ts" LogicalName="runtime-pack/engine/coding-agent/src/slash-commands/helpers/mcp.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/slash-commands/helpers/parse.ts" LogicalName="runtime-pack/engine/coding-agent/src/slash-commands/helpers/parse.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/slash-commands/helpers/reset-usage.ts" LogicalName="runtime-pack/engine/coding-agent/src/slash-commands/helpers/reset-usage.ts" WithCulture="false" />
@@ -1831,6 +1833,8 @@
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/engine-host.test.ts" LogicalName="runtime-pack/engine/engine-host.test.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/engine-host.ts" LogicalName="runtime-pack/engine/engine-host.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/host.ts" LogicalName="runtime-pack/engine/host.ts" WithCulture="false" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/mcp-connectors-tool.test.ts" LogicalName="runtime-pack/engine/mcp-connectors-tool.test.ts" WithCulture="false" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/mcp-connectors-tool.ts" LogicalName="runtime-pack/engine/mcp-connectors-tool.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/parked-settings.test.ts" LogicalName="runtime-pack/engine/parked-settings.test.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/read-session.ts" LogicalName="runtime-pack/engine/read-session.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/read-whole-page.test.ts" LogicalName="runtime-pack/engine/read-whole-page.test.ts" WithCulture="false" />

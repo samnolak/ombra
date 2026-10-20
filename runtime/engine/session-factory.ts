@@ -19,6 +19,7 @@ import { cfgPrewalkEnabled } from "./coding-agent/src/session/settings";
 import { discoverTitleSystemPromptFile, loadSystemPromptTemplateFile, resolvePromptInput } from "./coding-agent/src/system-prompt";
 import { cfgToolsApprovalMode } from "./coding-agent/src/tools/settings";
 import { EventBus } from "./coding-agent/src/utils/event-bus";
+import { mcpConnectorsExtension } from "./mcp-connectors-tool";
 
 export type EngineSessionResult = CreateAgentSessionResult;
 
@@ -189,6 +190,8 @@ export async function createEngineSession(cwd: string, args: readonly string[], 
 				additionalDirectories: [...new Set([...cfgWorkspaceAdditionalDirectories.get(settings), ...(parsed.addDir ?? []).map(dir => path.resolve(projectCwd, dir))])],
 				additionalExtensionPaths: [...(parsed.trustedExtensions ?? []), ...(parsed.extensions ?? []), ...(parsed.hooks ?? [])].map(file => path.resolve(projectCwd, file)),
 				disableExtensionDiscovery: parsed.noExtensions,
+				// The agent's MCP connectors tool reaches the session's manager once the session exists.
+				extensions: [mcpConnectorsExtension(() => created?.mcpManager)],
 				disableProjectCustomTools: parsed.untrustedProject,
 				toolNames: parsed.noTools ? parsed.tools ?? [] : parsed.tools,
 				enableLsp: parsed.noLsp ? false : undefined,

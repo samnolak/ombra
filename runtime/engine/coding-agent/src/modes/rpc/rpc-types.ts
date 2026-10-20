@@ -158,10 +158,12 @@ export type RpcCommand =
 	| { id?: string; type: "btw_cancel"; recordId?: string }
 	| { id?: string; type: "get_btw_history" }
 
-	// MCP connectors: state, OAuth sign-in (the URL arrives as `open_url` with `mcpServer`), reconnect
+	// MCP connectors: state, OAuth sign-in (the URL arrives as `open_url` with `mcpServer`), sign-out,
+	// reconnect (re-reads the config files)
 	| { id?: string; type: "get_mcp_servers" }
 	| { id?: string; type: "mcp_login"; serverName: string }
 	| { id?: string; type: "mcp_login_cancel"; serverName: string }
+	| { id?: string; type: "mcp_logout"; serverName: string }
 	| { id?: string; type: "mcp_reconnect"; serverName?: string };
 
 // ============================================================================
@@ -701,6 +703,7 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "get_mcp_servers"; success: true; data: { servers: RpcMcpServerInfo[] } }
 	| { id?: string; type: "response"; command: "mcp_login"; success: true; data: RpcMcpServerInfo }
 	| { id?: string; type: "response"; command: "mcp_login_cancel"; success: true; data: { cancelled: boolean } }
+	| { id?: string; type: "response"; command: "mcp_logout"; success: true; data: RpcMcpServerInfo }
 	| { id?: string; type: "response"; command: "mcp_reconnect"; success: true; data: { servers: RpcMcpServerInfo[] } }
 
 	// Error response (any command can fail); saved-model recovery carries structured identity.

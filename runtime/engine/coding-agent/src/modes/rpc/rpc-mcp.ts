@@ -1,14 +1,17 @@
 /**
  * MCP connectors over RPC: per-server state with sign-in status, OAuth sign-in
- * started by the host (`mcp_login`), re-auth prompts, reconnect, and form
- * elicitation as `extension_ui_request { method: "elicit" }`.
+ * started by the host (`mcp_login`), sign-out (`mcp_logout`), re-auth prompts,
+ * reconnect that re-reads the config files, and form elicitation as
+ * `extension_ui_request { method: "elicit" }`.
  *
  * Nothing here opens a browser: the authorization URL goes to the host as
  * `open_url` tagged with the server, only while the host's own `mcp_login`
- * runs. Credentials never leave the auth storage; frames carry names, states
- * and redacted errors only.
+ * (or the user's `/mcp reauth`) runs. The agent may only ask the host to offer
+ * a sign-in (`mcp_auth_required`). Credentials never leave the auth storage;
+ * frames carry names, states and redacted errors only.
  */
 import { Snowflake } from "@oh-my-pi/pi-utils";
+import { clearCache as clearFsCache } from "../../capability/fs";
 import { connectToServer, disconnectServer } from "../../mcp/client";
 import { loadAllMCPConfigs } from "../../mcp/config";
 import type { MCPElicitationRequest, MCPElicitationResult } from "../../mcp/elicitation";
@@ -20,6 +23,7 @@ import {
 	reauthorizeMcpServer,
 	resolveMcpServerForAuth,
 	runMcpOAuthFlow,
+	signOutMcpServer,
 } from "../../mcp/oauth-reauth";
 import { reloadSessionMcpServers } from "../../mcp/session-reload";
 import { cfgMcpEnableProjectConfig } from "../../mcp/settings";
@@ -41,6 +45,14 @@ const LOOPBACK_HOSTS: Record<string, true> = { localhost: true, "127.0.0.1": tru
 const MAX_ERROR_CHARS = 500;
 const CANCELLED_CODE = "mcp_login_cancelled";
 const TIMEOUT_REASON = "MCP OAuth flow timed out";
+
+/** The live controller per MCP manager: the agent's connector tool reaches the host through it. */
+const controllers = new WeakMap<MCPManager, RpcMcpController>();
+
+/** The RPC connector controller serving `manager`, while an RPC runtime is attached to it. */
+export function getRpcMcpController(manager: MCPManager | undefined): RpcMcpController | undefined {
+	return manager ? controllers.get(manager) : undefined;
+}
 
 /**
  * Whether a URL may be handed to the user's browser: https, or plain http only
@@ -90,6 +102,7 @@ export class RpcMcpController {
 		this.#output = output;
 		this.#dialog = dialog;
 		if (!manager) return;
+		controllers.set(manager, this);
 		// A tool-level OAuth challenge: tell the host, never start a browser flow on our own.
 		manager.setAuthHandler(async serverName => {
 			this.#challenged.add(serverName);
@@ -192,9 +205,55 @@ export class RpcMcpController {
 		return true;
 	}
 
-	/** One server (from its current config) or, without a name, every server rediscovered. */
+	/**
+	 * Sign out of one server: its stored credentials and the auth block in its
+	 * config go (as `/mcp unauth`), then it reconnects signed out.
+	 */
+	async logout(serverName: string): Promise<RpcMcpServerInfo> {
+		const manager = this.#require();
+		const target = await resolveMcpServerForAuth(this.#session.sessionManager.getCwd(), serverName, manager);
+		if (!target) throw new RpcMcpError(`MCP server "${serverName}" not found`);
+		this.#logins.get(serverName)?.abort("cancelled");
+		await signOutMcpServer(serverName, target, this.#session.modelRegistry.authStorage);
+		this.#challenged.delete(serverName);
+		this.#signedIn.delete(serverName);
+		// The refusal after sign-out is what the user asked for: no sign-in prompt for it.
+		this.#prompted.set(serverName, "signed_out");
+		if (target.config.enabled !== false) await this.#connect(manager, serverName);
+		return this.#info(manager, serverName);
+	}
+
+	/**
+	 * The agent asks the user to sign in: the host gets `mcp_auth_required` and
+	 * offers `mcp_login`; nothing opens until the user accepts.
+	 */
+	requestSignIn(serverName: string): RpcMcpServerInfo {
+		const manager = this.#require();
+		if (!manager.getAllServerNames().includes(serverName)) throw new RpcMcpError(`MCP server "${serverName}" not found`);
+		const info = this.#info(manager, serverName);
+		if (info.auth === "none" && info.transport === "stdio")
+			throw new RpcMcpError(`MCP server "${serverName}" runs locally (stdio) and has no OAuth sign-in`);
+		if (!this.#logins.has(serverName)) {
+			const reason = info.auth === "signed_out" || info.auth === "none" ? "signed_out" : "expired";
+			this.#prompted.set(serverName, reason);
+			this.#output({ type: "mcp_auth_required", serverName, reason });
+		}
+		return info;
+	}
+
+	/**
+	 * Re-read the config files and reconnect: without a name every server is
+	 * rediscovered (added, removed and edited entries take effect); with a name
+	 * only that server, unless the session does not know it yet (just added to
+	 * mcp.json), which needs the full rediscovery.
+	 */
 	async reconnect(serverName?: string): Promise<RpcMcpServerInfo[]> {
 		const manager = this.#require();
+		if (serverName !== undefined && !manager.getAllServerNames().includes(serverName)) {
+			const target = await resolveMcpServerForAuth(this.#session.sessionManager.getCwd(), serverName, manager);
+			if (!target) throw new RpcMcpError(`MCP server "${serverName}" not found`);
+			serverName = undefined;
+		}
 		if (serverName === undefined) {
 			this.#challenged.clear();
 			this.#prompted.clear();
@@ -202,8 +261,6 @@ export class RpcMcpController {
 			await manager.waitForPendingConnections();
 			await this.#session.refreshMCPTools(manager.getTools());
 		} else {
-			if (!manager.getAllServerNames().includes(serverName))
-				throw new RpcMcpError(`MCP server "${serverName}" not found`);
 			this.#challenged.delete(serverName);
 			this.#prompted.delete(serverName);
 			await this.#connect(manager, serverName);
@@ -215,6 +272,7 @@ export class RpcMcpController {
 		for (const login of this.#logins.values()) login.abort("RPC session closed");
 		this.#logins.clear();
 		this.#unsubscribe?.();
+		if (this.#manager && controllers.get(this.#manager) === this) controllers.delete(this.#manager);
 		this.#manager?.setAuthHandler(undefined);
 		this.#manager?.setElicitationHandler(undefined);
 	}
@@ -229,6 +287,8 @@ export class RpcMcpController {
 		const previous = manager.getServerConfig(name);
 		const previousSource = manager.getSource(name);
 		await manager.disconnectServer(name);
+		// mcp.json edited outside omp: drop the cached file contents first.
+		clearFsCache();
 		const { configs, sources } = await loadAllMCPConfigs(this.#session.sessionManager.getCwd(), {
 			enableProjectConfig: cfgMcpEnableProjectConfig.get(this.#session.settings),
 			filterExa: true,

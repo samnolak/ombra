@@ -2113,6 +2113,10 @@ export interface McpLoginCancelResult {
 	cancelled: boolean;
 }
 
+export interface McpLogoutParams {
+	serverName: string;
+}
+
 export interface McpReconnectParams {
 	serverName?: string;
 }
@@ -2201,5 +2205,6 @@ export interface RpcWireCommands {
 	get_mcp_servers: { params: undefined; result: GetMcpServersResult };
 	mcp_login: { params: McpLoginParams; result: McpServerInfo };
 	mcp_login_cancel: { params: McpLoginCancelParams; result: McpLoginCancelResult };
+	mcp_logout: { params: McpLogoutParams; result: McpServerInfo };
 	mcp_reconnect: { params: McpReconnectParams; result: McpReconnectResult };
 }

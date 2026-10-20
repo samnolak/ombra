@@ -870,8 +870,19 @@
 				"clientOmit": []
 			},
 			{
+				"name": "mcp_logout",
+				"doc": "Sign out of an MCP server: its stored OAuth credentials and config auth block are removed, then it reconnects signed out.",
+				"params": "McpLogoutParams",
+				"result": "McpServerInfo",
+				"nullable": false,
+				"unwrap": null,
+				"timeoutMs": 120000,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
 				"name": "mcp_reconnect",
-				"doc": "Reconnect one server from its config, or without a name rediscover and reconnect them all.",
+				"doc": "Re-read mcp.json and reconnect: one server, or without a name (or for a server new to the session) rediscover and reconnect them all.",
 				"params": "McpReconnectParams",
 				"result": "McpReconnectResult",
 				"nullable": false,
@@ -8012,6 +8023,17 @@
 			},
 			"required": [
 				"cancelled"
+			]
+		},
+		"McpLogoutParams": {
+			"type": "object",
+			"properties": {
+				"serverName": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"serverName"
 			]
 		},
 		"McpReconnectParams": {

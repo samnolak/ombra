@@ -1,6 +1,7 @@
 import type { Settings } from "../config/settings";
 import type { SlashCommandIconName } from "@oh-my-pi/pi-tui/theme/symbols";
 import type { InteractiveModeContext, SubmittedUserInput } from "../modes/types";
+import type { RpcMcpServerInfo } from "../modes/rpc/rpc-types";
 import type { AgentSession } from "../session/agent-session";
 import type { SessionManager } from "../session/session-manager";
 
@@ -115,6 +116,19 @@ export interface SlashCommandRuntime {
 	 * (RPC) ignore the flag and always push.
 	 */
 	notifyConfigChanged?: (options?: { handledBySessionEvent?: boolean }) => Promise<void> | void;
+	/**
+	 * MCP connectors served by the host (RPC): `/mcp reauth|unauth|reconnect|reload`
+	 * run the same flows as `mcp_login`, `mcp_logout` and `mcp_reconnect`. Absent
+	 * in ACP, where those verbs stay TUI-only.
+	 */
+	mcpConnectors?: SlashMcpConnectors;
+}
+
+/** MCP connector actions an RPC host serves to `/mcp`. */
+export interface SlashMcpConnectors {
+	login(serverName: string): Promise<RpcMcpServerInfo>;
+	logout(serverName: string): Promise<RpcMcpServerInfo>;
+	reconnect(serverName?: string): Promise<RpcMcpServerInfo[]>;
 }
 
 /**

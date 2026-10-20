@@ -25,8 +25,8 @@
       "attestation": "https://registry.npmjs.org/-/npm/v1/attestations/@oh-my-pi%2fpi-coding-agent@18.12.2",
       "verification": "npm tarball integrity verified; SLSA payload decoded, signatures not independently verified"
     },
-    "sha256": "98b93c41786c78def47caa0bfdfa1a3a3b89fc30a846b82c50d8f68cb6b103ed",
-    "bytes": 23749937,
+    "sha256": "03ed50955465a76490d31e4ac4e5717736a4835fea7adf85534bd0a532eded69",
+    "bytes": 23778624,
     "files": [
       {
         "path": "approval-lease.test.ts",
@@ -45,8 +45,8 @@
       },
       {
         "path": "coding-agent/CHANGELOG.md",
-        "size": 266357,
-        "sha256": "16389b687888d1a8a0239e9ed108417c4e2f7907e4bdb15fa513c1b3d5789f9d"
+        "size": 267713,
+        "sha256": "a8084e9e308faa3176ca65c2780b6d2b11c85b62db40a887491b8ba57a784be7"
       },
       {
         "path": "coding-agent/LICENSE",
@@ -450,8 +450,8 @@
       },
       {
         "path": "coding-agent/src/capability/mcp.ts",
-        "size": 4695,
-        "sha256": "78011a6939607199ad242b7ada26f9ce8be0cc56cf838b530d7d76341a67f055"
+        "size": 4718,
+        "sha256": "ae42946e306da7d3654125dae3ca67aaf017fe20aa67bb4d36869bb3800c9a95"
       },
       {
         "path": "coding-agent/src/capability/prompt.ts",
@@ -1715,8 +1715,8 @@
       },
       {
         "path": "coding-agent/src/config/mcp-schema.json",
-        "size": 8679,
-        "sha256": "8c7964f75566e7b3ae11be7c30115b2ecfa46cc092a82403d0ce651622def784"
+        "size": 8916,
+        "sha256": "b5061717b82daaf6bdd371ade8fbe409cb9fbf2d3f5bbc874eb6967ffcf15e75"
       },
       {
         "path": "coding-agent/src/config/model-discovery.ts",
@@ -2050,8 +2050,8 @@
       },
       {
         "path": "coding-agent/src/discovery/builtin.ts",
-        "size": 32268,
-        "sha256": "124eac92a1898b350f1db3c421e033a40da93dc411d02023e855163179eab04b"
+        "size": 32296,
+        "sha256": "fa074a12808d501dbb535cc5ebb3b47d7025d3bf19729cb42e54acdfc5907220"
       },
       {
         "path": "coding-agent/src/discovery/claude-md.ts",
@@ -2115,8 +2115,8 @@
       },
       {
         "path": "coding-agent/src/discovery/mcp-json.ts",
-        "size": 5629,
-        "sha256": "83dc21376d024fa69d9c118a426d0fde8503afca5e4a8b4fbd8c7bf79aeddb5f"
+        "size": 5654,
+        "sha256": "8eb421accaf655aef8e622913dbf3dd0a18a0b27167c660157930d03d73ee50c"
       },
       {
         "path": "coding-agent/src/discovery/omp-extension-roots.ts",
@@ -3675,8 +3675,8 @@
       },
       {
         "path": "coding-agent/src/mcp/client.ts",
-        "size": 15349,
-        "sha256": "fc844b04c25e29715b282a71ec98df413faf70de7b87e78a3732ae3e853a0053"
+        "size": 16567,
+        "sha256": "59348ef5e5849344ce6395812235666a35de47c9bb4ffaa2b4fa2a268b04b48c"
       },
       {
         "path": "coding-agent/src/mcp/config-writer.ts",
@@ -3719,6 +3719,11 @@
         "sha256": "7930c0cde9aa119a2f3addf2ebdade0b05d90f40c836ab196940d56758c2bbdc"
       },
       {
+        "path": "coding-agent/src/mcp/oauth-client-name.test.ts",
+        "size": 4963,
+        "sha256": "799f9bc7ead074be626fd10c8f6733fabeb4acc984eb0b83a15c08743a8dd037"
+      },
+      {
         "path": "coding-agent/src/mcp/oauth-credentials.ts",
         "size": 9734,
         "sha256": "2c3c7e817889aba78991a3fbe19d4cc9626d1a123a3187cb43fcca69bb67de13"
@@ -3730,13 +3735,13 @@
       },
       {
         "path": "coding-agent/src/mcp/oauth-flow.ts",
-        "size": 32113,
-        "sha256": "9b8d962a3f094dd8ccb53ebe96feca608917473d76c4d248bd3ba9a76012286f"
+        "size": 34567,
+        "sha256": "817ec544d1dc71093d5d2cb15dadd67cc91cbf03cc70b35da065d78dbe794ab7"
       },
       {
         "path": "coding-agent/src/mcp/oauth-reauth.ts",
-        "size": 20208,
-        "sha256": "db85bff2cc67a957671db60966647212deaed5f4027907383cb08fb3c78278c9"
+        "size": 21733,
+        "sha256": "9f0565d2a0a8e995e9d1da73bea47c95a4630fe65cc9b63350fe0ded4c99c161"
       },
       {
         "path": "coding-agent/src/mcp/request-id.ts",
@@ -3815,8 +3820,8 @@
       },
       {
         "path": "coding-agent/src/mcp/types.ts",
-        "size": 16037,
-        "sha256": "15f30aae4fcc0f2281fb3ca67f0f8f847998c46d104820f1d3bbaa7528bd8e8b"
+        "size": 16157,
+        "sha256": "bbcc2417119621df566dab1ca1ee0920b796b591e9e3d88b29e0cbd9c2a7dee0"
       },
       {
         "path": "coding-agent/src/memories/index.ts",
@@ -4045,8 +4050,8 @@
       },
       {
         "path": "coding-agent/src/modes/controllers/mcp-command-controller.ts",
-        "size": 83609,
-        "sha256": "9080cbc4818cfdcc75546b2c59596fbb89c3832bf0260005f36912a7c6bed05c"
+        "size": 82364,
+        "sha256": "1b2d0604cd35f9e9863635a4c86bf71c402e7da080a0c99ab9e241c652fdd7ad"
       },
       {
         "path": "coding-agent/src/modes/controllers/omfg-controller.ts",
@@ -4225,8 +4230,8 @@
       },
       {
         "path": "coding-agent/src/modes/rpc/rpc-mcp.ts",
-        "size": 12979,
-        "sha256": "cdd02daf028af6b532401a9ce2994d4a9415cf2d2bc30a2ff0beda2c517a23e9"
+        "size": 16001,
+        "sha256": "6e76c7244ec3c38f773888aa7ee83fc041f8dcc576e75b2feec753730b810237"
       },
       {
         "path": "coding-agent/src/modes/rpc/rpc-messages-backward.ts",
@@ -4240,8 +4245,8 @@
       },
       {
         "path": "coding-agent/src/modes/rpc/rpc-mode.ts",
-        "size": 109931,
-        "sha256": "8f1778e19bee7477462ce8ae74f86ec79ef4d2fa7d7920f7b6c59f77d5e4627a"
+        "size": 110107,
+        "sha256": "29dd50697318672916897a43407f49ece6cccdc394c51db3bf50c776b90c5bbd"
       },
       {
         "path": "coding-agent/src/modes/rpc/rpc-navigate-tree.test.ts",
@@ -4295,13 +4300,13 @@
       },
       {
         "path": "coding-agent/src/modes/rpc/rpc-types.ts",
-        "size": 40596,
-        "sha256": "f17bfb671240d5b82b269829b4a8265dd6d62ee6fc0480284c5380f5dcf19312"
+        "size": 40796,
+        "sha256": "813162ca07d360170e6f13ae1f7a3f4c24b977294bc8d6d3f9abd0d85dbfd13f"
       },
       {
         "path": "coding-agent/src/modes/rpc/wire/commands.ts",
-        "size": 16580,
-        "sha256": "58b255197869efd4deb53a3149560847d472109f4c375648d963d7a15aba7e2e"
+        "size": 16869,
+        "sha256": "345c77774da8583efac1b1d65e87e36130d6af33b7bad5980c98e6b722c0f427"
       },
       {
         "path": "coding-agent/src/modes/rpc/wire/content.ts",
@@ -4330,13 +4335,13 @@
       },
       {
         "path": "coding-agent/src/modes/rpc/wire/rpc-wire.generated.ts",
-        "size": 59734,
-        "sha256": "25e3ee3629cebbbb18796086c7ac44fd13585e91577a26a3f7ff5b57e587d4de"
+        "size": 59858,
+        "sha256": "581e257b6c1e86f5b4028f4140f197cfb12ce7e88a16464b73058940e5bab0d7"
       },
       {
         "path": "coding-agent/src/modes/rpc/wire/rpc-wire.schema.json",
-        "size": 149586,
-        "sha256": "d0dcaeeea276006597be714d012f64617fbd7278e70561944965e640fbf276c5"
+        "size": 150140,
+        "sha256": "1975ab41109b4d1fb1e96b3aebf2c77e0603ffa1790ade53a0e7dacb7150ef6f"
       },
       {
         "path": "coding-agent/src/modes/rpc/wire/state.ts",
@@ -6654,9 +6659,14 @@
         "sha256": "7ebf34ae042c2f63dca5a3c6b588062c18bf144b1ba45a24002e5cb2e9242264"
       },
       {
+        "path": "coding-agent/src/slash-commands/helpers/mcp-connectors.test.ts",
+        "size": 3217,
+        "sha256": "67f7020175b739f8434d487d4c1b2839130429f6ac7ebc0370311f514a56dea7"
+      },
+      {
         "path": "coding-agent/src/slash-commands/helpers/mcp.ts",
-        "size": 20081,
-        "sha256": "60081bd3447fcf1b8a42985ee25926b9251d06b48d18e10f8da2084baf6c0ecc"
+        "size": 22884,
+        "sha256": "682d151d60755231e30258b1d424f76b9b35ba493828d663a9c44bd614b529d9"
       },
       {
         "path": "coding-agent/src/slash-commands/helpers/parse.ts",
@@ -6715,8 +6725,8 @@
       },
       {
         "path": "coding-agent/src/slash-commands/types.ts",
-        "size": 8547,
-        "sha256": "86b57f906e12cb938b3ca23779e718b28f3bb306a5712419f7765f2ed91eed51"
+        "size": 9139,
+        "sha256": "968f6c3db9304ce517874e1c76ad8d22d722e756d3425ad0d540dd6f902ac71f"
       },
       {
         "path": "coding-agent/src/speculation/host.ts",
@@ -9175,8 +9185,18 @@
       },
       {
         "path": "host.ts",
-        "size": 5867,
-        "sha256": "4248d915a0f29d6de65fb3e51daba21f728f2e11cf2aea53f1cc298015466612"
+        "size": 6064,
+        "sha256": "71aaf30105006091c881477d6e0d8ba5b78d96f2fdc3ef6f3f12d1f3043c7278"
+      },
+      {
+        "path": "mcp-connectors-tool.test.ts",
+        "size": 3526,
+        "sha256": "0938f962ac559dde4ed53d329ffb3862772edb4c9394e16cf3ae7f172df87604"
+      },
+      {
+        "path": "mcp-connectors-tool.ts",
+        "size": 3056,
+        "sha256": "323c6661f631b4c2fa11b2d48f89e47ff9018fd5688399eeabb8005749e7fa6c"
       },
       {
         "path": "parked-settings.test.ts",
@@ -9200,8 +9220,8 @@
       },
       {
         "path": "session-factory.ts",
-        "size": 12768,
-        "sha256": "cbee2d2f8e9b636a475ff351cbc5eb0607d967176af1a73e4feb36a1fae61967"
+        "size": 12995,
+        "sha256": "cfd5af483be077727487e098f79aecdc83d579afd02e4615815beacaef4bc79d"
       },
       {
         "path": "session-isolation.test.ts",

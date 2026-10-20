@@ -61,6 +61,7 @@ export interface MCPServer {
 	oauth?: {
 		clientId?: string;
 		clientSecret?: string;
+		clientName?: string;
 		scope?: string;
 		redirectUri?: string;
 		callbackPort?: number;

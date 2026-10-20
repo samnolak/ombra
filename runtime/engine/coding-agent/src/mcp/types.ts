@@ -93,6 +93,8 @@ interface MCPServerConfigBase {
 	oauth?: {
 		clientId?: string;
 		clientSecret?: string;
+		/** `client_name` for dynamic client registration (servers that allowlist clients by name). */
+		clientName?: string;
 		scope?: string;
 		redirectUri?: string;
 		callbackPort?: number;
