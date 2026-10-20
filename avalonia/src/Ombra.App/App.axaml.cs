@@ -154,6 +154,10 @@ public sealed class App : Application
                 Notifier = CreateNotifier()
             };
             desktop.MainWindow = window;
+            // AppKit's Dock reopen callback only raises Avalonia's activation event; it does not
+            // deminiaturize our window. Window.Activated cannot help while no window is visible.
+            if (OperatingSystem.IsMacOS() && this.TryGetFeature<IActivatableLifetime>() is { } activation)
+                activation.Activated += (_, e) => RestoreWindowOnActivation(window, e.Kind);
             Ombra.App.Services.PerfLog.Attach(window); // OMBRA_PERF=1: frame-rate and layout graphs, slow applies on stderr
             window.Opened += (_, _) => vm.OnWindowOpened();
             vm.NotificationsEnabled = options.Notifications ?? true;
@@ -290,6 +294,13 @@ public sealed class App : Application
         {
             // No tray on this desktop (e.g. a Linux session without a status-notifier host): the window has everything.
         }
+    }
+
+    internal static void RestoreWindowOnActivation(Window window, ActivationKind kind)
+    {
+        if (kind == ActivationKind.Reopen
+            || (kind == ActivationKind.Background && window.WindowState == WindowState.Minimized))
+            ShowWindow(window);
     }
 
     private static void ShowWindow(Window window)

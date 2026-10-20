@@ -2,6 +2,44 @@
 
 Behaviour that differs by OS and is set on purpose. Keep each entry: what, why, how it is checked.
 
+## macOS: full-screen ownership and restoring the main window
+
+The green button belongs to Ombra's NSWindow, not the embedded Nightly window. View → Enter/Exit Full Screen
+and ⌃⌘F therefore toggle the same host window. Avalonia disables AppKit's automatic full-screen menu item,
+so Ombra supplies it explicitly. `NightlyShortcutMonitor` leaves ⌃⌘F to that menu; forwarding it to the hidden
+browser window cannot exit Ombra's full-screen Space. Plain ⌘F still belongs to Nightly's Find command.
+`WindowSafetyTests` check the menu command/title/gesture, and `NightlyShortcutMonitorTests` check routing.
+
+Nightly also refuses fullscreen in an embedded DOM window before changing its fullscreen state or freezing
+the pres shell. Its Cocoa widget rejects native fullscreen and size-mode transitions, including a session's
+saved maximized state. Embedded startup normalizes the profile's persisted `sizemode` and the attached
+browser chrome attribute; only Ombra supplies the native frame. Standalone Nightly retains its usual behavior.
+The runtime smoke must include a profile saved with `sizemode=fullscreen` and one with `sizemode=maximized`:
+open Browser, run `restore green-key` and `restore green-menu`, then restart. The host must enter/exit
+fullscreen, Nightly must remain embedded without its own Space, and Browser must fill its pane after restart.
+
+AppKit application activation and window activation are different: a minimized window cannot receive
+`Window.Activated`. Avalonia forwards Dock `applicationShouldHandleReopen` through `IActivatableLifetime`;
+the application handles `Reopen` by showing, deminiaturizing and activating its existing main window.
+Returning from the background also restores a minimized main window. A visible maximized or full-screen
+window is not normalized by this path. Browser child windows and Dock attention do not own this lifecycle.
+Headless `WindowSafetyTests` cover repeated activation from minimized state, preserving maximized/full-screen
+state, and reopening a hidden window without treating every background activation as a reopen request.
+
+The native Nightly acceptance driver has `restore dock|activate|hide|zoom|doubleclick|fullscreen|close`.
+Each runs ten cycles and records NSWindow `isMiniaturized`, `isVisible`, frame, Avalonia state and presence
+in the on-screen `CGWindowList`. `dock` invokes the actual application delegate reopen callback; `activate`
+switches to Finder then invokes `applicationDidBecomeActive:` without calling `makeKeyAndOrderFront` to repair it.
+These exercise AppKit callbacks, not physical clicks on the Dock or the system application switcher.
+The `green`, `green-key`, `green-menu`, `green-minimize` and `green-activate` modes enter through
+the real green button's action, then exercise the named exit/activation path. Logs include the native
+full-screen style bit and `isZoomed` as well as Avalonia state, so a stale managed state cannot hide a stuck Space.
+Run on Chats and Browser; prefix a mode with `popup-` to open a Nightly context menu before each cycle,
+or `starting-` to restart the embedded runtime before each cycle. The driver requires negative X so tests
+stay on the left display. The Browser `close` case sends ⌘W to Nightly and checks Ombra survives.
+On Chats, ⌘W intentionally follows the quit sequence: the process exits, so a later Dock launch is a new
+application, not `applicationShouldHandleReopen` on a hidden retained window.
+
 ## macOS: embedded browser print sheets
 
 Nightly's embedded window must never become an on-screen sheet parent. Its native print and page-setup requests

@@ -10,7 +10,7 @@ namespace Ombra.App.Nightly;
 /// that window's (⌘T, ⌘L, ⌘W, ⇧⌘T, ⌃Tab, ⌘C, ⌘F, its spaces' keys…). AppKit would offer it to Ombra's menu bar
 /// (⌘W, ⌘C, ⌘F are items there) and to its keyboard navigation (⌃Tab) before any view, so a local <c>NSEvent</c>
 /// monitor takes it first: the event goes to the pane and is consumed. Ombra keeps only the app's and the window's own:
-/// ⌘Q, ⌘H, ⌥⌘H, ⌘M, ⌘` and ⌘Esc (back to the chats). The key up takes the pane's usual path.
+/// ⌘Q, ⌘H, ⌥⌘H, ⌘M, ⌘`, ⌃⌘F (full screen) and ⌘Esc (back to the chats). The key up takes the pane's usual path.
 /// </summary>
 [SupportedOSPlatform("macos")]
 internal static unsafe class NightlyShortcutMonitor
@@ -50,7 +50,8 @@ internal static unsafe class NightlyShortcutMonitor
     /// <summary>Whether Ombra keeps a key down with these modifiers (NSEventModifierFlags) and macOS key code.</summary>
     internal static bool IsOmbras(ulong modifiers, int keyCode) =>
         (modifiers & (Command | Control)) == 0
-        || ((modifiers & Command) != 0 && keyCode is 0x0C /* Q */ or 0x04 /* H */ or 0x2E /* M */ or 0x32 /* ` */ or 0x35 /* Esc */);
+        || ((modifiers & Command) != 0 && keyCode is 0x0C /* Q */ or 0x04 /* H */ or 0x2E /* M */ or 0x32 /* ` */ or 0x35 /* Esc */)
+        || ((modifiers & (Command | Control)) == (Command | Control) && keyCode == 0x03 /* F */);
 
     /// <summary>The monitor's handler: <c>NSEvent* (^)(NSEvent*)</c>; returning nil consumes the event.</summary>
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

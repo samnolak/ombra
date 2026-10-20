@@ -14,6 +14,7 @@ public sealed class NightlyShortcutMonitorTests
     [InlineData(Command, 0x2E)] // ⌘M
     [InlineData(Command, 0x32)] // ⌘`
     [InlineData(Command, 0x35)] // ⌘Esc
+    [InlineData(Command | Control, 0x03)] // ⌃⌘F: Ombra owns the full-screen NSWindow
     [InlineData(0UL, 0x00)] // plain typing
     [InlineData(Shift, 0x00)]
     public void Ombra_keeps_the_apps_own_keys_and_plain_typing(ulong modifiers, int keyCode)
@@ -26,6 +27,8 @@ public sealed class NightlyShortcutMonitorTests
     [InlineData(Command, 0x11)] // ⌘T
     [InlineData(Command, 0x25)] // ⌘L
     [InlineData(Command, 0x0D)] // ⌘W
+    [InlineData(Command, 0x03)] // ⌘F still searches Nightly
+    [InlineData(Control, 0x03)] // ⌃F is not the window full-screen shortcut
     [InlineData(Command | Shift, 0x11)] // ⇧⌘T
     [InlineData(Control, 0x30)] // ⌃Tab
     [InlineData(Command, 0x2B)] // ⌘, (Nightly's settings)

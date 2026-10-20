@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
@@ -67,6 +68,58 @@ public sealed class WindowSafetyTests
         w.KeyTextInput("write a long answer");
         w.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
         await Until(() => vm.IsRunning && vm.Rows.OfType<AssistantRowViewModel>().Any(), "streaming");
+    }
+
+    [AvaloniaTheory]
+    [InlineData(ActivationKind.Reopen)]
+    [InlineData(ActivationKind.Background)]
+    public void Application_activation_restores_a_minimized_window_without_window_activation(ActivationKind kind)
+    {
+        var window = new Window();
+        window.Show();
+        try
+        {
+            for (var i = 0; i < 10; i++)
+            {
+                window.WindowState = WindowState.Minimized;
+                Ombra.App.App.RestoreWindowOnActivation(window, kind);
+                Assert.Equal(WindowState.Normal, window.WindowState);
+                Assert.True(window.IsVisible);
+            }
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaTheory]
+    [InlineData(WindowState.Maximized)]
+    [InlineData(WindowState.FullScreen)]
+    public void Dock_reopen_preserves_an_expanded_window(WindowState state)
+    {
+        var window = new Window();
+        window.Show();
+        try
+        {
+            window.WindowState = state;
+            Ombra.App.App.RestoreWindowOnActivation(window, ActivationKind.Reopen);
+            Assert.Equal(state, window.WindowState);
+        }
+        finally { window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public void Background_activation_does_not_show_a_hidden_normal_window_but_Dock_reopen_does()
+    {
+        var window = new Window();
+        window.Show();
+        try
+        {
+            window.Hide();
+            Ombra.App.App.RestoreWindowOnActivation(window, ActivationKind.Background);
+            Assert.False(window.IsVisible);
+            Ombra.App.App.RestoreWindowOnActivation(window, ActivationKind.Reopen);
+            Assert.True(window.IsVisible);
+        }
+        finally { window.Close(); }
     }
 
     [AvaloniaFact]
@@ -149,6 +202,17 @@ public sealed class WindowSafetyTests
         Assert.Equal(new KeyGesture(Key.M, cmd), items["Minimize"].Gesture);
         Assert.Equal(new KeyGesture(Key.W, cmd), items["Close"].Gesture);
         Assert.Equal(new KeyGesture(Key.Z, cmd | KeyModifiers.Shift), items["Redo"].Gesture);
+        if (OperatingSystem.IsMacOS())
+        {
+            var fullScreen = items[Loc.T("Enter Full Screen")];
+            Assert.Equal(new KeyGesture(Key.F, cmd | KeyModifiers.Control), fullScreen.Gesture);
+            fullScreen.Command!.Execute(null);
+            Assert.Equal(WindowState.FullScreen, w.WindowState);
+            Assert.Equal(Loc.T("Exit Full Screen"), fullScreen.Header);
+            fullScreen.Command.Execute(null);
+            Assert.Equal(WindowState.Normal, w.WindowState);
+            Assert.Equal(Loc.T("Enter Full Screen"), fullScreen.Header);
+        }
 
         // Edit acts on the text that has the keyboard
         var composer = w.FindControl<TextBox>("Composer")!;

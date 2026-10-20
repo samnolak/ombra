@@ -333,7 +333,7 @@ internal static partial class NightlyAcceptance
                     }
                     catch (Exception e)
                     {
-                        Log($"DRIVE error {e.Message}");
+                        Check("drive-command", false, $"{line}: {e.Message}");
                     }
                     Log($"DONE {++n}");
                 }
@@ -384,6 +384,9 @@ internal static partial class NightlyAcceptance
                     Check($"browser-empty-theme-{parts[1]}", themed,
                         $"page luma={pageLuma:0.0} sidebar luma={sidebarLuma:0.0}");
                     ScreenShot($"empty-theme-{parts[1]}");
+                    break;
+                case "restore":
+                    await RestoreChecks(parts[1]);
                     break;
                 case "fullscreen":
                     // As the green button does: AppKit's own full screen, which Avalonia then reports as WindowState.
@@ -488,6 +491,7 @@ internal static partial class NightlyAcceptance
 
         private void LogState()
         {
+            Log("  native " + RestoreState(out _));
             var visible = Panes().Where(p => p.IsEffectivelyVisible).ToList();
             Log($"state page={vm.ShowBrowserPage} sidebar={vm.ShowSidebar} useNightly={vm.Browser.UseNightly} active={window.IsActive} panes={Panes().Count} "
                 + $"visible={visible.Count} focused={window.FocusManager?.GetFocusedElement()?.GetType().Name}");
