@@ -37,11 +37,16 @@ var headless = args.Contains("--headless", StringComparer.Ordinal);
 var root = Path.Combine(Path.GetFullPath(args[workIndex + 1]), "run-" + Guid.NewGuid().ToString("N"));
 var builder = AppBuilder.Configure<App>();
 if (headless) builder.UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).UseSkia();
-else builder.UsePlatformDetect().With(new AvaloniaNativePlatformOptions
+else
 {
-    RenderingMode = render == "metal" ? [AvaloniaNativeRenderingMode.Metal] : [AvaloniaNativeRenderingMode.OpenGl, AvaloniaNativeRenderingMode.Software],
-    OverlayPopups = true,
-});
+    // A native run never takes the focus of the Mac's user (OMBRA_TEST_NO_ACTIVATE=0 lets it).
+    Ombra.App.Platform.TestFocus.Configure(harness: true);
+    builder = Ombra.App.Platform.TestFocus.Apply(builder.UsePlatformDetect().With(new AvaloniaNativePlatformOptions
+    {
+        RenderingMode = render == "metal" ? [AvaloniaNativeRenderingMode.Metal] : [AvaloniaNativeRenderingMode.OpenGl, AvaloniaNativeRenderingMode.Software],
+        OverlayPopups = true,
+    }));
+}
 builder.SetupWithoutStarting();
 using var headlessClock = headless ? DispatcherTimer.Run(() =>
 {

@@ -29,7 +29,7 @@ internal static partial class FeatureSmoke
         /// </summary>
         private async Task TitleBar()
         {
-            window.Position = new PixelPoint(40, 40);
+            window.Position = Platform.TestFocus.Position(window, new PixelPoint(40, 40));
             window.Width = 1360;
             window.Height = 880;
             SetSidebar(true);

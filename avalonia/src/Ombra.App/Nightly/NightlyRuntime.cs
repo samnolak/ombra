@@ -504,6 +504,9 @@ internal sealed class NightlyRuntime : IDisposable
             "user_pref(\"zen.view.window.scheme\", 2);",
         }) prefs.AppendLine(line);
         prefs.AppendLine($"user_pref(\"ui.systemUsesDarkTheme\", {(_darkTheme ? 1 : 0)});");
+        // A harness run (Platform/TestFocus.cs, set for what it starts): Nightly never activates itself to raise a window.
+        if (Environment.GetEnvironmentVariable(Platform.TestFocus.Variable) == "1")
+            prefs.AppendLine("user_pref(\"mozilla.widget.raise-on-setfocus\", false);");
         File.WriteAllText(Path.Combine(_options.ProfileDirectory, "user.js"), prefs.ToString());
     }
 

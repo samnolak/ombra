@@ -115,6 +115,13 @@ internal static partial class NightlyAcceptance
 
         private async Task RestoreChecks(string mode)
         {
+            // They check how the window comes back when macOS activates the app (Dock reopen, app switch, unhide): a run
+            // that never activates an app (Platform/TestFocus.cs) cannot make them, and must not pass them.
+            if (Platform.TestFocus.NoActivate)
+            {
+                Check($"restore-{mode}", false, $"needs app activation: run with {Platform.TestFocus.Variable}=0");
+                return;
+            }
             TraceRestoreFrames();
             if (window.Position.X >= 0) throw new InvalidOperationException("Restore checks require a window on the left display.");
             var popup = mode.StartsWith("popup-", StringComparison.Ordinal);

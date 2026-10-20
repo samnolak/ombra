@@ -15,6 +15,8 @@
 # MANUAL   printed at the end: ⌘ vs Ctrl shortcuts, file dialogs, notification display, Retina — answer in result.txt.
 # Needs: Xcode command line tools (codesign, ditto), .NET 10 SDK, node, python3.
 set -uo pipefail
+# GUI runs never take the focus of the Mac's user (src/Ombra.App/Platform/TestFocus.cs); 0 runs the checks that switch apps.
+export OMBRA_TEST_NO_ACTIVATE=${OMBRA_TEST_NO_ACTIVATE:-1}
 WORK=${1:?work dir}; mkdir -p "$WORK"; WORK=$(cd "$WORK" && pwd)
 HERE=$(cd "$(dirname "$0")/../.." && pwd); cd "$HERE"
 [ "$(uname -s)" = Darwin ] || { echo "run this on macOS"; exit 2; }
@@ -78,8 +80,9 @@ grep -q ",Running," "$WORK/timeline.csv"; check "package-prompt-streams (omp sta
 ompkids() { pgrep -P $APPPID | tr '\n' ' '; }
 OMPS=$(ompkids)
 sleep 10
+# The ⌘M fallback types into the front app: only when the run may activate Ombra.
 if osascript -e 'tell application "System Events" to set miniaturized of window 1 of (first process whose unix id is '$APPPID') to true' > "$WORK/minimize.log" 2>&1 \
-   || osascript -e 'tell application "System Events" to keystroke "m" using command down' >> "$WORK/minimize.log" 2>&1; then
+   || { [ "$OMBRA_TEST_NO_ACTIVATE" = 0 ] && osascript -e 'tell application "System Events" to keystroke "m" using command down' >> "$WORK/minimize.log" 2>&1; }; then
   sleep 2; M0=$(tail -1 "$WORK/timeline.csv"); sleep 60; M1=$(tail -1 "$WORK/timeline.csv")
   python3 - "$M0" "$M1" > "$WORK/minimized.txt" <<'PY'
 import sys
@@ -91,8 +94,12 @@ PY
   check "minimized-core-folds-ui-paused" $? "$(cat "$WORK/minimized.txt")"
   for _ in $(seq 1 180); do grep -q "omp finished" "$WORK/osascript-calls.txt" 2>/dev/null && break; sleep 1; done
   grep -q "omp finished" "$WORK/osascript-calls.txt" 2>/dev/null; check "notification-on-run-end (client → osascript)" $? "$(head -1 "$WORK/osascript-calls.txt" 2>/dev/null)"
-  osascript -e 'tell application id "io.github.samnolak.ombra" to activate' >/dev/null 2>&1; sleep 2
-  tail -1 "$WORK/timeline.csv" | grep -q ",Normal,"; check "restore-shows-current-state" $? "$(tail -1 "$WORK/timeline.csv")"
+  if [ "$OMBRA_TEST_NO_ACTIVATE" = 0 ]; then
+    osascript -e 'tell application id "io.github.samnolak.ombra" to activate' >/dev/null 2>&1; sleep 2
+    tail -1 "$WORK/timeline.csv" | grep -q ",Normal,"; check "restore-shows-current-state" $? "$(tail -1 "$WORK/timeline.csv")"
+  else
+    say "NOT RUN restore-shows-current-state — it activates the app (OMBRA_TEST_NO_ACTIVATE=0 runs it)"
+  fi
 else
   say "NOT RUN minimize / background / notification — osascript has no Accessibility permission here ($(tail -1 "$WORK/minimize.log"))"
   for _ in $(seq 1 240); do tail -1 "$WORK/timeline.csv" | grep -q ",Ready," && break; sleep 1; done

@@ -15,6 +15,10 @@ internal static class TestEnvironment
         // The mouse and the accessibility settings on the desk running the tests are not the tests'
         Ombra.App.Platform.SystemPointer.Override = () => null;
         Ombra.App.Platform.ReducedMotion.Override = false;
+        // Nothing a test starts (the real app, a Nightly runtime) takes the focus of the desk running the tests:
+        // they inherit OMBRA_TEST_NO_ACTIVATE (Platform/TestFocus.cs). The headless windows here keep their activation.
+        if (Environment.GetEnvironmentVariable(Ombra.App.Platform.TestFocus.Variable) is null)
+            Environment.SetEnvironmentVariable(Ombra.App.Platform.TestFocus.Variable, "1");
     }
 
     /// <summary>

@@ -130,7 +130,7 @@ internal static partial class NightlyAcceptance
                 await Drive(drive);
                 return;
             }
-            window.Position = new PixelPoint(60, 60);
+            window.Position = Platform.TestFocus.Position(window, new PixelPoint(60, 60));
             window.Width = 1320;
             window.Height = 860;
             vm.IsPreviewOpen = true;
@@ -589,9 +589,15 @@ internal static partial class NightlyAcceptance
         {
             var file = Path.Combine(dir, name + ".png");
             var number = MacObjC.SendLong(NsWindow, "windowNumber");
+            // screencapture is another process, which needs screen recording permission; the app's own window it does not.
+            // Without the permission a harness run never starts it: macOS would ask in a window that takes the focus.
+            if (!Platform.TestFocus.ScreenCaptureAllowed)
+            {
+                Log($"SHOT {file} window={number} in-process={OwnWindowImage(number, file)} (no Screen Recording)");
+                return file;
+            }
             using var p = Process.Start(new ProcessStartInfo("/usr/sbin/screencapture", ["-x", "-o", "-l", number.ToString(), file]))!;
             p.WaitForExit();
-            // screencapture is another process, which needs screen recording permission; the app's own window it does not
             var own = p.ExitCode != 0 && OwnWindowImage(number, file);
             Log($"SHOT {file} window={number} exit={p.ExitCode}{(p.ExitCode != 0 ? $" in-process={own}" : "")}");
             return file;
@@ -626,6 +632,13 @@ internal static partial class NightlyAcceptance
             var file = Path.Combine(dir, name + ".png");
             var frame = ((delegate* unmanaged<nint, nint, CGRect>)MacObjC.MsgSend)(NsWindow, MacObjC.Sel("frame"));
             var rect = FormattableString.Invariant($"{frame.X},{PrimaryScreenHeight() - frame.Y - frame.Height},{frame.Width},{frame.Height}");
+            if (!Platform.TestFocus.ScreenCaptureAllowed)
+            {
+                // No Screen Recording (see Shot): the window alone, without the popups over it.
+                var number = MacObjC.SendLong(NsWindow, "windowNumber");
+                Log($"SHOT {file} screen rect={rect} in-process window={OwnWindowImage(number, file)} (no Screen Recording)");
+                return file;
+            }
             using var p = Process.Start(new ProcessStartInfo("/usr/sbin/screencapture", ["-x", "-R", rect, file]))!;
             p.WaitForExit();
             Log($"SHOT {file} screen rect={rect} exit={p.ExitCode}");
@@ -696,12 +709,8 @@ internal static partial class NightlyAcceptance
 
         private static double Uptime() => SendDouble(MacObjC.Send(MacObjC.Cls("NSProcessInfo"), "processInfo"), "systemUptime");
 
-        private unsafe void Activate()
-        {
-            ((delegate* unmanaged<nint, nint, byte, void>)MacObjC.MsgSend)(App, MacObjC.Sel("activateIgnoringOtherApps:"), 1);
-            MacObjC.SendVoid(NsWindow, "makeKeyAndOrderFront:", 0);
-            window.Activate();
-        }
+        /// <summary>The window takes the keyboard without activating the app (<see cref="Platform.TestFocus.Activate"/>).</summary>
+        private void Activate() => Platform.TestFocus.Activate(window);
 
         private unsafe void Post(nint ev) => ((delegate* unmanaged<nint, nint, nint, byte, void>)MacObjC.MsgSend)(App, MacObjC.Sel("postEvent:atStart:"), ev, 0);
 
