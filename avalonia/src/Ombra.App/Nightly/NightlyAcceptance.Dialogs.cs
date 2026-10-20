@@ -116,6 +116,23 @@ internal static partial class NightlyAcceptance
                     $"color={color} focus={pane.IsKeyboardFocusWithin}");
         }
 
+        /// <summary>Run after opening the system dialog from print preview (or Page Setup).
+        /// The actual AppKit sheet is on Ombra, visible, no Nightly window is on screen, and a posted Escape cancels.</summary>
+        private async Task PrintPanelCheck(NightlyPane pane)
+        {
+            nint sheet = 0;
+            var attached = await Until(() => (sheet = MacObjC.Send(NsWindow, "attachedSheet")) != 0, 15);
+            var visible = attached && MacObjC.SendBool(sheet, "isVisible");
+            var count = NightlyWindowRects(pane.RuntimePid).Count;
+            Check("browser-window-print-panel-attached", visible && count == 0,
+                $"sheet={(sheet == 0 ? "none" : MacObjC.ClassName(MacObjC.ClassOf(sheet)))} visible={visible} nightlyWindows={count}");
+            Shot("p-print-panel-attached");
+            KeyPress("\u001b", 0x35, 0);
+            Check("browser-window-print-panel-escape", attached && await Until(() => MacObjC.Send(NsWindow, "attachedSheet") == 0, 5)
+                && NightlyWindowRects(pane.RuntimePid).Count == 0,
+                $"attachedSheet={MacObjC.Send(NsWindow, "attachedSheet")} nightlyWindows={NightlyWindowRects(pane.RuntimePid).Count}");
+        }
+
         /// <summary>Nightly's windows on screen by number.</summary>
         private static List<long> NightlyWindowNumbers(int pid)
         {

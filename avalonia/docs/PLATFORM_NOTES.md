@@ -2,6 +2,18 @@
 
 Behaviour that differs by OS and is set on purpose. Keep each entry: what, why, how it is checked.
 
+## macOS: embedded browser print sheets
+
+Nightly's embedded window must never become an on-screen sheet parent. Its native print and page-setup requests
+go through `ZenEmbedDialogs` to `NightlyPrintPanel`, which presents AppKit's panel on Ombra's own window.
+The authenticated runtime channel carries a securely archived `NSPrintInfo`; cancellation returns no print info.
+Printer, paper, orientation, copies, range and scaling return to Nightly for the actual print job. Gecko-specific
+options remain the print preview's settings; the standalone browser retains its original accessory controller.
+
+Acceptance driver `printpanel` checks a system dialog already opened from print preview: visible sheet attached
+to Ombra, no on-screen Nightly windows, and Escape dismisses it. Driver `dnd` samples `CGWindowList` throughout
+the drag/drop cases and checks that Nightly has zero on-screen windows during and after the run.
+
 ## macOS: TLS through Network.framework
 
 **What.** `Ombra.App` (and the test projects `Ombra.Tests`, `Ombra.Teams.Tests`) set the .NET runtime option

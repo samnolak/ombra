@@ -465,6 +465,9 @@ internal static partial class NightlyAcceptance
                     // DialogChecks on their own (their PASS/FAIL lines in the log).
                     await DialogChecks(pane);
                     break;
+                case "printpanel" when pane is not null:
+                    await PrintPanelCheck(pane);
+                    break;
                 case "imeend" when Shown() is { IsBrowserWindow: false } agentPane:
                     await CompositionEndedByNightly(agentPane, parts.Length > 1 ? int.Parse(parts[1], CultureInfo.InvariantCulture) : 1);
                     break;
@@ -553,7 +556,7 @@ internal static partial class NightlyAcceptance
                 using var plain = new NSStr(unmodified);
                 var ev = ((delegate* unmanaged<nint, nint, ulong, CGPoint, ulong, double, long, nint, nint, nint, byte, ushort, nint>)MacObjC.MsgSend)(
                     MacObjC.Cls("NSEvent"), MacObjC.Sel("keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:charactersIgnoringModifiers:isARepeat:keyCode:"),
-                    type, default, flags, Uptime(), MacObjC.SendLong(NsWindow, "windowNumber"), 0, chars.Handle, plain.Handle, 0, keyCode);
+                    type, default, flags, Uptime(), MacObjC.SendLong(MacObjC.Send(NsWindow, "attachedSheet") is var sheet && sheet != 0 ? sheet : NsWindow, "windowNumber"), 0, chars.Handle, plain.Handle, 0, keyCode);
                 Post(ev);
             }
         }
