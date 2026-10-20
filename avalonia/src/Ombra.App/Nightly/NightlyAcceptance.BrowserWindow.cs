@@ -291,11 +291,11 @@ internal static partial class NightlyAcceptance
         /// windows on screen), <c>sheet NAME</c> (the Browser page's sheet against the Chats page's, <see cref="SheetMatches"/>),
         /// <c>newwindows</c> (<see cref="NewWindowChecks"/>), <c>imeend [N]</c> (<see cref="CompositionEndedByNightly"/> N
         /// times on the agent's pane: <c>preview</c> the K1 fixture first), <c>position X Y</c> (the window's top-left on the
-        /// desktop), <c>wait MS</c>, <c>quit</c>. Each is logged; <c>DONE n</c> after each.
+        /// desktop), <c>wait MS</c>, <c>quit</c>. Each is logged; <c>DONE n</c> after each. Startup preserves the
+        /// configured window position, so a secondary-monitor run does not first jump onto the main monitor.
         /// </summary>
         private async Task Drive(string file)
         {
-            window.Position = new PixelPoint(60, 60);
             window.Width = 1320;
             window.Height = 860;
             await Task.Delay(500);
@@ -368,6 +368,22 @@ internal static partial class NightlyAcceptance
                 case "theme":
                     vm.SetThemeCommand.Execute(parts[1]);
                     await Task.Delay(600);
+                    break;
+                case "emptytheme" when pane is not null:
+                    // Run on the empty-tab page, including before the first `theme` command to cover startup.
+                    // Sample below the floating URL bar, away from aurora highlights and the sidebar's controls.
+                    var dark = parts[1] == "dark";
+                    var pageLuma = double.NaN;
+                    var sidebarLuma = double.NaN;
+                    var themed = await Until(async () =>
+                    {
+                        pageLuma = await FrameRegionLuma(pane, new Rect(0.8, 0.65, 0.1, 0.1));
+                        sidebarLuma = await FrameRegionLuma(pane, new Rect(0.03, 0.65, 0.08, 0.1));
+                        return dark ? pageLuma < 100 && sidebarLuma < 100 : pageLuma > 180 && sidebarLuma > 180;
+                    }, 5);
+                    Check($"browser-empty-theme-{parts[1]}", themed,
+                        $"page luma={pageLuma:0.0} sidebar luma={sidebarLuma:0.0}");
+                    ScreenShot($"empty-theme-{parts[1]}");
                     break;
                 case "fullscreen":
                     // As the green button does: AppKit's own full screen, which Avalonia then reports as WindowState.

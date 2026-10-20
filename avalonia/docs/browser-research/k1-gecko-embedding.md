@@ -294,6 +294,15 @@ device mode is `Command` op 7, Ombra's appearance op 8):
   Acceptance (Release Ombra, pinned package `1.23.2b-20261019095634`, cdhash `7949beed…8926`, en and ru): 96 PASS
   each, 0 FAIL, RESULT PASS, no Nightly process left. `NightlyShortcutMonitorTests` + `NightlyRuntimeTests` (with the
   new `ThemeMessageIsACommandForNoWindow`): 29 passed, 3 skipped, 0 failed.
+- **Empty-tab appearance acceptance (2026-10-20).** Current development Nightly (`BuildID 20261019233321`)
+  follows Ombra on fresh dark and light profiles and on dark → light → dark switches; the URL text is readable
+  and no second traffic-light dot is drawn. Evidence: `.temp/BrTheme/final/before-*.png` and
+  `.temp/BrTheme/final/light-fresh/fresh-light.png`. This does not establish the cause of the earlier owner's
+  screenshots: the owner's read-only profile records an older `extensions.lastAppBuildId` (`20261019095615`).
+  Do not add another theme override on that evidence; verify the final pinned runtime as well.
+  Driver command `emptytheme dark|light` checks actual frame pixels in the empty page and the sidebar (dark
+  luma <100, light >180), with a five-second update deadline and a screenshot. Run it before any `theme`
+  command on fresh profiles for startup coverage, then after `theme dark`, `theme light`, `theme dark`.
 - **No Nightly window outside Ombra (2026-10-19).** Everything that made a new browser window — a sized
   `window.open` (sign-in popups), ⌘N, Shift-click / Open Link in New Window, ⌘⇧P, moving a tab to a new window,
   ⌘⇧O Library, session restore with several saved windows — put an ordinary Nightly window on screen, usually behind
