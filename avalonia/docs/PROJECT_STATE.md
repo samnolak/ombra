@@ -184,6 +184,13 @@ omp 18.12.2 npm sources (upgraded from 18.8.0 on 2026-10-19; upstream base `1d5a
 
 ## How to run
 
+Headless tests use one temporary directory per process and set `GIT_CEILING_DIRECTORIES`
+at that directory, so a fixture without `.git` cannot inherit the checkout's repository
+even when `TMPDIR` points inside it. Existing Git ceilings are preserved; repositories
+created inside fixtures remain discoverable. For parallel English/Russian runs, set
+`OMBRA_TEST_LANG=en` / `ru`, use distinct `--artifacts-path` and results directories,
+and prefer separate `TMPDIR` directories outside the checkout.
+
 ```
 dotnet build Ombra.sln                         # warnings are errors
 dotnet test tests/Ombra.Tests                  # real-omp + acceptance tests run when OMBRA_TEST_CONFIG is set

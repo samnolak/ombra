@@ -168,7 +168,10 @@ public sealed class FilesReviewTests
         ClickAt(w, revert);
         await Settle(100);
         ClickAt(w, Named<Button>(w, "ConfirmRevertButton"));
-        await FileTestRepo.Until(() => !File.ReadAllText(app).Contains("print('changed')") && !v.HasChanges && !v.ShowChanges, "reverted");
+        // Git may unlink the worktree file while restoring it. Wait for the completed
+        // review refresh before reading, rather than racing that filesystem operation.
+        await FileTestRepo.Until(() => !v.HasChanges && !v.ShowChanges, "reverted");
+        Assert.DoesNotContain("print('changed')", File.ReadAllText(app));
         Assert.Equal("", GitOut(root, "status", "--porcelain", "--", "src/app.py"));
         await FileTestRepo.Until(() => v.Text.Contains("def step_1"), "the file shown");
         Assert.False(Named<Border>(w, "ViewerReviewBar").IsEffectivelyVisible);

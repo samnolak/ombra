@@ -32,6 +32,11 @@ internal static class TestEnvironment
         var run = Directory.CreateDirectory(Path.Combine(parent, "run-" + Environment.ProcessId)).FullName;
         foreach (var variable in OperatingSystem.IsWindows() ? new[] { "TMP", "TEMP" } : ["TMPDIR"])
             Environment.SetEnvironmentVariable(variable, run);
+        // TMPDIR may be a repository's .temp folder. Fixtures without their own .git must
+        // never discover that enclosing repository; nested fixture repositories still work.
+        var ceilings = Environment.GetEnvironmentVariable("GIT_CEILING_DIRECTORIES");
+        Environment.SetEnvironmentVariable("GIT_CEILING_DIRECTORIES",
+            string.IsNullOrEmpty(ceilings) ? run : run + Path.PathSeparator + ceilings);
         AppDomain.CurrentDomain.ProcessExit += (_, _) => TryDelete(run);
     }
 
