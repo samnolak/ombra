@@ -315,8 +315,9 @@ device mode is `Command` op 7, Ombra's appearance op 8):
     kept). In the pane's window `OpenBrowserWindow` opens a tab, `openLinkIn(where=window)` a tab in front,
     `replaceTab(s)WithWindow` do nothing, `showPlacesOrganizer` is Zen's Library or the organizer in a tab; new/private
     window and Move to New Window menu items are hidden (`zen-browser-ui.css`).
-  - *Ombra's links* (chat, cards, context menu, Open in browser) open in the Browser page (`OpenInBrowserPage`);
-    non-http stays with the system.
+  - *Ombra's links* go through `MainViewModel.OpenLink` (2026-10-20): a click (chat, terminal, cards, settings) opens
+    a tab of the right panel's Browser tool; ⌘-click / the link menu adds *Open in Browser page* (this window) and
+    *Open in default browser*; the preview's own *Open in browser* goes to the Browser page; non-http stays with the system.
   - *Runtime identity.* `pack-nightly.py` gives the packaged copy `CFBundleIdentifier`
     `io.github.samnolak.ombra.nightly-runtime` and drops `CFBundleURLTypes`/`CFBundleDocumentTypes` before signing
     (`--check` verifies), so LaunchServices never routes a default-browser link to it. Signing comes after the change,
@@ -349,7 +350,7 @@ device mode is `Command` op 7, Ombra's appearance op 8):
   resize, in full screen, after ⌘M and back, on the other display, and after Nightly was killed and restarted; 5 min of
   pans kept Ombra's IOSurface regions at 18–19 and its footprint at 519–520 MB.
 
-- **Open in app (2026-10-19).** A link Ombra opens in the Browser page (`OpenInBrowserPage`), or one clicked or typed
+- **Open in app (2026-10-19).** A link Ombra opens in the Browser page (`OpenLink(…, LinkTarget.BrowserPage)`), or one clicked or typed
   there, to a site whose desktop app is installed (Zoom `/j/`, Figma files, Толк rooms, `t.me`, Teams, Slack, …) goes to
   that app through LaunchServices; the tab opened for it closes, so the page shows what it showed. Nightly decides
   (`src/zen/open-in-app/`, documented in the desktop repo's `prefs/README.md`); Ombra still switches to the Browser

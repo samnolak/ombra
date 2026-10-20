@@ -311,7 +311,7 @@ public sealed partial class GitSettingsViewModel : WorkspacePageViewModel
     }
 
     [RelayCommand]
-    private void InstallGh() => Main.OpenExternal("https://cli.github.com/");
+    private void InstallGh() => Main.OpenLink("https://cli.github.com/");
 
     /// <summary>A shell in the project folder (to run git init, or anything git needs by hand).</summary>
     [RelayCommand]

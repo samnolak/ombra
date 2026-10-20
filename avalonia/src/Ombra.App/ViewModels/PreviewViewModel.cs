@@ -422,6 +422,25 @@ public sealed partial class PreviewViewModel : ObservableObject
         AddressFocusRequested?.Invoke();
     }
 
+    /// <summary>
+    /// A link the user opened from Ombra (a chat's reply, tool output, a card; MainViewModel.OpenLink): a tab of the
+    /// user's of its own, shown, after the last one (the tab shown when it is empty). The pane stops following omp.
+    /// The reason when the address is refused.
+    /// </summary>
+    public string? OpenUserTab(Uri uri)
+    {
+        if (!TryNormalize(uri.AbsoluteUri, out var normalized, out var error)) return error;
+        if (ActiveTab.HasContent)
+        {
+            var tab = Configure(new PreviewTab("", isAgentTab: false) { IsOpenedByUser = true });
+            Tabs.Add(tab);
+            ActiveTab = tab;
+        }
+        FollowsAgent = false;
+        Navigate(normalized.AbsoluteUri);
+        return HasMessage ? Message : null;
+    }
+
     /// <summary>The user closes a tab they opened, one of omp's or a pop-up (their first tab stays); omp's requests for it are refused from now on.</summary>
     [RelayCommand]
     private void CloseTab(PreviewTab? tab)

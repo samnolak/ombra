@@ -46,26 +46,6 @@ public partial class MainViewModel
         _ = Share.MarkInboxSeenAsync();
     }
 
-    /// <summary>
-    /// The Browser page's Nightly window, while Nightly shows the page (MainWindow.BrowserWindow.cs): opens a link in a
-    /// new tab of it. Null with the built-in preview.
-    /// </summary>
-    public Action<Uri>? OpenInBrowserWindow { get; set; }
-
-    /// <summary>
-    /// A web link the user opens from Ombra (the conversation, a card, a menu, the preview's "Open in browser"): with
-    /// Nightly it is a new tab of the Browser page, which shows, instead of a window of the system's browser (which,
-    /// with Nightly as the default browser, was a Nightly window outside Ombra). False when the caller should hand the
-    /// link to the system: the built-in preview, or not http/https.
-    /// </summary>
-    internal bool OpenInBrowserPage(Uri uri)
-    {
-        if (OpenInBrowserWindow is not { } open || uri.Scheme is not ("http" or "https")) return false;
-        OpenBrowserPageCommand.Execute(null);
-        open(uri);
-        return true;
-    }
-
     /// <summary>Accepted links: the Browser page, each in a tab of its own (the first in the empty tab when there is one).</summary>
     internal void OpenSharedLinks(IReadOnlyList<string> urls)
     {
@@ -79,8 +59,8 @@ public partial class MainViewModel
                 else Notify("IconAlert", Loc.T("Couldn't open the link"), url);
                 continue;
             }
-            if (Browser.ActiveTab.HasContent) Browser.NewTabCommand.Execute(null);
-            if (Browser.NavigateForAgent(url) is { } error) Notify("IconAlert", Loc.T("Couldn't open the link"), error);
+            var refused = Uri.TryCreate(url, UriKind.Absolute, out var link) ? Browser.OpenUserTab(link) : url;
+            if (refused is not null) Notify("IconAlert", Loc.T("Couldn't open the link"), refused);
         }
     }
 

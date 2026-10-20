@@ -614,6 +614,17 @@ public sealed class MarkdownView : ContentControl
             Hover(null);
         }
 
+        // ── Links (InlineLink): a press on one may lose its capture to this text — TextBlock's arrange takes its inline
+        // controls out and puts them back, and the pressed link re-arranges it — so the release comes here, not to the link ──
+
+        private InlineLink? _pressedLink;
+
+        public MdText() => AddHandler(PointerPressedEvent, (_, e) =>
+        {
+            _pressedLink = e.GetCurrentPoint(this).Properties.IsLeftButtonPressed && e.Source is Visual source
+                ? source.FindAncestorOfType<InlineLink>(includeSelf: true) : null;
+        }, Avalonia.Interactivity.RoutingStrategies.Bubble, handledEventsToo: true);
+
         protected override void OnPointerPressed(Avalonia.Input.PointerPressedEventArgs e)
         {
             _pressedAt = _target is not null && e.GetCurrentPoint(this).Properties.IsLeftButtonPressed ? e.GetPosition(this) : null;
@@ -624,8 +635,18 @@ public sealed class MarkdownView : ContentControl
         {
             base.OnPointerReleased(e);
             var at = e.GetPosition(this);
+            var link = _pressedLink;
+            _pressedLink = null;
+            // The link pressed, released over it after its capture came here: its click
+            if (link is not null && e.InitialPressMouseButton == Avalonia.Input.MouseButton.Left && TopLevel.GetTopLevel(link) is not null
+                && new Rect(link.Bounds.Size).Contains(e.GetPosition(link)))
+            {
+                ClearSelection();
+                link.Open();
+                e.Handled = true;
+            }
             // A click: released where it was pressed, nothing selected (a drag over the path selects it instead)
-            if (_pressedAt is { } from && _target is { } target && Math.Abs(at.X - from.X) < 4 && Math.Abs(at.Y - from.Y) < 4
+            else if (_pressedAt is { } from && _target is { } target && Math.Abs(at.X - from.X) < 4 && Math.Abs(at.Y - from.Y) < 4
                 && SelectionStart == SelectionEnd && PathLinks.GetHandler(this) is { } handler)
             {
                 ToolTip.SetIsOpen(this, false);
@@ -787,8 +808,9 @@ public sealed class MarkdownView : ContentControl
         }
     }
 
-    /// <summary>A link the size of the surrounding text in the action color (opened as <see cref="ContextMenus.OpenLink"/>
-    /// does; http/https only); its context menu opens or copies it.</summary>
+    /// <summary>A link the size of the surrounding text in the action color (http/https only): a click opens it in the right
+    /// panel's Browser tool (<see cref="ContextMenus.OpenLink"/>); ⌘-click (Ctrl-click off macOS) and its context menu offer
+    /// the other places (<see cref="ContextMenus.ForLink"/>).</summary>
     private static HyperlinkButton Link(string label, Uri uri) => new InlineLink
     {
         Content = new TextBlock { Text = label, TextDecorations = TextDecorations.Underline },
@@ -824,18 +846,42 @@ public sealed class MarkdownView : ContentControl
             return size;
         }
 
+        /// <summary>The press that makes this click held ⌘ (Ctrl off macOS): the click shows the link's menu.</summary>
+        private bool _menuClick;
+
         // A right press stays with the link: the text around it would take the pointer (to select), and the release that
         // asks for a menu would then come from the text, not the link
         protected override void OnPointerPressed(Avalonia.Input.PointerPressedEventArgs e)
         {
+            _menuClick = e.KeyModifiers.HasFlag(OperatingSystem.IsMacOS() ? Avalonia.Input.KeyModifiers.Meta : Avalonia.Input.KeyModifiers.Control);
             base.OnPointerPressed(e);
             if (e.GetCurrentPoint(this).Properties.IsRightButtonPressed) e.Handled = true;
         }
 
-        // Not HyperlinkButton's launch: with Nightly the link opens in the Browser page, as the menu's "Open link" does.
-        protected override void OnClick()
+        // Not HyperlinkButton's launch (the system's browser): the right panel's Browser tool, next to the chat.
+        protected override void OnClick() => Open();
+
+        public InlineLink() => AddHandler(ContextRequestedEvent, (_, e) =>
         {
-            if (NavigateUri is { } uri) ContextMenus.OpenLink(this, uri.AbsoluteUri);
+            if (ShowMenu()) e.Handled = true;
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+
+        /// <summary>The click: the link's menu after a ⌘ press, else <see cref="ContextMenus.OpenLink"/> (also from
+        /// <see cref="MdText"/>, when the release came to the text).</summary>
+        internal void Open()
+        {
+            var menu = _menuClick;
+            _menuClick = false;
+            if (!(menu && ShowMenu()) && NavigateUri is { } uri) ContextMenus.OpenLink(this, uri.AbsoluteUri);
+        }
+
+        /// <summary>The link's menu (⌘-click, right click), placed on the text the link sits in, at the pointer: opening
+        /// it lays the text out, which takes the link out of the tree and back and would close a menu placed on the link.</summary>
+        private bool ShowMenu()
+        {
+            if (ContextFlyout is not Avalonia.Controls.Primitives.PopupFlyoutBase flyout) return false;
+            flyout.ShowAt(this.GetVisualParent() as Control ?? this, showAtPointer: true);
+            return true;
         }
     }
 

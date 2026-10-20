@@ -106,8 +106,6 @@ public sealed partial class MainViewModel
         return true;
     }
 
-    internal void OpenExternal(string url) => OpenUrlRequested?.Invoke(url);
-
     /// <summary>
     /// <c>/wt &lt;branch&gt;</c> (omp 18.2.0, builtin-lifecycle.ts): omp creates the branch from HEAD in a new linked
     /// worktree under worktree.base, carries the uncommitted changes over and moves this session (its file and working

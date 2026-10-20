@@ -271,7 +271,7 @@ public sealed partial class MainViewModel
     private void ShowDownloadedUpdate()
     {
         if (DownloadedUpdate is { } file && Path.GetDirectoryName(file) is { } dir)
-            OpenUrlRequested?.Invoke(new Uri(dir).AbsoluteUri);
+            OpenLink(new Uri(dir));
     }
 
     /// <summary>The sidebar notice opens Settings → Updates (or omp's page while omp updates); a finished outcome is dismissed.</summary>

@@ -338,10 +338,10 @@ public sealed partial class MainViewModel
         {
             var full = Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(ProjectFolder ?? Session.CurrentLaunch.WorkingDirectory ?? "", path));
             card.Finish(true, Loc.T("Exported as HTML"), Loc.T("A single page with the whole conversation, tool calls included, to open in a browser."), full,
-                new SessionCardAction(Loc.T("Open"), new RelayCommand(() => OpenUrlRequested?.Invoke(new Uri(full).AbsoluteUri))),
+                new SessionCardAction(Loc.T("Open"), new RelayCommand(() => OpenLink(new Uri(full)))),
                 new SessionCardAction(Loc.T("Show in folder"), new RelayCommand(() =>
                 {
-                    if (Path.GetDirectoryName(full) is { } dir) OpenUrlRequested?.Invoke(new Uri(dir).AbsoluteUri);
+                    if (Path.GetDirectoryName(full) is { } dir) OpenLink(new Uri(dir));
                 })),
                 new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
         }
@@ -421,7 +421,7 @@ public sealed partial class MainViewModel
             card.Finish(true, copied ? Loc.T("Link copied") : Loc.T("Shared"), Loc.T("Anyone with this link can read the conversation.") + (note is null ? "" : " " + note) +
                 (gist is null ? "" : " " + Loc.F("Stored in a secret gist: {0}", gist)), url,
                 new SessionCardAction(Loc.T("Copy link"), new AsyncRelayCommand(async () => { await CopyTextAsync(url, Loc.T("Link copied")); })),
-                new SessionCardAction(Loc.T("Open"), new RelayCommand(() => OpenUrlRequested?.Invoke(url))),
+                new SessionCardAction(Loc.T("Open"), new RelayCommand(() => OpenLink(url))),
                 new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
         }
         else card.Finish(false, Loc.T("Not shared"), Said(r, "Failed to share session: "), secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
@@ -621,7 +621,7 @@ public sealed partial class MainViewModel
             card.Finish(true, Loc.T("Usage dashboard"),
                 synced is null ? Loc.T("omp's local dashboard of tokens, cost and models across all your sessions runs on this computer.")
                     : Loc.F("omp's local dashboard of tokens, cost and models across all your sessions runs on this computer ({0}).", synced.Trim().TrimEnd('.').ToLowerInvariant()), url,
-                new SessionCardAction(Loc.T("Open in browser"), new RelayCommand(() => OpenUrlRequested?.Invoke(url))),
+                new SessionCardAction(Loc.T("Open"), new RelayCommand(() => OpenLink(url))),
                 new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
         }
         else card.Finish(false, Loc.T("Dashboard not started"), Said(r, "Stats dashboard failed: "), secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));

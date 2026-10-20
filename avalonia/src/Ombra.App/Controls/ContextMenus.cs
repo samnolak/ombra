@@ -43,19 +43,21 @@ public static class ContextMenus
         return menu;
     }
 
-    /// <summary>Open a link in the built-in preview or system browser, copy its full address, or share it with the team (P5).</summary>
+    /// <summary>
+    /// A link's menu (its right click, or ⌘-click): open it in the right panel's Browser tool (what a click does), in the
+    /// Browser page or in the system's default browser (<see cref="ViewModels.MainViewModel.OpenLink(Uri, ViewModels.LinkTarget)"/>),
+    /// copy its full address, or share it with the team (P5).
+    /// </summary>
     public static Flyout ForLink(string url)
     {
         Flyout? menu = null;
+        var web = Uri.TryCreate(url, UriKind.Absolute, out var uri) && ViewModels.PreviewViewModel.IsAllowed(uri);
+        bool InOmbra() => web && menu?.Target is { } target && ConversationMenus.Owner(target) is not null;
         menu = Menu(
-            new MenuAction(Loc.T("Open in preview"), "IconGlobe", target =>
-            {
-                if (ConversationMenus.Owner(target) is not { } vm) return;
-                vm.Preview.NavigateCommand.Execute(url);
-                vm.ShowPaneCommand.Execute(SidePane.Browser);
-            }, () => Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
-                && menu?.Target is { } target && ConversationMenus.Owner(target) is not null),
-            new MenuAction(Loc.T("Open link"), "IconExternal", target => OpenLink(target, url)),
+            new MenuAction(Loc.T("Open in preview"), "IconGlobe", target => OpenLink(target, url), InOmbra),
+            new MenuAction(Loc.T("Open in Browser page"), "IconGlobe", target => OpenLink(target, url, LinkTarget.BrowserPage), InOmbra),
+            new MenuAction(web ? Loc.T("Open in default browser") : Loc.T("Open link"), "IconExternal",
+                target => OpenLink(target, url, LinkTarget.SystemBrowser)),
             new MenuAction(Loc.T("Copy link"), "IconLink", target => _ = CopyAsync(target, url, Loc.T("Link copied"))),
             null,
             new MenuAction(Loc.T("Share with team…"), "IconShare", target => ConversationMenus.Owner(target)?.ShareLink(url),
@@ -261,13 +263,13 @@ public static class ContextMenus
         return row;
     }
 
-    /// <summary>A link the user opens from Ombra: with Nightly, a new tab of the Browser page
-    /// (<see cref="ViewModels.MainViewModel.OpenInBrowserPage"/>); otherwise the system's browser.</summary>
-    public static void OpenLink(Control target, string url)
+    /// <summary>A link the user opens from a control: <see cref="MainViewModel.OpenLink(Uri, LinkTarget)"/> of the window's
+    /// model (a click: the right panel's Browser tool); a window without one hands it to the system.</summary>
+    public static void OpenLink(Control target, string url, LinkTarget to = LinkTarget.Panel)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || TopLevel.GetTopLevel(target) is not { } top) return;
-        if (top.DataContext is ViewModels.MainViewModel vm && vm.OpenInBrowserPage(uri)) return;
-        _ = top.Launcher.LaunchUriAsync(uri);
+        if (top.DataContext is MainViewModel vm) vm.OpenLink(uri, to);
+        else _ = top.Launcher.LaunchUriAsync(uri);
     }
 
     // ───────────── Window rules ─────────────
