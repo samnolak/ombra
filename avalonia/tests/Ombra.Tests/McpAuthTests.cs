@@ -225,14 +225,14 @@ public class McpAuthTests
     }
 
     [AvaloniaFact]
-    public async Task Reconnect_all_asks_omp_once_and_shows_the_new_states()
+    public async Task Reload_config_asks_omp_once_and_shows_the_new_states()
     {
         await using var ui = await Open();
         var c = ui.C;
 
-        await c.ReconnectAllCommand.ExecuteAsync(null);
+        await c.ReloadConfigCommand.ExecuteAsync(null);
         Assert.Single(ui.Sent, "mcp_reconnect *");
-        Assert.Equal(Loc.F("omp reconnected the MCP servers: {0} of {1} connected.", 2, 3), c.Feedback.Notice);
+        Assert.Equal(Loc.F("omp read its MCP config again: {0} of {1} servers connected.", 2, 3), c.Feedback.Notice);
         Assert.Equal(ConnectorState.NoTools, c.Servers.Single(s => s.Name == "broken").State);
     }
 
@@ -256,6 +256,173 @@ public class McpAuthTests
         Assert.Equal(Loc.T("Sign in"), c.AuthPrompts[0].SignInLabel);
         c.AuthPrompts[0].DismissCommand.Execute(null);
         await Until(() => !c.HasAuthPrompts, "dismissed");
+    }
+
+    private const string Refusal = "Figma refused client registration (Forbidden): this client is not on the server allowlist; set oauth.clientName or a pre-registered clientId";
+
+    // A server omp could not start (its own error), one that needs a sign-in: the states the lists show besides connected
+    private const string Failing = """
+        { "servers": [
+          { "name": "echo", "transport": "stdio", "scope": "user", "status": "connected", "toolCount": 2, "auth": "none" },
+          { "name": "broken", "transport": "stdio", "scope": "project", "status": "failed", "toolCount": 0, "auth": "none",
+            "error": "spawn /nonexistent/cmd ENOENT" },
+          { "name": "web", "transport": "sse", "scope": "project", "status": "disconnected", "toolCount": 0, "auth": "signed_out",
+            "authUrl": "https://auth.example.com/authorize?client_id=c&state=s2", "loginTools": 3 }
+        ] }
+        """;
+
+    [AvaloniaFact]
+    public async Task The_list_shows_connected_sign_in_needed_error_and_off_with_omps_reason()
+    {
+        await using var ui = await Open(Failing.Replace("\"loginTools\": 3", $"\"loginTools\": 3, \"loginError\": \"{Refusal}\""));
+        var c = ui.C;
+
+        var echo = c.Servers.Single(s => s.Name == "echo");
+        Assert.Equal((ConnectorState.Connected, false), (echo.State, echo.SuggestReconnect));
+        var broken = c.Servers.Single(s => s.Name == "broken");
+        Assert.Equal((ConnectorState.Failed, Loc.T("Couldn't connect"), "spawn /nonexistent/cmd ENOENT"), (broken.State, broken.StateText, broken.Failure));
+        Assert.True(broken.SuggestReconnect);
+        Assert.False(broken.SuggestSignIn);
+        var web = c.Servers.Single(s => s.Name == "web");
+        Assert.Equal((Loc.T("Not connected: sign-in needed"), Loc.T("Signed out")), (web.StateText, web.AuthText));
+        Assert.True(web.SuggestSignIn);
+        Assert.False(web.SuggestReconnect);
+        // Off: the project folder's server switched off in the user file (disabledServers)
+        var docs = c.Servers.Single(s => s.Name == "docs");
+        await Until(() => docs.State == ConnectorState.Off, "docs off");
+        Assert.Equal((Loc.T("Off"), false), (docs.StateText, docs.SuggestReconnect));
+        await Shot(ui, "connectors-list-states", scrollTo: "ConnectorList");
+
+        // A refused client registration: omp's words on the row, and no page opens
+        await web.SignInCommand.ExecuteAsync(null);
+        Assert.Equal(Refusal, web.SignInError);
+        Assert.Empty(ui.Opened);
+        await Shot(ui, "connectors-sign-in-refused", scrollTo: "ConnectorList");
+
+        // Reconnect: omp connects the failed server again from its config as it is now
+        await broken.ReconnectCommand.ExecuteAsync(null);
+        Assert.Contains("mcp_reconnect broken", ui.Sent);
+        Assert.Equal("", broken.Failure);
+        Assert.NotEqual(ConnectorState.Failed, broken.State);
+        Assert.Equal(Loc.F("Reconnected “{0}”.", "broken"), c.Feedback.Notice);
+    }
+
+    [AvaloniaFact]
+    public async Task The_chats_connectors_list_signs_in_reconnects_and_reloads_the_config()
+    {
+        await using var ui = await Open(Failing, connectors: false);
+        var (c, vm) = (ui.C, ui.Vm);
+        var chip = ui.W.GetVisualDescendants().OfType<Ombra.App.Views.Session.ConnectorsIndicator>().Single();
+        await Until(() => c.IsChatAvailable, "chip");
+        await Settle(100);
+        Assert.True(chip.Button.IsEffectivelyVisible);
+        Assert.DoesNotContain("get_mcp_servers", ui.Sent); // omp is asked only when the list opens
+
+        chip.Button.Command!.Execute(null);
+        await Until(() => c.ChatServers.Count == 3 && !c.IsChatLoading, "the chat's list");
+        var echo = c.ChatServers.Single(s => s.Name == "echo");
+        var broken = c.ChatServers.Single(s => s.Name == "broken");
+        var web = c.ChatServers.Single(s => s.Name == "web");
+        Assert.Equal((ConnectorState.Connected, Loc.Plural(2, "Connected · {0} tool", "Connected · {0} tools")), (echo.State, echo.StatusText));
+        Assert.Equal((ConnectorState.Failed, Loc.T("Couldn't connect"), "spawn /nonexistent/cmd ENOENT", true), (broken.State, broken.StatusText, broken.Error, broken.CanReconnect));
+        Assert.Equal((Loc.T("Sign-in needed"), true, false, ""), (web.StatusText, web.CanSignIn, web.CanReconnect, web.Error));
+        Assert.Equal(2, c.ChatAttention);
+        Assert.Equal(Loc.Plural(2, "{0} connector needs attention", "{0} connectors need attention"), c.ChipLabel);
+        await Settle(200);
+        Assert.True(chip.FindControl<TextBlock>("ConnectorsChipLabel")!.IsEffectivelyVisible);
+        var names = chip.Popup.Child!.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible)
+            .Select(b => Avalonia.Automation.AutomationProperties.GetName(b)).ToList();
+        Assert.Contains(Loc.F("Sign in to {0}", "web"), names);
+        Assert.Contains(Loc.F("Reconnect {0}", "broken"), names);
+        Assert.Contains(Loc.T("Reload config"), names);
+        await Shot(ui, "chat-connectors");
+
+        // Sign in from the chat: the page opens in the default browser, the row connects
+        await web.SignInCommand.ExecuteAsync(null);
+        Assert.Equal(["https://auth.example.com/authorize?client_id=c&state=s2"], ui.Opened);
+        Assert.Equal((ConnectorState.Connected, false), (web.State, web.NeedsAttention));
+        Assert.Equal(Loc.Plural(3, "Signed in to “{1}”: {0} tool ready.", "Signed in to “{1}”: {0} tools ready.", "web"), c.ChatNotice);
+        Assert.Equal(Loc.F("{0} isn't connected", "broken"), c.ChipLabel);
+
+        await broken.ReconnectCommand.ExecuteAsync(null);
+        Assert.Contains("mcp_reconnect broken", ui.Sent);
+        Assert.False(c.HasChatAttention);
+        Assert.Equal(Loc.F("Reconnected “{0}”.", "broken"), c.ChatNotice);
+
+        await c.ReloadConfigCommand.ExecuteAsync(null);
+        Assert.Contains("mcp_reconnect *", ui.Sent);
+        Assert.Equal(Loc.F("omp read its MCP config again: {0} of {1} servers connected.", 3, 3), c.ChatNotice);
+
+        await c.ManageConnectorsCommand.ExecuteAsync(null);
+        Assert.False(c.IsChatOpen);
+        Assert.True(vm.IsSettingsOpen && vm.PluginsHub.IsMcpTab);
+    }
+
+    [AvaloniaFact]
+    public async Task Omps_sign_in_prompt_marks_the_chip_after_it_is_dismissed_and_the_notice_links_to_the_list()
+    {
+        await using var ui = await Open(connectors: false);
+        var (c, vm) = (ui.C, ui.Vm);
+
+        await Emit(ui, """{ "type": "mcp_auth_required", "serverName": "web", "reason": "expired" }""");
+        await Until(() => c.HasChatAttention && !c.IsChatLoading && ui.Sent.Contains("get_mcp_servers"), "chip marked");
+        Assert.Equal(Loc.F("Sign in to {0}", "web"), c.ChipLabel);
+        Assert.Equal(Loc.T("Sign-in expired"), c.ChatServers.Single(s => s.Name == "web").StatusText);
+
+        // The conversation's notice, in the app's language, links to the list
+        await Until(() => vm.Rows.OfType<NoticeRowViewModel>().Any(n => n.HasConnectorLink), "notice");
+        var notice = vm.Rows.OfType<NoticeRowViewModel>().Single(n => n.HasConnectorLink);
+        Assert.Equal(("web", Loc.F("Connector “{0}” needs you to sign in again.", "web")), (notice.McpServer, notice.Text));
+        await Settle(200);
+        var link = ui.W.GetVisualDescendants().OfType<Button>()
+            .First(b => b.IsEffectivelyVisible && Avalonia.Automation.AutomationProperties.GetName(b) == Loc.F("Show connectors: {0}", "web"));
+        await Shot(ui, "chat-sign-in-notice");
+
+        // Dismissed on the page, the sign-in stays on the chip
+        vm.DismissConnectorSignInPrompt("web");
+        await Until(() => vm.McpAuthRequests.Count == 0, "prompt dismissed");
+        await Settle(100);
+        Assert.True(c.HasChatAttention);
+
+        link.Command!.Execute(link.CommandParameter);
+        await Until(() => vm.IsSettingsOpen && vm.PluginsHub.IsMcpTab, "the MCP list");
+    }
+
+    [AvaloniaFact]
+    public async Task Sign_out_forgets_the_sign_in_and_the_row_offers_sign_in_again()
+    {
+        await using var ui = await Open();
+        var c = ui.C;
+        var web = c.Servers.Single(s => s.Name == "web");
+        Assert.True(web.CanSignOut); // expired: omp still keeps a sign-in
+        await web.SignInCommand.ExecuteAsync(null);
+        ui.Vm.PluginsHub.OpenServerCommand.Execute(web);
+        await Settle(200);
+        Assert.True(ui.W.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "SignOutServerButton").IsEffectivelyVisible);
+        Assert.True(ui.W.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "ReconnectServerButton").IsEffectivelyVisible);
+        await Shot(ui, "connectors-details-sign-out");
+
+        await web.SignOutCommand.ExecuteAsync(null);
+        Assert.Contains("mcp_logout web", ui.Sent);
+        Assert.Equal(("signed_out", true, false), (web.Auth, web.SuggestSignIn, web.CanSignOut));
+        Assert.Equal(Loc.F("Signed out of “{0}”.", "web"), c.Feedback.Notice);
+    }
+
+    [AvaloniaFact]
+    public async Task A_typed_mcp_reauth_opens_its_sign_in_page_in_the_default_browser()
+    {
+        await using var ui = await Open(connectors: false);
+        var vm = ui.Vm;
+        vm.ComposerText = "/mcp reauth web";
+        await vm.SendCommand.ExecuteAsync(null);
+        await Emit(ui, """{ "type": "extension_ui_request", "id": "t1", "method": "open_url", "url": "https://auth.example.com/typed", "mcpServer": "web" }""");
+        await Until(() => ui.Opened.Count == 1, "the typed sign-in's page");
+        Assert.Equal("https://auth.example.com/typed", ui.Opened[0]);
+
+        // Another server's page nobody asked for here: the link card
+        await Emit(ui, """{ "type": "extension_ui_request", "id": "t2", "method": "open_url", "url": "https://auth.example.com/other", "mcpServer": "echo" }""");
+        await Until(() => vm.PendingUrl is not null, "link card");
+        Assert.Single(ui.Opened);
     }
 
     private const string Form = """

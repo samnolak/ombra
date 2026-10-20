@@ -55,10 +55,11 @@ public sealed partial class MainViewModel
     /// <summary>omp's pinned session ids, read with each scan of the session list (listed first in the sidebar).</summary>
     private HashSet<string> _pinnedIds = [];
 
-    /// <summary>Called from Apply: the ring, the pin state and which menu items can run.</summary>
+    /// <summary>Called from Apply: the ring, the connectors chip, the pin state and which menu items can run.</summary>
     private void ApplySessionArea(SessionSnapshot s)
     {
         Usage.Apply(s);
+        Connectors.ApplyChat(Session, s);
         if (s.SessionFile != _pinsFor)
         {
             _pinsFor = s.SessionFile;

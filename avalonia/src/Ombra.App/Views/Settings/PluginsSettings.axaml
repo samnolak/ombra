@@ -291,6 +291,9 @@
                         <Button Content="{loc:T 'Cancel sign-in'}" Command="{Binding CancelSignInCommand}" IsVisible="{Binding IsSigningIn}"
                                 ToolTip.Tip="{loc:T 'Finish the sign-in in your browser. omp connects as soon as it’s done.'}"
                                 AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Cancel the sign-in to {0}'}}" />
+                        <Button Classes="outline" Content="{loc:T 'Reconnect'}" Command="{Binding ReconnectCommand}" IsVisible="{Binding SuggestReconnect}"
+                                ToolTip.Tip="{loc:T 'omp connects to it again, from its entry in mcp.json as it is now'}"
+                                AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Reconnect {0}'}}" />
                       </StackPanel>
                       <Panel Grid.Column="2" VerticalAlignment="Center">
                         <TextBlock Classes="plug-scope" Text="{Binding ScopeLabel}" ToolTip.Tip="{Binding ScopeTip}" IsVisible="{Binding !NeedsTrust}" />
@@ -311,6 +314,11 @@
                       <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
                       <SelectableTextBlock Grid.Column="1" Classes="error" Text="{Binding SignInError}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
                     </Grid>
+                    <!-- omp's reason the server didn't connect (or the last test failed), in its own words -->
+                    <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasFailure}" Margin="72,0,16,12">
+                      <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlert}" Size="16" VerticalAlignment="Top" Margin="0,0,8,0" />
+                      <SelectableTextBlock Grid.Column="1" Classes="error" Text="{Binding Failure}" TextWrapping="Wrap" FontSize="{DynamicResource GuiFontS}" />
+                    </Grid>
                   </StackPanel>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
@@ -322,11 +330,11 @@
             <TextBlock x:Name="OtherMcpTools" Classes="tertiary" TextWrapping="Wrap" IsVisible="{Binding HasOtherTools}"
                        Text="{Binding OtherTools, StringFormat={loc:T 'This chat also has MCP tools from servers set up for other apps (Claude Code, Cursor, VS Code…): {0}'}}" />
             <StackPanel Orientation="Horizontal" Spacing="8">
-              <Button x:Name="ReconnectAllButton" Command="{Binding ReconnectAllCommand}" IsEnabled="{Binding CanChange}" IsVisible="{Binding ShowList}"
-                      ToolTip.Tip="{loc:T 'omp finds its MCP servers again and reconnects every one, without a restart'}" AutomationProperties.Name="{loc:T 'Reconnect all'}">
+              <Button x:Name="ReloadConfigButton" Command="{Binding ReloadConfigCommand}" IsEnabled="{Binding CanChange}" IsVisible="{Binding IsOmpRunning}"
+                      ToolTip.Tip="{loc:T 'omp reads mcp.json again and reconnects every server, without a restart'}" AutomationProperties.Name="{loc:T 'Reload config'}">
                 <StackPanel Orientation="Horizontal" Spacing="6">
                   <ctl:Icon Data="{StaticResource IconReload}" Size="16" VerticalAlignment="Center" />
-                  <TextBlock Text="{loc:T 'Reconnect all'}" VerticalAlignment="Center" />
+                  <TextBlock Text="{loc:T 'Reload config'}" VerticalAlignment="Center" />
                 </StackPanel>
               </Button>
               <Button x:Name="McpMoreButton" Classes="flat" Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).PluginsHub.ToggleMcpMoreCommand}"

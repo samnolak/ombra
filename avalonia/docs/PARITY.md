@@ -192,7 +192,7 @@ extension commands that omp lists itself keep going to omp.
 | `/hub` | TUI | **Done** — opens Background tasks — *Panes* area |
 | `/login [provider]` | TUI (RPC `login`) | **Done** — Settings › Model providers (RPC sign-in with the browser link / code card) |
 | `/logout [provider]` | TUI (RPC `get_logout_accounts`, `logout`, omp 18.8.0) | **Done** — Settings › Model providers (the sign-out icon beside *Signed in*: pick the stored account to remove) |
-| `/mcp …` | yes | **Done** — Plugins page › MCP — *Connectors* area (sign-in / sign in again, Reconnect all, server forms over RPC) |
+| `/mcp …` | yes | **Done** — Plugins page › MCP — *Connectors* area (sign-in / sign in again / sign out, Reconnect, Reload config, server forms over RPC); the chat's connectors plug under the message box; `/mcp reauth <name>` typed opens its sign-in page in the default browser |
 | `/ssh …` | yes | **Done** — Settings › SSH hosts — *Workspace* area |
 | `/btw` | TUI | **Done** over the owned engine's RPC (`btw`, `btw_cancel`, `get_btw_history`): the BTW panel above the message box, also while omp works (*Session* area); an omp without them: via omp terminal |
 | `/tan`, `/omfg`, `/cleanse`, `/debug` | TUI | **Via omp terminal** |
@@ -301,7 +301,7 @@ extension commands that omp lists itself keep going to omp.
 Plan / goal / vibe / loop modes, `/clear`, `/tree`, `/logout` (over RPC since 18.8.0; plan, goal and `/btw` are in the
 GUI over the owned engine's RPC), live collaboration (`/collab`, `/join`), realtime voice (`/live`), `/pause`, `/tan`, `/omfg`, `/cleanse`, the agents hub and
 `/advisor configure`, omp's git TUI. (MCP OAuth sign-in and MCP forms are over RPC in the owned runtime:
-`get_mcp_servers`, `mcp_login`, `mcp_reconnect`, `elicit` — Plugins page › MCP and the form card.) The GUI never sends these to omp: they would
+`get_mcp_servers`, `mcp_login`, `mcp_logout`, `mcp_reconnect`, `elicit` — Plugins page › MCP, the chat's connectors plug and the form card.) The GUI never sends these to omp: they would
 reach the model as a message. Each has the "runs in omp's terminal" card; the terminal panel's **+ omp TUI** starts
 omp's own interface for them.
 

@@ -748,6 +748,9 @@ public sealed partial class NoticeRowViewModel(NoticeItem item) : RowViewModel(i
     public string Text => _text;
     public bool IsError => ((NoticeItem)Model).Level == NoticeLevel.Error;
     public bool IsWarning => ((NoticeItem)Model).Level == NoticeLevel.Warning;
+    /// <summary>A connector's sign-in notice: it links to the connectors list, where the sign-in stays.</summary>
+    public string? McpServer => ((NoticeItem)Model).McpServer;
+    public bool HasConnectorLink => McpServer is not null;
 
     protected override void OnUpdated()
     {

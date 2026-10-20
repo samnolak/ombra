@@ -121,7 +121,7 @@ index 2f65650670a2a9ffbab5fbd0295196611f15e174..e9ae4eac98fd7bdf2de8b6808ee440b1
  	}
  
 diff --git a/src/main.ts b/src/main.ts
-index c071445eb8dd4f050f8f27985275f674dc073e71..941f55a9b674f9df28035aa92fef96ae4ddf6d4b 100644
+index c071445eb8dd4f050f8f27985275f674dc073e71..f90ad5d397f8610fecce940d9c1577a7366a4fb3 100644
 --- a/src/main.ts
 +++ b/src/main.ts
 @@ -65,7 +65,7 @@ import { Settings, settings } from "./config/settings";
@@ -133,7 +133,15 @@ index c071445eb8dd4f050f8f27985275f674dc073e71..941f55a9b674f9df28035aa92fef96ae
  	preloadPluginRoots,
  	resolveActiveProjectRegistryPath,
  } from "./discovery/helpers";
-@@ -147,6 +147,7 @@ import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "./plan-mode/settings";
+@@ -83,6 +83,7 @@ import type { RpcModeOptions } from "./modes/rpc/rpc-mode";
+ import { claimRpcInput } from "./modes/rpc/rpc-input";
+ import { CURRENT_SETUP_VERSION } from "@oh-my-pi/pi-tui/setup/setup-version";
+ import type * as SetupWizardModule from "./modes/setup";
++import { adoptConfiguredProfile } from "./modes/setup-gate";
+ import type { SetupScene } from "@oh-my-pi/pi-tui/setup/scenes/types";
+ import { invokeSkillCommandFromText, isKnownSkillCommand } from "./modes/skill-command";
+ import {
+@@ -147,6 +148,7 @@ import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "./plan-mode/settings";
  
  import { cfgAdvisorEnabled } from "./advisor/settings";
  import { cfgToolsApprovalMode } from "./tools/settings";
@@ -141,7 +149,22 @@ index c071445eb8dd4f050f8f27985275f674dc073e71..941f55a9b674f9df28035aa92fef96ae
  import {
  	cfgAutocompleteMaxVisible,
  	cfgAutoResume,
-@@ -1745,6 +1746,9 @@ export async function buildSessionOptions(
+@@ -666,7 +668,13 @@ async function runInteractiveMode(
+ 		// to know whether the stored setup version is current. Lazy-load the wizard
+ 		// barrel only when setup is stale, forced, or the explicit startup splash
+ 		// setting needs the shared setup splash renderer.
+-		const storedSetupVersion = cfgSetupVersion.get(settings);
++		// A profile set up elsewhere (the Ombra app, `omp login`) has no setup version: adopted, not walked through
++		// sign-in again (modes/setup-gate.ts).
++		const storedSetupVersion = await adoptConfiguredProfile(
++			settings,
++			session.modelRegistry.getAvailable("all").length,
++			forceSetupWizard,
++		);
+ 		setupWizard =
+ 			forceSetupWizard || storedSetupVersion < CURRENT_SETUP_VERSION || showStartupSplash
+ 				? await import("./modes/setup")
+@@ -1745,6 +1753,9 @@ export async function buildSessionOptions(
  			options.disableExtensionDiscovery = true;
  		}
  	}
@@ -151,7 +174,7 @@ index c071445eb8dd4f050f8f27985275f674dc073e71..941f55a9b674f9df28035aa92fef96ae
  
  	return options;
  }
-@@ -1831,16 +1835,7 @@ export async function runRootCommand(
+@@ -1831,16 +1842,7 @@ export async function runRootCommand(
  		// RPC owns stdin. Claim its singleton stream before plugin/extension discovery can load an in-process consumer.
  		const rpcInput = mode === "rpc" || mode === "rpc-ui" ? claimRpcInput() : undefined;
  
@@ -168,7 +191,7 @@ index c071445eb8dd4f050f8f27985275f674dc073e71..941f55a9b674f9df28035aa92fef96ae
  
  		// Trusted files load as exact module paths, never as package roots whose
  		// sibling hooks/tools/commands/MCP content could be discovered implicitly.
-@@ -1904,8 +1899,22 @@ export async function runRootCommand(
+@@ -1904,8 +1906,22 @@ export async function runRootCommand(
  		// main config file during auth discovery.
  		const settingsPromise = deps.settings
  			? Promise.resolve(deps.settings)
@@ -192,7 +215,7 @@ index c071445eb8dd4f050f8f27985275f674dc073e71..941f55a9b674f9df28035aa92fef96ae
  		const authStoragePromise = logger.time("discoverAuthStorage", async () =>
  			(deps.discoverAuthStorage ?? discoverAuthStorage)(undefined, { settings: await settingsPromise }),
  		);
-@@ -1923,6 +1932,8 @@ export async function runRootCommand(
+@@ -1923,6 +1939,8 @@ export async function runRootCommand(
  		const settingsInstance = await settingsPromise;
  		// Process-lifetime: broker/account-policy edits reconfigure the shared credential store.
  		createAuthStorageSettingsSync(settingsInstance, authStorage);
@@ -201,7 +224,7 @@ index c071445eb8dd4f050f8f27985275f674dc073e71..941f55a9b674f9df28035aa92fef96ae
  		if (parsedArgs.approvalMode) {
  			// Runtime override (not persisted): every `tools.approvalMode` read downstream
  			// sees this value. The wrapper still honours --auto-approve / --yolo on top of it.
-@@ -2274,6 +2285,8 @@ export async function runRootCommand(
+@@ -2274,6 +2292,8 @@ export async function runRootCommand(
  		sessionOptions.authStorage = authStorage;
  		sessionOptions.modelRegistry = modelRegistry;
  		sessionOptions.hasUI = isInteractive || mode === "rpc-ui";
@@ -210,7 +233,7 @@ index c071445eb8dd4f050f8f27985275f674dc073e71..941f55a9b674f9df28035aa92fef96ae
  		sessionOptions.allowSessionModelFallback = isInteractive;
  		sessionOptions.settingsApproval = isInteractive;
  		sessionOptions.tuiTranscript = isInteractive;
-@@ -2639,12 +2652,23 @@ export async function runRootCommand(
+@@ -2639,12 +2659,23 @@ export async function runRootCommand(
  			if (mode === "rpc" || mode === "rpc-ui") {
  				// Branch-only protocol runner: keep RPC host code out of normal interactive startup.
  				const runRpcMode: RunRpcMode = (await import("./modes/rpc/rpc-mode")).runRpcMode;
@@ -234,3 +257,26 @@ index c071445eb8dd4f050f8f27985275f674dc073e71..941f55a9b674f9df28035aa92fef96ae
  					input: rpcInput,
  				});
  			} else if (isInteractive) {
+diff --git a/src/modes/setup-gate.ts b/src/modes/setup-gate.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..94d3a08e8050ab0de071c2ad0db88557dd00c412
+--- /dev/null
++++ b/src/modes/setup-gate.ts
+@@ -0,0 +1,17 @@
++import { CURRENT_SETUP_VERSION } from "@oh-my-pi/pi-tui/setup/setup-version";
++import type { Settings } from "../config/settings";
++import { cfgSetupVersion } from "./settings";
++
++/**
++ * The setup version to select onboarding scenes with. A profile that never ran the setup wizard (no stored version)
++ * but already has a model to use was set up elsewhere — the Ombra app, `omp login`, provider keys in the environment.
++ * Its first scene would sign in again (Enter starts the first provider's login), so the profile is recorded as set up
++ * and no scene runs. A profile that ran an older wizard keeps getting the scenes added since.
++ */
++export async function adoptConfiguredProfile(settings: Settings, availableModels: number, force: boolean): Promise<number> {
++	const stored = cfgSetupVersion.get(settings);
++	if (force || stored > 0 || availableModels === 0) return stored;
++	cfgSetupVersion.set(settings, CURRENT_SETUP_VERSION);
++	await settings.flush();
++	return CURRENT_SETUP_VERSION;
++}

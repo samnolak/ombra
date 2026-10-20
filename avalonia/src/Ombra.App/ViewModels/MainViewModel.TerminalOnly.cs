@@ -39,6 +39,8 @@ public sealed partial class MainViewModel
         // omp advertised the name itself (a skill, prompt, extension or file command): it runs there
         if (_commands.Any(c => c.Source != "builtin" && (c.Name == name || c.Aliases.Contains(name)))) return false;
         var args = t.Length > name.Length + 1 ? t[(name.Length + 2)..].Trim() : "";
+        // omp's /mcp runs over RPC; a sign-in typed here opens its page in the browser (MainViewModel.Mcp.cs)
+        if (name == "mcp") NoteTypedMcpCommand(args);
         if (name is "model" or "models" && args.Length == 0)
         {
             ComposerText = "";

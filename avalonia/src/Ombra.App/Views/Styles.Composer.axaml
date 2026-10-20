@@ -48,7 +48,7 @@
   <Style Selector="Grid#ComposerFooter.density1 TextBlock.project-label">
     <Setter Property="MaxWidth" Value="100" />
   </Style>
-  <Style Selector="Grid#ComposerFooter.density2 TextBlock.usage-percent">
+  <Style Selector="Grid#ComposerFooter.density2 TextBlock.usage-percent, Grid#ComposerFooter.density2 Panel.connectors-label">
     <Setter Property="IsVisible" Value="False" />
   </Style>
   <Style Selector="Grid#ComposerFooter.density3 TextBlock.project-label">

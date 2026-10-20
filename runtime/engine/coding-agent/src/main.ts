@@ -83,6 +83,7 @@ import type { RpcModeOptions } from "./modes/rpc/rpc-mode";
 import { claimRpcInput } from "./modes/rpc/rpc-input";
 import { CURRENT_SETUP_VERSION } from "@oh-my-pi/pi-tui/setup/setup-version";
 import type * as SetupWizardModule from "./modes/setup";
+import { adoptConfiguredProfile } from "./modes/setup-gate";
 import type { SetupScene } from "@oh-my-pi/pi-tui/setup/scenes/types";
 import { invokeSkillCommandFromText, isKnownSkillCommand } from "./modes/skill-command";
 import {
@@ -667,7 +668,13 @@ async function runInteractiveMode(
 		// to know whether the stored setup version is current. Lazy-load the wizard
 		// barrel only when setup is stale, forced, or the explicit startup splash
 		// setting needs the shared setup splash renderer.
-		const storedSetupVersion = cfgSetupVersion.get(settings);
+		// A profile set up elsewhere (the Ombra app, `omp login`) has no setup version: adopted, not walked through
+		// sign-in again (modes/setup-gate.ts).
+		const storedSetupVersion = await adoptConfiguredProfile(
+			settings,
+			session.modelRegistry.getAvailable("all").length,
+			forceSetupWizard,
+		);
 		setupWizard =
 			forceSetupWizard || storedSetupVersion < CURRENT_SETUP_VERSION || showStartupSplash
 				? await import("./modes/setup")

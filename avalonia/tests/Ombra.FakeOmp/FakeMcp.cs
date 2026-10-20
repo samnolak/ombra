@@ -5,9 +5,9 @@ namespace Ombra.FakeOmp;
 
 /// <summary>
 /// MCP servers over RPC like the owned engine (<c>get_mcp_servers</c>, <c>mcp_login</c>, <c>mcp_login_cancel</c>,
-/// <c>mcp_reconnect</c>), in every scenario. FAKE_OMP_MCP names a JSON file <c>{"servers":[…]}</c>; a server's
-/// <c>holdLogin</c>, <c>authUrl</c> and <c>loginTools</c> steer its sign-in and are never sent. Each command is
-/// appended to FAKE_OMP_COMMAND_LOG; <c>test_mcp_control</c> replaces the servers or emits a frame.
+/// <c>mcp_reconnect</c>, <c>mcp_logout</c>), in every scenario. FAKE_OMP_MCP names a JSON file <c>{"servers":[…]}</c>; a
+/// server's <c>holdLogin</c>, <c>authUrl</c>, <c>loginTools</c> and <c>loginError</c> steer its sign-in and are never
+/// sent. Each command is appended to FAKE_OMP_COMMAND_LOG; <c>test_mcp_control</c> replaces the servers or emits a frame.
 /// </summary>
 internal sealed class FakeMcp(Action<object> emit, Action<string?, string, object?, string?, string?> respond) : IDisposable
 {
@@ -31,6 +31,7 @@ internal sealed class FakeMcp(Action<object> emit, Action<string?, string, objec
         copy.Remove("holdLogin");
         copy.Remove("authUrl");
         copy.Remove("loginTools");
+        copy.Remove("loginError");
         return copy;
     }
 
@@ -58,6 +59,8 @@ internal sealed class FakeMcp(Action<object> emit, Action<string?, string, objec
                 var name = cmd?["serverName"]?.GetValue<string>() ?? "";
                 Log("mcp_login " + name);
                 if (Find(name) is not { } entry) { respond(id, type, null, $"MCP server \"{name}\" not found", null); return true; }
+                // A server that refuses the sign-in before any page (a refused client registration): omp's error
+                if (entry["loginError"]?.GetValue<string>() is { } refused) { respond(id, type, null, refused, null); return true; }
                 var cts = new CancellationTokenSource();
                 bool hold;
                 lock (_gate)
@@ -112,8 +115,27 @@ internal sealed class FakeMcp(Action<object> emit, Action<string?, string, objec
                     foreach (var server in _servers.OfType<JsonObject>())
                         if ((name is null || server["name"]?.GetValue<string>() == name)
                             && server["auth"]?.GetValue<string>() is "none" or "signed_in")
+                        {
                             server["status"] = "connected";
+                            server.Remove("error");
+                        }
                 respond(id, type, new { servers = PublicServers() }, null, null);
+                return true;
+            }
+            case "mcp_logout":
+            {
+                var name = cmd?["serverName"]?.GetValue<string>() ?? "";
+                Log("mcp_logout " + name);
+                if (Find(name) is not { } entry) { respond(id, type, null, $"MCP server \"{name}\" not found", null); return true; }
+                JsonObject done;
+                lock (_gate)
+                {
+                    entry["auth"] = "signed_out";
+                    entry["status"] = "disconnected";
+                    entry["toolCount"] = 0;
+                    done = Public(entry);
+                }
+                respond(id, type, done, null, null);
                 return true;
             }
             case "test_mcp_control":

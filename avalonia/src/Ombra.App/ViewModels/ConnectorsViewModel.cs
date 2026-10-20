@@ -62,7 +62,18 @@ public sealed partial class McpServerRowViewModel : ObservableObject
     internal int SessionTools { get; set; }
 
     /// <summary>The server as this session's omp has it now (<c>get_mcp_servers</c>); null when omp didn't say.</summary>
-    internal Ombra.Rpc.OmpMcpServer? Live { get; set; }
+    internal Ombra.Rpc.OmpMcpServer? Live
+    {
+        get => _live;
+        set
+        {
+            _live = value;
+            OnPropertyChanged(nameof(CanReconnect));
+            OnPropertyChanged(nameof(SuggestReconnect));
+        }
+    }
+
+    private Ombra.Rpc.OmpMcpServer? _live;
 
     /// <summary>The server's entry in its mcp.json (null when the file could not be read).</summary>
     internal JsonObject? Config { get; set; }
@@ -132,7 +143,7 @@ public sealed partial class McpServerRowViewModel : ObservableObject
     private bool _isBusy;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsConnected), nameof(IsFailed), nameof(IsWorking), nameof(HasNoTools), nameof(CanTest))]
+    [NotifyPropertyChangedFor(nameof(IsConnected), nameof(IsFailed), nameof(IsWorking), nameof(HasNoTools), nameof(CanTest), nameof(SuggestReconnect))]
     private ConnectorState _state;
 
     [ObservableProperty] private string _stateText = "";
@@ -151,12 +162,18 @@ public sealed partial class McpServerRowViewModel : ObservableObject
 
     /// <summary>Sign-in state omp reports (<c>get_mcp_servers</c>): none | signed_in | signed_out | expired; empty when unknown.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasAuth), nameof(AuthText), nameof(NeedsSignIn), nameof(SignInLabel), nameof(SuggestSignIn), nameof(CanSignInAgain))]
+    [NotifyPropertyChangedFor(nameof(HasAuth), nameof(AuthText), nameof(NeedsSignIn), nameof(SignInLabel), nameof(SuggestSignIn), nameof(CanSignInAgain),
+        nameof(CanSignOut), nameof(SuggestReconnect))]
     private string _auth = "";
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(SuggestSignIn), nameof(CanSignInAgain))]
+    [NotifyPropertyChangedFor(nameof(SuggestSignIn), nameof(CanSignInAgain), nameof(CanSignOut), nameof(CanReconnect), nameof(SuggestReconnect))]
     private bool _isSigningIn;
+
+    /// <summary>omp reconnects this server (Reconnect) or forgets its sign-in (Sign out).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanSignOut), nameof(CanReconnect), nameof(SuggestReconnect))]
+    private bool _isReconnecting;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasSignInError))]
@@ -187,6 +204,15 @@ public sealed partial class McpServerRowViewModel : ObservableObject
     /// <summary>The menu's sign-in for a signed-in server (a new account, a new scope).</summary>
     public bool CanSignInAgain => IsEnabled && !IsSigningIn && Auth == "signed_in";
 
+    /// <summary>omp forgets the stored sign-in (<c>mcp_logout</c>): a signed-in or expired server.</summary>
+    public bool CanSignOut => IsEnabled && !IsSigningIn && !IsReconnecting && Auth is "signed_in" or "expired";
+
+    /// <summary>omp has the server in this session: it can connect it again from its config as it is now.</summary>
+    public bool CanReconnect => IsEnabled && Live is not null && !IsSigningIn && !IsReconnecting;
+
+    /// <summary>The list row offers Reconnect for a server that failed or is not connected (and needs no sign-in).</summary>
+    public bool SuggestReconnect => CanReconnect && !NeedsSignIn && State is ConnectorState.Failed or ConnectorState.NotConnected;
+
     public string RemoveQuestion => (Scope == "project" ? Loc.F("Remove the MCP server “{0}” from this project?", Name) : Loc.F("Remove the MCP server “{0}”?", Name));
 
     partial void OnIsEnabledChanged(bool value)
@@ -194,6 +220,9 @@ public sealed partial class McpServerRowViewModel : ObservableObject
         OnPropertyChanged(nameof(CanTest));
         OnPropertyChanged(nameof(SuggestSignIn));
         OnPropertyChanged(nameof(CanSignInAgain));
+        OnPropertyChanged(nameof(CanSignOut));
+        OnPropertyChanged(nameof(CanReconnect));
+        OnPropertyChanged(nameof(SuggestReconnect));
         if (!_syncing) _ = _page.SetEnabledAsync(this, value);
     }
 
@@ -219,6 +248,8 @@ public sealed partial class McpServerRowViewModel : ObservableObject
     [RelayCommand] private Task Remove() => _page.RemoveAsync(this);
     [RelayCommand] private Task SignIn() => _page.SignInAsync(Name);
     [RelayCommand] private Task CancelSignIn() => _page.CancelSignInAsync(Name);
+    [RelayCommand] private Task Reconnect() => _page.ReconnectAsync(Name);
+    [RelayCommand] private Task SignOut() => _page.SignOutAsync(Name);
 }
 
 /// <summary>omp's prompt that a connector needs the user to sign in (again): <c>mcp_auth_required</c>.</summary>
@@ -346,7 +377,7 @@ public sealed partial class ConnectorsViewModel : ObservableObject
     public bool HasLoadError => LoadError.Length > 0;
     public bool HasOtherTools => OtherTools.Length > 0;
 
-    /// <summary>omp reconnects every connector (Reconnect all).</summary>
+    /// <summary>omp reads its MCP config again and reconnects every connector (Reload config).</summary>
     [ObservableProperty] private bool _isReconnecting;
 
     public bool CanChange => IsOmpRunning;
@@ -600,6 +631,14 @@ public sealed partial class ConnectorsViewModel : ObservableObject
             (row.State, row.StateText) = (ConnectorState.NoTools, Loc.T("Connected · 0 tools"));
         else if (live is { NeedsSignIn: true })
             (row.State, row.StateText) = (ConnectorState.NotConnected, Loc.T("Not connected: sign-in needed"));
+        else if (live is { Status: "failed" })
+        {
+            // omp's own reason (URL queries removed by omp): a refused client registration, a command that won't start…
+            (row.State, row.StateText) = (ConnectorState.Failed, Loc.T("Couldn't connect"));
+            row.Failure = live.Error ?? "";
+        }
+        else if (live is { Status: "connecting" })
+            (row.State, row.StateText) = (ConnectorState.Pending, Loc.T("Connecting…"));
         else if (row.Scope is "project" or "file" && HasOptions && !ProjectServers)
             (row.State, row.StateText) = (ConnectorState.Off, Loc.T("Skipped: servers from project files are off"));
         else
@@ -609,9 +648,11 @@ public sealed partial class ConnectorsViewModel : ObservableObject
     /// <summary>omp's state of each server by name; empty when this omp can't tell (an older one) or didn't answer.</summary>
     private async Task<Dictionary<string, Ombra.Rpc.OmpMcpServer>> LiveStatesAsync()
     {
+        var session = _owner.Session;
         try
         {
             var list = await _owner.GetConnectorStatesAsync();
+            UpdateChat(session, list, complete: true);
             return list.GroupBy(s => s.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
         }
         catch (Exception e) when (IsOmpFailure(e)) { return new(StringComparer.Ordinal); }
@@ -620,15 +661,18 @@ public sealed partial class ConnectorsViewModel : ObservableObject
     private static bool IsOmpFailure(Exception e) =>
         e is Ombra.Rpc.RpcCommandException or TimeoutException or Ombra.Rpc.RpcConnectionClosedException or OmpNotRunningException or OperationCanceledException;
 
-    /// <summary>omp's states after a sign-in or a reconnect, on the rows (a test result gives way: the state is newer).</summary>
-    private void ApplyLive(IEnumerable<Ombra.Rpc.OmpMcpServer> servers)
+    /// <summary>omp's states after a sign-in or a reconnect, on the rows (a test result gives way: the state is newer).
+    /// The settings rows are the shown chat's; the chat list is <paramref name="session"/>'s (the one that answered).</summary>
+    private void ApplyLive(SessionController session, IReadOnlyCollection<Ombra.Rpc.OmpMcpServer> servers, bool complete = false)
     {
-        foreach (var server in servers)
-            foreach (var row in Servers.Where(r => r.Name == server.Name))
-            {
-                row.Live = server;
-                ApplySessionState(row, keepTest: false);
-            }
+        if (ReferenceEquals(session, _owner.Session))
+            foreach (var server in servers)
+                foreach (var row in Servers.Where(r => r.Name == server.Name))
+                {
+                    row.Live = server;
+                    ApplySessionState(row, keepTest: false);
+                }
+        UpdateChat(session, servers, complete);
     }
 
     /// <summary>omp's list of servers switched off by name (<c>disabledServers</c> in the user file).</summary>
@@ -991,79 +1035,180 @@ public sealed partial class ConnectorsViewModel : ObservableObject
     private async Task ReloadLiveAsync()
     {
         var version = _loadVersion;
+        var session = _owner.Session;
         var live = await LiveStatesAsync();
-        if (version == _loadVersion) ApplyLive(live.Values);
+        if (version == _loadVersion) ApplyLive(session, live.Values);
+    }
+
+    /// <summary>What an action did, on the settings page and in the chat's connectors list alike.</summary>
+    private void Say(string notice)
+    {
+        Feedback.Notice = notice;
+        ChatNotice = notice;
+    }
+
+    private void SayError(string error)
+    {
+        Feedback.Error = error;
+        ChatError = error;
+    }
+
+    private static string WhyFailed(Exception e) => e switch
+    {
+        Ombra.Rpc.RpcCommandException c => c.Error,
+        TimeoutException => Loc.T("omp did not answer in time. Try again."),
+        _ => Loc.T("omp isn't running."),
+    };
+
+    private void ClearActionMessages()
+    {
+        ClearFeedback();
+        ChatNotice = "";
+        ChatError = "";
     }
 
     /// <summary>
-    /// Signs in to a connector: omp sends its sign-in page, which opens in the browser (MainViewModel.Mcp.cs), and
-    /// answers when the user finished there or cancelled.
+    /// Signs in to a connector: omp sends its sign-in page, which opens in the default browser (MainViewModel.Mcp.cs),
+    /// and answers when the user finished there or cancelled.
     /// </summary>
     internal async Task SignInAsync(string name)
     {
+        var session = _owner.Session;
         var row = Servers.FirstOrDefault(r => r.Name == name);
-        if (row is { IsSigningIn: true }) return;
-        ClearFeedback();
+        var chat = ChatRow(name);
+        if (row is { IsSigningIn: true } || chat is { IsSigningIn: true }) return;
+        ClearActionMessages();
         if (row is not null)
         {
             row.IsSigningIn = true;
             row.SignInError = "";
         }
+        if (chat is not null)
+        {
+            chat.IsSigningIn = true;
+            chat.ActionError = "";
+        }
         try
         {
             var server = await _owner.SignInToConnectorAsync(name);
-            if (server is not null) ApplyLive([server]);
-            Feedback.Notice = server is { Status: "connected", ToolCount: > 0 }
+            if (server is not null) ApplyLive(session, [server]);
+            Say(server is { Status: "connected", ToolCount: > 0 }
                 ? Loc.Plural(server.ToolCount, "Signed in to “{1}”: {0} tool ready.", "Signed in to “{1}”: {0} tools ready.", name)
-                : Loc.F("Signed in to “{0}”.", name);
+                : Loc.F("Signed in to “{0}”.", name));
         }
         catch (Ombra.Rpc.RpcCommandException e) when (e.Code == "mcp_login_cancelled")
         {
-            Feedback.Notice = Loc.F("Sign-in to “{0}” cancelled.", name);
+            Say(Loc.F("Sign-in to “{0}” cancelled.", name));
         }
         catch (Exception e) when (IsOmpFailure(e))
         {
-            var why = e switch
-            {
-                Ombra.Rpc.RpcCommandException c => c.Error,
-                TimeoutException => Loc.T("The sign-in took too long. Try again."),
-                _ => Loc.T("omp isn't running."),
-            };
+            // omp's own words: a refused client registration says what to set in the server's config
+            var why = e is TimeoutException ? Loc.T("The sign-in took too long. Try again.") : WhyFailed(e);
             if (row is not null) row.SignInError = why;
             else Feedback.Error = why;
+            if (chat is not null) chat.ActionError = why;
+            else ChatError = why;
         }
         finally
         {
             if (row is not null) row.IsSigningIn = false;
+            if (chat is not null) chat.IsSigningIn = false;
         }
     }
 
     internal async Task CancelSignInAsync(string name)
     {
         try { await _owner.CancelConnectorSignInAsync(name); }
-        catch (Exception e) when (IsOmpFailure(e)) { Feedback.Error = e is Ombra.Rpc.RpcCommandException c ? c.Error : Loc.T("omp isn't running."); }
+        catch (Exception e) when (IsOmpFailure(e)) { SayError(WhyFailed(e)); }
     }
 
     internal void DismissPrompt(string name) => _owner.DismissConnectorSignInPrompt(name);
 
-    /// <summary>omp finds its connectors again and reconnects every one (no restart; a changed mcp.json too).</summary>
-    [RelayCommand]
-    private async Task ReconnectAllAsync()
+    /// <summary>omp connects one server again, from its entry in mcp.json as it is now (no restart).</summary>
+    internal async Task ReconnectAsync(string name)
     {
-        if (IsReconnecting) return;
-        ClearFeedback();
-        IsReconnecting = true;
+        var session = _owner.Session;
+        var row = Servers.FirstOrDefault(r => r.Name == name);
+        var chat = ChatRow(name);
+        if (row is { IsReconnecting: true } || chat is { IsReconnecting: true }) return;
+        ClearActionMessages();
+        if (row is not null) row.IsReconnecting = true;
+        if (chat is not null)
+        {
+            chat.IsReconnecting = true;
+            chat.ActionError = "";
+        }
         try
         {
-            var servers = await _owner.ReconnectConnectorsAsync();
-            _pending.Clear();
-            ApplyLive(servers);
-            var connected = servers.Count(s => s.Status == "connected");
-            Feedback.Notice = Loc.F("omp reconnected the MCP servers: {0} of {1} connected.", connected, servers.Count);
+            var servers = await _owner.ReconnectConnectorsAsync(name);
+            _pending.Remove(name);
+            ApplyLive(session, servers, complete: true);
+            Say(servers.FirstOrDefault(s => s.Name == name) is { Status: "connected" }
+                ? Loc.F("Reconnected “{0}”.", name)
+                : Loc.F("“{0}” is still not connected.", name));
         }
         catch (Exception e) when (IsOmpFailure(e))
         {
-            Feedback.Error = e is Ombra.Rpc.RpcCommandException c ? c.Error : Loc.T("omp isn't running.");
+            SayError(WhyFailed(e));
+        }
+        finally
+        {
+            if (row is not null) row.IsReconnecting = false;
+            if (chat is not null) chat.IsReconnecting = false;
+        }
+    }
+
+    /// <summary>omp forgets the server's stored sign-in and disconnects it (<c>mcp_logout</c>).</summary>
+    internal async Task SignOutAsync(string name)
+    {
+        var session = _owner.Session;
+        var row = Servers.FirstOrDefault(r => r.Name == name);
+        if (row is { IsReconnecting: true }) return;
+        ClearActionMessages();
+        if (row is not null) row.IsReconnecting = true;
+        try
+        {
+            var server = await _owner.SignOutOfConnectorAsync(name);
+            if (server is not null) ApplyLive(session, [server]);
+            Say(Loc.F("Signed out of “{0}”.", name));
+        }
+        catch (Exception e) when (IsOmpFailure(e))
+        {
+            SayError(WhyFailed(e));
+        }
+        finally
+        {
+            if (row is not null) row.IsReconnecting = false;
+        }
+    }
+
+    /// <summary>
+    /// omp reads its MCP config files again — servers added, edited or removed in mcp.json — and reconnects every
+    /// server, without a restart (<c>mcp_reconnect</c> without a name).
+    /// </summary>
+    [RelayCommand]
+    private async Task ReloadConfigAsync()
+    {
+        if (IsReconnecting) return;
+        ClearActionMessages();
+        IsReconnecting = true;
+        var session = _owner.Session;
+        try
+        {
+            var servers = await _owner.ReconnectConnectorsAsync();
+            // What waited for a restart is read now: the list's restart offer is done (the options' one is not)
+            _pending.Clear();
+            Feedback.ShowRestart = false;
+            NeedsRestart = OptionsFeedback.ShowRestart;
+            ApplyLive(session, servers, complete: true);
+            var connected = servers.Count(s => s.Status == "connected");
+            Say(Loc.F("omp read its MCP config again: {0} of {1} servers connected.", connected, servers.Count));
+            // Servers added or removed in the files: the page lists them anew
+            if (_owner.IsSettingsOpen && _owner.SettingsCategory == "plugins") await RefreshAsync();
+        }
+        catch (Exception e) when (IsOmpFailure(e))
+        {
+            SayError(WhyFailed(e));
         }
         finally
         {

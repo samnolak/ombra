@@ -516,10 +516,14 @@
           <!-- Codex's system line: the words centred between two hairlines; an error or a warning has its mark before them -->
           <Grid Classes="notice-line" Classes.error="{Binding IsError}" Classes.warning="{Binding IsWarning}" ColumnDefinitions="*,Auto,*" ctl:ConversationMenus.Kind="Notice">
             <Border Classes="notice-rule" />
-            <Grid Grid.Column="1" ColumnDefinitions="Auto,Auto" MaxWidth="460">
+            <Grid Grid.Column="1" ColumnDefinitions="Auto,Auto,Auto" MaxWidth="460">
               <ctl:Icon Classes="error-mark" Data="{StaticResource IconAlertCircle}" Size="16" Margin="0,2,6,0" VerticalAlignment="Top" IsVisible="{Binding IsError}" />
               <ctl:Icon Classes="warning-mark" Data="{StaticResource IconAlertCircle}" Size="16" Margin="0,2,6,0" VerticalAlignment="Top" IsVisible="{Binding IsWarning}" />
               <SelectableTextBlock Grid.Column="1" Classes="notice-text" Text="{Binding Text}" />
+              <!-- A connector's sign-in notice: the connectors list keeps its Sign in after the notice scrolls away -->
+              <Button Grid.Column="2" Classes="link action" Margin="8,0,0,0" VerticalAlignment="Top" IsVisible="{Binding HasConnectorLink}"
+                      Content="{loc:T 'Show connectors'}" Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenConnectorsPageCommand}"
+                      AutomationProperties.Name="{Binding McpServer, StringFormat={loc:T 'Show connectors: {0}'}}" />
             </Grid>
             <Border Grid.Column="2" Classes="notice-rule" />
           </Grid>
@@ -2068,8 +2072,11 @@
           </Button.Flyout>
         </Button>
       </StackPanel>
-      <!-- How full the context is (Views/Session/UsageIndicator) -->
-      <session:UsageIndicator x:Name="UsageIndicator" Grid.Column="2" VerticalAlignment="Center" />
+      <!-- The chat's connectors (Views/Session/ConnectorsIndicator) and how full the context is (Views/Session/UsageIndicator) -->
+      <StackPanel x:Name="FooterRight" Grid.Column="2" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+        <session:ConnectorsIndicator x:Name="ConnectorsIndicator" VerticalAlignment="Center" />
+        <session:UsageIndicator x:Name="UsageIndicator" VerticalAlignment="Center" />
+      </StackPanel>
     </Grid>
   </Grid>
 
