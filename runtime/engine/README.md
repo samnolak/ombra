@@ -302,7 +302,8 @@ failure attribution rather than interleaved worker headers; chunk coverage is re
 `upstream-fixtures.patch` adapts incomplete XdevState/ACK fixtures, Biome's fake
 stdin formatter (asserting that disk remains unchanged), and the unvendored
 Python/Rust/Go SDK generators for Ombra wire types. It also corrects the upstream
-OAuth refresh mock seam and uses a trusted-OSC multiplexer fixture on macOS.
+OAuth refresh mock seam, uses a trusted-OSC multiplexer fixture on macOS, and seeds
+LSP fixtures through the public trust-scoped accessor instead of a private cache map.
 Only SDK outputs are regenerated; owned TypeScript/schema artifacts remain subject
 to their upstream consistency test.
 `upstream-expected-failures.json` enumerates exact test titles grouped by the

@@ -345,3 +345,31 @@ index 737404a..08cac63 100644
  def scalar_or_array(item: Decoder[T]) -> Decoder[tuple[T, ...]]:
      """Accepts a bare scalar where older servers sent one instead of a list."""
      as_array = array(item)
+diff --git a/packages/coding-agent/test/tools/lsp-regressions.test.ts b/packages/coding-agent/test/tools/lsp-regressions.test.ts
+index 6424cda..9c4596e 100644
+--- a/packages/coding-agent/test/tools/lsp-regressions.test.ts
++++ b/packages/coding-agent/test/tools/lsp-regressions.test.ts
+@@ -12,12 +12,22 @@ import { createLspWritethrough, LspTool } from "@oh-my-pi/pi-coding-agent/lsp";
+ import * as lspClient from "@oh-my-pi/pi-coding-agent/lsp/client";
+ import * as lspConfig from "@oh-my-pi/pi-coding-agent/lsp/config";
+ import {
+-	configCache,
++	invalidateConfig,
+ 	getConfig,
+ 	getServersForFile,
+ 	type LspConfig,
+ 	loadConfig,
+ } from "@oh-my-pi/pi-coding-agent/lsp/config";
++
++// Owned caches are trust-partitioned and private; seed the current scope through
++// its public accessor instead of depending on the upstream cwd-only map.
++const configCache = {
++	set(cwd: string, config: LspConfig) {
++		invalidateConfig(cwd);
++		Object.assign(getConfig(cwd), config);
++	},
++	delete: invalidateConfig,
++};
+ import { waitForDiagnostics } from "@oh-my-pi/pi-coding-agent/lsp/diagnostics";
+ import {
+ 	applyTextEditsToString,
