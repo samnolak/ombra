@@ -68,6 +68,10 @@ case "$RID" in
     D="$STAGE/$NAME"; mkdir -p "$D"
     cp -R "$PUB"/. "$D/"
     cp "$HERE/src/Ombra.App/Assets/icon-256.png" "$D/ombra.png"
+    for s in 16 24 32 48 64 128 256 512 1024; do
+      mkdir -p "$D/icons/hicolor/${s}x${s}/apps"
+      cp "$HERE/src/Ombra.App/Assets/icon-$s.png" "$D/icons/hicolor/${s}x${s}/apps/ombra.png"
+    done
     cp "$PKG/ombra.desktop" "$PKG/install-desktop-entry.sh" "$D/"
     cp "$D/Ombra" "$D/OmpGui"
     chmod +x "$D/Ombra" "$D/OmpGui" "$D/install-desktop-entry.sh"
@@ -104,13 +108,7 @@ case "$RID" in
     chmod +x "$APP/Contents/MacOS/Ombra" "$APP/Contents/MacOS/OmpGui"
     engine "$APP/Contents/Resources/engine"
     sed "s/VERSION/${VERSION%%-*}/g" "$PKG/Info.plist" > "$APP/Contents/Info.plist"
-    ICONSET="$STAGE/ombra.iconset"; mkdir -p "$ICONSET"
-    SRC="$HERE/src/Ombra.App/Assets/icon-1024.png"
-    for s in 16 32 128 256 512; do
-      sips -z $s $s "$SRC" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-      d=$((s * 2)); sips -z $d $d "$SRC" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
-    done
-    iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/ombra.icns"
+    cp "$HERE/src/Ombra.App/Assets/ombra.icns" "$APP/Contents/Resources/ombra.icns"
     docs "$STAGE/$NAME"
     python3 "$HERE/tools/package/native-platform.py" "$RID" "$APP" --prune
     "$HERE/tools/package/sign.sh" macos "$APP" "$SIGNING"

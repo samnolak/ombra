@@ -122,12 +122,18 @@ band; a new session's greeting, message box and the row under it stay in the mid
 or not. Unpin shows a struck-through pin.
 
 Also in 0.0.8: renamed OMP GUI → **Ombra** (projects and namespaces `Ombra.*`, executable `Ombra`, bundle id
-`io.github.samnolak.ombra`, `OMBRA_*` variables, update feed `samnolak/ombra`) with a new icon (a smirking clown with a
-red nose, `tools/icon/ombra-art.jpg`) that also greets a new session: *Oh? You're approaching ‹project›?* The first
+`io.github.samnolak.ombra`, `OMBRA_*` variables, update feed `samnolak/ombra`). The app now uses the owner's
+silver/red swirl artwork (2026-10-20); the ONI pet remains separate. New sessions greet: *Oh? You're approaching ‹project›?* The first
 start moves the old data folders and links the old paths (omp's sessions keep them); packages carry the launcher a
 second time as `OmpGui` so installed OMP GUI updaters accept them (checked: 0.0.7's updater installs a 0.0.8 package
 on macOS); an updated *OMP GUI.app* renames itself to *Ombra.app*. Once no OMP GUI install is left, the `OmpGui`
 launcher copy can go.
+
+App icon assets are generated from `tools/icon/ombra-icon-sheet.png` with
+`python3 tools/icon/make_icon.py src/Ombra.App/Assets` (Pillow and macOS `iconutil`).
+The generator detects the large icon's convex rim, removes the black sheet matte, and centers the complete
+artwork on the 1024/824 macOS grid. It writes the PNG size set, packaged ICNS and Windows ICO; circular
+sheet variants supply the tray and small ICO frames. Window, greeting and onboarding images share these assets.
 
 ## M1 scope: the 15 features (fixed 2026-09-25)
 

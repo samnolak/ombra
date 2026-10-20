@@ -4,6 +4,7 @@
     <RootNamespace>Ombra.App</RootNamespace>
     <AssemblyName>Ombra</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets/icon.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
     <!-- Do not execute assemblies supplied through DOTNET_STARTUP_HOOKS before startup admission. -->
