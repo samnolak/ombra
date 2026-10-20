@@ -59,6 +59,17 @@ continuation, empty/upstream patch handling, and corporate CA configuration.
   the owned elicitation union. A long isolated HOME also exceeds a HUD fixture's
   fixed preview width. Do not weaken production safety/isolation to satisfy these
   upstream-only fixtures; see the compatibility review in `runtime/engine/README.md`.
+  The 2026-10-20 isolated rerun completed **189 passed / 22 failed chunks**
+  (211 total, 975.4 seconds), using the release-provenance revision and frozen lockfile.
+  `runtime/engine/check-upstream.py` now provides the repeatable compatibility gate:
+  short HOME, supported Python, allowlisted test environment, verified native addon,
+  reviewed fixture adaptations, and an exact expected-failures list consumed by the gate.
+  It never skips whole failing chunks. The investigation repaired standalone RPC EOF
+  dropping accepted commands; upstream output/backpressure and failed/recovered-store
+  shutdown regressions passed **7/7** after the fix. OAuth refresh fixtures passed
+  **21/21** after mocking the current refresh API; generated wire consistency passed
+  **1/1** after adapting the unvendored SDK generators. These targeted results do not
+  by themselves claim a green complete suite; retain the complete gate's `verdict.json`.
 - Final local macOS arm64 ZIP: **263,918,776 bytes**; bundled engine **437 MiB**.
   SHA256: `df2afb0ef16f33e248ce39361a0aa9a64487b4b404eb5ceffe0e2ebb4ad4a80e`.
   The older recorded ZIP is only rounded to 264.0 MB: the new ZIP is approximately

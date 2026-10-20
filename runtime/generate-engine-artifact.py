@@ -27,7 +27,8 @@ def render():
         if not source.is_file():
             continue
         path = source.relative_to(ENGINE).as_posix()
-        if path.split("/", 1)[0] in {".temp", "patches", "patcher.py", "upstream.json", "README.md"}:
+        if path.split("/", 1)[0] in {".temp", "patches", "patcher.py", "upstream.json", "README.md",
+                                    "check-upstream.py", "upstream-fixtures.patch", "upstream-expected-failures.json"}:
             continue
         if any(part in {"node_modules", ".git", "__pycache__"} for part in source.relative_to(ENGINE).parts):
             raise ValueError(f"Non-source directory in engine: {path}")
