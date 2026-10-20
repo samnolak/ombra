@@ -129,11 +129,13 @@ second time as `OmpGui` so installed OMP GUI updaters accept them (checked: 0.0.
 on macOS); an updated *OMP GUI.app* renames itself to *Ombra.app*. Once no OMP GUI install is left, the `OmpGui`
 launcher copy can go.
 
-App icon assets are generated from `tools/icon/ombra-icon-sheet.png` with
-`python3 tools/icon/make_icon.py src/Ombra.App/Assets` (Pillow and macOS `iconutil`).
-The generator detects the large icon's convex rim, removes the black sheet matte, and centers the complete
-artwork on the 1024/824 macOS grid. It writes the PNG size set, packaged ICNS and Windows ICO; circular
-sheet variants supply the tray and small ICO frames. Window, greeting and onboarding images share these assets.
+App icon assets are generated from `tools/icon/ombra-icon-sheet.png` with `python3 tools/icon/make_icon.py`
+(Pillow, numpy, macOS `iconutil`; Xcode 26 for the macOS 26 catalog). The sheet's large tile is a mock-up with its
+own corners, rim and glow, so the generator lifts the swirl off it onto a full-bleed black square. macOS 26 gets
+`packaging/macos/Ombra.icon` compiled into `Assets.car` (`CFBundleIconName`, the system draws its own shape —
+the self-shaped icon before this sat shrunk on a grey plate in the Dock); older macOS gets `ombra.icns` with Apple's
+continuous-corner shape on the 1024/824 grid. Window, greeting, Linux and Windows use the same shaped tile;
+circular sheet variants supply the tray and small ICO frames. Details: [`PLATFORM_NOTES.md`](PLATFORM_NOTES.md).
 
 ## M1 scope: the 15 features (fixed 2026-09-25)
 

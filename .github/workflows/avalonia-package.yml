@@ -95,6 +95,19 @@ jobs:
         run: python3 ../runtime/generate-engine-artifact.py --check
       - name: Native platform gate regressions (all six RIDs)
         run: python3 tools/package/test-native-platform.py
+      - name: macOS 26 app icon (packaging/macos/Ombra.icon → Assets.car with Xcode 26's actool)
+        if: matrix.rid == 'osx-arm64'
+        run: |
+          # Compiles the checked-in Icon Composer icon; machines without Xcode 26 take Assets.car from this artifact
+          xcode=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | grep -vi -e beta -e candidate | sort -V | tail -1)
+          [ -n "$xcode" ] || { ls -d /Applications/Xcode*.app; echo "no Xcode 26 on this runner"; exit 1; }
+          DEVELOPER_DIR="$xcode/Contents/Developer" python3 tools/icon/make_icon.py --car "$RUNNER_TEMP/icon"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: matrix.rid == 'osx-arm64'
+        with:
+          name: ombra-icon-catalog
+          path: ${{ runner.temp }}/icon/Assets.car
+          retention-days: 14
       - name: .NET 10 SDK
         run: |
           if dotnet --list-sdks 2>/dev/null | grep -q '^10\.'; then dotnet --version; exit 0; fi
