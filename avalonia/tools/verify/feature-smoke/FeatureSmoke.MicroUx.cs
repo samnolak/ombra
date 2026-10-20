@@ -46,8 +46,10 @@ internal static partial class FeatureSmoke
                 window.Show();
                 await Task.Delay(500);
                 Shot("41-dock-waiting-question");
-                if (CanShoot(Path.Combine(dir, "41-dock-desktop.png")))
+                // The desktop (the Dock's badge) is no window of the app's: only screencapture shows it
+                if (Ombra.App.Platform.TestFocus.ScreenCaptureAllowed)
                     using (var capture = Process.Start(new ProcessStartInfo("/usr/sbin/screencapture", ["-x", Path.Combine(dir, "41-dock-desktop.png")]))!) capture.WaitForExit();
+                else Log("SHOT 41-dock-desktop skipped: no Screen Recording");
                 vm.NotificationsEnabled = false;
                 Check("dock-settings-clear-badge", string.IsNullOrEmpty(Badge()) && vm.DockWaitingCount == 0, Badge() ?? "null");
                 vm.NotificationsEnabled = true;

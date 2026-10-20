@@ -352,7 +352,7 @@ internal static partial class FeatureSmoke
             await Task.Delay(400);
             Shot(shot + "-dark");
             var allow = ButtonFor(vm.CurrentDialog!.AllowCommand);
-            if (Check("approval-allow-button", allow is not null)) Click(allow!);
+            if (Check("approval-allow-button", allow is not null)) await ClickSettled(allow!);
             Check("approval-answered", await Until(() => vm.CurrentDialog is null, 10));
         }
 
@@ -479,7 +479,7 @@ internal static partial class FeatureSmoke
             Check("plan-card-again", await Until(() => vm.HasPlanReview, 30));
             await Until(() => !vm.IsRunning, 30);
             var approve = ButtonFor(vm.ApprovePlanCommand);
-            if (Check("plan-approve-button", approve is not null)) Click(approve!);
+            if (Check("plan-approve-button", approve is not null)) await ClickSettled(approve!);
             Check("plan-approved", await Until(() => !vm.HasPlanReview && !vm.IsPlanMode, 20), $"plan={vm.IsPlanMode} review={vm.HasPlanReview}");
             await Until(() => !vm.IsRunning, 60);
             await Task.Delay(500);
@@ -706,6 +706,29 @@ internal static partial class FeatureSmoke
             Log($"click {c.GetType().Name}#{c.Name} '{Avalonia.Automation.AutomationProperties.GetName(c)}' at ({at.X:0},{at.Y:0})");
         }
 
+        /// <summary>
+        /// Clicks <paramref name="c"/> once it has stopped moving and is what the window hits at its centre (at most 3 s):
+        /// a card that just appeared is still being laid out and scrolled into view (MainWindow.ChatScroll), and a click
+        /// computed before that lands beside it. The screenshot each step took used to hide this; without Screen
+        /// Recording the shots are skipped (TestFocus.ScreenCaptureAllowed).
+        /// </summary>
+        private async Task ClickSettled(Control c)
+        {
+            Point? last = null;
+            var still = 0;
+            var end = DateTime.UtcNow.AddSeconds(3);
+            while (DateTime.UtcNow < end && still < 3)
+            {
+                var at = c.TranslatePoint(new Point(c.Bounds.Width / 2, c.Bounds.Height / 2), window);
+                var hit = at is { } p && (window.InputHitTest(p) as Visual)?.FindAncestorOfType<Control>(includeSelf: true) is { } h
+                    && (ReferenceEquals(h, c) || c.IsVisualAncestorOf(h));
+                still = hit && at == last ? still + 1 : 0;
+                last = at;
+                await Task.Delay(100);
+            }
+            Click(c);
+        }
+
         private unsafe CGPoint PopupPoint(Control c, TopLevel top, nint w, double fx, double fy)
         {
             var client = c.TranslatePoint(new Point(c.Bounds.Width * fx, c.Bounds.Height * fy), top) ?? default;
@@ -726,30 +749,32 @@ internal static partial class FeatureSmoke
 
         // ── screenshots ──
         // screencapture needs Screen Recording; without it a harness run never starts it (macOS would ask in a window that
-        // takes the focus: TestFocus.ScreenCaptureAllowed) and the shot is skipped.
+        // takes the focus: TestFocus.ScreenCaptureAllowed) and shoots its own window in-process instead
+        // (TestFocus.CaptureOwnWindow: the window alone, without other windows over it).
 
-        private bool CanShoot(string file)
+        /// <summary>The window alone in-process, when screencapture may not run; false when it may.</summary>
+        private bool ShotInProcess(string file)
         {
-            if (TestFocus.ScreenCaptureAllowed) return true;
-            Log($"SHOT {file} skipped: no Screen Recording");
-            return false;
+            if (TestFocus.ScreenCaptureAllowed) return false;
+            Log($"SHOT {file} in-process={TestFocus.CaptureOwnWindow(MacObjC.SendLong(NsWindow, "windowNumber"), file)} (no Screen Recording)");
+            return true;
         }
 
         private void Shot(string name)
         {
             var file = Path.Combine(dir, name + ".png");
-            if (!CanShoot(file)) return;
+            if (ShotInProcess(file)) return;
             var number = MacObjC.SendLong(NsWindow, "windowNumber");
             using var p = Process.Start(new ProcessStartInfo("/usr/sbin/screencapture", ["-x", "-o", "-l", number.ToString(), file]))!;
             p.WaitForExit();
             Log($"SHOT {file} exit={p.ExitCode}");
         }
 
-        /// <summary>The window's area of the screen, popups over it included.</summary>
+        /// <summary>The window's area of the screen, popups over it included (without Screen Recording: the window alone).</summary>
         private unsafe void ShotScreenRegion(string name)
         {
             var file = Path.Combine(dir, name + ".png");
-            if (!CanShoot(file)) return;
+            if (ShotInProcess(file)) return;
             var frame = ((delegate* unmanaged<nint, nint, CGRect>)MacObjC.MsgSend)(NsWindow, MacObjC.Sel("frame"));
             var screens = MacObjC.Send(MacObjC.Cls("NSScreen"), "screens");
             var primaryHeight = ((delegate* unmanaged<nint, nint, CGRect>)MacObjC.MsgSend)(MacObjC.Send(screens, "firstObject"), MacObjC.Sel("frame")).Height;

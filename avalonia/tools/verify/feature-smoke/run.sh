@@ -2,7 +2,7 @@
 # Native macOS feature smoke: a Release Ombra window driven in-process (FeatureSmoke.cs, compiled in through
 # feature-smoke.targets only for this build) against the real omp engine of this repository (runtime/engine, run with
 # the pinned runtime's Bun and dependencies) and the stand-in model (tools/mock-model). Isolated HOME, profile,
-# settings and chats under <work-dir>. Needs Screen Recording permission for screencapture; no Accessibility.
+# settings and chats under <work-dir>. Shots: screencapture with Screen Recording, else the window in-process; no Accessibility.
 # The window never takes the focus of the Mac's user (OMBRA_TEST_NO_ACTIVATE, src/Ombra.App/Platform/TestFocus.cs): it
 # opens on the display left of the main one when there is one, and <work-dir>/front.log records the front app all along
 # (tools/verify/front-app-watch.sh): the smoke fails if the app or its Nightly ever became the front app.
