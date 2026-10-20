@@ -36,13 +36,14 @@ const { claimRpcInput } = await import("./coding-agent/src/modes/rpc/rpc-input")
 // Claim input before extension discovery can obtain Bun's singleton reader.
 const input = selfCheck ? undefined : claimRpcInput();
 requireEditorProjectTrust();
-const [{ createEngineSession, initEngineProcessSettings }, { createRpcSessionRuntime }, { EngineHost, readEngineInput }, { RpcFrameEncoder }, { RpcOutputWriter }, { setSessionLeaseIdentity }] = await Promise.all([
+const [{ createEngineSession, initEngineProcessSettings }, { createRpcSessionRuntime }, { EngineHost, readEngineInput }, { RpcFrameEncoder }, { RpcOutputWriter }, { setSessionLeaseIdentity }, { setMcpOAuthClientName }] = await Promise.all([
 	import("./session-factory"),
 	import("./coding-agent/src/modes/rpc/rpc-mode"),
 	import("./engine-host"),
 	import("./coding-agent/src/modes/rpc/rpc-frame"),
 	import("./coding-agent/src/modes/rpc/rpc-output"),
 	import("./coding-agent/src/session/session-storage"),
+	import("./coding-agent/src/mcp/oauth-flow"),
 ]);
 if (selfCheck) {
 	const sent = Promise.withResolvers<void>();
@@ -56,6 +57,8 @@ if (selfCheck) {
 await initEngineProcessSettings();
 // Lease holder records name this process, so another window or a terminal can say where a chat is open.
 setSessionLeaseIdentity("ombra", "Ombra");
+// MCP dynamic client registration names Ombra unless a server entry sets oauth.clientName.
+setMcpOAuthClientName("Ombra");
 
 const encoder = new RpcFrameEncoder();
 let fatalOutputError: Error | undefined;

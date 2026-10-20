@@ -443,6 +443,7 @@ const BACKGROUND_COMMANDS: ReadonlySet<string> = new Set<RpcCommand["type"]>([
 	"get_mcp_servers",
 	"mcp_login",
 	"mcp_login_cancel",
+	"mcp_logout",
 	"mcp_reconnect",
 ]);
 
@@ -1867,6 +1868,7 @@ export async function createRpcSessionRuntime(
 							notifyConfigChanged: async () => {
 								output({ type: "config_update", model: session.model, thinkingLevel: session.thinkingLevel });
 							},
+							mcpConnectors: mcp,
 						});
 						if (!isCurrent()) return "cancelled";
 						if (builtinResult !== false) {
@@ -2680,6 +2682,7 @@ export async function createRpcSessionRuntime(
 
 			case "mcp_login":
 			case "mcp_login_cancel":
+			case "mcp_logout":
 			case "mcp_reconnect": {
 				if (command.type !== "mcp_reconnect" && typeof command.serverName !== "string")
 					return error(id, command.type, "serverName must be a string");
@@ -2687,6 +2690,7 @@ export async function createRpcSessionRuntime(
 					if (command.type === "mcp_login") return success(id, "mcp_login", await mcp.login(command.serverName));
 					if (command.type === "mcp_login_cancel")
 						return success(id, "mcp_login_cancel", { cancelled: mcp.cancelLogin(command.serverName) });
+					if (command.type === "mcp_logout") return success(id, "mcp_logout", await mcp.logout(command.serverName));
 					if (command.serverName !== undefined && typeof command.serverName !== "string")
 						return error(id, command.type, "serverName must be a string");
 					return success(id, "mcp_reconnect", { servers: await mcp.reconnect(command.serverName) });

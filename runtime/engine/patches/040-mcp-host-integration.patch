@@ -8,10 +8,16 @@ Why: Ombra embeds multiple concurrent sessions and renders native host features.
 Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
 
 diff --git a/src/mcp/client.ts b/src/mcp/client.ts
-index a9e68a0cd9359b143ea5a9f2011b16305b4fb741..5b4899a81d3d4192552de55ed31d90960d392ed1 100644
+index a9e68a0cd9359b143ea5a9f2011b16305b4fb741..c3debabf6ced23fba6af7ff063e6aa97d3d4d921 100644
 --- a/src/mcp/client.ts
 +++ b/src/mcp/client.ts
-@@ -11,6 +11,7 @@ import { createHttpTransport } from "./transports/http";
+@@ -6,11 +6,13 @@
+ import * as path from "node:path";
+ import * as url from "node:url";
+ import { getProjectDir, logger, untilAborted, withTimeout } from "@oh-my-pi/pi-utils";
++import { normalizeMCPTransportError } from "./errors";
+ import { describeMCPTimeout, isMCPTimeoutEnabled, resolveMCPTimeoutMs } from "./timeout";
+ import { createHttpTransport } from "./transports/http";
  import { LegacySseConnectionTimeoutError, createSseTransport } from "./transports/sse";
  import { createStdioTransport } from "./transports/stdio";
  import type {
@@ -19,7 +25,7 @@ index a9e68a0cd9359b143ea5a9f2011b16305b4fb741..5b4899a81d3d4192552de55ed31d9096
  	MCPGetPromptParams,
  	MCPGetPromptResult,
  	MCPHttpServerConfig,
-@@ -94,11 +95,14 @@ async function initializeConnection(
+@@ -94,11 +96,14 @@ async function initializeConnection(
  		signal?: AbortSignal;
  		/** Called after notifications/initialized succeeds. */
  		onInitialized?: () => void | Promise<void>;
@@ -34,7 +40,7 @@ index a9e68a0cd9359b143ea5a9f2011b16305b4fb741..5b4899a81d3d4192552de55ed31d9096
  			roots: { listChanged: false },
  		},
  		clientInfo: CLIENT_INFO,
-@@ -154,6 +158,8 @@ export async function connectToServer(
+@@ -154,6 +159,8 @@ export async function connectToServer(
  		signal?: AbortSignal;
  		onNotification?: (method: string, params: unknown) => void;
  		onRequest?: (method: string, params: unknown) => Promise<unknown>;
@@ -43,7 +49,7 @@ index a9e68a0cd9359b143ea5a9f2011b16305b4fb741..5b4899a81d3d4192552de55ed31d9096
  	},
  ): Promise<MCPServerConnection> {
  	// `withTimeout` rejects a pre-aborted signal without observing `connect()`; never start one.
-@@ -176,6 +182,7 @@ export async function connectToServer(
+@@ -176,6 +183,7 @@ export async function connectToServer(
  		try {
  			const initResult = await initializeConnection(transport, {
  				signal: options?.signal,
@@ -51,6 +57,41 @@ index a9e68a0cd9359b143ea5a9f2011b16305b4fb741..5b4899a81d3d4192552de55ed31d9096
  				async onInitialized() {
  					// Open the optional GET SSE stream only after the initialized
  					// notification makes the session ready for further traffic.
+@@ -212,10 +220,33 @@ export async function connectToServer(
+ 		if (transport) {
+ 			void transport.close().catch(() => {});
+ 		}
+-		throw error instanceof LegacySseConnectionTimeoutError ? timeoutError : error;
++		if (error instanceof LegacySseConnectionTimeoutError) throw timeoutError;
++		throw figmaDesktopRefusal(config, error) ?? error;
+ 	}
+ }
+ 
++/** What a refused connection to Figma Desktop's Dev Mode MCP server means. */
++export const FIGMA_DESKTOP_NOT_RUNNING =
++	"Figma desktop MCP server is not running: enable it in Figma → Preferences → Dev Mode MCP server (needs a Dev or Full seat)";
++
++/**
++ * Figma Desktop serves its MCP endpoint on 127.0.0.1:3845 only while the Dev
++ * Mode MCP server is enabled; a refused connection there is that setting (or a
++ * seat without it), not a network problem. `undefined` for every other failure.
++ */
++function figmaDesktopRefusal(config: MCPServerConfig, error: unknown): Error | undefined {
++	if ((config.type !== "http" && config.type !== "sse") || !config.url) return undefined;
++	let target: URL;
++	try {
++		target = new URL(config.url);
++	} catch {
++		return undefined;
++	}
++	if (target.port !== "3845" || !["127.0.0.1", "localhost", "[::1]"].includes(target.hostname)) return undefined;
++	if (normalizeMCPTransportError(error, { transport: "http", stage: "connect" }).failure !== "connect") return undefined;
++	return new Error(`${FIGMA_DESKTOP_NOT_RUNNING} (nothing answers at ${target.origin}).`, { cause: error });
++}
++
+ /**
+  * List tools from a connected server.
+  */
 diff --git a/src/mcp/elicitation.ts b/src/mcp/elicitation.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..4221879687a927991fb87f2232a829a7c6588631
@@ -550,10 +591,10 @@ index 8d5428e46930e0031cb0f27661123056d95cd9f4..68057702ea7e2223799955efab0ab8a5
  		connection.config = config;
 diff --git a/src/mcp/oauth-reauth.ts b/src/mcp/oauth-reauth.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..f7f0f748bbbdec229cf3034e8d2a232669cb3c8b
+index 0000000000000000000000000000000000000000..974ae518e8e6a066852d63fd1fff1852dc79d667
 --- /dev/null
 +++ b/src/mcp/oauth-reauth.ts
-@@ -0,0 +1,473 @@
+@@ -0,0 +1,505 @@
 +/**
 + * MCP OAuth sign-in, independent of any UI: finding the server's config,
 + * discovering its OAuth endpoints, running the browser authorization-code
@@ -569,7 +610,12 @@ index 0000000000000000000000000000000000000000..f7f0f748bbbdec229cf3034e8d2a2326
 +import type { AuthStorage } from "../session/auth-storage";
 +import { readMCPConfigFile, updateMCPServer } from "./config-writer";
 +import type { MCPManager } from "./manager";
-+import { lookupMcpOAuthCredentialForServer, removeManagedMcpOAuthCredential } from "./oauth-credentials";
++import {
++	lookupMcpOAuthCredentialForServer,
++	mcpOAuthCredentialIdsForServerUrl,
++	removeManagedMcpOAuthCredential,
++	removeManagedMcpOAuthCredentials,
++} from "./oauth-credentials";
 +import { analyzeAuthError, discoverOAuthEndpoints, fetchResourceMetadataScopes, type OAuthEndpoints } from "./oauth-discovery";
 +import { MCPOAuthFlow, type MCPStoredOAuthCredential, mcpOAuthCredentialId } from "./oauth-flow";
 +import type { MCPAuthChallenge, MCPAuthConfig, MCPServerConfig } from "./types";
@@ -596,6 +642,8 @@ index 0000000000000000000000000000000000000000..f7f0f748bbbdec229cf3034e8d2a2326
 +	prompt?: string;
 +	serverUrl?: string;
 +	registrationUrl?: string;
++	/** DCR `client_name` override (`oauth.clientName`). */
++	clientName?: string;
 +	issuerUrl?: string;
 +	resource?: string;
 +	stripSameOriginResource?: boolean;
@@ -717,6 +765,29 @@ index 0000000000000000000000000000000000000000..f7f0f748bbbdec229cf3034e8d2a2326
 +}
 +
 +/**
++ * Sign a server out: drop the credential its auth block points at and this
++ * profile's url-keyed binding (runtime discovery expands `${...}` URL values
++ * before looking up that deterministic row, so both spellings are cleared),
++ * then strip the auth block from its config file. A runtime-discovered server
++ * without an auth block of its own keeps its config untouched. Returns false
++ * when there was nothing to remove. The TUI's `/mcp unauth` and RPC `mcp_logout` share it.
++ */
++export async function signOutMcpServer(name: string, target: McpAuthTarget, authStorage: AuthStorage): Promise<boolean> {
++	const currentAuth = (target.config as MCPServerConfig & { auth?: MCPAuthConfig }).auth;
++	if (currentAuth?.type === "oauth") await removeManagedMcpOAuthCredential(authStorage, currentAuth.credentialId);
++	let removedUrlKeyedCredential = false;
++	if ((target.config.type === "http" || target.config.type === "sse") && target.config.url) {
++		removedUrlKeyedCredential = await removeManagedMcpOAuthCredentials(
++			authStorage,
++			mcpOAuthCredentialIdsForServerUrl(target.config.url),
++		);
++	}
++	if (target.discovered && currentAuth?.type !== "oauth") return removedUrlKeyedCredential;
++	await updateMCPServer(target.filePath, name, stripMcpOAuthAuth(target.config));
++	return true;
++}
++
++/**
 + * The OAuth endpoints of an http/sse server: probes it without credentials
 + * (`testUnauthenticated` connects and throws the server's refusal), then
 + * follows the challenge and RFC 8414/9728 discovery.
@@ -823,6 +894,7 @@ index 0000000000000000000000000000000000000000..f7f0f748bbbdec229cf3034e8d2a2326
 +			authorizationUrl: request.authorizationUrl,
 +			tokenUrl: request.tokenUrl,
 +			registrationUrl: request.registrationUrl,
++			clientName: request.clientName,
 +			issuerUrl: request.issuerUrl,
 +			clientId: resolvedClientId,
 +			clientSecret: resolvedClientSecret,
@@ -995,6 +1067,7 @@ index 0000000000000000000000000000000000000000..f7f0f748bbbdec229cf3034e8d2a2326
 +		redirectUri: target.config.oauth?.redirectUri,
 +		prompt: target.config.oauth?.prompt,
 +		registrationUrl: oauth.registrationUrl,
++		clientName: runtimeBaseConfig.oauth?.clientName,
 +		issuerUrl: oauth.issuerUrl,
 +		serverUrl,
 +		resource: oauthResource,
@@ -1111,10 +1184,19 @@ index 892223ecde26e4b412b9b1bc58453cd582a9671f..56818b04b8f4b1de06ec17fa84ba3c0c
  	readonly #fallbackProvider: string | undefined;
  	readonly #fallbackProviderName: string | undefined;
 diff --git a/src/mcp/types.ts b/src/mcp/types.ts
-index 3ac98f2dd07fee55291574a77e9f76c80829d399..89d4a769c8f7c551315d65fd35f307ea1376947f 100644
+index 3ac98f2dd07fee55291574a77e9f76c80829d399..47ea9b4fa055f9a9f643ec96187b4b0798f18275 100644
 --- a/src/mcp/types.ts
 +++ b/src/mcp/types.ts
-@@ -196,6 +196,8 @@ export interface MCPImplementation {
+@@ -93,6 +93,8 @@ interface MCPServerConfigBase {
+ 	oauth?: {
+ 		clientId?: string;
+ 		clientSecret?: string;
++		/** `client_name` for dynamic client registration (servers that allowlist clients by name). */
++		clientName?: string;
+ 		scope?: string;
+ 		redirectUri?: string;
+ 		callbackPort?: number;
+@@ -196,6 +198,8 @@ export interface MCPImplementation {
  export interface MCPClientCapabilities {
  	roots?: { listChanged?: boolean };
  	sampling?: Record<string, never>;
@@ -1124,7 +1206,7 @@ index 3ac98f2dd07fee55291574a77e9f76c80829d399..89d4a769c8f7c551315d65fd35f307ea
  }
  
 diff --git a/src/modes/controllers/mcp-command-controller.ts b/src/modes/controllers/mcp-command-controller.ts
-index 11b61f98592a1ccd05af660e8261c572bbbf4543..d9d85afa74132a0513687a5f01d0432f5948deee 100644
+index 11b61f98592a1ccd05af660e8261c572bbbf4543..6cdc0c971f0b5088c281cf07007a8b15141decaf 100644
 --- a/src/modes/controllers/mcp-command-controller.ts
 +++ b/src/modes/controllers/mcp-command-controller.ts
 @@ -3,21 +3,17 @@
@@ -1149,20 +1231,36 @@ index 11b61f98592a1ccd05af660e8261c572bbbf4543..d9d85afa74132a0513687a5f01d0432f
  } from "../../mcp";
  import { connectToServer, disconnectServer, listTools } from "../../mcp/client";
  import {
-@@ -30,12 +26,10 @@ import {
+@@ -29,13 +25,6 @@ import {
+ 	updateMCPServer,
  	validateServerName,
  } from "../../mcp/config-writer";
- import {
+-import {
 -	lookupMcpOAuthCredentialForServer,
- 	mcpOAuthCredentialIdsForServerUrl,
- 	removeManagedMcpOAuthCredential,
- 	removeManagedMcpOAuthCredentials,
- } from "../../mcp/oauth-credentials";
+-	mcpOAuthCredentialIdsForServerUrl,
+-	removeManagedMcpOAuthCredential,
+-	removeManagedMcpOAuthCredentials,
+-} from "../../mcp/oauth-credentials";
 -import { MCPOAuthFlow, type MCPStoredOAuthCredential, mcpOAuthCredentialId } from "../../mcp/oauth-flow";
  import {
  	clearSmitheryApiKey,
  	createSmitheryCliAuthSession,
-@@ -74,7 +68,20 @@ import type { NativeNode } from "@oh-my-pi/pi-tui/native/node";
+@@ -51,13 +40,7 @@ import {
+ 	searchSmitheryRegistry,
+ 	toConfigName,
+ } from "../../mcp/smithery-registry";
+-import type {
+-	MCPAuthChallenge,
+-	MCPAuthConfig,
+-	MCPConfigFile,
+-	MCPServerConfig,
+-	MCPServerConnection,
+-} from "../../mcp/types";
++import type { MCPAuthChallenge, MCPConfigFile, MCPServerConfig, MCPServerConnection } from "../../mcp/types";
+ import { shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
+ import { urlHyperlinkAlways } from "@oh-my-pi/pi-tui/render";
+ import { copyToClipboard } from "../../utils/clipboard";
+@@ -74,7 +57,20 @@ import type { NativeNode } from "@oh-my-pi/pi-tui/native/node";
  import type { InteractiveModeContext } from "../types";
  import { groupBySource, parseRemoveArgs, readScopeFlag, showCommandMessage } from "./command-controller-shared";
  
@@ -1177,14 +1275,14 @@ index 11b61f98592a1ccd05af660e8261c572bbbf4543..d9d85afa74132a0513687a5f01d0432f
 +	reauthorizeMcpServer,
 +	resolveMcpServerForAuth,
 +	runMcpOAuthFlow,
-+	stripMcpOAuthAuth,
++	signOutMcpServer,
 +	withTimeout,
 +} from "../../mcp/oauth-reauth";
 +import { reloadSessionMcpServers } from "../../mcp/session-reload";
  
  const MCP_MANUAL_INPUT_PROVIDER_ID = "mcp";
  const MCP_MANUAL_LOGIN_TIP = "Headless? Paste the redirect URL or code with /login <value>.";
-@@ -96,24 +103,6 @@ class MutableHintBlock extends TranscriptBlock {
+@@ -96,24 +92,6 @@ class MutableHintBlock extends TranscriptBlock {
  		this.#sealed = true;
  	}
  }
@@ -1209,7 +1307,7 @@ index 11b61f98592a1ccd05af660e8261c572bbbf4543..d9d85afa74132a0513687a5f01d0432f
  
  type ActiveMCPOAuthFlow = {
  	cancel: (reason: string) => void;
-@@ -324,11 +313,7 @@ class McpConnectingBlock extends ChatBlock {
+@@ -324,11 +302,7 @@ class McpConnectingBlock extends ChatBlock {
   * DCR-issued client secrets stay embedded in the stored credential and are
   * deliberately not surfaced here, so they cannot leak into config files.
   */
@@ -1222,7 +1320,14 @@ index 11b61f98592a1ccd05af660e8261c572bbbf4543..d9d85afa74132a0513687a5f01d0432f
  
  /**
   * Thrown by {@link MCPCommandController}'s OAuth handler when the user (or a
-@@ -789,7 +774,7 @@ export class MCPCommandController {
+@@ -783,13 +757,14 @@ export class MCPCommandController {
+ 									redirectUri: finalConfig.oauth?.redirectUri,
+ 									prompt: finalConfig.oauth?.prompt,
+ 									registrationUrl: oauth.registrationUrl,
++									clientName: finalConfig.oauth?.clientName,
+ 									issuerUrl: oauth.issuerUrl,
+ 									serverUrl: finalConfig.url,
+ 									resource: oauthResource,
  									stripSameOriginResource: oauthResourceIsFallback,
  								},
  							);
@@ -1231,7 +1336,15 @@ index 11b61f98592a1ccd05af660e8261c572bbbf4543..d9d85afa74132a0513687a5f01d0432f
  								tokenUrl: oauth.tokenUrl,
  								resource: oauthResource,
  								stripSameOriginResource: oauthResourceIsFallback,
-@@ -881,21 +866,6 @@ export class MCPCommandController {
+@@ -867,6 +842,7 @@ export class MCPCommandController {
+ 			prompt?: string;
+ 			serverUrl?: string;
+ 			registrationUrl?: string;
++			clientName?: string;
+ 			issuerUrl?: string;
+ 			resource?: string;
+ 			stripSameOriginResource?: boolean;
+@@ -881,21 +857,6 @@ export class MCPCommandController {
  		},
  	): Promise<OAuthFlowResult> {
  		const authStorage = this.ctx.session.modelRegistry.authStorage;
@@ -1253,7 +1366,7 @@ index 11b61f98592a1ccd05af660e8261c572bbbf4543..d9d85afa74132a0513687a5f01d0432f
  		const manualInput = this.ctx.oauthManualInput;
  		let manualInputClaim: { promise: Promise<string>; clear: (reason?: string) => void } | undefined;
  		const oauthTimeout = new AbortController();
-@@ -927,20 +897,21 @@ export class MCPCommandController {
+@@ -927,20 +888,22 @@ export class MCPCommandController {
  					`OAuth login already in progress for ${pendingProvider}. Complete or cancel it before starting MCP OAuth.`,
  				);
  			}
@@ -1281,11 +1394,12 @@ index 11b61f98592a1ccd05af660e8261c572bbbf4543..d9d85afa74132a0513687a5f01d0432f
 +					prompt: opts?.prompt,
 +					serverUrl: opts?.serverUrl,
 +					registrationUrl: opts?.registrationUrl,
++					clientName: opts?.clientName,
 +					issuerUrl: opts?.issuerUrl,
  					resource: opts?.resource,
  					stripSameOriginResource: opts?.stripSameOriginResource,
  				},
-@@ -1012,57 +983,20 @@ export class MCPCommandController {
+@@ -1012,57 +975,20 @@ export class MCPCommandController {
  						return claim.promise;
  					},
  					signal: oauthTimeout.signal,
@@ -1350,7 +1464,7 @@ index 11b61f98592a1ccd05af660e8261c572bbbf4543..d9d85afa74132a0513687a5f01d0432f
  		} catch (error) {
  			// Esc, an external abort, or a newer MCP flow are neutral
  			// cancellations. The timeout path also aborts the controller but does
-@@ -1093,47 +1027,6 @@ export class MCPCommandController {
+@@ -1093,47 +1019,6 @@ export class MCPCommandController {
  		}
  	}
  
@@ -1398,7 +1512,7 @@ index 11b61f98592a1ccd05af660e8261c572bbbf4543..d9d85afa74132a0513687a5f01d0432f
  	/**
  	 * Test connection to an MCP server.
  	 * Throws an error if connection fails (used for auto-detection).
-@@ -1154,53 +1047,10 @@ export class MCPCommandController {
+@@ -1154,53 +1039,10 @@ export class MCPCommandController {
  		await disconnectServer(connection);
  	}
  
@@ -1453,7 +1567,7 @@ index 11b61f98592a1ccd05af660e8261c572bbbf4543..d9d85afa74132a0513687a5f01d0432f
  	 * files), this also recognizes runtime-discovered servers that `/mcp list`
  	 * surfaces but that live in no writable config — e.g. servers from a Claude
  	 * Code marketplace plugin (`cloudflare:cloudflare-api`), `.cursor/mcp.json`,
-@@ -1213,104 +1063,8 @@ export class MCPCommandController {
+@@ -1213,104 +1055,8 @@ export class MCPCommandController {
  	 * persisted by `/mcp reauth` takes effect. `discovered` lets callers tailor
  	 * messaging and skip pointless writes when there is nothing to persist.
  	 */
@@ -1560,7 +1674,7 @@ index 11b61f98592a1ccd05af660e8261c572bbbf4543..d9d85afa74132a0513687a5f01d0432f
  	}
  
  	async #waitForServerConnectionWithAnimation(
-@@ -1829,7 +1583,7 @@ export class MCPCommandController {
+@@ -1829,7 +1575,7 @@ export class MCPCommandController {
  		}
  
  		try {
@@ -1569,16 +1683,51 @@ index 11b61f98592a1ccd05af660e8261c572bbbf4543..d9d85afa74132a0513687a5f01d0432f
  			if (!found) {
  				// Check if this is a discovered server from a third-party config
  				const userConfigPath = getMCPConfigPath("user", getProjectDir());
-@@ -1967,7 +1721,7 @@ export class MCPCommandController {
+@@ -1936,41 +1682,11 @@ export class MCPCommandController {
  				return;
  			}
  
+-			const currentAuth = (found.config as MCPServerConfig & { auth?: MCPAuthConfig }).auth;
+-			const authStorage = this.ctx.session.modelRegistry.authStorage;
+-			if (currentAuth?.type === "oauth") {
+-				await removeManagedMcpOAuthCredential(authStorage, currentAuth.credentialId);
+-			}
+-			// Also drop this profile's url-keyed binding so the server is truly
+-			// signed out even when the config carries no auth block. Runtime
+-			// discovery expands `${...}` URL values before MCPManager looks up the
+-			// deterministic credential row, so unauth must clear that same key.
+-			let removedUrlKeyedCredential = false;
+-			if ((found.config.type === "http" || found.config.type === "sse") && found.config.url) {
+-				removedUrlKeyedCredential = await removeManagedMcpOAuthCredentials(
+-					authStorage,
+-					mcpOAuthCredentialIdsForServerUrl(found.config.url),
+-				);
+-			}
+-
+-			if (found.discovered && currentAuth?.type !== "oauth") {
+-				if (!removedUrlKeyedCredential) {
+-					this.#showMessage(
+-						["", theme.fg("muted", `No stored OAuth auth to remove for "${name}".`), ""].join("\n"),
+-					);
+-					return;
+-				}
+-				await this.reloadServers();
+-				this.#showMessage(
+-					["", theme.fg("success", `- Cleared auth for "${name}" (${found.scope} config)`), ""].join("\n"),
+-				);
++			if (!(await signOutMcpServer(name, found, this.ctx.session.modelRegistry.authStorage))) {
++				this.#showMessage(["", theme.fg("muted", `No stored OAuth auth to remove for "${name}".`), ""].join("\n"));
+ 				return;
+ 			}
+-
 -			const updated = this.#stripOAuthAuth(found.config);
-+			const updated = stripMcpOAuthAuth(found.config);
- 			await updateMCPServer(found.filePath, name, updated);
+-			await updateMCPServer(found.filePath, name, updated);
  			await this.reloadServers();
- 
-@@ -2005,107 +1759,28 @@ export class MCPCommandController {
+-
+ 			this.#showMessage(
+ 				["", theme.fg("success", `- Cleared auth for "${name}" (${found.scope} config)`), ""].join("\n"),
+ 			);
+@@ -2005,107 +1721,28 @@ export class MCPCommandController {
  				return;
  			}
  
@@ -1706,7 +1855,7 @@ index 11b61f98592a1ccd05af660e8261c572bbbf4543..d9d85afa74132a0513687a5f01d0432f
  			if (options.reload !== false) {
  				await this.reloadServers();
  				const state = await this.#waitForServerConnectionWithAnimation(name);
-@@ -2236,41 +1911,16 @@ export class MCPCommandController {
+@@ -2236,41 +1873,16 @@ export class MCPCommandController {
  	}
  
  	/**

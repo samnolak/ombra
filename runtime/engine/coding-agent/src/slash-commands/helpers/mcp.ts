@@ -13,8 +13,9 @@ import { MCPManager } from "../../mcp/manager";
 import { getSmitheryApiKey } from "../../mcp/smithery-auth";
 import { searchSmitheryRegistry } from "../../mcp/smithery-registry";
 import type { MCPServerConfig, MCPServerConnection } from "../../mcp/types";
+import type { RpcMcpServerInfo } from "../../modes/rpc/rpc-types";
 import { parseCommandArgs } from "../../utils/command-args";
-import type { ParsedSlashCommand, SlashCommandResult, SlashCommandRuntime } from "../types";
+import type { ParsedSlashCommand, SlashCommandResult, SlashCommandRuntime, SlashMcpConnectors } from "../types";
 import { commandConsumed, errorMessage, parseNamedScopeArgs, parseSubcommand, usage } from "./parse";
 
 type AcpMcpScope = "user" | "project";
@@ -473,7 +474,10 @@ const MCP_HELP_TEXT = [
 	"  /mcp enable <name>                                      Enable a server",
 	"  /mcp disable <name>                                     Disable a server",
 	"  /mcp remove <name> [--scope project|user]               Remove a server",
-	"  /mcp reload                                             Reload MCP runtime",
+	"  /mcp reload                                             Reload MCP runtime (re-reads mcp.json)",
+	"  /mcp reauth <name>                                      Sign in to a server again (RPC hosts)",
+	"  /mcp unauth <name>                                      Sign out of a server (RPC hosts)",
+	"  /mcp reconnect [name]                                   Re-read mcp.json and reconnect (RPC hosts)",
 	"  /mcp resources                                          List resources from all servers",
 	"  /mcp prompts                                            List prompts from all servers",
 	"  /mcp test <name>                                        Test connection to a server",
@@ -484,6 +488,60 @@ const MCP_HELP_TEXT = [
 ].join("\n");
 
 const TUI_ONLY_MCP_VERBS = new Set(["reauth", "unauth", "smithery-login", "smithery-logout", "reconnect"]);
+
+/** Verbs an RPC host's connectors serve (`SlashCommandRuntime.mcpConnectors`). */
+const CONNECTOR_VERBS: Record<string, true> = {
+	reauth: true,
+	login: true,
+	unauth: true,
+	logout: true,
+	reconnect: true,
+	reload: true,
+};
+
+function describeConnector(info: RpcMcpServerInfo): string {
+	const tools = `${info.toolCount} tool${info.toolCount === 1 ? "" : "s"}`;
+	return `"${info.name}": ${info.status}, sign-in ${info.auth}, ${tools}${info.error ? ` — ${info.error}` : ""}`;
+}
+
+/**
+ * `/mcp reauth|login`, `unauth|logout`, `reconnect` and `reload` for hosts that
+ * serve MCP connectors (RPC): the same flows as `mcp_login`, `mcp_logout` and
+ * `mcp_reconnect`. Sign-in waits on the user's browser, so it runs in the
+ * background and reports when it settles.
+ */
+async function handleConnectorCommand(
+	verb: string,
+	rest: string,
+	runtime: SlashCommandRuntime,
+	connectors: SlashMcpConnectors,
+): Promise<SlashCommandResult> {
+	const name = rest.trim().split(/\s+/, 1)[0] || undefined;
+	if ((verb === "reauth" || verb === "login" || verb === "unauth" || verb === "logout") && !name) {
+		return usage(`Usage: /mcp ${verb} <name>`, runtime);
+	}
+	const run = async (): Promise<void> => {
+		try {
+			if (verb === "reauth" || verb === "login") {
+				await runtime.output(`Signing in to "${name}": continue in the browser page that opens.`);
+				await runtime.output(`Signed in to ${describeConnector(await connectors.login(name!))}`);
+			} else if (verb === "unauth" || verb === "logout") {
+				await runtime.output(`Signed out of ${describeConnector(await connectors.logout(name!))}`);
+			} else {
+				const servers = await connectors.reconnect(verb === "reload" ? undefined : name);
+				const shown = name && verb !== "reload" ? servers.filter(server => server.name === name) : servers;
+				await runtime.output(
+					shown.length ? `Reloaded MCP config:\n${shown.map(describeConnector).join("\n")}` : "Reloaded MCP config: no servers.",
+				);
+			}
+		} catch (err) {
+			await runtime.output(`/mcp ${verb}${name ? ` ${name}` : ""} failed: ${errorMessage(err)}`);
+		}
+	};
+	if ((verb === "reauth" || verb === "login") && runtime.runCommandInBackground) runtime.runCommandInBackground(run);
+	else await run();
+	return commandConsumed();
+}
 
 /** ACP/text-mode `/mcp` handler. Shared by both dispatchers via the spec. */
 export async function handleMcpAcp(
@@ -500,6 +558,9 @@ export async function handleMcpAcp(
 			"MCP notifications require the TUI client (live MCPManager). Use /mcp list to see server status.",
 			runtime,
 		);
+	}
+	if (runtime.mcpConnectors && Object.hasOwn(CONNECTOR_VERBS, verb)) {
+		return await handleConnectorCommand(verb, rest, runtime, runtime.mcpConnectors);
 	}
 	if (TUI_ONLY_MCP_VERBS.has(verb)) {
 		return usage(`/mcp ${verb} requires OAuth or browser flows only available in the TUI client.`, runtime);

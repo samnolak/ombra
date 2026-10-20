@@ -77,7 +77,7 @@ class Host {
 /** A Streamable-HTTP MCP server behind OAuth 2.1 (RFC 9728 metadata, DCR, PKCE), like a hosted connector. */
 function oauthServer(options: { authorizeEndpoint?: (origin: string) => string } = {}) {
 	const state = { token: `access-${crypto.randomUUID()}`, refresh: `refresh-${crypto.randomUUID()}`, codes: new Set<string>(),
-		refreshWorks: true, issued: 0 };
+		refreshWorks: true, issued: 0, clientNames: [] as string[] };
 	const secrets = () => [state.token, state.refresh, ...state.codes];
 	const server = Bun.serve({
 		hostname: "127.0.0.1",
@@ -99,7 +99,8 @@ function oauthServer(options: { authorizeEndpoint?: (origin: string) => string }
 					token_endpoint_auth_methods_supported: ["none"],
 				});
 			if (url.pathname === "/register") {
-				const body = await request.json() as { redirect_uris?: string[] };
+				const body = await request.json() as { redirect_uris?: string[]; client_name: string };
+				state.clientNames.push(body.client_name);
 				return Response.json({ client_id: "ombra-test-client", redirect_uris: body.redirect_uris, token_endpoint_auth_method: "none" }, { status: 201 });
 			}
 			if (url.pathname === "/authorize") {
@@ -321,4 +322,53 @@ test("elicitation: a server's form arrives as an elicit UI request and the user'
 		content: { env: "prod", replicas: 2, notify: false, email: "ops@example.com" } });
 	const both = await until(() => readFile(f.elicited, "utf8"), text => text.trim().split("\n").length >= 2, "second answer");
 	expect(JSON.parse(both.trim().split("\n")[1]!)).toEqual({ action: "accept", content: { env: "prod", replicas: 2, notify: false, email: "ops@example.com" } });
+}, 120_000);
+
+test("chat /mcp reauth runs the host sign-in as Ombra (oauth.clientName overrides); mcp_logout signs out", async () => {
+	const remote = oauthServer();
+	const named = oauthServer();
+	const f = await fixture({ docs: { type: "http", url: remote.url }, named: { type: "http", url: named.url, oauth: { clientName: "Claude Code" } } });
+	await f.host.waitSession(f.sessionKey, frame => frame.type === "mcp_auth_required" && frame.serverName === "docs", "docs prompt");
+
+	// The user types the command in Ombra's chat: the same flow as mcp_login, URL tagged with the server.
+	const typed = await f.host.command(f.sessionKey, "prompt", { message: "/mcp reauth docs" }, 60_000);
+	expect(typed.success).toBe(true);
+	const open = await f.host.waitSession(f.sessionKey, frame => frame.method === "open_url" && frame.mcpServer === "docs", "open_url");
+	expect(await completeInBrowser(open.url)).toBe(200);
+	const done = await f.host.waitSession(f.sessionKey, frame => frame.type === "command_output" && String(frame.text).startsWith("Signed in to"), "sign-in output", 60_000);
+	expect(done.text).toBe('Signed in to "docs": connected, sign-in signed_in, 2 tools');
+	expect(remote.state.clientNames).toEqual(["Ombra"]);
+
+	const login = f.host.command(f.sessionKey, "mcp_login", { serverName: "named" }, 60_000);
+	const namedOpen = await f.host.waitSession(f.sessionKey, frame => frame.method === "open_url" && frame.mcpServer === "named", "named open_url");
+	await completeInBrowser(namedOpen.url);
+	expect((await login).success).toBe(true);
+	expect(named.state.clientNames).toEqual(["Claude Code"]);
+
+	const out = await f.host.command(f.sessionKey, "mcp_logout", { serverName: "docs" }, 60_000);
+	expect(out).toMatchObject({ success: true, data: { name: "docs", auth: "signed_out", toolCount: 0 } });
+	const config = JSON.parse(await readFile(join(f.agentDir, "mcp.json"), "utf8"));
+	expect(config.mcpServers.docs.auth).toBeUndefined();
+	// Signing out is not an episode to prompt about again.
+	expect(f.host.session(f.sessionKey).filter(frame => frame.type === "mcp_auth_required" && frame.serverName === "docs")).toHaveLength(1);
+	const wire = JSON.stringify(f.host.frames) + f.host.stderr;
+	for (const secret of [...remote.secrets(), ...named.secrets()]) expect(wire).not.toContain(secret);
+}, 120_000);
+
+test("reload: mcp_reconnect re-reads mcp.json, including a server added after the session started", async () => {
+	const f = await fixture({});
+	expect(await serversOf(f.host, f.sessionKey)).toEqual([]);
+	await writeFile(join(f.agentDir, "mcp.json"), JSON.stringify({ mcpServers: {
+		asker: { type: "stdio", command: process.execPath, args: ["-e", ELICITING_SERVER] },
+	} }));
+	const added = await f.host.command(f.sessionKey, "mcp_reconnect", { serverName: "asker" }, 60_000);
+	expect(added).toMatchObject({ success: true, data: { servers: [expect.objectContaining({ name: "asker", status: "connected" })] } });
+
+	await writeFile(join(f.agentDir, "mcp.json"), JSON.stringify({ mcpServers: {} }));
+	const typed = await f.host.command(f.sessionKey, "prompt", { message: "/mcp reload" }, 60_000);
+	expect(typed.success).toBe(true);
+	const output = await f.host.waitSession(f.sessionKey, frame => frame.type === "command_output" && String(frame.text).startsWith("Reloaded MCP config"), "reload output", 60_000);
+	expect(output.text).toBe("Reloaded MCP config: no servers.");
+	expect(await serversOf(f.host, f.sessionKey)).toEqual([]);
+	expect(await f.host.command(f.sessionKey, "mcp_reconnect", { serverName: "gone" })).toMatchObject({ success: false, error: 'MCP server "gone" not found' });
 }, 120_000);

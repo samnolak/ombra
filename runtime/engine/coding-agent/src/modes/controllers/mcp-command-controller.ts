@@ -26,11 +26,6 @@ import {
 	validateServerName,
 } from "../../mcp/config-writer";
 import {
-	mcpOAuthCredentialIdsForServerUrl,
-	removeManagedMcpOAuthCredential,
-	removeManagedMcpOAuthCredentials,
-} from "../../mcp/oauth-credentials";
-import {
 	clearSmitheryApiKey,
 	createSmitheryCliAuthSession,
 	getSmitheryApiKey,
@@ -45,13 +40,7 @@ import {
 	searchSmitheryRegistry,
 	toConfigName,
 } from "../../mcp/smithery-registry";
-import type {
-	MCPAuthChallenge,
-	MCPAuthConfig,
-	MCPConfigFile,
-	MCPServerConfig,
-	MCPServerConnection,
-} from "../../mcp/types";
+import type { MCPAuthChallenge, MCPConfigFile, MCPServerConfig, MCPServerConnection } from "../../mcp/types";
 import { shortenPath } from "@oh-my-pi/pi-tui/render/render-utils";
 import { urlHyperlinkAlways } from "@oh-my-pi/pi-tui/render";
 import { copyToClipboard } from "../../utils/clipboard";
@@ -78,7 +67,7 @@ import {
 	reauthorizeMcpServer,
 	resolveMcpServerForAuth,
 	runMcpOAuthFlow,
-	stripMcpOAuthAuth,
+	signOutMcpServer,
 	withTimeout,
 } from "../../mcp/oauth-reauth";
 import { reloadSessionMcpServers } from "../../mcp/session-reload";
@@ -768,6 +757,7 @@ export class MCPCommandController {
 									redirectUri: finalConfig.oauth?.redirectUri,
 									prompt: finalConfig.oauth?.prompt,
 									registrationUrl: oauth.registrationUrl,
+									clientName: finalConfig.oauth?.clientName,
 									issuerUrl: oauth.issuerUrl,
 									serverUrl: finalConfig.url,
 									resource: oauthResource,
@@ -852,6 +842,7 @@ export class MCPCommandController {
 			prompt?: string;
 			serverUrl?: string;
 			registrationUrl?: string;
+			clientName?: string;
 			issuerUrl?: string;
 			resource?: string;
 			stripSameOriginResource?: boolean;
@@ -911,6 +902,7 @@ export class MCPCommandController {
 					prompt: opts?.prompt,
 					serverUrl: opts?.serverUrl,
 					registrationUrl: opts?.registrationUrl,
+					clientName: opts?.clientName,
 					issuerUrl: opts?.issuerUrl,
 					resource: opts?.resource,
 					stripSameOriginResource: opts?.stripSameOriginResource,
@@ -1690,41 +1682,11 @@ export class MCPCommandController {
 				return;
 			}
 
-			const currentAuth = (found.config as MCPServerConfig & { auth?: MCPAuthConfig }).auth;
-			const authStorage = this.ctx.session.modelRegistry.authStorage;
-			if (currentAuth?.type === "oauth") {
-				await removeManagedMcpOAuthCredential(authStorage, currentAuth.credentialId);
-			}
-			// Also drop this profile's url-keyed binding so the server is truly
-			// signed out even when the config carries no auth block. Runtime
-			// discovery expands `${...}` URL values before MCPManager looks up the
-			// deterministic credential row, so unauth must clear that same key.
-			let removedUrlKeyedCredential = false;
-			if ((found.config.type === "http" || found.config.type === "sse") && found.config.url) {
-				removedUrlKeyedCredential = await removeManagedMcpOAuthCredentials(
-					authStorage,
-					mcpOAuthCredentialIdsForServerUrl(found.config.url),
-				);
-			}
-
-			if (found.discovered && currentAuth?.type !== "oauth") {
-				if (!removedUrlKeyedCredential) {
-					this.#showMessage(
-						["", theme.fg("muted", `No stored OAuth auth to remove for "${name}".`), ""].join("\n"),
-					);
-					return;
-				}
-				await this.reloadServers();
-				this.#showMessage(
-					["", theme.fg("success", `- Cleared auth for "${name}" (${found.scope} config)`), ""].join("\n"),
-				);
+			if (!(await signOutMcpServer(name, found, this.ctx.session.modelRegistry.authStorage))) {
+				this.#showMessage(["", theme.fg("muted", `No stored OAuth auth to remove for "${name}".`), ""].join("\n"));
 				return;
 			}
-
-			const updated = stripMcpOAuthAuth(found.config);
-			await updateMCPServer(found.filePath, name, updated);
 			await this.reloadServers();
-
 			this.#showMessage(
 				["", theme.fg("success", `- Cleared auth for "${name}" (${found.scope} config)`), ""].join("\n"),
 			);

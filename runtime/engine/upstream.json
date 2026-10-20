@@ -114,6 +114,7 @@
     "110-tool-policy-and-deferred-devices.patch",
     "120-embedded-cli-boundary.patch",
     "130-host-runtime-integration.patch",
-    "150-ombra-change-notes.patch"
+    "150-ombra-change-notes.patch",
+    "160-mcp-figma-connectors.patch"
   ]
 }

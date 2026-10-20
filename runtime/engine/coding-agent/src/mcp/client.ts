@@ -6,6 +6,7 @@
 import * as path from "node:path";
 import * as url from "node:url";
 import { getProjectDir, logger, untilAborted, withTimeout } from "@oh-my-pi/pi-utils";
+import { normalizeMCPTransportError } from "./errors";
 import { describeMCPTimeout, isMCPTimeoutEnabled, resolveMCPTimeoutMs } from "./timeout";
 import { createHttpTransport } from "./transports/http";
 import { LegacySseConnectionTimeoutError, createSseTransport } from "./transports/sse";
@@ -219,8 +220,31 @@ export async function connectToServer(
 		if (transport) {
 			void transport.close().catch(() => {});
 		}
-		throw error instanceof LegacySseConnectionTimeoutError ? timeoutError : error;
+		if (error instanceof LegacySseConnectionTimeoutError) throw timeoutError;
+		throw figmaDesktopRefusal(config, error) ?? error;
 	}
+}
+
+/** What a refused connection to Figma Desktop's Dev Mode MCP server means. */
+export const FIGMA_DESKTOP_NOT_RUNNING =
+	"Figma desktop MCP server is not running: enable it in Figma → Preferences → Dev Mode MCP server (needs a Dev or Full seat)";
+
+/**
+ * Figma Desktop serves its MCP endpoint on 127.0.0.1:3845 only while the Dev
+ * Mode MCP server is enabled; a refused connection there is that setting (or a
+ * seat without it), not a network problem. `undefined` for every other failure.
+ */
+function figmaDesktopRefusal(config: MCPServerConfig, error: unknown): Error | undefined {
+	if ((config.type !== "http" && config.type !== "sse") || !config.url) return undefined;
+	let target: URL;
+	try {
+		target = new URL(config.url);
+	} catch {
+		return undefined;
+	}
+	if (target.port !== "3845" || !["127.0.0.1", "localhost", "[::1]"].includes(target.hostname)) return undefined;
+	if (normalizeMCPTransportError(error, { transport: "http", stage: "connect" }).failure !== "connect") return undefined;
+	return new Error(`${FIGMA_DESKTOP_NOT_RUNNING} (nothing answers at ${target.origin}).`, { cause: error });
 }
 
 /**

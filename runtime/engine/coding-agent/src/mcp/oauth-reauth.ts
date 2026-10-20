@@ -13,7 +13,12 @@ import { expandEnvVarsDeep } from "../discovery/helpers";
 import type { AuthStorage } from "../session/auth-storage";
 import { readMCPConfigFile, updateMCPServer } from "./config-writer";
 import type { MCPManager } from "./manager";
-import { lookupMcpOAuthCredentialForServer, removeManagedMcpOAuthCredential } from "./oauth-credentials";
+import {
+	lookupMcpOAuthCredentialForServer,
+	mcpOAuthCredentialIdsForServerUrl,
+	removeManagedMcpOAuthCredential,
+	removeManagedMcpOAuthCredentials,
+} from "./oauth-credentials";
 import { analyzeAuthError, discoverOAuthEndpoints, fetchResourceMetadataScopes, type OAuthEndpoints } from "./oauth-discovery";
 import { MCPOAuthFlow, type MCPStoredOAuthCredential, mcpOAuthCredentialId } from "./oauth-flow";
 import type { MCPAuthChallenge, MCPAuthConfig, MCPServerConfig } from "./types";
@@ -40,6 +45,8 @@ export interface McpOAuthFlowRequest {
 	prompt?: string;
 	serverUrl?: string;
 	registrationUrl?: string;
+	/** DCR `client_name` override (`oauth.clientName`). */
+	clientName?: string;
 	issuerUrl?: string;
 	resource?: string;
 	stripSameOriginResource?: boolean;
@@ -161,6 +168,29 @@ export async function resolveMcpServerForAuth(
 }
 
 /**
+ * Sign a server out: drop the credential its auth block points at and this
+ * profile's url-keyed binding (runtime discovery expands `${...}` URL values
+ * before looking up that deterministic row, so both spellings are cleared),
+ * then strip the auth block from its config file. A runtime-discovered server
+ * without an auth block of its own keeps its config untouched. Returns false
+ * when there was nothing to remove. The TUI's `/mcp unauth` and RPC `mcp_logout` share it.
+ */
+export async function signOutMcpServer(name: string, target: McpAuthTarget, authStorage: AuthStorage): Promise<boolean> {
+	const currentAuth = (target.config as MCPServerConfig & { auth?: MCPAuthConfig }).auth;
+	if (currentAuth?.type === "oauth") await removeManagedMcpOAuthCredential(authStorage, currentAuth.credentialId);
+	let removedUrlKeyedCredential = false;
+	if ((target.config.type === "http" || target.config.type === "sse") && target.config.url) {
+		removedUrlKeyedCredential = await removeManagedMcpOAuthCredentials(
+			authStorage,
+			mcpOAuthCredentialIdsForServerUrl(target.config.url),
+		);
+	}
+	if (target.discovered && currentAuth?.type !== "oauth") return removedUrlKeyedCredential;
+	await updateMCPServer(target.filePath, name, stripMcpOAuthAuth(target.config));
+	return true;
+}
+
+/**
  * The OAuth endpoints of an http/sse server: probes it without credentials
  * (`testUnauthenticated` connects and throws the server's refusal), then
  * follows the challenge and RFC 8414/9728 discovery.
@@ -267,6 +297,7 @@ export async function runMcpOAuthFlow(
 			authorizationUrl: request.authorizationUrl,
 			tokenUrl: request.tokenUrl,
 			registrationUrl: request.registrationUrl,
+			clientName: request.clientName,
 			issuerUrl: request.issuerUrl,
 			clientId: resolvedClientId,
 			clientSecret: resolvedClientSecret,
@@ -439,6 +470,7 @@ export async function reauthorizeMcpServer(options: {
 		redirectUri: target.config.oauth?.redirectUri,
 		prompt: target.config.oauth?.prompt,
 		registrationUrl: oauth.registrationUrl,
+		clientName: runtimeBaseConfig.oauth?.clientName,
 		issuerUrl: oauth.issuerUrl,
 		serverUrl,
 		resource: oauthResource,
