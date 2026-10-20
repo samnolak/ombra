@@ -1,0 +1,80 @@
+{
+  "version": "18.12.2",
+  "groups": [
+    {
+      "id": "writer-leases",
+      "patch": "090-session-leases-and-isolation.patch",
+      "reason": "Fixtures retain overlapping writers/reuse a live session id, or delete a journal without a valid ownership header. Ombra requires an exclusive writer/deletion lease and forks a conflicting writer instead of mutating another owner.",
+      "tests": [
+        "packages/coding-agent > SessionManager cwd adoption on resume > clears fallback persistence after adopting an accessible session",
+        "packages/coding-agent > SessionManager legacy session migration persistence > still rewrites immediately when explicitly requested",
+        "packages/coding-agent > SessionManager legacy session migration persistence > forces a deferred legacy rewrite when ensureOnDisk is requested",
+        "packages/coding-agent > session runtime identity > credits each entry to the build that wrote it across a resume by a different build",
+        "packages/coding-agent > FileSessionStorage.deleteSessionWithArtifacts > removes stale .bak siblings so the picker cannot resurrect the session (issue #11499)",
+        "packages/coding-agent > SessionManager cross-process rewrite freshness > moves to a sibling instead of re-serializing forever when a writer without the lease races every retry",
+        "packages/coding-agent > SessionManager close() drops empty metadata-only sessions > keeps the session file when another process consumed the draft and appended real messages"
+      ]
+    },
+    {
+      "id": "session-runtime",
+      "patch": "100-session-runtime-isolation.patch",
+      "reason": "Upstream assumes process-global child registries and shared retained Python kernels. Ombra scopes registry/IRC and kernel ownership to the root session, and explicitly marks unavailable eval state after process restart.",
+      "tests": [
+        "packages/coding-agent > AgentSession python cleanup > waits for active SDK session Python work before releasing a shared retained kernel",
+        "packages/coding-agent > AgentSession python cleanup > detaches retained kernel ownership even when dispose times out waiting for Python work",
+        "packages/coding-agent > runSubprocess soft request budget > a budget hard-abort keeps the kept-alive agent adopted and messageable via irc",
+        "packages/coding-agent > keeps the previous process's request as the resumed request prefix",
+        "packages/coding-agent > SDK subagent IRC follow-up delivery > persists the follow-up only in its owning session with a single root",
+        "packages/coding-agent > SDK subagent IRC follow-up delivery > persists the follow-up only in its owning session with two live roots with default agent ids",
+        "packages/coding-agent > SDK subagent IRC follow-up delivery > persists the follow-up only in its owning session with an unrelated root reopened from disk",
+        "packages/coding-agent > SDK subagent IRC follow-up delivery > persists the follow-up only in its owning session with two roots with distinct agent ids"
+      ]
+    },
+    {
+      "id": "rpc-admission",
+      "patch": "019-rpc-host-protocol.patch",
+      "reason": "Upstream fixtures omit explicit admission/ACK state or the writer-lease manager. Ombra emits inputDisposition, gates prompt_result behind ACK, and distinguishes cancelled local dispatch from admitted agent work.",
+      "tests": [
+        "packages/coding-agent > RPC subagent registry > clears stale snapshots after successful RPC session changes",
+        "packages/coding-agent > AgentSession prompt admission via extension command routing > fires onPromptAdmitted once the command is routed, before its handler runs",
+        "packages/coding-agent > AgentSession concurrent prompt dispatch > reports a transition-dropped RPC prompt as aborted, not as a completed local command",
+        "packages/coding-agent > tryRunRpcSkillCommand > dispatches registered /skill commands as skill prompt messages",
+        "packages/coding-agent > tryRunRpcSkillCommand > honors the RPC prompt streaming behavior for registered /skill commands",
+        "packages/coding-agent > tryRunRpcSkillCommand > preserves attached images in skill prompt messages",
+        "packages/coding-agent > dispatchRpcSkillPrompt > answers the prompt command once admitted, before the skill dispatch completes",
+        "packages/coding-agent > dispatchRpcSkillPrompt > does not answer before admission, unlike the pre-fix immediate ack",
+        "packages/coding-agent > dispatchRpcSkillPrompt > a late dispatch failure surfaces through onError, not the answer",
+        "packages/coding-agent > dispatchRpcSkillPrompt > emits a non-invoked completion frame when the dispatch bails before the turn starts",
+        "packages/coding-agent > dispatchRpcSkillPrompt > forwards attached images to promptCustomMessage",
+        "packages/coding-agent > reportPromptResult > completes locally when the prompt resolves without agent work",
+        "packages/coding-agent > reportPromptResult > waits for the run when an extension command schedules agent work",
+        "packages/coding-agent > reportPromptResult > ignores extension user messages scheduled before the watched prompt",
+        "packages/coding-agent > reportPromptResult > prompt_result follows the extension-send outcome",
+        "packages/coding-agent > initializeExtensions markAgentInvokingMessage > marks triggerTurn extension custom messages as agent work"
+      ]
+    },
+    {
+      "id": "typed-approvals",
+      "patch": "060-typed-tool-approvals.patch",
+      "reason": "Ombra passes typed approval metadata/denial callbacks and explicit critical-pattern policy=prompt; yolo/--auto-approve never bypass critical-command approval. Compact prompt rendering also includes the owned typed provenance.",
+      "tests": [
+        "packages/coding-agent > tools.approvalMode setting > critical bash patterns do not prompt in yolo mode with bash allowed",
+        "packages/coding-agent > tools.approvalMode setting > CLI --auto-approve also bypasses safety-override patterns",
+        "packages/coding-agent > ExtensionRunner > tool approval lifecycle > emits requested before waiting and resolved after approval",
+        "packages/coding-agent > ExtensionRunner > tool approval lifecycle > approving for this session skips later mode prompts of that tool and tier, until the session changes",
+        "packages/coding-agent > MCP fallback and prompt formatting > the dialog's compact prompt summarizes the details to one row, keeping origin, reason, and appendix",
+        "packages/coding-agent > tool-owned dynamic approval declarations > classifies critical bash patterns through BashTool.approval",
+        "packages/coding-agent > tool-owned dynamic approval declarations > keeps critical bash patterns prompt-gated unless explicitly denied"
+      ]
+    },
+    {
+      "id": "recovery-policy",
+      "patch": "070-small-context-recovery.patch",
+      "reason": "Ombra retries context overflow through its recovery prompt rather than the upstream no-prompt path, and refuses silently changing an unavailable saved session model without fallback permission.",
+      "tests": [
+        "packages/coding-agent > AgentSession model persistence > falls back to the saved default model when switch-session role restore is unavailable",
+        "packages/coding-agent > AgentSession payload-rejection 413 handling > falls through to overflow recovery when the local gauge shows no headroom"
+      ]
+    }
+  ]
+}

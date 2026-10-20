@@ -3,6 +3,6 @@ namespace Ombra.App.Services.Runtime;
 
 public static partial class RuntimePack
 {
-    public const string SourceSha256 = "0202246bab1f89102f4f6f482fd6c67f7aca270439d33efaedc99356d4bdcf8c";
-    public const string ManifestSha256 = "fa14a809831fad3a5f4143e2e12e4c3e95c24e806ddea371cc14b6485215ab59";
+    public const string SourceSha256 = "53898ffbc843256ef52b42ee8e250e8b5d3589651586388822a7c4fcbcc317e9";
+    public const string ManifestSha256 = "9243d049cb59621d21b418e6f2f20ad575c04c4cfb7b4883d3e2a16f5bc6835e";
 }

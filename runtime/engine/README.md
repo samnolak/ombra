@@ -286,3 +286,35 @@ with its own frozen development lockfile and verified native addon, in a separat
 Git repository and an allowlisted environment (no inherited browser host settings
 or provider credentials), not with a mixture of workspace and npm singletons.
 
+### Upstream compatibility gate
+
+Run `python3 runtime/engine/check-upstream.py --bun /absolute/path/to/bun`
+with Bun 1.4.2 and Python 3.10+ (`--python /absolute/path/to/python3` overrides
+the harness interpreter). Each run needs a fresh `--work` directory (default
+`.temp/upstream-gate`). It clones the release tag, checks the 18.12.2 npm
+provenance revision, installs the frozen upstream development lockfile, overlays
+owned source, and integrity-verifies the platform-native addon through the patcher.
+Tests get a short temporary HOME and an allowlisted environment: no inherited
+CMUX/OMP host settings or provider credentials. Corporate CA paths are retained
+only for dependency installation. Files within a chunk run serially for stable
+failure attribution rather than interleaved worker headers; chunk coverage is retained.
+
+`upstream-fixtures.patch` adapts incomplete XdevState/ACK fixtures, Biome's fake
+stdin formatter (asserting that disk remains unchanged), and the unvendored
+Python/Rust/Go SDK generators for Ombra wire types. It also corrects the upstream
+OAuth refresh mock seam and uses a trusted-OSC multiplexer fixture on macOS.
+Only SDK outputs are regenerated; owned TypeScript/schema artifacts remain subject
+to their upstream consistency test.
+`upstream-expected-failures.json` enumerates exact test titles grouped by the
+responsible intentional contract difference. It is consumed by the gate, not a
+blanket chunk skip: every test still runs, and new failures, import errors,
+unaccounted failures, crashes and missing outcome reports fail the gate.
+The work directory retains `full.log`, `outcomes.json` and `verdict.json`;
+unused expectations are reported so the list can be reduced after fixture updates.
+
+The compatibility investigation also repaired a real standalone RPC merge regression:
+EOF now drains already accepted commands before abortive session teardown, without
+changing GUI close semantics. Recovered persistence errors no longer label a
+successful shutdown as a durability failure. Upstream backpressured-output and
+failed/recovered-store shutdown tests cover this boundary.
+

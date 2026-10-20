@@ -46,7 +46,8 @@ public sealed class RuntimeSourceArtifactTests
         var paths = artifact.GetProperty("files").EnumerateArray().Select(f => f.GetProperty("path").GetString()!).ToArray();
         Assert.Equal(Directory.EnumerateFiles(canonical, "*", SearchOption.AllDirectories)
             .Select(p => Path.GetRelativePath(canonical, p).Replace('\\', '/'))
-            .Where(p => p.Split('/')[0] is not (".temp" or "patches" or "patcher.py" or "upstream.json" or "README.md"))
+            .Where(p => p.Split('/')[0] is not (".temp" or "patches" or "patcher.py" or "upstream.json" or "README.md"
+                or "check-upstream.py" or "upstream-fixtures.patch" or "upstream-expected-failures.json"))
             .Order(), paths.Order());
         Assert.Contains("host.ts", paths);
         Assert.Contains("session-factory.ts", paths);
@@ -55,6 +56,7 @@ public sealed class RuntimeSourceArtifactTests
         Assert.True(paths.Length > 1700);
         Assert.DoesNotContain(paths, p => p.StartsWith("patches/", StringComparison.Ordinal)
             || p is "patcher.py" or "upstream.json" or "README.md"
+                or "check-upstream.py" or "upstream-fixtures.patch" or "upstream-expected-failures.json"
             || p.StartsWith(".temp/", StringComparison.Ordinal));
         foreach (var file in artifact.GetProperty("files").EnumerateArray())
         {

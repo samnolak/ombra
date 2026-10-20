@@ -1,0 +1,347 @@
+diff --git a/packages/ai/test/auth-storage-oauth-refresh-race.test.ts b/packages/ai/test/auth-storage-oauth-refresh-race.test.ts
+index ffe51b0..b8d49f8 100644
+--- a/packages/ai/test/auth-storage-oauth-refresh-race.test.ts
++++ b/packages/ai/test/auth-storage-oauth-refresh-race.test.ts
+@@ -127,14 +127,13 @@ describe("AuthStorage OAuth refresh race", () => {
+ 		// refresh token to our snapshot will therefore see the SAME stale token
+ 		// and fall through to the disable. We then race a peer rotation into the
+ 		// window between the pre-check and the CAS, which the CAS must detect.
+-		vi.spyOn(oauthUtils, "getOAuthApiKey").mockImplementation(async (provider, creds) => {
+-			const credential = creds[provider];
++		vi.spyOn(oauthUtils, "refreshOAuthToken").mockImplementation(async (_provider, credential) => {
+ 			if (credential?.refresh === "stale-refresh") {
+ 				throw new Error(
+ 					'HTTP 400 invalid_grant {"error":"invalid_grant","error_description":"Refresh token not found or invalid"}',
+ 				);
+ 			}
+-			return { newCredentials: credential!, apiKey: credential!.access };
++			return credential;
+ 		});
+ 
+ 		const sharedStore = store;
+@@ -188,7 +187,7 @@ describe("AuthStorage OAuth refresh race", () => {
+ 			},
+ 		]);
+ 
+-		vi.spyOn(oauthUtils, "getOAuthApiKey").mockImplementation(async () => {
++		vi.spyOn(oauthUtils, "refreshOAuthToken").mockImplementation(async () => {
+ 			throw new Error('invalid_grant {"error":"invalid_grant"}');
+ 		});
+ 
+diff --git a/packages/coding-agent/scripts/gen-rpc/go.ts b/packages/coding-agent/scripts/gen-rpc/go.ts
+index 9390a1e..1fa8722 100644
+--- a/packages/coding-agent/scripts/gen-rpc/go.ts
++++ b/packages/coding-agent/scripts/gen-rpc/go.ts
+@@ -685,8 +685,8 @@ class GoEmitter {
+ 			return parts.join("\n");
+ 		}
+ 		const result = this.#def(command.result);
+-		if (result.kind !== "object") throw new Error(`${command.name}: result must be an object`);
+ 		if (command.unwrap) {
++			if (result.kind !== "object") throw new Error(`${command.name}: unwrapped result must be an object`);
+ 			if (command.nullable) throw new Error(`${command.name}: nullable unwrapped results are not supported`);
+ 			const field = result.fields.find(candidate => candidate.key === command.unwrap);
+ 			if (!field) throw new Error(`${command.name}: unwrap field ${command.unwrap} not in ${command.result}`);
+@@ -771,7 +771,10 @@ class GoEmitter {
+ 				blocks.push(this.#unionBlock(name, def.doc));
+ 			} else if (def.type.kind === "union" && !nonNull(def.type)) {
+ 				this.#kindUnion(def.type, { name, doc: def.doc });
+-			} else throw new Error(`${name}: unsupported alias for Go`);
++			} else {
++				this.#claim(name, `alias ${name}`);
++				blocks.push(`type ${name} = ${this.#goType(def.type, name)}\n`);
++			}
+ 			takePending();
+ 		}
+ 		const methods = new Set<string>();
+diff --git a/packages/coding-agent/scripts/gen-rpc/python.ts b/packages/coding-agent/scripts/gen-rpc/python.ts
+index 8b4f368..33a12b6 100644
+--- a/packages/coding-agent/scripts/gen-rpc/python.ts
++++ b/packages/coding-agent/scripts/gen-rpc/python.ts
+@@ -310,7 +310,9 @@ class PythonEmitter {
+ 					this.#runtime.add("nullable");
+ 					return `nullable(${this.#decoder(inner, where)})`;
+ 				}
+-				throw new Error(`${where}: Python decoders support only nullable unions inline`);
++				this.#runtime.add("union");
++				this.#runtime.add("Decoder");
++				return `cast('Decoder[${this.#annotation(type, "record")}]', union(${type.members.map(member => this.#decoder(member, where)).join(", ")}))`;
+ 			}
+ 			case "null":
+ 				throw new Error(`${where}: bare null type`);
+@@ -565,7 +567,8 @@ class PythonEmitter {
+ 			return `Sequence[${this.#paramAnnotation(type.items, where)}]`;
+ 		}
+ 		if (type.kind === "ref" && this.#def(type.name).kind === "object" && !this.#isOpen(type.name)) {
+-			throw new Error(`${where}: record-typed parameters need a hand-written command`);
++			this.#typing.add("Mapping");
++			return "Mapping[str, object]";
+ 		}
+ 		const inner = nonNull(type);
+ 		if (inner) return `${this.#paramAnnotation(inner, where)} | None`;
+diff --git a/packages/coding-agent/scripts/gen-rpc/rust.ts b/packages/coding-agent/scripts/gen-rpc/rust.ts
+index 7d38a15..b4529a9 100644
+--- a/packages/coding-agent/scripts/gen-rpc/rust.ts
++++ b/packages/coding-agent/scripts/gen-rpc/rust.ts
+@@ -600,10 +600,10 @@ class RustEmitter {
+ 		let output = "()";
+ 		let decode = "\t\tlet _ = data;\n\t\tOk(())";
+ 		if (command.result) {
+-			const result = this.#object(command.result);
+ 			let project = "";
+ 			output = command.result;
+ 			if (command.unwrap) {
++				const result = this.#object(command.result);
+ 				const plan = this.#planFields(result, result.fields).find(
+ 					candidate => candidate.field.key === command.unwrap,
+ 				);
+diff --git a/packages/coding-agent/test/agent-session-acp-permission.test.ts b/packages/coding-agent/test/agent-session-acp-permission.test.ts
+index 5c1d15a..2495ebc 100644
+--- a/packages/coding-agent/test/agent-session-acp-permission.test.ts
++++ b/packages/coding-agent/test/agent-session-acp-permission.test.ts
+@@ -385,6 +385,7 @@ it("top-level fallback preserves ACP permission for mounted destructive tools",
+ 	const xdev: XdevState = {
+ 		tools,
+ 		mountedNames: new Set(),
++		deferredNames: new Set<string>(),
+ 		builtInNames: new Set(["read", "write"]),
+ 		isActive: name => name === "read" || name === "write",
+ 	};
+@@ -417,6 +418,7 @@ it("startup-mounted destructive tools gain the ACP permission gate when the brid
+ 	const xdev: XdevState = {
+ 		tools,
+ 		mountedNames: new Set(["delete"]),
++		deferredNames: new Set<string>(),
+ 		builtInNames: new Set(["read", "write"]),
+ 		isActive: name => name === "read" || name === "write",
+ 	};
+diff --git a/packages/coding-agent/test/agent-session-plan-mode-convergence.test.ts b/packages/coding-agent/test/agent-session-plan-mode-convergence.test.ts
+index faba1ba..7ff81a4 100644
+--- a/packages/coding-agent/test/agent-session-plan-mode-convergence.test.ts
++++ b/packages/coding-agent/test/agent-session-plan-mode-convergence.test.ts
+@@ -166,6 +166,7 @@ describe("AgentSession plan-mode convergence", () => {
+ 			? {
+ 					tools: toolRegistry,
+ 					mountedNames: new Set<string>(),
++					deferredNames: new Set<string>(),
+ 					builtInNames: new Set(["ask", "write", "read"]),
+ 					isActive: name => currentAgent?.state.tools.some(tool => tool.name === name) ?? false,
+ 				}
+diff --git a/packages/coding-agent/test/agent-session-prewalk.test.ts b/packages/coding-agent/test/agent-session-prewalk.test.ts
+index e63b623..beea8b3 100644
+--- a/packages/coding-agent/test/agent-session-prewalk.test.ts
++++ b/packages/coding-agent/test/agent-session-prewalk.test.ts
+@@ -918,6 +918,7 @@ describe("AgentSession prewalk", () => {
+ 					],
+ 				]),
+ 				mountedNames: new Set([mcp.name]),
++				deferredNames: new Set<string>(),
+ 				builtInNames: new Set(),
+ 				isActive: () => false,
+ 			};
+diff --git a/packages/coding-agent/test/agent-session-tool-rebuild-skip.test.ts b/packages/coding-agent/test/agent-session-tool-rebuild-skip.test.ts
+index 3eb1fad..d1c33ad 100644
+--- a/packages/coding-agent/test/agent-session-tool-rebuild-skip.test.ts
++++ b/packages/coding-agent/test/agent-session-tool-rebuild-skip.test.ts
+@@ -87,6 +87,7 @@ function createTestXdevState(): XdevState {
+ 	return {
+ 		tools: new Map(),
+ 		mountedNames: new Set(),
++		deferredNames: new Set<string>(),
+ 		builtInNames: new Set(["read", "write"]),
+ 		isActive: () => true,
+ 	};
+diff --git a/packages/coding-agent/test/biome-client.test.ts b/packages/coding-agent/test/biome-client.test.ts
+index b2d4145..8929419 100644
+--- a/packages/coding-agent/test/biome-client.test.ts
++++ b/packages/coding-agent/test/biome-client.test.ts
+@@ -54,10 +54,10 @@ async function createFakeBiomeCommand(
+ 		`import * as fs from "node:fs";
+ const [command, flag, target] = process.argv.slice(2);
+ if (command !== "format") process.exit(7);
+-if (flag !== "--write") process.exit(8);
++if (flag !== "--stdin-file-path") process.exit(8);
+ if (target !== ${JSON.stringify(path.join(tempDir, "example.ts"))}) process.exit(10);
+-if (fs.readFileSync(target, "utf8") !== fs.readFileSync(${JSON.stringify(expectedInputPath)}, "utf8")) process.exit(9);
+-fs.copyFileSync(${JSON.stringify(formattedOutputPath)}, target);
++if (fs.readFileSync(0, "utf8") !== fs.readFileSync(${JSON.stringify(expectedInputPath)}, "utf8")) process.exit(9);
++process.stdout.write(fs.readFileSync(${JSON.stringify(formattedOutputPath)}, "utf8"));
+ `,
+ 	);
+ }
+@@ -82,7 +82,7 @@ describe("BiomeClient format", () => {
+ 		const result = await new BiomeClient(biomeConfig(command), tempDir).format(targetFile, unformatted);
+ 
+ 		expect(result).toBe(formatted);
+-		expect(await Bun.file(targetFile).text()).toBe(formatted);
++		expect(await Bun.file(targetFile).text()).toBe("export const stale = true;\n");
+ 	});
+ 
+ 	test.skipIf(repoBiome === null)("formats config-included TypeScript with a real Biome", async () => {
+diff --git a/packages/coding-agent/test/interactive-mode-default-plan-mode.test.ts b/packages/coding-agent/test/interactive-mode-default-plan-mode.test.ts
+index cf34b2f..ef81643 100644
+--- a/packages/coding-agent/test/interactive-mode-default-plan-mode.test.ts
++++ b/packages/coding-agent/test/interactive-mode-default-plan-mode.test.ts
+@@ -240,6 +240,7 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
+ 		const xdev: XdevState = {
+ 			tools: new Map(),
+ 			mountedNames: new Set(),
++			deferredNames: new Set<string>(),
+ 			builtInNames: new Set(["read", "write"]),
+ 			isActive: name => session?.getActiveToolNames().includes(name) === true,
+ 		};
+@@ -318,6 +319,7 @@ describe("InteractiveMode plan.defaultOnStartup", () => {
+ 		const xdev: XdevState = {
+ 			tools: new Map(),
+ 			mountedNames: new Set(),
++			deferredNames: new Set<string>(),
+ 			builtInNames: new Set(["read", "write"]),
+ 			isActive: name => session?.getActiveToolNames().includes(name) === true,
+ 		};
+diff --git a/packages/coding-agent/test/issue-5764-registertool-loadmode.test.ts b/packages/coding-agent/test/issue-5764-registertool-loadmode.test.ts
+index 5af4fe6..03e241c 100644
+--- a/packages/coding-agent/test/issue-5764-registertool-loadmode.test.ts
++++ b/packages/coding-agent/test/issue-5764-registertool-loadmode.test.ts
+@@ -17,7 +17,9 @@ import {
+ 	defaultLoadModeForToolName,
+ 	ESSENTIAL_BUILTIN_TOOL_NAMES,
+ } from "@oh-my-pi/pi-coding-agent/tools/essential-tools";
+-import { isMountableUnderXdev } from "@oh-my-pi/pi-coding-agent/tools/xdev";
++import { isMountableUnderXdev as mountable } from "@oh-my-pi/pi-coding-agent/tools/xdev";
++const isMountableUnderXdev = (tool: Parameters<typeof mountable>[0]) =>
++	mountable(tool, { deferredNames: new Set<string>() });
+ 
+ function makeSession(): ToolSession {
+ 	return {
+diff --git a/packages/coding-agent/test/mcp-tool-name-canonicalization.test.ts b/packages/coding-agent/test/mcp-tool-name-canonicalization.test.ts
+index 8e8c953..dd448e7 100644
+--- a/packages/coding-agent/test/mcp-tool-name-canonicalization.test.ts
++++ b/packages/coding-agent/test/mcp-tool-name-canonicalization.test.ts
+@@ -156,6 +156,7 @@ function xdevStateWith(options: { mounted?: string[]; active?: string[] }): Xdev
+ 	return {
+ 		tools,
+ 		mountedNames: new Set(mounted),
++		deferredNames: new Set<string>(),
+ 		builtInNames: new Set(),
+ 		isActive: name => active.includes(name),
+ 	};
+diff --git a/packages/coding-agent/test/memory-tools.test.ts b/packages/coding-agent/test/memory-tools.test.ts
+index d612a37..361e0a0 100644
+--- a/packages/coding-agent/test/memory-tools.test.ts
++++ b/packages/coding-agent/test/memory-tools.test.ts
+@@ -276,6 +276,7 @@ describe("Mnemopi tool factories", () => {
+ 		session.xdev = {
+ 			tools,
+ 			mountedNames: new Set(["recall", "memory_edit"]),
++			deferredNames: new Set<string>(),
+ 			builtInNames: new Set(tools.keys()),
+ 			isActive: name => name === "reflect",
+ 		};
+diff --git a/packages/coding-agent/test/rpc-prompt-result.test.ts b/packages/coding-agent/test/rpc-prompt-result.test.ts
+index 9837283..1a3ece9 100644
+--- a/packages/coding-agent/test/rpc-prompt-result.test.ts
++++ b/packages/coding-agent/test/rpc-prompt-result.test.ts
+@@ -19,6 +19,13 @@ function createHarness() {
+ 		hasPendingAsyncWork: () => false,
+ 	};
+ 	const results = new RpcPromptResults(session, frame => frames.push(frame));
++	// These unit tests model a transport that has already written its input ACK.
++	const begin = results.begin.bind(results);
++	results.begin = id => {
++		const ticket = begin(id);
++		results.acknowledge(id);
++		return ticket;
++	};
+ 	return { frames, session, results };
+ }
+ 
+@@ -207,7 +214,7 @@ describe("RpcPromptResults", () => {
+ 		await flushFrames();
+ 
+ 		expect(frames).toEqual([
+-			{ type: "prompt_result", id: "req_old", agentInvoked: true, status: "aborted", sessionSettled: true },
++			{ type: "prompt_result", id: "req_old", agentInvoked: true, status: "aborted", sessionSettled: false },
+ 			{ type: "prompt_result", id: "req_new", agentInvoked: true, status: "completed", sessionSettled: true },
+ 		]);
+ 	});
+@@ -226,7 +233,7 @@ describe("RpcPromptResults", () => {
+ 		await flushFrames();
+ 
+ 		expect(frames).toEqual([
+-			{ type: "prompt_result", id: "req_queued", agentInvoked: true, status: "aborted", sessionSettled: true },
++			{ type: "prompt_result", id: "req_queued", agentInvoked: true, status: "aborted", sessionSettled: false },
+ 			{ type: "prompt_result", id: "req_running", agentInvoked: true, status: "aborted", sessionSettled: true },
+ 		]);
+ 	});
+@@ -239,6 +246,7 @@ describe("RpcPromptResults", () => {
+ 		);
+ 		results.completeLocal(results.begin("req_6"));
+ 		frames.push({ type: "response", id: "req_6" });
++		results.acknowledge("req_6");
+ 		await flushFrames();
+ 
+ 		expect(frames).toEqual([
+diff --git a/packages/coding-agent/test/write-xdev-dispatch.test.ts b/packages/coding-agent/test/write-xdev-dispatch.test.ts
+index bcee08a..c66fa9c 100644
+--- a/packages/coding-agent/test/write-xdev-dispatch.test.ts
++++ b/packages/coding-agent/test/write-xdev-dispatch.test.ts
+@@ -65,6 +65,7 @@ function createTestXdevState(
+ 	const state: XdevState = {
+ 		tools: new Map(tools.map(tool => [tool.name, tool])),
+ 		mountedNames: new Set(tools.map(tool => tool.name)),
++		deferredNames: new Set<string>(),
+ 		builtInNames: new Set(builtInNames),
+ 		isActive,
+ 		resolve: name => resolveXdevTool(state, name),
+diff --git a/packages/tui/test/terminal-background.test.ts b/packages/tui/test/terminal-background.test.ts
+index 47ada2b..583caab 100644
+--- a/packages/tui/test/terminal-background.test.ts
++++ b/packages/tui/test/terminal-background.test.ts
+@@ -205,8 +205,10 @@ describe("terminal background SIXEL repaint", () => {
+ 	});
+ 
+ 	it("repaints multiplexer viewports without clearing their native history", async () => {
+-		const previousZellij = Bun.env.ZELLIJ;
+-		Bun.env.ZELLIJ = "1";
++		// Zellij deliberately distrusts OSC 11 on macOS; tmux exercises this
++		// generic multiplexer repaint contract with trusted background reports.
++		const previousTmux = Bun.env.TMUX;
++		Bun.env.TMUX = "test,1,0";
+ 		const terminal = new AppearanceTerminal(40, 5);
+ 		const scheduler = new VirtualRenderScheduler();
+ 		const tui = new TUI(terminal, undefined, { renderScheduler: scheduler });
+@@ -232,8 +234,8 @@ describe("terminal background SIXEL repaint", () => {
+ 			expect(terminal.writes.join("")).not.toContain("\x1b[3J");
+ 		} finally {
+ 			tui.stop();
+-			if (previousZellij === undefined) delete Bun.env.ZELLIJ;
+-			else Bun.env.ZELLIJ = previousZellij;
++			if (previousTmux === undefined) delete Bun.env.TMUX;
++			else Bun.env.TMUX = previousTmux;
+ 		}
+ 	});
+ 
+diff --git a/sdk/python/omp-rpc/src/omp_rpc/_wire_runtime.py b/sdk/python/omp-rpc/src/omp_rpc/_wire_runtime.py
+index 737404a..08cac63 100644
+--- a/sdk/python/omp-rpc/src/omp_rpc/_wire_runtime.py
++++ b/sdk/python/omp-rpc/src/omp_rpc/_wire_runtime.py
+@@ -114,6 +114,19 @@ def nullable(inner: Decoder[T]) -> Decoder[T | None]:
+     return decode
+ 
+ 
++def union(*members: Decoder[object]) -> Decoder[object]:
++    """Try each declared wire alternative without accepting arbitrary JSON."""
++    def decode(value: object, path: str) -> object:
++        for member in members:
++            try:
++                return member(value, path)
++            except ValueError:
++                pass
++        raise ValueError(f"{path} does not match any declared union alternative")
++
++    return decode
++
++
+ def scalar_or_array(item: Decoder[T]) -> Decoder[tuple[T, ...]]:
+     """Accepts a bare scalar where older servers sent one instead of a list."""
+     as_array = array(item)

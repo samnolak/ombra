@@ -1423,8 +1423,8 @@ export interface RpcModeOptions {
 export interface RpcSessionRuntime {
 	/** Accept an already parsed command or side-channel frame. */
 	dispatch(frame: unknown, processed?: () => void): void;
-	/** Abort and dispose only this logical session; idempotent. */
-	close(): Promise<void>;
+	/** Abort and dispose this session; CLI EOF may first drain accepted input. */
+	close(options?: { drainInput?: boolean }): Promise<void>;
 	readonly closed: Promise<void>;
 }
 
@@ -1744,9 +1744,10 @@ export async function createRpcSessionRuntime(
 	// unhandled rejection if a session closes during startup.
 	void closed.promise.catch(() => {});
 	let closing: Promise<void> | undefined;
-	const close = (): Promise<void> => {
+	const close = (options?: { drainInput?: boolean }): Promise<void> => {
 		if (closing) return closing;
 		closing = (async () => {
+			if (options?.drainInput) await inputDispatcher.drain();
 			inputDispatcher.stop();
 			lifetime.abort(new Error("RPC session closed"));
 			mcp.close();
@@ -1779,7 +1780,7 @@ export async function createRpcSessionRuntime(
 			unsubscribePersistence();
 			unsubscribeTakeover();
 			extensionUserMessageTracker.dispose();
-			if (persistenceFailure) {
+			if (persistenceFailure && failures.length > 0) {
 				process.stderr.write(`${formatPersistenceDurabilityFailure(persistenceFailure.message)}\n`);
 			}
 			if (failures.length) throw new AggregateError(failures, "RPC session disposal failed");
@@ -2880,7 +2881,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 		message => writer.write(encoder.encodeFrames({ type: "response", command: "parse", success: false, error: message })),
 	);
 	try {
-		await runtime.close();
+		await runtime.close({ drainInput: true });
 		await writer.close();
 		process.exit(0);
 	} catch {

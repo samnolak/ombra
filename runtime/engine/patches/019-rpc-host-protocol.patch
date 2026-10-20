@@ -223,7 +223,7 @@ index aacb7e0d3ca756db58a6c1212eb910c9df54cf2a..af65e3a2d294d976f4c822c4d0da1aaa
  	}
  
 diff --git a/src/modes/rpc/rpc-mode.ts b/src/modes/rpc/rpc-mode.ts
-index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8deb035a05 100644
+index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..6f200d9685ec3f1eda11c8f1e0503df2d73aa7a7 100644
 --- a/src/modes/rpc/rpc-mode.ts
 +++ b/src/modes/rpc/rpc-mode.ts
 @@ -19,8 +19,12 @@ import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
@@ -628,8 +628,8 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
 +export interface RpcSessionRuntime {
 +	/** Accept an already parsed command or side-channel frame. */
 +	dispatch(frame: unknown, processed?: () => void): void;
-+	/** Abort and dispose only this logical session; idempotent. */
-+	close(): Promise<void>;
++	/** Abort and dispose this session; CLI EOF may first drain accepted input. */
++	close(options?: { drainInput?: boolean }): Promise<void>;
 +	readonly closed: Promise<void>;
 +}
 +
@@ -714,7 +714,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  
  	// Shutdown request flag (wrapped in object to allow mutation with const)
  	const shutdownState = { requested: false };
-@@ -1621,120 +1710,82 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1621,120 +1710,83 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  	const onPromptError = (id: string | undefined, command: string) => (promptError: Error) =>
  		output(error(id, command, promptError.message));
  
@@ -837,9 +837,10 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
 +	// unhandled rejection if a session closes during startup.
 +	void closed.promise.catch(() => {});
 +	let closing: Promise<void> | undefined;
-+	const close = (): Promise<void> => {
++	const close = (options?: { drainInput?: boolean }): Promise<void> => {
 +		if (closing) return closing;
 +		closing = (async () => {
++			if (options?.drainInput) await inputDispatcher.drain();
 +			inputDispatcher.stop();
 +			lifetime.abort(new Error("RPC session closed"));
 +			mcp.close();
@@ -881,7 +882,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
 +			unsubscribePersistence();
 +			unsubscribeTakeover();
 +			extensionUserMessageTracker.dispose();
-+			if (persistenceFailure) {
++			if (persistenceFailure && failures.length > 0) {
 +				process.stderr.write(`${formatPersistenceDurabilityFailure(persistenceFailure.message)}\n`);
 +			}
 +			if (failures.length) throw new AggregateError(failures, "RPC session disposal failed");
@@ -891,7 +892,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  	};
  
  	const getAvailableCommands = async () => buildAvailableSlashCommands(session);
-@@ -1755,107 +1806,100 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1755,107 +1807,100 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  
  	const inputGate = new RpcUserInputGate();
  	type OrderedUserInput = Extract<RpcCommand, { type: "prompt" | "steer" | "follow_up" | "abort_and_prompt" }>;
@@ -1078,7 +1079,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  			case "negotiate_protocol": {
  				if (command.protocolVersion !== 2)
  					return error(id, "negotiate_protocol", `Unsupported RPC protocol version: ${command.protocolVersion}`);
-@@ -1873,17 +1917,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1873,17 +1918,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				try {
  					// Ack after admission, including hooks and skill image preparation, so a
  					// queue edit sent after this response finds the message.
@@ -1097,7 +1098,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  				} catch (promptSetupError) {
  					promptResults.discard(ticket);
  					throw promptSetupError;
-@@ -1892,8 +1926,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1892,8 +1927,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  
  			case "steer":
  			case "follow_up": {
@@ -1107,7 +1108,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  			}
  
  			case "remove_queued_message": {
-@@ -1906,7 +1939,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1906,7 +1940,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				return fitRemoveQueuedMessageResponse(
  					id,
  					session.takeQueuedMessage(command.message, command.queue),
@@ -1116,7 +1117,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  				);
  			}
  
-@@ -1930,36 +1963,39 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1930,36 +1964,39 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				const restored = session.clearQueue({ forInterrupt: true });
  				goalController.stopForHostAbort();
  				await session.abort({ reason: USER_INTERRUPT_LABEL });
@@ -1176,7 +1177,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  				}
  				const requestedModel =
  					command.type === "switch_session" ? await resolveRequestedRpcModel(session, command) : undefined;
-@@ -1974,9 +2010,13 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1974,9 +2011,13 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  					if (err instanceof SessionBusyError) return error(id, command.type, err.message, "session_busy");
  					throw err;
  				} finally {
@@ -1192,7 +1193,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  					});
  					// Respond only once this change's reattach (and any queued ahead of it) has run.
  					await goalController.settled();
-@@ -1984,9 +2024,11 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1984,9 +2025,11 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				if (!result.data.cancelled) {
  					inputGate.commitSessionChange(command);
  					// `branch` leaves a live run streaming to its normal yield; new/switch detach it.
@@ -1205,7 +1206,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  					await emitAvailableCommandsUpdate();
  				}
  				return success(id, result.type, result.data);
-@@ -2013,6 +2055,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2013,6 +2056,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  					// reopens a transcript with the same id.
  					if (session.sessionFile !== fileBeforeOpen) promptResults.abortOpen();
  					void settleWatcher.check();
@@ -1213,7 +1214,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  					await emitAvailableCommandsUpdate();
  				}
  				return success(id, "open_session", result);
-@@ -2023,8 +2066,10 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2023,8 +2067,10 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  			// =================================================================
  
  			case "get_state": {
@@ -1225,7 +1226,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  				const queuedMessages = session.getQueuedMessages();
  				const state: RpcSessionState = {
  					model: session.model,
-@@ -2065,6 +2110,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2065,6 +2111,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  					})),
  					contextUsage: session.getContextUsage(),
  					goal: session.getGoalModeState() ?? null,
@@ -1234,7 +1235,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  				};
  				return success(id, "get_state", state);
  			}
-@@ -2100,6 +2147,15 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2100,6 +2148,15 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				}
  			}
  
@@ -1250,7 +1251,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  			case "set_ask_dialog": {
  				rpcUiContext.askDialogEnabled = command.enabled === true;
  				return success(id, "set_ask_dialog", { enabled: rpcUiContext.askDialogEnabled });
-@@ -2263,6 +2319,40 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2263,6 +2320,40 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				return failure ? error(id, "steer_subagent", failure) : success(id, "steer_subagent");
  			}
  
@@ -1291,7 +1292,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  			// =================================================================
  			// Model
  			// =================================================================
-@@ -2446,6 +2536,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2446,6 +2537,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  			}
  
  			case "get_messages_page": {
@@ -1300,7 +1301,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  				if (session.isStreaming || session.isCompacting)
  					return error(id, "get_messages_page", RPC_MESSAGES_PAGE_BUSY_ERROR, "session_busy");
  				const messages = session.messages;
-@@ -2453,7 +2545,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2453,7 +2546,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  					return success(
  						id,
  						"get_messages_page",
@@ -1309,7 +1310,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  							messages,
  							{
  								sessionId: session.sessionId,
-@@ -2501,6 +2593,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2501,6 +2594,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				let authEmitted = false;
  				try {
  					await session.modelRegistry.authStorage.oauth.login(command.providerId, {
@@ -1317,7 +1318,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  						onAuth: info => {
  							authEmitted = true;
  							output({
-@@ -2577,6 +2670,35 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2577,6 +2671,35 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				return success(id, "logout", { remainingSource });
  			}
  
@@ -1353,7 +1354,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  			// =================================================================
  			// Side questions (/btw)
  			// =================================================================
-@@ -2638,25 +2760,21 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2638,25 +2761,21 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  		}
  	};
  
@@ -1388,7 +1389,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
  		errorResponse: error,
  		trackBackgroundTask: task => shutdownCoordinator.track(task),
  		pendingExtensionRequests,
-@@ -2670,33 +2788,103 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2670,33 +2789,103 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  		afterSerialCommand: () => shutdownCoordinator.checkShutdownRequested(),
  		acceptInput: command => inputGate.accept(command),
  	});
@@ -1510,7 +1511,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..b2b038ccb484f0556ad97ae22d674c8d
 -	// point unreachable for the compiler.
 -	return disposeAndExit();
 +	try {
-+		await runtime.close();
++		await runtime.close({ drainInput: true });
 +		await writer.close();
 +		process.exit(0);
 +	} catch {
