@@ -282,21 +282,29 @@ public sealed class AttentionTests
     /// Real-app finding: the frame a reply ended in froze for 50–85 ms when "omp finished" was notified (the window in the
     /// background): .NET's Process.Start forks the app on macOS, stalling the UI thread on the runtime's locks. The helper
     /// is started without a fork there (posix_spawn): it still gets its arguments (spaces kept, nothing interpreted) and
-    /// the app's environment, and Detached returns at once.
+    /// the app's environment, and Detached does not wait for it: the helper writes into a FIFO, which blocks it until this
+    /// test opens the FIFO for reading — only after Detached returned (a Detached that waited would never return).
     /// </summary>
     [Fact]
     public async Task A_detached_helper_gets_its_arguments_and_the_environment()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "the notifiers that start helpers are macOS and Linux ones");
+        var ct = TestContext.Current.CancellationToken;
         var dir = TestProcesses.TempDir("detached");
         var script = Path.Combine(dir, "helper.sh");
-        var output = Path.Combine(dir, "out.txt");
-        await File.WriteAllTextAsync(script, $"printf '%s|%s|%s' \"$1\" \"$2\" \"$HOME\" > '{output}.tmp' && mv '{output}.tmp' '{output}'\n", TestContext.Current.CancellationToken);
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        Run.Detached("sh", [script, "one two", "\" & $(rm -rf x)"]);
-        Assert.True(watch.ElapsedMilliseconds < 50, $"starting the helper took {watch.ElapsedMilliseconds} ms");
-        var deadline = DateTime.UtcNow.AddSeconds(10);
-        while (!File.Exists(output) && DateTime.UtcNow < deadline) await Task.Delay(20, TestContext.Current.CancellationToken);
-        Assert.Equal($"one two|\" & $(rm -rf x)|{Environment.GetEnvironmentVariable("HOME")}", await File.ReadAllTextAsync(output, TestContext.Current.CancellationToken));
+        var fifo = Path.Combine(dir, "out.fifo");
+        using (var mkfifo = System.Diagnostics.Process.Start("mkfifo", [fifo])) await mkfifo.WaitForExitAsync(ct);
+        await File.WriteAllTextAsync(script, $"printf '%s|%s|%s' \"$1\" \"$2\" \"$HOME\" > '{fifo}'\n", ct);
+        await Task.Run(() => Run.Detached("sh", [script, "one two", "\" & $(rm -rf x)"]), ct).WaitAsync(TimeSpan.FromSeconds(10), ct);
+        var read = Task.Run(() => File.ReadAllText(fifo), ct);
+        try
+        {
+            Assert.Equal($"one two|\" & $(rm -rf x)|{Environment.GetEnvironmentVariable("HOME")}", await read.WaitAsync(TimeSpan.FromSeconds(10), ct));
+        }
+        finally
+        {
+            // The helper never wrote: give the blocked reader an end of file
+            if (!read.IsCompleted) File.OpenWrite(fifo).Dispose();
+        }
     }
 }

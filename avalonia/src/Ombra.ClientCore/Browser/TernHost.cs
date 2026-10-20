@@ -226,6 +226,12 @@ public sealed class TernHost : IDisposable
 
     // ── Ops without a block ──
 
+    /// <summary>
+    /// A new tab for omp, loading the open's address — about:blank when it gave none — through the block, so the load
+    /// reports (<c>committed</c>, <c>loaded</c>) once the page's events reach omp. As Tern does: omp's client waits for
+    /// its about:blank tab's load before it configures the tab, and a web view the browser just made has loaded nothing
+    /// yet, or loaded it before the page was connected.
+    /// </summary>
     private async Task<JsonObject> OpenAsync(Connection connection, JsonObject p, CancellationToken ct)
     {
         var browser = Browser ?? throw new TernException(TernException.NoWindow, "The Ombra window is not ready yet.");
@@ -237,17 +243,15 @@ public sealed class TernHost : IDisposable
         block.Attach(page);
         lock (_gate) _blocks[block.Id] = block;
         connection.Own(block);
-        if (TernBlock.Str(p, "url") is { Length: > 0 } url && url != "about:blank")
+        try
         {
-            try
-            {
-                await block.DispatchAsync("goto", new JsonObject { ["url"] = url }, ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                await CloseAsync(connection, block, CancellationToken.None).ConfigureAwait(false);
-                throw;
-            }
+            var url = TernBlock.Str(p, "url") is { Length: > 0 } u ? u : "about:blank";
+            await block.DispatchAsync("goto", new JsonObject { ["url"] = url }, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            await CloseAsync(connection, block, CancellationToken.None).ConfigureAwait(false);
+            throw;
         }
         return new JsonObject { ["block"] = block.Id };
     }
