@@ -131,10 +131,11 @@ launcher copy can go.
 
 App icon assets are generated from `tools/icon/ombra-icon-sheet.png` with `python3 tools/icon/make_icon.py`
 (Pillow, numpy, macOS `iconutil`; Xcode 26 for the macOS 26 catalog). The sheet's large tile is a mock-up with its
-own corners, rim and glow, so the generator lifts the swirl off it onto a full-bleed black square. macOS 26 gets
-`packaging/macos/Ombra.icon` compiled into `Assets.car` (`CFBundleIconName`, the system draws its own shape —
-the self-shaped icon before this sat shrunk on a grey plate in the Dock); older macOS gets `ombra.icns` with Apple's
-continuous-corner shape on the 1024/824 grid. Window, greeting, Linux and Windows use the same shaped tile;
+own corners, rim and glow, so the generator lifts the swirl off it onto a full-bleed black square.
+`packaging/macos/Ombra.icon` (Icon Composer) is compiled into `Assets.car` (`CFBundleIconName`): macOS 26 draws
+its own shape and its dark, tinted and clear looks, macOS 14–15 actool's flat renditions — the self-shaped icon
+before this sat shrunk on a grey plate in the macOS 26 Dock. `ombra.icns` (`CFBundleIconFile`) has Apple's
+continuous-corner shape on the 1024/824 grid. Window, greeting, Linux and Windows use that shaped tile;
 circular sheet variants supply the tray and small ICO frames. Details: [`PLATFORM_NOTES.md`](PLATFORM_NOTES.md).
 
 ## M1 scope: the 15 features (fixed 2026-09-25)

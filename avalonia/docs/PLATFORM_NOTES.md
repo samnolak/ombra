@@ -40,6 +40,32 @@ stay on the left display. The Browser `close` case sends ⌘W to Nightly and che
 On Chats, ⌘W intentionally follows the quit sequence: the process exits, so a later Dock launch is a new
 application, not `applicationShouldHandleReopen` on a hidden retained window.
 
+## macOS: the app icon (no grey plate on macOS 26)
+
+**What.** `Ombra.app` carries two icons (`tools/package/package.sh`, `packaging/Info.plist`): `Assets.car` with
+the Icon Composer icon `Ombra` (`CFBundleIconName`) and `ombra.icns` (`CFBundleIconFile`). Both come from
+`tools/icon/make_icon.py`: the swirl on a full-bleed black square (`packaging/macos/Ombra.icon`: black fill, the
+swirl as one layer without glass), compiled by Xcode 26's `actool`; the icns is that square inside Apple's app icon
+shape (continuous corners, radius 185.4 on the 824/1024 grid). The catalog also holds flat renditions for macOS 14–15.
+
+**Why.** macOS 26 draws an icon whose outline is not its own app icon shape shrunk on a light-grey rounded plate
+(“icon jail”). The first swirl icon kept the presentation sheet's tile — a rounded rectangle of its own, wider than
+tall, with a rim and glow — and was jailed. Checked with `NSWorkspace.icon(forFile:)` on test bundles: that icns was
+jailed whether the launcher names SDK 26 or 15 (the `vtool` SDK marking is unrelated and stays for the window
+corners); a full-bleed square, the Big Sur shape and the macOS 26 shape are all re-masked by the system without a
+plate; the catalog icon adds the system's dark, tinted and clear renderings. Windows and Linux do not mask app
+icons, so `icon.ico` and the hicolor PNGs keep the shaped tile (a full-bleed square would show as a hard black
+square there).
+
+**Checked.** A package from `package.sh osx-arm64` rendered through IconServices (`ISIcon` with an
+`ISImageDescriptor`; `NSWorkspace.icon(forFile:)` agrees for the light look) at Dock size, light and dark appearance
+and both greyscale variants of the tinted/clear modes: full size in the system shape, no plate. The previous icon
+from the same renderer: on the plate in all of them.
+
+**Regenerating.** `actool` for `.icon` needs Xcode 26 on a macOS 26 host (on macos-15 its asset runtime crashes);
+without one, the `icon` job of `avalonia-package.yml` (runner macos-26) compiles the checked-in `Ombra.icon` and
+uploads `Assets.car` as artifact `ombra-icon-catalog`.
+
 ## macOS: embedded browser print sheets
 
 Nightly's embedded window must never become an on-screen sheet parent. Its native print and page-setup requests
