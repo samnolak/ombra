@@ -924,6 +924,12 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
     }
     else if (!aborted && (scenario is "approval" or "approval-timeout" || scenario == "multi" && message.Contains("APPROVE", StringComparison.Ordinal)))
     {
+        // "READ <path>": the turn reads that file before it asks (what a running turn opened: GitBellTests)
+        if (message.StartsWith("READ ", StringComparison.Ordinal))
+        {
+            Emit(new { type = "tool_execution_start", toolCallId = "t0", toolName = "read", args = new { path = message[5..].Trim() } });
+            Emit(new { type = "tool_execution_end", toolCallId = "t0", toolName = "read", result = new { content = new[] { new { type = "text", text = "file body" } } } });
+        }
         Emit(new { type = "tool_execution_start", toolCallId = "t1", toolName = "bash", args = new { command = "echo hi" } });
         var did = $"ap{Interlocked.Increment(ref dialogSeq)}";
         // Long enough that the card (deadline minus the client's 1 s margin) is seen on slow runners (CI run 18, Windows).

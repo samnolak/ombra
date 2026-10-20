@@ -15,13 +15,16 @@ public sealed record WatchedFolder(string Path, bool AutoFetch);
 
 /// <summary>What the bell needs from the window: the open chats' folders, the settings, and where its actions lead.</summary>
 /// <param name="BeginUpdate">
-/// Admission for an update of the repository at the given top: null while an agent turn runs (or input waits) in it;
+/// Admission for an update of the repository at the given top: null while another update holds it, or while an agent
+/// turn runs (or input waits) in it unless the second argument lets the update run under the turn (Update now);
 /// otherwise a hold that refuses new turns there until it is disposed.
 /// </param>
+/// <param name="AgentFiles">The files (relative to the given top, '/') the turns running in that repository changed or opened.</param>
 public sealed record GitBellHost(
     Func<IReadOnlyList<WatchedFolder>> Folders,
     Func<bool> FetchAllowed,
-    Func<string, IDisposable?> BeginUpdate,
+    Func<string, bool, IDisposable?> BeginUpdate,
+    Func<string, IReadOnlyCollection<string>> AgentFiles,
     Action<string, string> AskAgent,
     Func<string, string, Task> ShowIncoming,
     Action OpenTeamInbox);
@@ -58,6 +61,13 @@ public sealed partial class GitBellViewModel : ObservableObject
     public ObservableCollection<TeamInboxRow> Team { get; } = [];
 
     [ObservableProperty] private bool _isOpen;
+
+    /// <summary>The list is shown: a queued update's Update now is weighed against what the turn did since.</summary>
+    partial void OnIsOpenChanged(bool value)
+    {
+        if (!value) return;
+        foreach (var row in Repos.Where(r => r.IsQueued)) Weigh(row);
+    }
 
     public int Count => Repos.Count(r => r.HasNews) + Team.Count;
     public bool HasBadge => Count > 0;
@@ -208,6 +218,7 @@ public sealed partial class GitBellViewModel : ObservableObject
             Repos.Add(row);
         }
         row.Set(state, error);
+        if (row.IsQueued) Weigh(row);
     }
 
     /// <summary>The "behind" hint for the composer of a chat in <paramref name="folder"/>; null when it is up to date.</summary>
@@ -216,29 +227,59 @@ public sealed partial class GitBellViewModel : ObservableObject
             ? Repos.FirstOrDefault(r => r.Top == top && r.Behind > 0)
             : null;
 
-    internal async Task UpdateAsync(RepoUpdateRow row)
+    /// <summary>
+    /// Update / Update (keep my changes): right away when no agent works in the repository, else queued — it runs when
+    /// the turn ends (<see cref="OnTurnEnded"/>). <paramref name="now"/> (Update now on a queued row): under the
+    /// running turn, when the incoming commits touch none of the files it changed or opened and none of the uncommitted
+    /// ones (both read again first); otherwise it stays queued and the row says which files.
+    /// </summary>
+    internal async Task UpdateAsync(RepoUpdateRow row, bool now = false)
     {
         // Taken before the first await and held through the read and the pull: no turn starts in this repository
-        // while git writes its files, and none is running now (it may be editing them or running git itself)
-        using var hold = _host.BeginUpdate(row.Top);
+        // while git writes its files, and, but for Update now, none is running (it may be editing them or running git)
+        using var hold = _host.BeginUpdate(row.Top, now);
         if (hold is null)
         {
-            row.IsQueued = true;
-            row.Message = Loc.T("The agent is working in this repository: it updates when the turn ends.");
+            Queue(row);
             return;
         }
-        row.IsQueued = false;
         row.IsBusy = true;
-        row.Message = Loc.T("Updating…");
+        row.ShowMessage(Loc.T("Updating…"));
         try
         {
+            if (now)
+            {
+                Apply(row.Top, await GitUpstream.ReadAsync(row.Top, CancellationToken.None), null);
+                if (!row.IsQueued || row.AgentOverlap.Count > 0)
+                {
+                    // Not updatable any more (the risk line says why) or the turn touched an incoming file (the row lists them)
+                    row.ShowMessage(row.IsQueued ? Loc.T("Will update when the agent's turn ends.") : "");
+                    Notify();
+                    return;
+                }
+            }
+            row.IsQueued = false;
             var error = await GitUpstream.UpdateAsync(row.Top, CancellationToken.None);
             var state = await GitUpstream.ReadAsync(row.Top, CancellationToken.None);
             Apply(row.Top, state, null);
-            row.Message = error ?? Loc.T("Updated.");
+            row.ShowMessage(error ?? Loc.T("Updated."), error is not null);
             Notify();
         }
         finally { row.IsBusy = false; }
+    }
+
+    private void Queue(RepoUpdateRow row)
+    {
+        row.IsQueued = true;
+        row.ShowMessage(Loc.T("Will update when the agent's turn ends."));
+        Weigh(row);
+    }
+
+    /// <summary>For Update now: the incoming files the turns running in the repository changed or opened.</summary>
+    private void Weigh(RepoUpdateRow row)
+    {
+        var agent = new HashSet<string>(_host.AgentFiles(row.Top), OperatingSystem.IsLinux() ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase);
+        row.AgentOverlap = row.State?.Incoming?.Files.Where(agent.Contains).ToList() ?? [];
     }
 
     /// <summary>Whether <paramref name="folder"/> is in a repository being updated (<paramref name="updating"/>: their tops).</summary>
@@ -277,17 +318,43 @@ public sealed partial class RepoUpdateRow(GitBellViewModel bell, string top) : O
     [NotifyPropertyChangedFor(nameof(HasMessage))]
     private string _message = "";
 
+    /// <summary>The message is a failure (git's reason): shown as a warning.</summary>
+    [ObservableProperty] private bool _isMessageError;
+
+    /// <summary>git is updating the repository now.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(CanUpdate), nameof(CanUpdateKeepingChanges))]
+    [NotifyPropertyChangedFor(nameof(IsWaiting), nameof(CanUpdateNow))]
+    [NotifyCanExecuteChangedFor(nameof(UpdateCommand))]
     private bool _isBusy;
 
-    [ObservableProperty] private bool _isQueued;
+    /// <summary>Update was pressed while an agent works in the repository: it runs when the turn ends (Cancel drops it).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsWaiting), nameof(CanUpdateNow), nameof(NowText), nameof(HasNowText))]
+    [NotifyCanExecuteChangedFor(nameof(UpdateCommand))]
+    private bool _isQueued;
+
+    /// <summary>The incoming files the running turn changed or opened (as last weighed): Update now is not offered while there are any.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanUpdateNow), nameof(NowText), nameof(HasNowText))]
+    private IReadOnlyList<string> _agentOverlap = [];
 
     internal void Set(UpstreamState? state, string? error)
     {
         State = state;
         Error = error is null ? null : Loc.T("Couldn't check the remote: ") + error;
         OnPropertyChanged(nameof(HasError));
+        // A queued update the branch can no longer take by a fast-forward is dropped: the risk line says why
+        if (IsQueued && Risk is not (UpdateRisk.Clean or UpdateRisk.KeepChanges))
+        {
+            IsQueued = false;
+            ShowMessage("");
+        }
+    }
+
+    internal void ShowMessage(string text, bool error = false)
+    {
+        Message = text;
+        IsMessageError = error;
     }
 
     public int Behind => State?.Behind ?? 0;
@@ -331,9 +398,28 @@ public sealed partial class RepoUpdateRow(GitBellViewModel bell, string top) : O
     public bool HasOverlap => State?.Overlap.Count > 0;
     public string OverlapText => State is { } s && s.Overlap.Count > 0 ? Loc.F("Changed on both sides: {0}", FileList(s.Overlap)) : "";
 
-    public bool CanUpdate => Risk == UpdateRisk.Clean && !IsBusy;
-    public bool CanUpdateKeepingChanges => Risk == UpdateRisk.KeepChanges && !IsBusy;
+    /// <summary>Update is offered (disabled while queued or updating).</summary>
+    public bool CanUpdate => Risk == UpdateRisk.Clean;
+
+    /// <summary>Update (keep my changes) is offered (disabled while queued or updating).</summary>
+    public bool CanUpdateKeepingChanges => Risk == UpdateRisk.KeepChanges;
+
     public bool CanAskAgent => Risk is UpdateRisk.Overlap or UpdateRisk.Diverged;
+
+    /// <summary>Queued or updating: the spinner by the message.</summary>
+    public bool IsWaiting => IsBusy || IsQueued;
+
+    /// <summary>Queued, and the incoming commits touch none of the files the running turn changed or opened.</summary>
+    public bool CanUpdateNow => IsQueued && !IsBusy && AgentOverlap.Count == 0;
+
+    /// <summary>Why a queued update offers no Update now.</summary>
+    public string NowText => IsQueued && AgentOverlap.Count > 0
+        ? Loc.F("Can't update now: the agent's turn changed or opened files the incoming commits change ({0}).", FileList(AgentOverlap))
+        : "";
+
+    public bool HasNowText => NowText.Length > 0;
+
+    private bool CanStartUpdate => !IsBusy && !IsQueued;
 
     /// <summary>The request the composer gets for an update that needs care.</summary>
     public string AgentRequest
@@ -348,8 +434,18 @@ public sealed partial class RepoUpdateRow(GitBellViewModel bell, string top) : O
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanStartUpdate))]
     private Task Update() => bell.UpdateAsync(this);
+
+    [RelayCommand]
+    private Task UpdateNow() => bell.UpdateAsync(this, now: true);
+
+    [RelayCommand]
+    private void CancelQueued()
+    {
+        IsQueued = false;
+        ShowMessage("");
+    }
 
     [RelayCommand]
     private void AskAgent() => bell.AskAgent(this);

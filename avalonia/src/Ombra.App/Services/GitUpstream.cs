@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Ombra.App.Localization;
 using Ombra.ClientCore;
 using Ombra.Rpc;
@@ -61,28 +62,43 @@ public sealed record UpstreamState(
 /// command — an ssh command, a credential helper, an upload-pack, a filter or merge driver, an ext:: transport, hooks,
 /// fsmonitor — is overridden on the command line with the user's own (global or system) value or a harmless one.</para>
 /// </summary>
-public static class GitUpstream
+public static partial class GitUpstream
 {
     private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan NetworkTimeout = TimeSpan.FromSeconds(90);
 
     private static string NullDevice => OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
 
-    /// <summary>git with no prompt of any kind (terminal, credential manager, ssh askpass) and English messages.</summary>
-    private static Dictionary<string, string?> Environment() => new()
+    /// <summary>
+    /// git with no prompt of any kind (terminal, credential manager, ssh askpass) and English messages. The rest of the
+    /// app's environment is git's: SSH_AUTH_SOCK reaches ssh's agent, PATH (the login shell's, read at start) the
+    /// credential helpers — on macOS with Homebrew's folders added, should the app have started without them.
+    /// </summary>
+    internal static Dictionary<string, string?> Environment()
     {
-        ["GIT_TERMINAL_PROMPT"] = "0",
-        ["GCM_INTERACTIVE"] = "never",
-        ["SSH_ASKPASS_REQUIRE"] = "never",
-        ["GIT_ASKPASS"] = OperatingSystem.IsWindows() ? null : "/usr/bin/true",
-        ["SSH_ASKPASS"] = OperatingSystem.IsWindows() ? null : "/usr/bin/true",
-        ["GIT_PAGER"] = "cat",
-        ["GIT_EDITOR"] = "true",
-        ["GIT_CONFIG_PARAMETERS"] = null,
-        ["GIT_CONFIG_COUNT"] = null,
-        ["LC_ALL"] = "C",
-        ["LANGUAGE"] = "C",
-    };
+        var env = new Dictionary<string, string?>
+        {
+            ["GIT_TERMINAL_PROMPT"] = "0",
+            ["GCM_INTERACTIVE"] = "never",
+            ["SSH_ASKPASS_REQUIRE"] = "never",
+            ["GIT_ASKPASS"] = OperatingSystem.IsWindows() ? null : "/usr/bin/true",
+            ["SSH_ASKPASS"] = OperatingSystem.IsWindows() ? null : "/usr/bin/true",
+            ["GIT_PAGER"] = "cat",
+            ["GIT_EDITOR"] = "true",
+            ["GIT_CONFIG_PARAMETERS"] = null,
+            ["GIT_CONFIG_COUNT"] = null,
+            ["LC_ALL"] = "C",
+            ["LANGUAGE"] = "C",
+        };
+        if (OperatingSystem.IsMacOS())
+        {
+            var dirs = (System.Environment.GetEnvironmentVariable("PATH") ?? "").Split(':', StringSplitOptions.RemoveEmptyEntries).ToList();
+            foreach (var dir in (string[])["/opt/homebrew/bin", "/usr/local/bin"])
+                if (!dirs.Contains(dir)) dirs.Add(dir);
+            env["PATH"] = string.Join(':', dirs);
+        }
+        return env;
+    }
 
     private static string Program => WorkspaceTools.Which(Git.Program) ?? Git.Program;
 
@@ -175,6 +191,72 @@ public static class GitUpstream
         Lines(r.Stderr).FirstOrDefault(l => l.StartsWith("fatal:", StringComparison.Ordinal) || l.StartsWith("error:", StringComparison.Ordinal))
         ?? Lines(r.Stderr).FirstOrDefault() ?? Lines(r.Stdout).FirstOrDefault() ?? Loc.T("git failed");
 
+    /// <summary>Why a fetch or pull from <paramref name="remote"/> failed: what to do when the remote refused access, else git's own line.</summary>
+    private static async Task<string> ReasonAsync(string top, string? remote, OmpCliResult r, CancellationToken ct)
+    {
+        var url = remote is null ? null : Lines((await RunAsync(top, ["remote", "get-url", remote], ct)).Stdout).FirstOrDefault();
+        return AccessProblem(r.Stderr, url) ?? Message(r);
+    }
+
+    /// <summary>
+    /// The remote at <paramref name="url"/> refusing access, said so that the user knows what to do: not found (on
+    /// GitHub also what a private repository looks like to an account without access), a sign-in git has no saved
+    /// credentials for, an SSH key or host key ssh refused. Null for any other failure and for a local remote.
+    /// </summary>
+    internal static string? AccessProblem(string stderr, string? url)
+    {
+        if (RemoteParts(url) is not (var host, var repo, var user)) return null;
+        bool Says(string text) => stderr.Contains(text, StringComparison.OrdinalIgnoreCase);
+        var github = host.Equals("github.com", StringComparison.OrdinalIgnoreCase) || host.EndsWith(".github.com", StringComparison.OrdinalIgnoreCase);
+        if (Says("Repository not found") || NotFoundLine().IsMatch(stderr) || Says("could not be found or you don't have permission"))
+            return github
+                ? Loc.F("GitHub says {0} was not found. A private repository looks like that to an account without access to it: sign in with one that has it (gh auth login in Terminal), or check the address (git remote -v) — the repository may have been renamed or deleted.", repo)
+                : Loc.F("{0} says {1} was not found: it may be private and the account git signs in with has no access to it, or it was renamed or deleted. Check the address (git remote -v) and the account.", host, repo);
+        if (Says("could not read Username") || Says("could not read Password") || Says("terminal prompts disabled") || Says("Authentication failed")
+            || Says("Invalid username or password") || Says("HTTP Basic: Access denied") || Says("returned error: 401"))
+            return github
+                ? Loc.T("GitHub asked for a sign-in and git has no saved credentials for it. Sign in in Terminal: gh auth login, then gh auth setup-git.")
+                : Loc.F("{0} asked for a sign-in and git has no saved credentials for it. Sign in once in Terminal: a git fetch there saves them with your credential helper.", host);
+        if (Says("Permission denied (publickey"))
+            return Loc.F("{0} refused your SSH key: check that it is loaded (ssh-add -l in Terminal) and added to your account there.", host);
+        if (Says("Host key verification failed"))
+            return Loc.F("{0}'s SSH host key is not known yet: connect once in Terminal ({1}) to accept it.", host, $"ssh -T {(user is null ? "" : user + "@")}{host}");
+        return null;
+    }
+
+    /// <summary>A remote address's host, repository (<c>owner/name</c>, no <c>.git</c>) and SSH user; null for a local path.</summary>
+    private static (string Host, string Repo, string? User)? RemoteParts(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        string host, path;
+        string? user = null;
+        if (url.Contains("://", StringComparison.Ordinal))
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || u.IsFile || u.Host.Length == 0) return null;
+            host = u.Host;
+            path = Uri.UnescapeDataString(u.AbsolutePath);
+            // Never a password or token: only an SSH user name is shown
+            if (u.Scheme == "ssh" && u.UserInfo.Length > 0) user = Uri.UnescapeDataString(u.UserInfo.Split(':')[0]);
+        }
+        else if (ScpLike().Match(url) is { Success: true } m)
+        {
+            host = m.Groups["host"].Value;
+            path = m.Groups["path"].Value;
+            user = m.Groups["user"].Success ? m.Groups["user"].Value : null;
+        }
+        else return null;
+        path = path.Trim('/');
+        if (path.EndsWith(".git", StringComparison.OrdinalIgnoreCase)) path = path[..^4];
+        return (host, path, user);
+    }
+
+    /// <summary><c>[user@]host:path</c>; the host is longer than one letter (<c>C:\repo</c> is a Windows path).</summary>
+    [GeneratedRegex(@"^(?:(?<user>[^@/:]+)@)?(?<host>[^@/:\\]{2,}):(?<path>.+)$")]
+    private static partial Regex ScpLike();
+
+    [GeneratedRegex(@"repository '[^']*' not found", RegexOptions.IgnoreCase)]
+    private static partial Regex NotFoundLine();
+
     /// <summary>The remote the branch tracks (else <c>origin</c>, when there is one); null without remotes.</summary>
     private static async Task<string?> RemoteAsync(string top, CancellationToken ct)
     {
@@ -194,7 +276,7 @@ public static class GitUpstream
         if (await RemoteAsync(top, ct) is not { } remote) return null;
         // remote.*.uploadpack takes the first value it finds (a -c after it does not win): the option does
         var r = await RunAsync(top, ["fetch", "--quiet", "--no-recurse-submodules", "--no-write-fetch-head", "--upload-pack=git-upload-pack", remote], ct, NetworkTimeout);
-        return r.Ok ? null : Message(r);
+        return r.Ok ? null : await ReasonAsync(top, remote, r, ct);
     }
 
     /// <summary>The repository against its upstream as last fetched; null when <paramref name="top"/> is no repository on a branch.</summary>
@@ -278,6 +360,6 @@ public static class GitUpstream
             case UpdateRisk.Diverged: return Loc.T("You have commits that are not pushed yet: the histories diverged.");
         }
         var pull = await RunAsync(top, ["pull", "--ff-only", "--no-rebase", "--quiet", "--no-recurse-submodules", "--upload-pack=git-upload-pack"], ct, NetworkTimeout);
-        return pull.Ok ? null : Loc.T("Nothing was changed: ") + Message(pull);
+        return pull.Ok ? null : Loc.T("Nothing was changed: ") + await ReasonAsync(top, await RemoteAsync(top, ct), pull, ct);
     }
 }
