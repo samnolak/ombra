@@ -6,6 +6,8 @@ import {
 	WALL_TIME_NOTICE_MIN_MS,
 } from "@oh-my-pi/pi-tui/tools/bash";
 import * as fs from "node:fs";
+import { homedir } from "node:os";
+import * as path from "node:path";
 import { type } from "@oh-my-pi/omptype";
 import type {
 	AgentTool,
@@ -177,25 +179,10 @@ function shellBuiltinsDisabled(settings: Settings): boolean {
 
 /**
  * Bash patterns flagged as safety critical for approval policy.
- *
- * Kept intentionally tight — the cost of a false negative is data loss or a compromised host,
- * while false positives remain actionable through user policy control.
- * New patterns should target shapes that are virtually never legitimate in automation.
+ * Destructive path operations are classified separately by their actual target:
+ * an absolute project or temporary subdirectory is not itself catastrophic.
  */
 export const CRITICAL_BASH_PATTERNS = [
-	// Recursive destruction.
-	// Options may sit on either side of the recursive/force flag, so only that flag is pinned and
-	// any other options are skipped: `rm -rf /`, `rm -rf -- /`, `rm --recursive --force /`,
-	// `rm -rf -v /`, `rm -v -rf /`. An absolute target is still required.
-	/\brm\s+(?:-\S+\s+)*(?:-[a-z]*[rRfF][a-z]*|--recursive|--force)\s+(?:-\S+\s+)*\//i,
-	// `--no-preserve-root` defeats coreutils' own refusal to recurse on `/`, so it is critical
-	// wherever it appears — including forms this list would otherwise reach only via the target.
-	/\brm\s+(?:-\S+\s+)*--no-preserve-root\b/i,
-	/\bsudo\s+rm\b/i, // any `sudo rm`.
-	/\bchmod\s+-R\s+[0-7]+\s+\//i, // `chmod -R 777 /`.
-	/\bchmod\s+-R\s+[ugoa+\-=rwxXst,]+\s+\//, // `chmod -R u+x /`, `chmod -R u+rwx,o+w /etc` (symbolic mode, root target).
-	/\bchown\s+-R\s+\S+\s+\//i, // `chown -R user /`.
-
 	// Fork bomb (a few common spacings).
 	/:\(\)\s*\{\s*:\s*\|\s*:/i,
 
@@ -211,7 +198,7 @@ export const CRITICAL_BASH_PATTERNS = [
 	/\btee\s+(?:-a\s+)?\/etc\/(?:passwd|shadow|sudoers)\b/i, // `tee /etc/passwd`, `tee -a /etc/sudoers`.
 
 	// Remote-fetch-then-execute (curl/wget piped to a shell or process-subbed).
-	/\b(?:curl|wget|fetch)\b[^|]*\|\s*(?:bash|sh|zsh|fish)\b/i,
+	/\b(?:curl|wget|fetch)\b[^|]*\|\s*(?:\/(?:usr\/)?bin\/)?(?:bash|sh|zsh|fish)\b/i,
 	// Process-sub variants — `bash <(curl …)`, `source <(curl …)`, `. <(curl …)`. `.` and `source` are
 	// anchored to a command boundary so `find . -name` and similar don't false-positive.
 	/(?:^|[\s;&|(])(?:bash|sh|zsh|source|\.)\s+<\(\s*(?:curl|wget|fetch)\b/i,
@@ -228,6 +215,48 @@ export const CRITICAL_BASH_PATTERNS = [
 	// Network-shell exfil.
 	/\bnc\b[^|;]*\s-[a-zA-Z]*[ec][a-zA-Z]*\s/i, // `nc -e` / `nc -c`.
 ] as const;
+
+function isCatastrophicTarget(target: string, cwd: string): boolean {
+	const home = homedir();
+	const expanded = target.replace(/^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/, home);
+	const resolved = path.posix.resolve(cwd, expanded);
+	if (resolved === "/" || resolved === home) return true;
+	// Entire system trees, user collections, and direct root/home globs.
+	if (/^\/(?:bin|sbin|etc|usr|System|Library|Applications|boot|dev|proc|sys)(?:\/|$)/.test(resolved)) return true;
+	if (/^\/(?:var|private|tmp|home|Users|root)$/.test(resolved)) return true;
+	if (/^\/(?:Users|home)\/[^/]+$/.test(resolved)) return true;
+	if (/^\/(?:private\/)?var\/(?!tmp(?:\/|$)|folders(?:\/|$))/.test(resolved) ||
+		/^\/private\/etc(?:\/|$)/.test(resolved)) return true;
+	const rootComponent = resolved.slice(1).split("/", 1)[0];
+	const homeComponent = resolved.startsWith(`${home}/`) ? resolved.slice(home.length + 1).split("/", 1)[0] : "";
+	return /[*?[]/.test(rootComponent) || /[*?[]/.test(homeComponent) ||
+		/^\/(?:Users|home)\/[^/]*[*?[]/.test(resolved);
+}
+
+/** Deliberately not a shell sandbox: protect recognizable catastrophic operations, not every cleanup. */
+function hasCriticalBashCommand(command: string, cwd: string): boolean {
+	if (CRITICAL_BASH_PATTERNS.some(pattern => pattern.test(command))) return true;
+	for (const argv of tokenizeShellSegments(command)) {
+		let start = 0;
+		while (start < argv.length && (/^[A-Za-z_]\w*=/.test(argv[start]) ||
+			["command", "exec", "env"].includes(argv[start]))) start++;
+		const executable = path.posix.basename(argv[start] ?? "");
+		if (executable === "sudo") return true;
+		if (!["rm", "chmod", "chown"].includes(executable)) continue;
+		const args = argv.slice(start + 1);
+		const recursive = args.some(arg => arg === "--recursive" || /^-[^-]*[rR]/.test(arg));
+		if (!recursive) continue;
+		let options = true;
+		let skipMode = executable !== "rm";
+		for (const arg of args) {
+			if (options && arg === "--") { options = false; continue; }
+			if (options && arg.startsWith("-")) continue;
+			if (skipMode) { skipMode = false; continue; }
+			if (isCatastrophicTarget(arg, cwd)) return true;
+		}
+	}
+	return false;
+}
 
 type BashPatternApproval = "allow" | "deny" | "prompt";
 
@@ -544,10 +573,10 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 				reason: `Blocked by bash pattern: ${patternRule.match}`,
 			};
 		}
-		const criticalCommand = command !== "" && CRITICAL_BASH_PATTERNS.some(pattern => pattern.test(command));
-		// Critical commands ask even in yolo (`policy` survives yolo, a bare override does not): like Codex's
-		// workspace-write sandbox and Claude Code's deny-first rules, autonomy never extends to wiping absolute
-		// paths or the host. Measured by runtime/harness-bench task `safety`.
+		const requestedCwd = (args as Partial<BashToolInput>).cwd;
+		const cwd = requestedCwd ? resolveToCwd(requestedCwd, this.session.cwd) : this.session.cwd;
+		const criticalCommand = command !== "" && hasCriticalBashCommand(command, cwd);
+		// Catastrophic commands ask even in yolo; ordinary absolute-path cleanups do not.
 		if (!compoundSegments && criticalCommand) {
 			return { tier: "exec", override: true, policy: "prompt", reason: "Critical pattern detected" };
 		}
@@ -577,7 +606,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 			}
 			for (const segment of compoundSegments) {
 				const literalCommand = segment.argv.join(" ");
-				if (criticalCommand || CRITICAL_BASH_PATTERNS.some(pattern => pattern.test(literalCommand))) {
+				if (criticalCommand || hasCriticalBashCommand(literalCommand, cwd)) {
 					return { tier: "exec", override: true, policy: "prompt", reason: "Critical pattern detected" };
 				}
 			}

@@ -83,6 +83,14 @@ This is application-level isolation, **not an OS security sandbox**. Trusted ext
 process and must not be treated as mutually untrusted tenants. A host crash affects its open chats; recovery keeps
 unsent input for review and does not resend it automatically.
 
+**Bypass permissions (`yolo`)** applies to each chat's isolated engine settings, including reopened and new
+chats. It permits ordinary shell commands and project/temp cleanup, including absolute paths under home or
+workspace subfolders and `pkill -f`. Recognizable catastrophic commands still require approval: recursive removal
+of `/`, the home directory (`~`/`$HOME`), system directories or root/home-level globs; disk formatting; remote
+scripts piped into a shell; and `sudo`. Explicit `tools.approval` and bash-pattern `prompt`/`deny` policies still
+apply in bypass mode. This classifier is a guardrail, not a shell sandbox: it does not resolve arbitrary shell
+programs or symlinks, and bypass permits destructive changes inside ordinary project directories.
+
 The managed installer verifies the embedded source manifest and pinned dependency downloads before activating a
 staged pack. It rejects an existing destination without the matching ownership marker and rejects reparse-point
 destinations rather than replacing unrelated content. The owned derivative is not an upstream-signed release.
