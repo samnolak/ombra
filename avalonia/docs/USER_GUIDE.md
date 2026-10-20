@@ -498,6 +498,8 @@ project yet), so the OS warns on first start:
   page a comment is on), each with where the mark is (in the viewport and on the page) and what finds the element
   holding it in the code: its selector, opening tag, text, position and size and — for React ≤ 18, Vue and Svelte dev
   builds — the source file; an area also lists the elements it shows. Comments on several pages can go together.
+  This works the same with either engine of the preview (the system's web view, or Nightly): with Nightly the
+  comment tools run in Ombra's own script world of the page, which the page's scripts can neither see nor reach.
 - **Comments (marks)** — comments on code (Changes, the editor, a change in the conversation) and on pages are one
   numbered list of chips in the message box, up to 40 at a time; a page comment's number is its pin's. Each has its
   place (file and line or lines with the lines around them, or the page), a short note and a status. Click a chip to

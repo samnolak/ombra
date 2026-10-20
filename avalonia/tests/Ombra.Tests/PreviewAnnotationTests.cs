@@ -8,6 +8,7 @@ using Ombra.App.Controls;
 using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore;
+using Ombra.ClientCore.Browser;
 
 namespace Ombra.Tests;
 
@@ -232,18 +233,211 @@ public sealed class PreviewAnnotationTests
     {
         var vm = new PreviewViewModel();
         var script = PreviewPanel.AnnotateScriptFor(vm.AnnotationToken);
-        Assert.DoesNotContain("__OMP_TOKEN__", script);
-        Assert.Contains("})(\"" + vm.AnnotationToken + "\");", script);
+        Assert.EndsWith("})(\"" + vm.AnnotationToken + "\", false);", script);
+        Assert.EndsWith("})", PreviewPanel.AnnotateFunction); // Nightly's isolated world calls it with its arguments
+        Assert.DoesNotContain(vm.AnnotationToken, PreviewPanel.AnnotateFunction);
         Assert.NotEqual(vm.AnnotationToken, new PreviewViewModel().AnnotationToken);
-        // A syntax check where Node is at hand (the real engines run it in the E2E check)
-        var node = new[] { "/opt/node22/bin/node", "/usr/bin/node", "/usr/local/bin/node" }.FirstOrDefault(File.Exists);
-        if (node is null) return;
-        var file = Path.Combine(TestProcesses.TempDir("annotate"), "annotate.js");
-        File.WriteAllText(file, script);
-        using var p = Process.Start(new ProcessStartInfo(node, ["--check", file]) { RedirectStandardError = true })!;
+        // A syntax check where Node is at hand (the real engines run it in the E2E check): the page's form, and the
+        // function as Nightly's isolated call wraps it (ZenEmbedAgentChild's ISOLATED_HEAD)
+        if (Node() is not { } node) return;
+        var dir = TestProcesses.TempDir("annotate");
+        foreach (var (name, source) in new[] { ("page.js", script), ("isolated.js", "(async (__ompArgs) => {\nconst __ompFn = (\n" + PreviewPanel.AnnotateFunction + "\n);\n})") })
+        {
+            var file = Path.Combine(dir, name);
+            File.WriteAllText(file, source);
+            using var p = Process.Start(new ProcessStartInfo(node, ["--check", file]) { RedirectStandardError = true })!;
+            var err = p.StandardError.ReadToEnd();
+            p.WaitForExit();
+            Assert.True(p.ExitCode == 0, name + ": " + err);
+        }
+    }
+
+    private static string? Node() =>
+        new[] { "/opt/node22/bin/node", "/usr/bin/node", "/usr/local/bin/node", "/opt/homebrew/bin/node" }
+            .Concat((Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries).Select(d => Path.Combine(d, "node")))
+            .FirstOrDefault(File.Exists);
+
+    /// <summary>
+    /// The script's two hosts, run in Node over a stand-in DOM: queued (Nightly's isolated world, no host bridge) its
+    /// messages wait for one reader — <c>next()</c> answers what is there, a newer reader ends the earlier one's wait with
+    /// null, a message reaches the waiting reader (Esc in annotate mode: "annotate-exit"), a second start on the document
+    /// changes nothing; in the page's world (the built-in preview) they go to <c>invokeCSharpAction</c> and there is no reader.
+    /// </summary>
+    [Fact]
+    public void Queued_the_script_keeps_its_messages_for_one_reader_and_in_the_page_world_posts_them()
+    {
+        if (Node() is not { } node) return;
+        var dir = TestProcesses.TempDir("annotate-queue");
+        var script = Path.Combine(dir, "annotate.js");
+        File.WriteAllText(script, PreviewPanel.AnnotateFunction);
+        var harness = Path.Combine(dir, "harness.js");
+        File.WriteAllText(harness, """
+            const fs = require("fs");
+            const listeners = {};
+            function node() {
+              return { style: {}, classList: { add() {}, remove() {} }, addEventListener() {}, appendChild() {}, setAttribute() {},
+                querySelector() { return node(); }, attachShadow() { return node(); },
+                getBoundingClientRect() { return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }; } };
+            }
+            globalThis.window = globalThis;
+            globalThis.document = { createElement: node, documentElement: node(), body: node(), querySelectorAll: () => [], elementFromPoint: () => null,
+              addEventListener: (t, f) => { listeners[t] = f; }, removeEventListener: (t) => { delete listeners[t]; } };
+            globalThis.location = { href: "http://localhost:5173/" };
+            globalThis.requestAnimationFrame = () => 0;
+            globalThis.setInterval = () => 0;
+            window.addEventListener = () => {};
+            window.removeEventListener = () => {};
+            const start = eval(fs.readFileSync(process.argv[2], "utf8"));
+            (async () => {
+              const out = {};
+              start("tok", true);
+              const a = window.__ompAnnotate;
+              out.first = await a.next();
+              const replaced = a.next();
+              const reader = a.next();
+              out.replaced = await replaced;
+              a.setMode(true);
+              listeners.keydown({ key: "Escape", preventDefault() {}, stopPropagation() {} });
+              out.exit = await reader;
+              start("other", true);
+              out.same = window.__ompAnnotate === a;
+              delete window.__ompAnnotate;
+              const posted = [];
+              window.invokeCSharpAction = m => posted.push(m);
+              start("page", false);
+              out.posted = posted;
+              out.pageNext = window.__ompAnnotate.next();
+              console.log(JSON.stringify(out));
+            })();
+            """);
+        using var p = Process.Start(new ProcessStartInfo(node, [harness, script]) { RedirectStandardOutput = true, RedirectStandardError = true })!;
+        var output = p.StandardOutput.ReadToEnd();
         var err = p.StandardError.ReadToEnd();
         p.WaitForExit();
         Assert.True(p.ExitCode == 0, err);
+        using var doc = JsonDocument.Parse(output);
+        var o = doc.RootElement;
+        static string[] Strings(JsonElement e) => [.. e.EnumerateArray().Select(x => x.GetString()!)];
+        Assert.Equal(["{\"type\":\"ready\",\"token\":\"tok\"}"], Strings(o.GetProperty("first")));
+        Assert.Equal(JsonValueKind.Null, o.GetProperty("replaced").ValueKind);
+        Assert.Equal(["{\"type\":\"annotate-exit\",\"token\":\"tok\"}"], Strings(o.GetProperty("exit")));
+        Assert.True(o.GetProperty("same").GetBoolean());
+        Assert.Equal(["{\"type\":\"ready\",\"token\":\"page\"}"], Strings(o.GetProperty("posted")));
+        Assert.Equal(JsonValueKind.Null, o.GetProperty("pageNext").ValueKind);
+    }
+
+    /// <summary>Nightly's isolated world as the annotations see it: every call recorded, the reader's left waiting for the
+    /// test to answer, the others answered at once (<see cref="Answer"/>).</summary>
+    private sealed class FakeIsolatedWorld : IIsolatedScripts
+    {
+        public readonly List<(string Source, string Args, TaskCompletionSource<string?> Answer)> Calls = [];
+        public string? Answer;
+        public string? Unsupported => null;
+
+        public Task<string?> CallAsync(string functionSource, string argsJson, CancellationToken ct)
+        {
+            var answer = new TaskCompletionSource<string?>();
+            Calls.Add((functionSource, argsJson, answer));
+            if (functionSource != IsolatedPageAnnotations.NextSource) answer.SetResult(Answer);
+            return answer.Task;
+        }
+
+        public int Count(string source) => Calls.Count(c => c.Source == source);
+
+        public string LastArgs(string source) => Calls.Last(c => c.Source == source).Args;
+
+        /// <summary>The reader's call waiting now, once there is one other than <paramref name="after"/>.</summary>
+        public async Task<TaskCompletionSource<string?>> Read(TaskCompletionSource<string?>? after = null)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (true)
+            {
+                Dispatcher.UIThread.RunJobs();
+                var open = Calls.LastOrDefault(c => c.Source == IsolatedPageAnnotations.NextSource && !c.Answer.Task.IsCompleted).Answer;
+                if (open is not null && open != after) return open;
+                Assert.True(DateTime.UtcNow < deadline, "no read waiting");
+                await Task.Delay(10);
+            }
+        }
+    }
+
+    private static async Task Settle()
+    {
+        for (var i = 0; i < 10; i++)
+        {
+            Dispatcher.UIThread.RunJobs();
+            await Task.Delay(5);
+        }
+    }
+
+    private static string Batch(params string[] messages) => JsonSerializer.Serialize(messages);
+
+    /// <summary>
+    /// A page Nightly shows: the script starts in its isolated world with the panel's token once a document has loaded,
+    /// mode and pins go to it as arguments, and its messages come back through one waiting read — a comment becomes a
+    /// mark, Esc ends the mode. A title change starts nothing; another document gets the script and a new reader, the
+    /// earlier one stops when the script ends its wait; another tab's and forged messages are nothing; a read whose
+    /// document went stops; a closed tab calls nothing.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task A_Nightly_page_runs_the_script_in_its_isolated_world_and_one_reader_takes_its_messages()
+    {
+        var vm = Opened();
+        var world = new FakeIsolatedWorld();
+        var shown = true;
+        var page = new IsolatedPageAnnotations(world, vm, () => shown);
+        await page.OnLoadedAsync("http://localhost:5173/");
+        Assert.Equal("[\"" + vm.AnnotationToken + "\",true]", Assert.Single(world.Calls, c => c.Source == PreviewPanel.AnnotateFunction).Args);
+        Assert.Equal("[false,[],null]", world.LastArgs(IsolatedPageAnnotations.SyncSource));
+        var first = await world.Read();
+
+        var ready = JsonSerializer.Serialize(new { type = "ready", token = vm.AnnotationToken });
+        first.SetResult(Batch(ready, Message(vm)));
+        var second = await world.Read(after: first);
+        Assert.Equal("Make it blue", Assert.Single(vm.Marks.Items).Note);
+        Assert.Contains("\"id\":\"a1\",\"number\":1", world.LastArgs(IsolatedPageAnnotations.SyncSource)); // its pin, numbered
+
+        await page.OnLoadedAsync("http://localhost:5173/"); // the title changed
+        Assert.Equal(1, world.Count(PreviewPanel.AnnotateFunction));
+        vm.IsAnnotating = true;
+        await page.SyncAsync();
+        Assert.StartsWith("[true,[{", world.LastArgs(IsolatedPageAnnotations.SyncSource));
+        // A team member's mark asked for: done once the page says it scrolled to the pin
+        vm.PendingReveal = "team-m1-i1";
+        world.Answer = "true";
+        await page.SyncAsync();
+        Assert.EndsWith(",\"team-m1-i1\"]", world.LastArgs(IsolatedPageAnnotations.SyncSource));
+        Assert.Null(vm.PendingReveal);
+        world.Answer = null;
+
+        page.OnLoading();
+        await page.OnLoadedAsync("http://localhost:5173/cart");
+        Assert.Equal(2, world.Count(PreviewPanel.AnnotateFunction));
+        var third = await world.Read(after: second);
+        second.SetResult("null"); // the script ended the earlier reader's wait
+        await Settle();
+        third.SetResult(Batch(JsonSerializer.Serialize(new { type = "annotate-exit", token = vm.AnnotationToken })));
+        var fourth = await world.Read(after: third);
+        Assert.False(vm.IsAnnotating);
+        Assert.Equal(4, world.Count(IsolatedPageAnnotations.NextSource)); // the stopped reader asked no more
+
+        shown = false;
+        fourth.SetResult(Batch(Message(vm, id: "a2")));
+        var fifth = await world.Read(after: fourth);
+        shown = true;
+        fifth.SetResult(Batch(Message(vm, id: "a3", token: "forged")));
+        var sixth = await world.Read(after: fifth);
+        Assert.Single(vm.Marks.Items);
+
+        sixth.SetException(new IsolatedScriptException("The page is gone."));
+        await Settle();
+        Assert.Equal(6, world.Count(IsolatedPageAnnotations.NextSource));
+        page.Close();
+        page.OnLoading();
+        await page.OnLoadedAsync("http://localhost:5173/other");
+        await page.SyncAsync();
+        Assert.Equal(6, world.Count(IsolatedPageAnnotations.NextSource));
+        Assert.Equal(2, world.Count(PreviewPanel.AnnotateFunction));
     }
 
     [Fact]

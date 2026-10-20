@@ -290,8 +290,9 @@ internal static partial class NightlyAcceptance
         /// under the window, popups included), <c>wshot NAME</c> (the window alone), <c>state</c>, <c>windows</c> (Nightly's
         /// windows on screen), <c>sheet NAME</c> (the Browser page's sheet against the Chats page's, <see cref="SheetMatches"/>),
         /// <c>newwindows</c> (<see cref="NewWindowChecks"/>), <c>imeend [N]</c> (<see cref="CompositionEndedByNightly"/> N
-        /// times on the agent's pane: <c>preview</c> the K1 fixture first), <c>position X Y</c> (the window's top-left on the
-        /// desktop), <c>wait MS</c>, <c>quit</c>. Each is logged; <c>DONE n</c> after each. Startup preserves the
+        /// times on the agent's pane: <c>preview</c> the K1 fixture first), <c>annotate URL COMMENT</c> (<see cref="AnnotationChecks"/>
+        /// on the right panel's engine), <c>position X Y</c> (the window's top-left on the desktop), <c>wait MS</c>, <c>quit</c>.
+        /// Each is logged; <c>DONE n</c> after each. Startup preserves the
         /// configured window position, so a secondary-monitor run does not first jump onto the main monitor.
         /// </summary>
         private async Task Drive(string file)
@@ -473,6 +474,10 @@ internal static partial class NightlyAcceptance
                     break;
                 case "imeend" when Shown() is { IsBrowserWindow: false } agentPane:
                     await CompositionEndedByNightly(agentPane, parts.Length > 1 ? int.Parse(parts[1], CultureInfo.InvariantCulture) : 1);
+                    break;
+                case "annotate" when parts.Length > 2:
+                    // AnnotationChecks on the right panel's engine: annotate URL COMMENT (the comment is the rest of the line)
+                    await AnnotationChecks(parts[1], line[(line.IndexOf(parts[1], StringComparison.Ordinal) + parts[1].Length + 1)..]);
                     break;
                 case "openinapp":
                     // OpenInAppChecks on their own (their PASS/FAIL lines in the log).

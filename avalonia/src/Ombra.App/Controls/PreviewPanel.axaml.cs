@@ -33,6 +33,8 @@ public partial class PreviewPanel : UserControl
     private readonly Dictionary<PreviewTab, PopupViewHost> _popups = [];
     /// <summary>Tabs shown by the embedded Nightly runtime (<see cref="PreviewViewModel.UseNightly"/>, macOS), one pane each.</summary>
     private readonly Dictionary<PreviewTab, Control> _nightly = [];
+    /// <summary>The annotations of each Nightly tab (the script in Ombra's isolated world, its messages read back).</summary>
+    private readonly Dictionary<PreviewTab, IsolatedPageAnnotations> _nightlyAnnotations = [];
 
     public PreviewPanel()
     {
@@ -335,7 +337,7 @@ public partial class PreviewPanel : UserControl
         if (_popups.Remove(tab, out var host)) this.FindControl<Panel>("WebHost")!.Children.Remove(host);
         if (_nightly.Remove(tab, out var pane))
         {
-            DropNightly(pane);
+            DropNightly(tab, pane);
             ShowActiveTab();
             return;
         }
@@ -419,6 +421,7 @@ public partial class PreviewPanel : UserControl
         tab.RunScript = pane.Agent.RunScriptAsync;
         tab.CaptureScreenshot = pane.Agent.CaptureAsync;
         tab.SetNative(null, pane.Agent, pane.Agent);
+        var annotations = _vm is { } owner ? _nightlyAnnotations[tab] = new IsolatedPageAnnotations(pane.Agent, owner, () => _vm?.ActiveTab == tab) : null;
         // The device mode: the window at the device's size (Nightly lays the page out at the window's size; the pane
         // scales it down where the panel is smaller), and what the page emulates (pixel ratio, user agent, touch,
         // viewport rules), sent before its first page loads.
@@ -446,6 +449,7 @@ public partial class PreviewPanel : UserControl
             if (location.Flags.HasFlag(Nightly.NightlyProtocol.LocationFlags.Loading))
             {
                 vm.OnNavigationStarted(tab, at);
+                annotations?.OnLoading();
                 return;
             }
             vm.OnNavigationCompleted(tab, at, success: true,
@@ -453,14 +457,16 @@ public partial class PreviewPanel : UserControl
                 location.Flags.HasFlag(Nightly.NightlyProtocol.LocationFlags.CanGoForward));
             if (tab == vm.ActiveTab) vm.Title = location.Title;
             else tab.Title = location.Title;
+            if (annotations is not null) _ = annotations.OnLoadedAsync(location.Url);
         };
         this.FindControl<Panel>("WebHost")!.Children.Add(pane);
         if (uri is not null) pane.Navigate(uri);
         ShowActiveTab();
     }
 
-    private void DropNightly(Control pane)
+    private void DropNightly(PreviewTab tab, Control pane)
     {
+        if (_nightlyAnnotations.Remove(tab, out var annotations)) annotations.Close();
         this.FindControl<Panel>("WebHost")!.Children.Remove(pane);
         if (OperatingSystem.IsMacOS()) ((NightlyPane)pane).Close();
     }
@@ -475,7 +481,7 @@ public partial class PreviewPanel : UserControl
         foreach (var (tab, pane) in _nightly.ToList())
         {
             _nightly.Remove(tab);
-            DropNightly(pane);
+            DropNightly(tab, pane);
             tab.RunScript = null;
             tab.CaptureScreenshot = null;
             tab.SetNative(null, null, null);
@@ -575,19 +581,25 @@ public partial class PreviewPanel : UserControl
         }
     }
 
-    // ── Annotations (PreviewAnnotations.cs): the page script outlines, takes the comment and pins; the list lives here ──
+    // ── Annotations (PreviewAnnotations.cs): the page script outlines, takes the comment and pins; the list lives here.
+    // The built-in preview runs it in the page's world (messages through invokeCSharpAction); Nightly in Ombra's isolated
+    // world, its messages read back by IsolatedPageAnnotations ──
 
+    /// <summary>annotate.js: one function expression, (token, queued).</summary>
     private static readonly Lazy<string> AnnotateScript = new(() =>
     {
         using var stream = typeof(PreviewPanel).Assembly.GetManifestResourceStream("preview/annotate.js")
             ?? throw new InvalidOperationException("preview/annotate.js is not embedded");
         using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
+        return reader.ReadToEnd().TrimEnd();
     });
 
-    /// <summary>The script with this panel's token, for a page just loaded (it does nothing where it already runs).</summary>
+    /// <summary>The script with this panel's token, for the page's world of a page just loaded (it does nothing where it already runs).</summary>
     internal static string AnnotateScriptFor(string token) =>
-        AnnotateScript.Value.Replace("__OMP_TOKEN__", JsonSerializer.Serialize(token, PreviewJsonContext.Default.String), StringComparison.Ordinal);
+        AnnotateScript.Value + "(" + JsonSerializer.Serialize(token, PreviewJsonContext.Default.String) + ", false);";
+
+    /// <summary>The script as the function an isolated world calls with <c>[token, true]</c> (its messages then wait for a reader).</summary>
+    internal static string AnnotateFunction => AnnotateScript.Value;
 
     private async Task InjectAnnotationsAsync(NativeWebView web)
     {
@@ -606,6 +618,11 @@ public partial class PreviewPanel : UserControl
     /// <summary>The page's mode and pins follow the panel's (after a navigation, a toggle, a comment added or removed).</summary>
     private async Task SyncAnnotationsAsync()
     {
+        if (_vm is { } owner && _nightlyAnnotations.TryGetValue(owner.ActiveTab, out var nightly))
+        {
+            await nightly.SyncAsync();
+            return;
+        }
         if (_web is not { } web || _vm is not { } vm) return;
         var mode = vm.IsAnnotating ? "true" : "false";
         try
@@ -660,7 +677,9 @@ public partial class PreviewPanel : UserControl
         }
         _ = SyncAnnotationsAsync();
         // Keys go to the page while commenting (Esc there leaves the mode)
-        if (_vm?.IsAnnotating == true && _web is { } web) web.Focus();
+        if (_vm?.IsAnnotating != true) return;
+        if (_web is { } web) web.Focus();
+        else if (OperatingSystem.IsMacOS()) ActiveNightly()?.FocusPage();
     }
 
     private void OnAnnotationsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) => _ = SyncAnnotationsAsync();

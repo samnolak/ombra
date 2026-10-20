@@ -1,4 +1,4 @@
-// Page annotations for the preview panel (Controls/PreviewPanel): injected into the page after each navigation.
+// Page annotations for the preview panel (Controls/PreviewPanel): started on the page after each navigation.
 // In annotate mode (as Codex's: "click, or drag to select an area") a click marks a point and a drag marks an area;
 // nothing is outlined while the pointer moves. A comment box opens at the mark; the comment goes to the client with
 // the mark (its place in the viewport and on the page), the element that holds it (a selector, its opening tag, its
@@ -8,20 +8,31 @@
 // click on a pin opens its comment again to change (Save) or delete it.
 // Everything lives in a closed shadow root, so the page's CSS does not reach it and the page's scripts cannot read it;
 // messages carry a token from this closure.
+// The file is one function, (token, queued). The built-in preview calls it in the page's world, its messages going
+// through the web view's invokeCSharpAction; Nightly calls it in Ombra's isolated world (queued: the page neither sees
+// nor reaches it, and it has no host bridge), its messages waiting here for the panel's reader (next()).
 // Entry: window.__ompAnnotate.{setMode(bool), setPins([{id, number, url, kind, selector, offsetX, offsetY, width, height,
-// pageX, pageY, comment, shared}]), reveal(id)} (the site's pins; each is drawn on its url only; shared pins are a team
-// member's marks: another colour, not editable; reveal scrolls a pin into view). Messages (JSON strings) through the web
-// view's invokeCSharpAction: {type: "annotation" | "annotation-update" {id, comment} | "annotation-remove" {id} |
-// "annotate-exit" | "ready" | "location" {url}, token, ...}.
-(function (token) {
+// pageX, pageY, comment, shared}]), reveal(id), next()} (the site's pins; each is drawn on its url only; shared pins are
+// a team member's marks: another colour, not editable; reveal scrolls a pin into view; next, queued only: a Promise of
+// the messages not taken yet, once there is one, and null for a reader a newer one replaced). Messages (JSON strings):
+// {type: "annotation" | "annotation-update" {id, comment} | "annotation-remove" {id} | "annotate-exit" | "ready" |
+// "location" {url}, token, ...}.
+(function (token, queued) {
   "use strict";
-  // Already here (injected again after a navigation inside the page): it keeps its own token, never takes one from
+  // Already here (started again after a navigation inside the page): it keeps its own token, never takes one from
   // an object the page could have put there.
   if (window.__ompAnnotate) return;
   var TEXT_MAX = 160, TAG_MAX = 300, COMMENT_MAX = 2000, DRAG_MIN = 6, INSIDE_MAX = 6;
+  var outbox = [], reader = null;
   var send = function (o) {
     o.token = token;
-    try { window.invokeCSharpAction(JSON.stringify(o)); } catch (e) { /* no host bridge: nothing to tell */ }
+    var text = JSON.stringify(o);
+    if (!queued) {
+      try { window.invokeCSharpAction(text); } catch (e) { /* no host bridge: nothing to tell */ }
+      return;
+    }
+    outbox.push(text);
+    if (reader) { var r = reader; reader = null; r(outbox.splice(0)); }
   };
 
   var host = document.createElement("omp-annotate");
@@ -100,10 +111,12 @@
   function sourceOf(el) {
     try {
       for (var e = el; e; e = e.parentElement) {
-        var key = Object.keys(e).find(function (k) { return k.indexOf("__reactFiber$") === 0; });
-        if (key) for (var f = e[key]; f; f = f.return) if (f._debugSource) return f._debugSource.fileName + ":" + f._debugSource.lineNumber;
-        if (e.__svelte_meta && e.__svelte_meta.loc) return e.__svelte_meta.loc.file + ":" + e.__svelte_meta.loc.line;
-        var v = e.__vueParentComponent;
+        // The page's own properties: in Ombra's isolated world an element is an Xray without them (wrappedJSObject has them)
+        var own = e.wrappedJSObject || e;
+        var key = Object.keys(own).find(function (k) { return k.indexOf("__reactFiber$") === 0; });
+        if (key) for (var f = own[key]; f; f = f.return) if (f._debugSource) return f._debugSource.fileName + ":" + f._debugSource.lineNumber;
+        if (own.__svelte_meta && own.__svelte_meta.loc) return own.__svelte_meta.loc.file + ":" + own.__svelte_meta.loc.line;
+        var v = own.__vueParentComponent;
         if (v && v.type && v.type.__file) return v.type.__file;
       }
     } catch (x) { /* a page object we could not read */ }
@@ -437,7 +450,15 @@
       if (d) { d.classList.add("flash"); setTimeout(function () { d.classList.remove("flash"); }, 1600); }
       return true;
     },
-    isOn: function () { return on; }
+    isOn: function () { return on; },
+    // One reader at a time takes the messages (queued only); a newer one replaces it, which then gets null and stops
+    next: function () {
+      if (!queued) return null;
+      if (reader) reader(null);
+      reader = null;
+      if (outbox.length) return Promise.resolve(outbox.splice(0));
+      return new Promise(function (resolve) { reader = resolve; });
+    }
   };
   send({ type: "ready" });
-})(__OMP_TOKEN__);
+})
