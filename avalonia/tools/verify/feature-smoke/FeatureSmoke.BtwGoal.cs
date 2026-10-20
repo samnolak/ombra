@@ -97,14 +97,14 @@ internal static partial class FeatureSmoke
             Shot("21-goal-active-dark");
 
             var pause = Named("GoalPauseButton");
-            if (Check("goal-pause-button", pause?.IsEffectivelyVisible == true)) Click(pause!);
+            if (Check("goal-pause-button", pause?.IsEffectivelyVisible == true)) await ClickSettled(pause!);
             Check("goal-paused", await Until(() => vm.IsGoalPaused && vm.GoalStatusText == Loc.T("Paused"), 10), $"status='{vm.GoalStatusText}'");
             var resume = Named("GoalResumeButton");
-            if (Check("goal-resume-button", await Until(() => resume?.IsEffectivelyVisible == true && resume.IsEffectivelyEnabled, 5))) Click(resume!);
+            if (Check("goal-resume-button", await Until(() => resume?.IsEffectivelyVisible == true && resume.IsEffectivelyEnabled, 5))) await ClickSettled(resume!);
             Check("goal-resumed", await Until(() => vm.IsGoalActive, 10), $"status='{vm.GoalStatusText}'");
 
             var edit = Named("GoalEditButton");
-            if (Check("goal-edit-button", await Until(() => edit?.IsEffectivelyVisible == true && edit.IsEffectivelyEnabled, 5))) Click(edit!);
+            if (Check("goal-edit-button", await Until(() => edit?.IsEffectivelyVisible == true && edit.IsEffectivelyEnabled, 5))) await ClickSettled(edit!);
             Check("goal-editor", await Until(() => vm.IsEditingGoal && FocusedIs("GoalDraftBox"), 5), $"editing={vm.IsEditingGoal} focus={Focused()}");
             vm.GoalDraft = "ship the smoke release notes";
             await Task.Delay(300);
@@ -124,7 +124,7 @@ internal static partial class FeatureSmoke
             Shot("21-goal-after-restart-light");
 
             var clear = Named("GoalClearButton");
-            if (Check("goal-clear-button", await Until(() => clear?.IsEffectivelyVisible == true && clear.IsEffectivelyEnabled, 5))) Click(clear!);
+            if (Check("goal-clear-button", await Until(() => clear?.IsEffectivelyVisible == true && clear.IsEffectivelyEnabled, 5))) await ClickSettled(clear!);
             Check("goal-cleared", await Until(() => !vm.ShowGoalBar && vm.Session.Snapshot().Goal is null, 10), $"bar={vm.ShowGoalBar}");
             await Task.Delay(400);
             Shot("21-goal-cleared-light");

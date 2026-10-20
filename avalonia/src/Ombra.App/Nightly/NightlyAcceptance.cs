@@ -593,38 +593,15 @@ internal static partial class NightlyAcceptance
             // Without the permission a harness run never starts it: macOS would ask in a window that takes the focus.
             if (!Platform.TestFocus.ScreenCaptureAllowed)
             {
-                Log($"SHOT {file} window={number} in-process={OwnWindowImage(number, file)} (no Screen Recording)");
+                Log($"SHOT {file} window={number} in-process={Platform.TestFocus.CaptureOwnWindow(number, file)} (no Screen Recording)");
                 return file;
             }
             using var p = Process.Start(new ProcessStartInfo("/usr/sbin/screencapture", ["-x", "-o", "-l", number.ToString(), file]))!;
             p.WaitForExit();
-            var own = p.ExitCode != 0 && OwnWindowImage(number, file);
+            var own = p.ExitCode != 0 && Platform.TestFocus.CaptureOwnWindow(number, file);
             Log($"SHOT {file} window={number} exit={p.ExitCode}{(p.ExitCode != 0 ? $" in-process={own}" : "")}");
             return file;
         }
-
-        /// <summary>The app's own window as the window server composes it (Nightly's layer and web views included), as PNG.</summary>
-        private static unsafe bool OwnWindowImage(long windowNumber, string file)
-        {
-            var image = CGWindowListCreateImage(new CGRect(double.PositiveInfinity, double.PositiveInfinity, 0, 0),
-                8 /* kCGWindowListOptionIncludingWindow */, (uint)windowNumber, 1 | 8 /* ignore framing, best resolution */);
-            if (image == 0) return false;
-            var rep = MacObjC.Send(MacObjC.Send(MacObjC.Cls("NSBitmapImageRep"), "alloc"), "initWithCGImage:", image);
-            try
-            {
-                var png = ((delegate* unmanaged<nint, nint, nuint, nint, nint>)MacObjC.MsgSend)(rep, MacObjC.Sel("representationUsingType:properties:"), 4 /* PNG */, 0);
-                using var path = new NSStr(file);
-                return png != 0 && ((delegate* unmanaged<nint, nint, nint, byte, byte>)MacObjC.MsgSend)(png, MacObjC.Sel("writeToFile:atomically:"), path.Handle, 1) != 0;
-            }
-            finally
-            {
-                if (rep != 0) MacObjC.SendVoid(rep, "release");
-                NightlyMach.CFRelease(image);
-            }
-        }
-
-        [DllImport("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")]
-        private static extern nint CGWindowListCreateImage(CGRect screenBounds, uint listOption, uint windowId, uint imageOption);
 
         /// <summary>The window's area of the screen with the app's popups over it (their windows are not the window's).</summary>
         private unsafe string ScreenShot(string name)
@@ -636,7 +613,7 @@ internal static partial class NightlyAcceptance
             {
                 // No Screen Recording (see Shot): the window alone, without the popups over it.
                 var number = MacObjC.SendLong(NsWindow, "windowNumber");
-                Log($"SHOT {file} screen rect={rect} in-process window={OwnWindowImage(number, file)} (no Screen Recording)");
+                Log($"SHOT {file} screen rect={rect} in-process window={Platform.TestFocus.CaptureOwnWindow(number, file)} (no Screen Recording)");
                 return file;
             }
             using var p = Process.Start(new ProcessStartInfo("/usr/sbin/screencapture", ["-x", "-R", rect, file]))!;

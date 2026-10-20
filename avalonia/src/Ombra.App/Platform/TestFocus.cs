@@ -127,6 +127,34 @@ public static unsafe class TestFocus
     [return: MarshalAs(UnmanagedType.U1)]
     private static extern bool CGPreflightScreenCaptureAccess();
 
+    /// <summary>
+    /// The app's own window <paramref name="windowNumber"/> as the window server composes it (Nightly's layer and web
+    /// views included) written to <paramref name="file"/> as PNG: in-process, so no Screen Recording is needed (what a
+    /// check shoots instead of <c>screencapture</c> when <see cref="ScreenCaptureAllowed"/> is false). False when none came.
+    /// </summary>
+    [SupportedOSPlatform("macos")]
+    public static bool CaptureOwnWindow(long windowNumber, string file)
+    {
+        var image = CGWindowListCreateImage(new MacRuntime.CGRect(double.PositiveInfinity, double.PositiveInfinity, 0, 0),
+            8 /* kCGWindowListOptionIncludingWindow */, (uint)windowNumber, 1 | 8 /* ignore framing, best resolution */);
+        if (image == 0) return false;
+        var rep = MacObjC.Send(MacObjC.Send(MacObjC.Cls("NSBitmapImageRep"), "alloc"), "initWithCGImage:", image);
+        try
+        {
+            var png = ((delegate* unmanaged<nint, nint, nuint, nint, nint>)MacObjC.MsgSend)(rep, MacObjC.Sel("representationUsingType:properties:"), 4 /* PNG */, 0);
+            using var path = new MacRuntime.NSStr(file);
+            return png != 0 && ((delegate* unmanaged<nint, nint, nint, byte, byte>)MacObjC.MsgSend)(png, MacObjC.Sel("writeToFile:atomically:"), path.Handle, 1) != 0;
+        }
+        finally
+        {
+            if (rep != 0) MacObjC.SendVoid(rep, "release");
+            NightlyMach.CFRelease(image);
+        }
+    }
+
+    [DllImport("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")]
+    private static extern nint CGWindowListCreateImage(MacRuntime.CGRect screenBounds, uint listOption, uint windowId, uint imageOption);
+
     // ── the guards: AppKit's activation calls of this process do nothing ──
 
     private static nint sSetActivationPolicy;
