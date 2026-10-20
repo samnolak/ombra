@@ -10,10 +10,23 @@
   <PropertyGroup>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <IsAotCompatible>true</IsAotCompatible>
-    <OmbraNativeDir Condition="'$(OmbraNativeDir)' == ''">$(MSBuildThisFileDirectory)../../native/ombra-core/target/release/</OmbraNativeDir>
-    <OmbraNativeFile Condition="'$(OmbraNativeFile)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">libombra_core.dylib</OmbraNativeFile>
-    <OmbraNativeFile Condition="'$(OmbraNativeFile)' == '' and $([MSBuild]::IsOSPlatform('Linux'))">libombra_core.so</OmbraNativeFile>
-    <OmbraNativeFile Condition="'$(OmbraNativeFile)' == '' and $([MSBuild]::IsOSPlatform('Windows'))">ombra_core.dll</OmbraNativeFile>
+    <!-- Native payload selection depends on the referencing application's RID. -->
+    <IsRidAgnostic>false</IsRidAgnostic>
+    <!-- A host cargo build is usable only for the host RID. Cross-publishes must
+         select cargo's target-specific output, never copy the host library. -->
+    <OmbraNativeRid Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</OmbraNativeRid>
+    <OmbraNativeRid Condition="'$(OmbraNativeRid)' == ''">$(NETCoreSdkRuntimeIdentifier)</OmbraNativeRid>
+    <OmbraNativeTarget Condition="'$(OmbraNativeRid)' == 'osx-arm64'">aarch64-apple-darwin</OmbraNativeTarget>
+    <OmbraNativeTarget Condition="'$(OmbraNativeRid)' == 'osx-x64'">x86_64-apple-darwin</OmbraNativeTarget>
+    <OmbraNativeTarget Condition="'$(OmbraNativeRid)' == 'linux-arm64'">aarch64-unknown-linux-gnu</OmbraNativeTarget>
+    <OmbraNativeTarget Condition="'$(OmbraNativeRid)' == 'linux-x64'">x86_64-unknown-linux-gnu</OmbraNativeTarget>
+    <OmbraNativeTarget Condition="'$(OmbraNativeRid)' == 'win-arm64'">aarch64-pc-windows-msvc</OmbraNativeTarget>
+    <OmbraNativeTarget Condition="'$(OmbraNativeRid)' == 'win-x64'">x86_64-pc-windows-msvc</OmbraNativeTarget>
+    <OmbraNativeDir Condition="'$(OmbraNativeDir)' == '' and '$(OmbraNativeRid)' == '$(NETCoreSdkRuntimeIdentifier)'">$(MSBuildThisFileDirectory)../../native/ombra-core/target/release/</OmbraNativeDir>
+    <OmbraNativeDir Condition="'$(OmbraNativeDir)' == '' and '$(OmbraNativeTarget)' != ''">$(MSBuildThisFileDirectory)../../native/ombra-core/target/$(OmbraNativeTarget)/release/</OmbraNativeDir>
+    <OmbraNativeFile Condition="'$(OmbraNativeFile)' == '' and $(OmbraNativeRid.StartsWith('osx-'))">libombra_core.dylib</OmbraNativeFile>
+    <OmbraNativeFile Condition="'$(OmbraNativeFile)' == '' and $(OmbraNativeRid.StartsWith('linux-'))">libombra_core.so</OmbraNativeFile>
+    <OmbraNativeFile Condition="'$(OmbraNativeFile)' == '' and $(OmbraNativeRid.StartsWith('win-'))">ombra_core.dll</OmbraNativeFile>
   </PropertyGroup>
   <ItemGroup>
     <None Include="$(OmbraNativeDir)$(OmbraNativeFile)" Condition="Exists('$(OmbraNativeDir)$(OmbraNativeFile)')"

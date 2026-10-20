@@ -27,6 +27,19 @@ was checked against the merged client and its tests.
 | F2: protocol and source identity | Shared-engine protocol **1** wraps session RPC v2 framing. Installer requires the host's `--self-check` to report protocol 1 and omp 18.12.2 before activation. Manifest/source SHA256 and source identity must match this client; tests reject protocol 0/2 and another omp version. |
 | F3: upgrade path | Engine upgrades ship with the client. Review the upstream source changes, update canonical `runtime/engine` and any dependency/version pins, run `python3 runtime/generate-engine-artifact.py`, then its `--check` gate, runtime installer/source tests and real-engine smoke. In particular recheck steer/settle semantics before raising the upstream base. Staging failure preserves the existing installation; older packs are retained for explicit cleanup, never silently selected as compatible fallbacks. Packages carry the installed pack (`tools/package/package.sh` → `Ombra --install-engine`); after a dependency change recheck each `RuntimePrune` rule's evidence (onnxruntime-web only in transformers' browser export, react/lucide only in omp-stats' dashboard sources, onnxruntime-node's binding path) and rerun a local-model (ONNX) smoke on the pruned pack. |
 
+Package native isolation is enforced before signing and against the final ZIP/tar.gz:
+`tools/package/native-platform.py <rid> <archive>`. It inspects ELF, Mach-O (including
+universal slices), and native PE headers, not filename extensions: portable managed
+DLLs stay, foreign OS/CPU binaries (including `.node` addons and extensionless Bun)
+are removed from unsigned staging. Signing only sees the resulting platform tree;
+the final check also covers notarization re-zips and cross-built RIDs without a smoke
+runner. `test-native-platform.py` exercises all six RID combinations, managed DLLs,
+universal macOS binaries, staging pruning and both archive formats.
+The shared `Ombra.Core.Interop` project selects `libombra_core` by the target RID,
+not the build host: host builds use Cargo's `target/release`, cross-builds use
+`target/<Rust target triple>/release`. An optional host native build must never
+leak into a different RID's publish directory.
+
 For isolated local smoke builds, build `tests/Ombra.Tests` in Release with
 `--artifacts-path <absolute-path>`, then pass that same path as `OMBRA_ARTIFACTS_PATH`
 to `tools/ci/real-omp-smoke.sh <work-dir>`. Without that variable, existing CI build
