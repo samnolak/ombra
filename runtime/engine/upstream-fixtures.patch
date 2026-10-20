@@ -373,3 +373,17 @@ index 6424cda..9c4596e 100644
  import { waitForDiagnostics } from "@oh-my-pi/pi-coding-agent/lsp/diagnostics";
  import {
  	applyTextEditsToString,
+diff --git a/packages/coding-agent/test/tools/approval.test.ts b/packages/coding-agent/test/tools/approval.test.ts
+index ee39d83..4603157 100644
+--- a/packages/coding-agent/test/tools/approval.test.ts
++++ b/packages/coding-agent/test/tools/approval.test.ts
+@@ -45,7 +45,8 @@ function createBashTool(settingsOverrides: Record<string, unknown> = {}, resolve
+ 		env: {},
+ 		prefix: undefined,
+ 	});
+-	return new BashTool({ settings } as unknown as ConstructorParameters<typeof BashTool>[0]);
++	// Owned critical-command classification resolves rm/chmod/chown targets against the session cwd.
++	return new BashTool({ settings, cwd: "/workspace/project" } as unknown as ConstructorParameters<typeof BashTool>[0]);
+ }
+ 
+ function bashApproval(command: string, settingsOverrides: Record<string, unknown> = {}, resolvedShell?: string) {

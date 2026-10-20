@@ -56,10 +56,8 @@
     {
       "id": "typed-approvals",
       "patch": "060-typed-tool-approvals.patch",
-      "reason": "Ombra passes typed approval metadata/denial callbacks and explicit critical-pattern policy=prompt; yolo/--auto-approve never bypass critical-command approval. Compact prompt rendering also includes the owned typed provenance.",
+      "reason": "Ombra passes typed approval metadata/denial callbacks and explicit critical-pattern policy=prompt; yolo/--auto-approve never bypass approval of catastrophic shell targets. Compact prompt rendering also includes the owned typed provenance.",
       "tests": [
-        "packages/coding-agent > tools.approvalMode setting > critical bash patterns do not prompt in yolo mode with bash allowed",
-        "packages/coding-agent > tools.approvalMode setting > CLI --auto-approve also bypasses safety-override patterns",
         "packages/coding-agent > ExtensionRunner > tool approval lifecycle > emits requested before waiting and resolved after approval",
         "packages/coding-agent > ExtensionRunner > tool approval lifecycle > approving for this session skips later mode prompts of that tool and tier, until the session changes",
         "packages/coding-agent > MCP fallback and prompt formatting > the dialog's compact prompt summarizes the details to one row, keeping origin, reason, and appendix",
