@@ -154,6 +154,8 @@ internal sealed class NightlyRuntime : IDisposable
     private volatile int _launchedPid;
     private volatile int _peerPid;
     private uint _peerPort;
+    // Nightly checked Ombra's code signature after HelloAck: it drops what Ombra sends before (UI thread).
+    private bool _peerTrusts;
     private bool _disposed;
     // Scripts waiting for Nightly's answer, by request id (answered on the receive thread).
     private readonly ConcurrentDictionary<uint, (uint WindowId, TaskCompletionSource<NightlyProtocol.ScriptResultInfo> Done)> _scripts = new();
@@ -656,12 +658,22 @@ internal sealed class NightlyRuntime : IDisposable
             NightlyMach.Deallocate(_peerPort);
             _peerPort = port;
             _peerPid = senderPid;
-            _supervisor.MarkReady();
-            // The appearance may have changed since user.js was written.
-            Send(NightlyProtocol.ThemeMessage(_darkTheme));
-            // The command line's chrome-less window is on its way; every other pane's window is asked for now.
-            foreach (var token in _panes.Keys.Order().Where(t => t != _commandLinePane)) Send(OpenMessage(token));
+            _peerTrusts = false;
         });
+    }
+
+    /// <summary>
+    /// Nightly's first Window message after HelloAck: Nightly sends windows only once it has checked Ombra (desktop
+    /// <c>Channel::Authenticate</c>) and drops every message that arrives before, so the runtime is ready now, not at Hello.
+    /// </summary>
+    private void OnPeerTrusts()
+    {
+        _peerTrusts = true;
+        _supervisor.MarkReady();
+        // The appearance may have changed since user.js was written.
+        Send(NightlyProtocol.ThemeMessage(_darkTheme));
+        // The command line's window is on its way; every other pane's window is asked for now.
+        foreach (var token in _panes.Keys.Order().Where(t => t != _commandLinePane)) Send(OpenMessage(token));
     }
 
     // ── windows (UI thread) ──
@@ -678,6 +690,7 @@ internal sealed class NightlyRuntime : IDisposable
 
     private void OnWindow(NightlyProtocol.WindowInfo info)
     {
+        if (!_peerTrusts) OnPeerTrusts();
         if (_closedWindows.Contains(info.WindowId)) return;
         var w = WindowFor(info.WindowId);
         if (!info.Visible && w.Info is { Visible: true })

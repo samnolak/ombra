@@ -83,10 +83,11 @@ internal static partial class NightlyAcceptance
             Check("dialogs-doorhanger-block", await Shows(Denied, 10) && NightlyWindowRects(pid).Count == 0 && pane.IsKeyboardFocusWithin,
                 $"color={color} focus={pane.IsKeyboardFocusWithin}");
 
-                // Save Page As (⌘S): the save panel as a sheet on Ombra's window; it saves where it is told.
+                // Save Page As (⌥⇧⌘S in Zen; its ⌘S is compact mode): the save panel as a sheet on Ombra's window; it
+                // saves where it is told.
                 var saved = Path.Combine(dir, "dialogs-saved.html");
                 File.Delete(saved);
-                KeyPress("s", 0x01, 1UL << 20);
+                KeyPress("s", 0x01, (1UL << 20) | (1UL << 19) | (1UL << 17));
                 nint sheet = 0;
                 var asked = await Until(() => (sheet = MacObjC.Send(NsWindow, "attachedSheet")) != 0, 15);
                 var sheetClass = sheet != 0 ? MacObjC.ClassName(MacObjC.ClassOf(sheet)) : "";
@@ -98,7 +99,10 @@ internal static partial class NightlyAcceptance
                 {
                     MacObjC.SendVoid(sheet, "setDirectoryURL:", MacObjC.FileUrl(dir));
                     MacObjC.SendVoid(sheet, "setNameFieldStringValue:", MacObjC.Str("dialogs-saved.html"));
-                    MacObjC.SendVoid(sheet, "ok:", 0);
+                    // The panel runs out of process (NSRemoteSavePanel): -ok: throws "not implemented"; ending the sheet
+                    // with OK is what its Save button does.
+                    await Task.Delay(300);
+                    MacObjC.SendVoid(NsWindow, "endSheet:returnCode:", sheet, 1);
                 }
                 Check("dialogs-save-as", save && await Until(() => File.Exists(saved) && new FileInfo(saved).Length > 0, 20)
                     && await Until(() => MacObjC.Send(NsWindow, "attachedSheet") == 0 && pane.IsKeyboardFocusWithin, 5),

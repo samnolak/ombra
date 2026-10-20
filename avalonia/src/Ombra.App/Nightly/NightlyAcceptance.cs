@@ -380,8 +380,11 @@ internal static partial class NightlyAcceptance
                 var ok = await Until(async () => (seen = await Probe(pane)) is { } p && Expected(p) && ShowsViewport(pane, host, width, height), 30);
                 Check($"device-{id}", ok, $"{seen} pane={pane.Bounds.Size} host={host.Bounds.Size} frame={pane.FrameLayout} scale={PageScale(pane):0.###}");
                 if (!ok) continue;
+                // A new device can reload the page after its first probe matched (the counts start again): the
+                // baseline is read once that load is over.
                 await Task.Delay(300);
-                var before = seen!;
+                await Until(() => !vm.Preview.IsLoading, 10);
+                var before = await Probe(pane) ?? seen!;
                 Click(pane, 120, 60);
                 var tapped = await Until(async () => (seen = await Probe(pane)) is { } p && p.Clicks > before.Clicks, 5);
                 var input = mobile
