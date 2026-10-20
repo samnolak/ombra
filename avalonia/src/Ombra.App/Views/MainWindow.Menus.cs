@@ -61,6 +61,22 @@ public sealed partial class MainWindow
             Item("Terminal", vm.ToggleTerminalCommand),
             Item("Events", vm.ToggleDebugCommand),
         };
+        if (OperatingSystem.IsMacOS())
+        {
+            // Avalonia disables AppKit's automatic full-screen menu item. Own the window command
+            // explicitly, including while the embedded browser has the keyboard.
+            var fullScreen = Item(Loc.T("Enter Full Screen"),
+                new RelayCommand(() => WindowState = WindowState == WindowState.FullScreen ? WindowState.Normal : WindowState.FullScreen),
+                Key.F, KeyModifiers.Control);
+            void UpdateFullScreenTitle() => fullScreen.Header = Loc.T(WindowState == WindowState.FullScreen ? "Exit Full Screen" : "Enter Full Screen");
+            UpdateFullScreenTitle();
+            PropertyChanged += (_, e) =>
+            {
+                if (e.Property == WindowStateProperty) UpdateFullScreenTitle();
+            };
+            view.Add(new NativeMenuItemSeparator());
+            view.Add(fullScreen);
+        }
         var window = new NativeMenu
         {
             Item("Minimize", new RelayCommand(() => WindowState = WindowState.Minimized), Key.M),
