@@ -541,7 +541,7 @@ project yet), so the OS warns on first start:
   ⌘/Ctrl shortcuts are Nightly's (⌘T, ⌘L, ⌘W, ⇧⌘T, Ctrl+Tab, switching spaces…); Ombra keeps only ⌘Q, ⌘H, ⌘M, ⌘`
   and ⌘Esc (back to the chats). Its menus, the library and share dialogs open as windows over Ombra's. omp never
   drives it. **Chats** in the rail goes back to the conversation; the tabs stay. Links and pages from your team open
-  here once you accept them.
+  here once you accept them, and so does a chat link's **Open in Browser page**.
 - **Panes** — the buttons at the right of the header open **Files** (Ctrl/⌘+Shift+F), **Plan** (Ctrl/⌘+Shift+P),
   **Background tasks** (Ctrl/⌘+Shift+T), the **Terminal** (Ctrl+`) and the **Browser** preview (Ctrl/⌘+Shift+B); a
   lit button means its pane is open, and its tooltip names its shortcut. When the header has too little room for
@@ -595,6 +595,15 @@ project yet), so the OS warns on first start:
   message, or opening another session, always goes to the end. Once you click the conversation's text (the keys
   are then the conversation's, not the message box's), Page Up / Page Down scroll by a screen, ↑/↓ by a little, Home
   goes to the top and End to the latest message.
+- **Links** — a web link (http or https) you click in Ombra — in a reply, in a terminal, on a card (**Open** on a
+  shared conversation or the usage dashboard), in Settings — opens in the right panel's **Browser** tab next to the
+  chat, in a tab of its own (the panel opens on it; Settings, the Browser page and the Team page close so you see it).
+  It shows with the pane's engine: Nightly, or the built-in preview while the pane asks whether to use Nightly or
+  offers to install it. Only when the pane has no engine at all (the system's web engine is missing) does the link go
+  to your default browser. ⌘-click (Ctrl-click on Windows and Linux) or right-click a link for **Open in preview**,
+  **Open in Browser page**, **Open in default browser**, **Copy link** and **Share with team…**. Sign-in pages
+  (**Open in browser** on omp's sign-in card, an MCP server's sign-in) open in your default browser, where your
+  accounts and passkeys are. Files, folders and `mailto:` links open with the system as before.
 - **Paths in replies** — a path omp writes as code (`src/app.ts`, `src/app.ts:42`, `assets/logo.png`, `docs/`) or as
   a link to a local file is looked up in the chat's project when the pointer rests on it. If it exists it is
   underlined and shows a preview: a file's first lines (around the line when it names one, that line marked), an
@@ -604,7 +613,8 @@ project yet), so the OS warns on first start:
 - **Right-click menus** — right-click (two-finger click, or Control+click on macOS) acts on what is under the
   pointer, not on what is selected: one of your messages offers **Copy** and **Rewind to here**; a reply **Copy**
   (the text as it reads), **Copy as Markdown** and, when it failed, **Retry**; a code block **Copy code** and
-  **Insert into message**; a link **Open link** and **Copy link**. Selected conversation words keep the native
+  **Insert into message**; a link **Open in preview**, **Open in Browser page**, **Open in default browser** and
+  **Copy link** (see *Links*). Selected conversation words keep the native
   **Copy** menu and add **Quote in message**, inserting a Markdown quote at the composer caret without replacing
   the draft. Free-text transcript comments are not supported: anchored comments remain on code/diffs and pages.
   Errors and notices offer **Copy details** and **Show in Events** (failed replies also offer **Retry** when available).

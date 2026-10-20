@@ -47,7 +47,7 @@ public partial class MainViewModel
     private bool OpenOwnSignInPage(OpenUrlRequest request)
     {
         if (request.McpServer is not { } server || !_mcpLogins.Contains((Session, server)) || !IsSafeBrowserUrl(request.Target, out var uri)) return false;
-        OpenUrlRequested?.Invoke(uri.AbsoluteUri);
+        OpenLink(uri, LinkTarget.SystemBrowser);
         return true;
     }
 }

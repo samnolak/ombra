@@ -122,7 +122,7 @@ internal static partial class FeatureSmoke
                 ("interrupt-race", InterruptRace),
                 .. BtwGoalSections(), .. AskPlanSections(), .. QueueRowsSections(), .. ForkHostToolsSections(), .. MarksSections(), .. SidebarNavSections(),
                 .. MicroUxSections(), .. SharedMarksSections(), .. ShareSections(), .. TeamSections(), .. NightlyShareSections(),
-                .. ProgressSections(), .. GitBellSections(), .. TitleBarSections(), .. PluginsHubSections(),
+                .. ProgressSections(), .. GitBellSections(), .. TitleBarSections(), .. PluginsHubSections(), .. ChatLinksSections(),
             ];
             var only = Environment.GetEnvironmentVariable("OMBRA_FEATURE_SMOKE_ONLY") is { Length: > 0 } o ? o.Split(',') : null;
             foreach (var (name, section) in sections)
@@ -157,7 +157,9 @@ internal static partial class FeatureSmoke
 
         private async Task Startup()
         {
-            window.Position = new PixelPoint(40, 40);
+            // OMBRA_FEATURE_SMOKE_POSITION=x,y puts the window elsewhere (another display) than the top-left of the main one
+            window.Position = Environment.GetEnvironmentVariable("OMBRA_FEATURE_SMOKE_POSITION")?.Split(',') is [var px, var py]
+                && int.TryParse(px, out var x) && int.TryParse(py, out var y) ? new PixelPoint(x, y) : new PixelPoint(40, 40);
             window.Width = 1360;
             window.Height = 880;
             vm.SettingsTheme = "dark";
@@ -687,10 +689,10 @@ internal static partial class FeatureSmoke
             return ((delegate* unmanaged<nint, nint, CGPoint, nint, CGPoint>)MacObjC.MsgSend)(content, MacObjC.Sel("convertPoint:toView:"), inView, 0);
         }
 
-        private unsafe nint MouseEvent(ulong type, CGPoint at, long clicks, nint windowRef) =>
+        private unsafe nint MouseEvent(ulong type, CGPoint at, long clicks, nint windowRef, ulong modifiers = 0) =>
             ((delegate* unmanaged<nint, nint, ulong, CGPoint, ulong, double, long, nint, long, long, float, nint>)MacObjC.MsgSend)(
                 MacObjC.Cls("NSEvent"), MacObjC.Sel("mouseEventWithType:location:modifierFlags:timestamp:windowNumber:context:eventNumber:clickCount:pressure:"),
-                type, at, 0, Uptime(), MacObjC.SendLong(windowRef, "windowNumber"), 0, 0, clicks, type is 1 or 3 ? 1f : 0f);
+                type, at, modifiers, Uptime(), MacObjC.SendLong(windowRef, "windowNumber"), 0, 0, clicks, type is 1 or 3 ? 1f : 0f);
 
         /// <summary>The native window a control is shown in (the main window, or a popup's own window).</summary>
         private nint NsWindowOf(Control c) =>

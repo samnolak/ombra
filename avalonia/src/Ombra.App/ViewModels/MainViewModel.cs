@@ -139,7 +139,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     public bool IsSigningIn => SigningIn is not null;
     public string SigningInText => Loc.F("Signing in to {0}… omp waits for the browser or the code; other actions wait too.", SigningIn);
 
-    /// <summary>Raised on the UI thread when the user chose to open <see cref="PendingUrl"/>; the view launches it.</summary>
+    /// <summary>Raised on the UI thread for a link the system opens (<see cref="OpenLink(Uri, LinkTarget)"/>: the default
+    /// browser, the file manager, the mail app); the view launches it.</summary>
     public event Action<string>? OpenUrlRequested;
 
     /// <summary>The view writes the clipboard and reports whether it succeeded, after showing any failure.</summary>
@@ -379,8 +380,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     private void OpenPendingUrl()
     {
+        // A sign-in: the system's browser, where the user's accounts, password manager and passkeys are
         if (PendingUrl is { } url && IsSafeBrowserUrl(url, out var uri))
-            OpenUrlRequested?.Invoke(uri.AbsoluteUri);
+            OpenLink(uri, LinkTarget.SystemBrowser);
         PendingUrl = null;
     }
 

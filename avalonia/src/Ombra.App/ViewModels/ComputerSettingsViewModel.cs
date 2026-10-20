@@ -243,7 +243,7 @@ public sealed partial class ComputerSettingsViewModel : WorkspacePageViewModel
     private async Task RunCheckActionAsync(RequirementCheck? check)
     {
         if (check?.Action == RequirementCheck.TurnOnEvalAction) await TurnOnEvalAsync();
-        else if (check?.Action is { } url) Main.OpenExternal(url);
+        else if (check?.Action is { } url) Main.OpenLink(url);
     }
 
     partial void OnEnabledChanged(bool value)

@@ -21,8 +21,8 @@ internal static partial class NightlyAcceptance
         ];
 
         /// <summary>
-        /// Open in app on the Browser page: a link Ombra opens there (the conversation's links go through
-        /// <see cref="ViewModels.MainViewModel.OpenInBrowserPage"/>) and a link clicked in the page, both to a site whose
+        /// Open in app on the Browser page: a link Ombra opens there (a chat link's "Open in Browser page",
+        /// <see cref="ViewModels.MainViewModel.OpenLink(Uri, ViewModels.LinkTarget)"/>) and a link clicked in the page, both to a site whose
         /// app is installed, reach that app through LaunchServices with the app's URL, and the page stays: the tab
         /// opened for Ombra's link closes (no blank tab, no landing page), the clicked page keeps its colour. The app is
         /// a probe written here (an AppleScript applet claiming the scheme of the first known app this Mac has no handler
@@ -69,8 +69,9 @@ internal static partial class NightlyAcceptance
                 vm.OpenInBrowserWindow?.Invoke(new Uri(page));
                 Check("open-in-app-page", await Until(Magenta, 30), $"colour={color}");
 
-                // A link from Ombra (a chat's link): the app gets it, the tab opened for it closes.
-                var opened = vm.OpenInBrowserPage(new Uri(link.Site));
+                // A link from Ombra (a chat link's "Open in Browser page"): the app gets it, the tab opened for it closes.
+                var opened = vm.OpenInBrowserWindow is not null;
+                vm.OpenLink(new Uri(link.Site), ViewModels.LinkTarget.BrowserPage);
                 var got = await Until(() => Lines(output).Count >= 1, 20);
                 await Task.Delay(1500);
                 Activate();

@@ -2715,6 +2715,8 @@
     "Left and Right resize; Home resets; End maximizes the width": "Стрелки влево и вправо меняют ширину; Home сбрасывает, End разворачивает на максимум",
     "Copy patch": "Скопировать патч",
     "Open in preview": "Открыть в предпросмотре",
+    "Open in Browser page": "Открыть на странице «Браузер»",
+    "Open in default browser": "Открыть в браузере по умолчанию",
     "Accept {0}": "Принять {0}",
     "Accept": "Принять",
     "Accepted": "Принято",

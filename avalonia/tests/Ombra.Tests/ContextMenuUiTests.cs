@@ -211,7 +211,7 @@ public sealed class ContextMenuUiTests
             var link = Within<HyperlinkButton>(replyRow, l => l.NavigateUri?.AbsoluteUri == "https://example.com/docs");
             await RightClick(w, link);
             menu = OpenMenu(link);
-            Assert.Same(link, ((PopupFlyoutBase)menu!).Target);
+            Assert.Same(link.GetVisualParent(), ((PopupFlyoutBase)menu!).Target); // the text the link sits in (MarkdownView.InlineLink.ShowMenu)
             await Choose(Item(menu, "Copy link"));
             Assert.Equal("https://example.com/docs", await w.Clipboard!.TryGetTextAsync());
 
@@ -476,7 +476,8 @@ public sealed class ContextMenuUiTests
 
             await RightClick(w, link);
             menu = OpenMenu(link)!;
-            Assert.True(Item(menu, "Open link").IsEnabled);
+            Assert.True(Item(menu, "Open in default browser").IsEnabled);
+            Assert.False(Item(menu, "Open in preview").IsEnabled); // no chat in this standalone window
             Save(w, "link-menu-" + theme);
             await Choose(Item(menu, "Copy link"));
             Assert.Equal("https://example.com/docs", await w.Clipboard!.TryGetTextAsync());
@@ -485,6 +486,82 @@ public sealed class ContextMenuUiTests
         {
             w.Close();
             MainViewModel.ApplyTheme("light");
+        }
+    }
+
+    /// <summary>
+    /// A link in a reply, clicked: the right panel's Browser tool, with the chat still on screen, never the system's
+    /// browser (the owner's default browser was Nightly, outside Ombra). ⌘-click (Ctrl-click off macOS) opens the link's
+    /// menu instead: "Open in default browser" and "Open in Browser page". The headless window has no native surface, so
+    /// once the panel tries to show the page its engine is unavailable and the next click goes to the system.
+    /// </summary>
+    [AvaloniaTheory]
+    [InlineData("en")]
+    [InlineData("ru")]
+    public async Task A_link_in_a_reply_opens_in_the_right_panel_and_cmd_click_offers_the_browser_page_and_the_default_browser(string language)
+    {
+        var settingsPath = Path.Combine(TestProcesses.TempDir("chat-links-" + language), "ombra.local.json");
+        var previous = Loc.Current;
+        Loc.Load(language, settingsPath);
+        var (w, vm) = await OpenAsync("markdown", height: 1400);
+        var system = new List<string>();
+        vm.OpenUrlRequested += system.Add;
+        var command = OperatingSystem.IsMacOS() ? RawInputModifiers.Meta : RawInputModifiers.Control;
+        try
+        {
+            await SendAsync(w, vm, "a link please");
+            await Until(() => vm.Rows.OfType<AssistantRowViewModel>().Any(r => r.HasText), "reply");
+            await Settle(400);
+            HyperlinkButton Link() => w.GetVisualDescendants().OfType<HyperlinkButton>().First(l => l.NavigateUri?.AbsoluteUri == "https://example.com/docs");
+            // As in the app: between the press and the release the reply's text lays out again, which takes the link out
+            // of the tree and back (TextBlock's arrange) and hands its pointer capture to the text.
+            async Task ClickLink(RawInputModifiers modifiers = RawInputModifiers.None)
+            {
+                var link = Link();
+                var p = Center(link, w);
+                w.MouseMove(p, modifiers);
+                w.MouseDown(p, MouseButton.Left, modifiers);
+                var lost = false;
+                void Lost(object? s, PointerCaptureLostEventArgs e) => lost = true;
+                link.PointerCaptureLost += Lost;
+                ((TextBlock)link.GetVisualParent()!).InvalidateMeasure();
+                await Settle();
+                link.PointerCaptureLost -= Lost;
+                Assert.True(lost);
+                w.MouseUp(p, MouseButton.Left, modifiers);
+                await Settle();
+            }
+
+            await ClickLink();
+            Assert.Equal(SidePane.Browser, vm.ActivePane);
+            Assert.Equal("https://example.com/docs", vm.Preview.CurrentUrl!.AbsoluteUri);
+            Assert.False(vm.ShowBrowserPage);
+            Assert.True(Link().IsEffectivelyVisible);
+            Assert.Empty(system);
+            Save(w, "chat-link-in-panel-" + language);
+
+            await ClickLink(command);
+            var menu = OpenMenu(Link())!;
+            Assert.Same(Link().GetVisualParent(), ((PopupFlyoutBase)menu).Target);
+            Save(w, "chat-link-cmd-menu-" + language);
+            Assert.Empty(system);
+            await Choose(Item(menu, "Open in default browser"));
+            Assert.Equal(["https://example.com/docs"], system);
+
+            Assert.True(vm.Preview.IsEngineUnavailable);
+            await ClickLink();
+            Assert.Equal(2, system.Count);
+
+            await ClickLink(command);
+            await Choose(Item(OpenMenu(Link())!, "Open in Browser page"));
+            Assert.True(vm.ShowBrowserPage);
+            Assert.Equal("https://example.com/docs", vm.Browser.CurrentUrl!.AbsoluteUri);
+            Assert.Equal(2, system.Count);
+        }
+        finally
+        {
+            w.Close();
+            Loc.Load(previous, settingsPath);
         }
     }
 

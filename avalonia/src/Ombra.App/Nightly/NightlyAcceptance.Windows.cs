@@ -100,12 +100,12 @@ internal static partial class NightlyAcceptance
             KeyPress("w", 0x0D, 1UL << 20);
             var cyanBeforeLink = await Shows(Cyan, 10);
 
-            // A link Ombra opens (a chat's link, a card's Open): from the Chats page, the Browser page shows it in a tab.
+            // A link Ombra opens in the Browser page (a chat link's ⌘-click menu): from the Chats page, the page shows it in a tab.
             if (!Uri.TryCreate(url, UriKind.Absolute, out var fixture) || fixture.Scheme is not ("http" or "https")) return;
             vm.ShowChatsCommand.Execute(null);
             await Until(() => !pane.IsEffectivelyVisible, 5);
             var link = new Uri(fixture, "?from=ombra");
-            vm.OpenExternal(link.AbsoluteUri);
+            vm.OpenLink(link, ViewModels.LinkTarget.BrowserPage);
             var shown = cyanBeforeLink && await Until(() => vm.ShowBrowserPage && pane.IsEffectivelyVisible, 10)
                 && await Until(Left, 15);
             await Task.Delay(1000);
