@@ -745,9 +745,10 @@ public sealed partial class ConversationState
                 var expired = Str(j, "reason") == "expired";
                 _mcpAuth.RemoveAll(a => a.Server == authServer);
                 _mcpAuth.Add(new McpAuthRequest(authServer, expired));
-                AddNotice(NoticeLevel.Warning, expired
-                    ? $"Connector “{authServer}” needs you to sign in again."
-                    : $"Connector “{authServer}” needs you to sign in.");
+                var authText = expired
+                    ? new ClientText("Connector “{0}” needs you to sign in again.", authServer)
+                    : new ClientText("Connector “{0}” needs you to sign in.", authServer);
+                Add(new NoticeItem(0, NoticeLevel.Warning, authText.ToString()) { Headline = authText, McpServer = authServer });
                 break;
             case "notice":
                 if (Str(j, "source") == "session-persistence" && Str(j, "sessionFile") is { } movedFile

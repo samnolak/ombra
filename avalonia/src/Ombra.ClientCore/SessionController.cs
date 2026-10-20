@@ -642,6 +642,12 @@ public sealed partial class SessionController : IAsyncDisposable
         return servers;
     }
 
+    /// <summary>Signs out of an MCP server: omp forgets its stored sign-in and disconnects it.</summary>
+    /// <exception cref="OmpNotRunningException" />
+    /// <exception cref="RpcCommandException">omp refused (an older omp has no such command).</exception>
+    public Task<OmpMcpServer?> McpLogoutAsync(string serverName, CancellationToken ct = default) =>
+        RequireConnection().McpLogoutAsync(serverName, ct);
+
     /// <summary>The user closed a connector's sign-in prompt without signing in.</summary>
     public void DismissMcpAuthRequest(string serverName) => Mutate(s => s.ClearMcpAuthRequest(serverName));
 

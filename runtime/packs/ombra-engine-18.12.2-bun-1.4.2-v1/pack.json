@@ -25,8 +25,8 @@
       "attestation": "https://registry.npmjs.org/-/npm/v1/attestations/@oh-my-pi%2fpi-coding-agent@18.12.2",
       "verification": "npm tarball integrity verified; SLSA payload decoded, signatures not independently verified"
     },
-    "sha256": "03ed50955465a76490d31e4ac4e5717736a4835fea7adf85534bd0a532eded69",
-    "bytes": 23778624,
+    "sha256": "82328ab482d33798ccda7cfc6c145cc09481b620457466101b434a2295edebca",
+    "bytes": 23782117,
     "files": [
       {
         "path": "approval-lease.test.ts",
@@ -45,8 +45,8 @@
       },
       {
         "path": "coding-agent/CHANGELOG.md",
-        "size": 267713,
-        "sha256": "a8084e9e308faa3176ca65c2780b6d2b11c85b62db40a887491b8ba57a784be7"
+        "size": 268127,
+        "sha256": "d9f53266afc2920eea560338f478f0186ff9ef8e2b6b34d83d78896921f5005c"
       },
       {
         "path": "coding-agent/LICENSE",
@@ -3625,8 +3625,8 @@
       },
       {
         "path": "coding-agent/src/main.ts",
-        "size": 113629,
-        "sha256": "355a66a5dd0fb6323b86299e3d75dc4c82653395f95bbb3c0fc7cdb9ba0c7843"
+        "size": 113934,
+        "sha256": "51bc6f65691b6d1f84d36fc861dd1c8e020735effa7a12e8779d317937e00023"
       },
       {
         "path": "coding-agent/src/markit/NOTICE",
@@ -4367,6 +4367,11 @@
         "path": "coding-agent/src/modes/settings.ts",
         "size": 39280,
         "sha256": "2a657406c5649e46926f42177acd9e4a1072c5d709af37553f26439b4165dc97"
+      },
+      {
+        "path": "coding-agent/src/modes/setup-gate.ts",
+        "size": 988,
+        "sha256": "e04e714e1850e2b1a27a26e8155e65f097bc118a61113bc9d7266ab72ef79078"
       },
       {
         "path": "coding-agent/src/modes/setup.ts",
@@ -9227,6 +9232,11 @@
         "path": "session-isolation.test.ts",
         "size": 15585,
         "sha256": "6b843df100daf1f868f4664973e8887bf20214ff50410a5cab37bee050cd385d"
+      },
+      {
+        "path": "setup-gate.test.ts",
+        "size": 1786,
+        "sha256": "99affcdfcd17c72a59fe809493e629cfb8fe00f4af258e18c3aaf57933705594"
       },
       {
         "path": "small-context-recovery.test.ts",

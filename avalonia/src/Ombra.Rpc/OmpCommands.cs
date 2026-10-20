@@ -473,10 +473,20 @@ public static class OmpCommands
     public static async Task<bool> McpLoginCancelAsync(this RpcConnection c, string serverName, CancellationToken ct = default) =>
         Cancelled(Ok(await c.RequestAsync("mcp_login_cancel", w => w.WriteString("serverName", serverName), ct: ct).ConfigureAwait(false)));
 
-    /// <summary>Reconnects one server, or with null rediscovers and reconnects all; returns every server's state after.</summary>
+    /// <summary>
+    /// Reconnects one server from its config as it is now, or with null reads every MCP config file again (servers
+    /// added, edited or removed in mcp.json) and reconnects all; returns every server's state after.
+    /// </summary>
     public static async Task<IReadOnlyList<OmpMcpServer>> McpReconnectAsync(this RpcConnection c, string? serverName, CancellationToken ct = default) =>
         McpServers(Ok(await c.RequestAsync("mcp_reconnect", w => { if (serverName is not null) w.WriteString("serverName", serverName); },
             timeout: TimeSpan.FromMinutes(2), ct: ct).ConfigureAwait(false)));
+
+    /// <summary>Signs out of an MCP server: omp forgets its stored sign-in and disconnects it (owned runtime <c>mcp_logout</c>).</summary>
+    public static async Task<OmpMcpServer?> McpLogoutAsync(this RpcConnection c, string serverName, CancellationToken ct = default)
+    {
+        var r = Ok(await c.RequestAsync("mcp_logout", w => w.WriteString("serverName", serverName), timeout: TimeSpan.FromMinutes(1), ct: ct).ConfigureAwait(false));
+        return r.Data is { ValueKind: JsonValueKind.Object } d ? McpServer(d) : null;
+    }
 
     private static IReadOnlyList<OmpMcpServer> McpServers(RpcResponse r) =>
         r.Data is { ValueKind: JsonValueKind.Object } d && d.TryGetProperty("servers", out var s) && s.ValueKind == JsonValueKind.Array

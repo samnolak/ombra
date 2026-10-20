@@ -1060,13 +1060,24 @@ configuration you are editing.
   checks and saves it (`/mcp add`).
 - A server that uses OAuth shows its sign-in on its row: *Signed in*, *Signed out* or *Sign-in expired*. **Sign in**
   (also offered when a remote server refused the test with 401) asks omp to sign in: the server's sign-in page opens
-  in your browser — only for a sign-in you started here, and only an `https` page or one on this computer — and the
-  row says *Connected · N tools* when you're done, without a restart. **Sign in again** on the server's page signs
-  in anew; **Cancel** stops a sign-in waiting on the browser. A link omp opens on its own stays on the link card for
-  you to open. When omp finds that a server needs you to sign in (again) — at start, or when a tool is refused — the
-  MCP tab shows a card with **Sign in** for it until you sign in or dismiss it; the conversation gets a notice too.
-- **Reconnect all**, under the list, has omp read its servers again and reconnect each one without restarting omp.
-  **Resources, prompts and options** asks the servers what they offer (a prompt can be used as a
+  in your default browser (your accounts and passkeys are there) — only for a sign-in you started here (or with
+  `/mcp reauth <name>` in the message box), and only an `https` page or one on this computer — and the row says
+  *Connected · N tools* when you're done, without a restart. **Sign in again** on the server's page signs in anew;
+  **Sign out** there has omp forget the sign-in it keeps; **Cancel** stops a sign-in waiting on the browser. When the
+  server refuses the sign-in (for example a client registration it does not allow), the row shows omp's reason. A
+  link omp opens on its own stays on the link card for you to open. When omp finds that a server needs you to sign in
+  (again) — at start, or when a tool is refused — the MCP tab shows a card with **Sign in** for it until you sign in
+  or dismiss it; the conversation gets a notice with **Show connectors**, which opens this list.
+- A server omp could not connect shows *Couldn't connect* with omp's reason under the row, and **Reconnect**, which
+  connects it again from its entry in `mcp.json` as it is now.
+- **Reload config**, under the list, has omp read its `mcp.json` files again — servers you added, edited or removed
+  there — and reconnect each one without restarting omp.
+- **The chat's connectors**: the plug under the message box (beside the context ring) lists this chat's servers —
+  *Connected · N tools*, *Sign-in needed*, *Sign-in expired*, *Couldn't connect* with omp's reason — with **Sign in**,
+  **Reconnect**, **Reload config** and **Manage connectors** (this tab). When a server needs a sign-in or failed, the
+  plug turns to the warning colour and says so (*Sign in to figma*), and stays that way after the notice and the card
+  are dismissed, until you sign in. omp is asked for the list when you open it, not in the background.
+- **Resources, prompts and options** asks the servers what they offer (a prompt can be used as a
   `/server:prompt` command); **Servers from project files** turns off the servers a project brings, for projects you
   don't trust.
 - A server can ask you to fill in a form while omp works (MCP elicitation): a card in the conversation names the

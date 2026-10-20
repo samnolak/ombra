@@ -226,6 +226,7 @@ public sealed partial class MainWindow : Window
         // its width while its right half runs past the card's edge
         ComposerLeft.SizeChanged += (_, e) => { if (e.WidthChanged) QueueComposerFit(); };
         ComposerRight.SizeChanged += (_, e) => { if (e.WidthChanged) QueueComposerFit(); };
+        FooterRight.SizeChanged += (_, e) => { if (e.WidthChanged) QueueComposerFit(); };
         ComposerBox.PropertyChanged += (_, e) => { if (e.Property == BoundsProperty && e.OldValue is Rect o && e.NewValue is Rect n && o.Height != n.Height || e.Property == MarginProperty) FitPanels(); };
     }
 
@@ -512,7 +513,7 @@ public sealed partial class MainWindow : Window
         try
         {
             FitRow(ComposerBox, ComposerToolbar, ComposerLeft, ComposerRight, 5);
-            FitRow(ComposerFooter, ComposerFooter, FooterLeft, UsageIndicator, 4);
+            FitRow(ComposerFooter, ComposerFooter, FooterLeft, FooterRight, 4);
         }
         finally { _fittingComposer = false; }
     }

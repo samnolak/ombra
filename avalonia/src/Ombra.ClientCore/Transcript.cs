@@ -84,6 +84,8 @@ public sealed record NoticeItem(long Key, NoticeLevel Level, string Text) : Tran
 {
     /// <summary><see cref="Text"/>'s first line as the client wrote it (format and values), for the app's language; null: omp's or the client's text as it is.</summary>
     public Ombra.Rpc.ClientText? Headline { get; init; }
+    /// <summary>The connector a sign-in notice is about (<c>mcp_auth_required</c>): the notice links to the connectors.</summary>
+    public string? McpServer { get; init; }
 }
 
 /// <summary>Command output, or a labelled visible runtime context message. Never contains hidden custom content.</summary>

@@ -869,6 +869,7 @@
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/runtime-init.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/runtime-init.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/session-teardown.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/session-teardown.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/settings.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/settings.ts" WithCulture="false" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/setup-gate.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/setup-gate.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/setup.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/setup.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/skill-command.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/skill-command.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/startup-composer.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/startup-composer.ts" WithCulture="false" />
@@ -1841,6 +1842,7 @@
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/session-compound-leases.test.ts" LogicalName="runtime-pack/engine/session-compound-leases.test.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/session-factory.ts" LogicalName="runtime-pack/engine/session-factory.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/session-isolation.test.ts" LogicalName="runtime-pack/engine/session-isolation.test.ts" WithCulture="false" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/setup-gate.test.ts" LogicalName="runtime-pack/engine/setup-gate.test.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/small-context-recovery.test.ts" LogicalName="runtime-pack/engine/small-context-recovery.test.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/take-session.ts" LogicalName="runtime-pack/engine/take-session.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/untrusted-project.test.ts" LogicalName="runtime-pack/engine/untrusted-project.test.ts" WithCulture="false" />

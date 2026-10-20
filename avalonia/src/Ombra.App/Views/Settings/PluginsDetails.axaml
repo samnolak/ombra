@@ -268,16 +268,22 @@
     </StackPanel>
 
     <StackPanel x:Name="ServerActions" Spacing="12" IsVisible="{Binding $parent[UserControl].((vm:PluginsHubViewModel)DataContext).IsServerDetails}" DataContext="{Binding SelectedServer}" x:DataType="vm:McpServerRowViewModel">
-      <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding HasMenu}">
+      <WrapPanel ItemSpacing="8" LineSpacing="8" IsVisible="{Binding HasMenu}">
         <Button x:Name="TestServerButton" Classes="outline" Content="{loc:T 'Test connection'}" Command="{Binding TestCommand}" IsEnabled="{Binding CanTest}"
                 AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Test {0}'}}" />
         <Button x:Name="EditServerButton" Classes="outline" Content="{loc:T 'Edit…'}" Command="{Binding EditCommand}" IsEnabled="{Binding CanEdit}"
                 AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Edit {0}'}}" />
         <Button x:Name="SignInAgainButton" Classes="outline" Content="{loc:T 'Sign in again'}" Command="{Binding SignInCommand}" IsVisible="{Binding CanSignInAgain}"
                 AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Sign in to {0} again'}}" />
+        <Button x:Name="ReconnectServerButton" Classes="outline" Content="{loc:T 'Reconnect'}" Command="{Binding ReconnectCommand}" IsVisible="{Binding CanReconnect}"
+                ToolTip.Tip="{loc:T 'omp connects to it again, from its entry in mcp.json as it is now'}"
+                AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Reconnect {0}'}}" />
+        <Button x:Name="SignOutServerButton" Classes="outline" Content="{loc:T 'Sign out'}" Command="{Binding SignOutCommand}" IsVisible="{Binding CanSignOut}"
+                ToolTip.Tip="{loc:T 'omp forgets the sign-in it keeps for this server and disconnects it'}"
+                AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Sign out of {0}'}}" />
         <Button x:Name="RemoveServerButton" Classes="outline" Content="{loc:T 'Remove…'}" Command="{Binding AskRemoveCommand}" IsVisible="{Binding !IsConfirmingRemove}"
                 AutomationProperties.Name="{Binding Name, StringFormat={loc:T 'Remove {0}…'}}" />
-      </StackPanel>
+      </WrapPanel>
       <Border Classes="conn-inset" IsVisible="{Binding IsConfirmingRemove}">
         <StackPanel Spacing="10">
           <StackPanel Spacing="2">
