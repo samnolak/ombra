@@ -37,6 +37,9 @@ internal static partial class NightlyAcceptance
             vm.OpenInBrowserWindow?.Invoke(new Uri(page));
             double luma = 0;
             bool Body(double low, double high) => (luma = ContentLuma(pane)) >= low && luma <= high;
+            // Cyan by its hue: the frames come colour-managed (#00ffff as about 100,250,252, mean ~200, as yellow's).
+            var rgb = (R: 0, G: 0, B: 0);
+            bool Cyan() => (rgb = ContentColor(pane, ContentMiddle)) is var (r, g, b) && (luma = (r + g + b) / 3.0) > 0 && g > 200 && b > 200 && r < g - 80;
             var loaded = await Until(() => Body(240, 256), 20);
             Activate();
             await Until(() => window.IsActive, 5);
@@ -59,8 +62,9 @@ internal static partial class NightlyAcceptance
             });
             Activate();
             await Until(() => window.IsActive, 5);
-            Check("browser-window-drag-focus-cancel", await Until(() => Body(160, 190), 5),
-                $"body luma={luma:0} (cyan: mozUserCancelled, dropEffect none, no drop)");
+            Check("browser-window-drag-focus-cancel", await Until(Cyan, 5),
+                $"body rgb={rgb.R:0},{rgb.G:0},{rgb.B:0} (cyan: mozUserCancelled, dropEffect none, no drop)");
+            Shot("p-browser-window-drag-focus-cancel");
 
             await Drag(At, W * 0.32, H * 0.2, W * 0.85, H * 0.2, 16, 0, async () =>
             {
@@ -69,15 +73,16 @@ internal static partial class NightlyAcceptance
                 KeyPress("\x1b", 0x35, 0);
                 await Task.Delay(300);
             });
-            Check("browser-window-drag-escape-cancel", await Until(() => Body(160, 190), 5),
-                $"body luma={luma:0} (cyan: mozUserCancelled, dropEffect none, no drop)");
+            Check("browser-window-drag-escape-cancel", await Until(Cyan, 5),
+                $"body rgb={rgb.R:0},{rgb.G:0},{rgb.B:0} (cyan: mozUserCancelled, dropEffect none, no drop)");
+            Shot("p-browser-window-drag-escape-cancel");
 
             await Drag(At, W * 0.32, H * 0.2, W * 0.85, H * 0.2, 16, 0);
             Check("browser-window-drag-after-cancel", await Until(() => Body(60, 110), 5),
                 $"body luma={luma:0} (blue: normal drop still works after cancellation)");
 
             await Drag(At, W * 0.32, H * 0.2, -30, H * 0.2, 16, 0);
-            Check("browser-window-drag-out", await Until(() => Body(110, 150) || Body(160, 190), 5), $"body luma={luma:0} (grey/cyan: dragend none, the drag carried out of the pane)");
+            Check("browser-window-drag-out", await Until(() => Body(110, 150) || Cyan(), 5), $"body luma={luma:0} (grey/cyan: dragend none, the drag carried out of the pane)");
 
             await DropFile(At(W * 0.85, H * 0.85), file);
             Check("browser-window-drag-files", await Until(() => Body(0, 30), 5), $"body luma={luma:0} (black: the page got dnd-file.txt)");
