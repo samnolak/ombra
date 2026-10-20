@@ -278,7 +278,7 @@ public sealed class App : Application
             trayMenu.Add(quit);
             var tray = new TrayIcon
             {
-                Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://Ombra/Assets/icon-256.png"))),
+                Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://Ombra/Assets/icon-round.png"))),
                 ToolTipText = "Ombra",
                 Menu = trayMenu,
             };

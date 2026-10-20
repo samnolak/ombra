@@ -1,52 +1,99 @@
-# The app icon: the Ombra artwork (tools/icon/ombra-art.jpg, a smirking clown with a red nose on a dark card) cut out of its card,
-# masked to the macOS-grid squircle (824/1024 body) with a soft drop shadow and a faint top rim. Needs Pillow.
-# Usage: python3 tools/icon/make_icon.py src/Ombra.App/Assets  (writes icon-1024/512/256.png and icon.ico)
-import math, os, sys
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+"""Extract the owner's presentation sheet; Pillow required, iconutil on macOS.
+Usage: python3 tools/icon/make_icon.py src/Ombra.App/Assets
+The opaque sheet is not an icon: recover its convex outer rim, retaining the
+black interior and complete swirl. No invented rim, shadow, or rounded mask.
+"""
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+from PIL import Image, ImageDraw
 
-S = 2048  # supersampled canvas; downscaled at the end
-U = S / 1024  # macOS icon grid units
-ART = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ombra-art.jpg")
-CARD = (79, 79, 1175, 1175)  # the artwork's card, just inside its drawn border
+SOURCE = Path(__file__).with_name("ombra-icon-sheet.png")
+SIZES = (16, 24, 32, 48, 64, 128, 256, 512, 1024)
 
-def superellipse(cx, cy, half, n=5.0, steps=720):
-    pts = []
-    for i in range(steps):
-        t = 2 * math.pi * i / steps
-        c, s = math.cos(t), math.sin(t)
-        pts.append((cx + half * math.copysign(abs(c) ** (2 / n), c), cy + half * math.copysign(abs(s) ** (2 / n), s)))
-    return pts
 
-cx, cy = S / 2, S / 2 - 6 * U
-half = 412 * U
-body = superellipse(cx, cy, half)
-left, top = round(cx - half), round(cy - half)
-side = round(2 * half)
+def hull(points):
+    points = sorted(set(points))
+    def cross(o, a, b):
+        return (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0])
+    halves = []
+    for sequence in (points, points[::-1]):
+        half = []
+        for p in sequence:
+            while len(half) >= 2 and cross(half[-2], half[-1], p) <= 0:
+                half.pop()
+            half.append(p)
+        halves.extend(half[:-1])
+    return halves
 
-img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
 
-# Soft drop shadow
-shadow = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-ImageDraw.Draw(shadow).polygon([(x, y + 14 * U) for x, y in body], fill=(0, 0, 0, 90))
-img.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(18 * U)))
+def extract(sheet, region):
+    image = sheet.crop(region).convert("RGB")
+    # Compression noise on the black sheet is below 9; the continuous rim is
+    # above it. Convexity bridges the dark bottom rim without keying out black
+    # portions of the artwork itself.
+    points = []
+    for y in range(image.height):
+        xs = [x for x in range(image.width) if max(image.getpixel((x, y))) > 8]
+        if xs:
+            for x in (xs[0], xs[-1]):
+                points.extend(((x, y), (x+1, y), (x, y+1), (x+1, y+1)))
+    boundary = hull(points)
+    mask = Image.new("L", (image.width*4, image.height*4))
+    ImageDraw.Draw(mask).polygon([(x*4, y*4) for x, y in boundary], fill=255)
+    mask = mask.resize(image.size, Image.Resampling.BOX)
+    rgba = image.convert("RGBA")
+    # Extend interior edge colour into fractional coverage, instead of dividing
+    # compression noise by near-zero alpha (which produces bright fringes).
+    pixels = []
+    for y in range(image.height):
+        for x in range(image.width):
+            alpha = mask.getpixel((x, y))
+            if 0 < alpha < 255:
+                ix = x + (2 if x < image.width / 2 else -2)
+                iy = y + (2 if y < image.height / 2 else -2)
+                rgb = image.getpixel((ix, iy))
+            else:
+                rgb = image.getpixel((x, y)) if alpha else (0, 0, 0)
+            pixels.append((*rgb, alpha))
+    rgba.putdata(pixels)
+    bounds = (min(x for x, y in boundary), min(y for x, y in boundary),
+              max(x for x, y in boundary), max(y for x, y in boundary))
+    print("Detected sheet bounds:", tuple(v + region[i % 2] for i, v in enumerate(bounds)))
+    return rgba.crop(bounds)
 
-# Artwork, masked to the squircle
-layer = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-layer.paste(Image.open(ART).convert("RGBA").crop(CARD).resize((side, side), Image.LANCZOS), (left, top))
-mask = Image.new("L", (S, S), 0)
-ImageDraw.Draw(mask).polygon(body, fill=255)
-layer.putalpha(mask)
-img.alpha_composite(layer)
 
-# Faint light rim along the edge, strongest at the top and gone by mid-height
-rim = Image.new("L", (S, S), 0)
-ImageDraw.Draw(rim).line(body + body[:1], fill=255, width=round(3 * U))
-fade = Image.linear_gradient("L").resize((S, S)).point(lambda v: max(0, 70 - v * 140 // 255))
-glow = Image.new("RGBA", (S, S), (255, 255, 255, 0))
-glow.putalpha(ImageChops.multiply(rim, fade))
-img.alpha_composite(glow)
+def grid(art, size=1024, body=824):
+    art = art.copy()
+    art.thumbnail((body, body), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (size, size))
+    canvas.alpha_composite(art, ((size-art.width)//2, (size-art.height)//2))
+    return canvas
 
-out = sys.argv[1]
-for px in (1024, 512, 256):
-    img.resize((px, px), Image.LANCZOS).save(f"{out}/icon-{px}.png")
-img.resize((256, 256), Image.LANCZOS).save(f"{out}/icon.ico", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+
+def main():
+    out = Path(sys.argv[1])
+    out.mkdir(parents=True, exist_ok=True)
+    sheet = Image.open(SOURCE)
+    square = grid(extract(sheet, (85, 40, 1045, 960)))
+    circle = grid(extract(sheet, (1120, 470, 1470, 815)), 512, 480)
+    tiny = grid(extract(sheet, (1230, 820, 1360, 945)), 128, 120)
+    for size in SIZES:
+        square.resize((size, size), Image.Resampling.LANCZOS).save(out / f"icon-{size}.png")
+    circle.save(out / "icon-round.png")
+    frames = [(tiny if s <= 32 else circle if s <= 64 else square).resize((s, s), Image.Resampling.LANCZOS)
+              for s in SIZES if s <= 256]
+    frames[-1].save(out / "icon.ico", sizes=[f.size for f in frames], append_images=frames[:-1])
+    with tempfile.TemporaryDirectory() as directory:
+        iconset = Path(directory) / "ombra.iconset"
+        iconset.mkdir()
+        for size in (16, 32, 128, 256, 512):
+            for scale in (1, 2):
+                suffix = "@2x" if scale == 2 else ""
+                square.resize((size*scale, size*scale), Image.Resampling.LANCZOS).save(iconset / f"icon_{size}x{size}{suffix}.png")
+        subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(out / "ombra.icns")], check=True)
+
+
+if __name__ == "__main__":
+    main()
