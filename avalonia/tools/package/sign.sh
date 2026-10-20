@@ -19,13 +19,45 @@ set -euo pipefail
 MODE=${1:?mode}; TARGET=${2:?target}
 HERE=$(cd "$(dirname "$0")/../.." && pwd)          # avalonia/
 TMP=$(mktemp -d)
+KEYCHAINS=()        # the user's keychain search list before open_keychain changed it (SEARCH_LIST=1), restored on exit
 cleanup() {
+  if [ -n "${SEARCH_LIST:-}" ]; then security list-keychains -d user -s ${KEYCHAINS[@]+"${KEYCHAINS[@]}"} || true; fi
   if [ -n "${KEYCHAIN:-}" ]; then security delete-keychain "$KEYCHAIN" 2>/dev/null || true; fi
-  if [ -n "${TRUSTED_CERT:-}" ]; then sudo -n security remove-trusted-cert -d "$TRUSTED_CERT" 2>/dev/null || true; fi
   rm -rf "$TMP"
 }
 trap cleanup EXIT
 record() { echo "$1" >> "$REC"; echo "signing: $1"; }
+
+# Nobody watches a CI machine: a keychain or SecurityAgent prompt would wait until the job's timeout. Every security and
+# codesign call here has a hard deadline (SIGALRM through perl, which macOS has; it has no timeout(1)): past it the call
+# is killed and the run fails. Only the tool and its verb are printed, never the arguments (passwords).
+bounded() {
+  local secs=$1 rc=0; shift
+  perl -e 'alarm shift; exec { $ARGV[0] } @ARGV or die "exec $ARGV[0]: $!\n"' "$secs" "$@" || rc=$?
+  [ "$rc" != 142 ] || echo "timed out after ${secs}s: ${1##*/} ${2:-}" >&2
+  return "$rc"
+}
+security() { bounded 60 /usr/bin/security "$@"; }
+codesign() { bounded 900 /usr/bin/codesign "$@"; }
+
+# A throwaway keychain with only the signing identity, for this run: a random password, unlocked, codesign allowed to
+# use the key without asking (-T and the partition list), and put first in the user's search list, where codesign looks
+# for the identity even with --keychain. No trust setting is needed: codesign signs with an untrusted self-signed
+# identity named by its SHA-1. On exit the search list is restored and the keychain deleted.
+open_keychain() { # <p12> <password>
+  local pass list k
+  pass=$(openssl rand -hex 16)
+  list=$(security list-keychains -d user)
+  while IFS= read -r k; do [ -z "$k" ] || { k=${k#*\"}; KEYCHAINS+=("${k%\"*}"); }; done <<< "$list"
+  KEYCHAIN="$TMP/signing.keychain-db"
+  security create-keychain -p "$pass" "$KEYCHAIN"
+  security set-keychain-settings -lut 3600 "$KEYCHAIN"
+  security unlock-keychain -p "$pass" "$KEYCHAIN"
+  security import "$1" -k "$KEYCHAIN" -P "$2" -T /usr/bin/codesign >/dev/null
+  security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$pass" "$KEYCHAIN" >/dev/null
+  SEARCH_LIST=1
+  security list-keychains -d user -s "$KEYCHAIN" ${KEYCHAINS[@]+"${KEYCHAINS[@]}"}
+}
 
 # Every macOS mode enables hardened runtime. Local identities have no Team ID:
 # library validation otherwise prevents loading even our own signed .NET libraries.
@@ -105,26 +137,16 @@ case "$MODE" in
         # ad-hoc signature's is its cdhash, different in every build: each update lost every permission and macOS asked
         # again. Signed with one long-lived certificate the requirement is "identifier and this certificate", the same
         # for every release, so a permission given once stays. Gatekeeper still warns (not a Developer ID).
-        KEYCHAIN="$TMP/selfsign.keychain-db"
-        KCPASS=$(openssl rand -hex 16)
         printf '%s' "$MACOS_SELFSIGN_P12_BASE64" | base64 -d > "$TMP/selfsign.p12"
-        security create-keychain -p "$KCPASS" "$KEYCHAIN"
-        security set-keychain-settings -lut 3600 "$KEYCHAIN"
-        security unlock-keychain -p "$KCPASS" "$KEYCHAIN"
-        security import "$TMP/selfsign.p12" -k "$KEYCHAIN" -P "$MACOS_SELFSIGN_PASSWORD" -T /usr/bin/codesign >/dev/null
-        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPASS" "$KEYCHAIN" >/dev/null
-        # codesign uses only a trusted identity: trust the certificate for code signing on this (CI) machine while
-        # signing, removed again on exit. Needs sudo without a password, as GitHub's macOS runners have.
-        openssl pkcs12 -in "$TMP/selfsign.p12" -passin "pass:$MACOS_SELFSIGN_PASSWORD" -nokeys -clcerts -out "$TMP/selfsign.pem" 2>/dev/null \
-          || openssl pkcs12 -legacy -in "$TMP/selfsign.p12" -passin "pass:$MACOS_SELFSIGN_PASSWORD" -nokeys -clcerts -out "$TMP/selfsign.pem"
-        sudo -n security add-trusted-cert -d -r trustRoot -p codeSign -k "$KEYCHAIN" "$TMP/selfsign.pem"
-        TRUSTED_CERT="$TMP/selfsign.pem"
-        HASH=$(openssl x509 -in "$TMP/selfsign.pem" -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')
+        open_keychain "$TMP/selfsign.p12" "$MACOS_SELFSIGN_PASSWORD"
+        HASH=$(security find-identity -p codesigning "$KEYCHAIN" | awk '$1 == "1)" { print $2; exit }')
+        [ -n "$HASH" ] || { echo "no code signing identity in MACOS_SELFSIGN_P12_BASE64"; exit 1; }
         sign_macos "$HASH" local --keychain "$KEYCHAIN"
         REQ=$(codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => //p')
         case "$REQ" in *"certificate leaf = H\"$(echo "$HASH" | tr 'A-F' 'a-f')\""*|*"certificate root = H\"$(echo "$HASH" | tr 'A-F' 'a-f')\""*) ;;
           *) echo "unexpected designated requirement: $REQ"; exit 1 ;; esac
-        record "macos: self-signed (project certificate $HASH; permissions stay across updates), hardened runtime with local library-validation exception, verified; not a Developer ID, Gatekeeper will warn"
+        CDHASH=$(codesign -dvvv "$APP" 2>&1 | sed -n 's/^CDHash=//p')
+        record "macos: self-signed (project certificate $HASH; permissions stay across updates; cdhash $CDHASH), hardened runtime with local library-validation exception, verified; not a Developer ID, Gatekeeper will warn"
         exit 0
       fi
       sign_macos "-" local
@@ -133,15 +155,8 @@ case "$MODE" in
       record "macos: UNSIGNED — ad-hoc signature only (cdhash $CDHASH), hardened runtime with local library-validation exception, verified (no certificate in the CI secrets); Gatekeeper will warn, and macOS asks for permissions again after every update"
       exit 0
     fi
-    KEYCHAIN="$TMP/signing.keychain-db"
-    KCPASS=$(openssl rand -hex 16)
     printf '%s' "$MACOS_CERT_P12_BASE64" | base64 -d > "$TMP/cert.p12"
-    security create-keychain -p "$KCPASS" "$KEYCHAIN"
-    security set-keychain-settings -lut 3600 "$KEYCHAIN"
-    security unlock-keychain -p "$KCPASS" "$KEYCHAIN"
-    security import "$TMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign >/dev/null
-    security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPASS" "$KEYCHAIN" >/dev/null
-    security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+    open_keychain "$TMP/cert.p12" "$MACOS_CERT_PASSWORD"
     sign_macos "$MACOS_SIGN_IDENTITY" developer --timestamp --keychain "$KEYCHAIN"
     record "macos: Developer ID ($MACOS_SIGN_IDENTITY), hardened runtime, verified (codesign --verify --deep --strict)"
     ;;
