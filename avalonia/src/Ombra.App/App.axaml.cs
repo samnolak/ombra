@@ -151,7 +151,8 @@ public sealed class App : Application
             {
                 DockAttention = OperatingSystem.IsMacOS() ? new Ombra.App.Platform.MacDockAttention() : null,
                 DataContext = vm,
-                Notifier = CreateNotifier()
+                Notifier = CreateNotifier(),
+                WindowLog = Ombra.App.Services.ClientLog.Shared, // where the window was put and who moved it (MainWindow.FrameLog.cs)
             };
             desktop.MainWindow = window;
             // AppKit's Dock reopen callback only raises Avalonia's activation event; it does not
