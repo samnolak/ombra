@@ -24,7 +24,7 @@ public sealed partial class MainViewModel
     private GitBellViewModel NewBell()
     {
         var bell = new GitBellViewModel(
-            new GitBellHost(WatchedFolders, GitWatchAllowed, BeginGitUpdate, AskAgentToUpdate, ShowIncomingAsync, ShowTeamInbox),
+            new GitBellHost(WatchedFolders, GitWatchAllowed, BeginGitUpdate, AgentFilesIn, AskAgentToUpdate, ShowIncomingAsync, ShowTeamInbox),
             Share.Inbox);
         bell.Changed += () => OnPropertyChanged(nameof(UpdateFirstHint));
         PropertyChanged += OnBellHintInputChanged;
@@ -37,7 +37,7 @@ public sealed partial class MainViewModel
     }
 
     /// <summary>The watch starts with the window: a first check shortly after, then every few minutes.</summary>
-    private void StartGitBell()
+    internal void StartGitBell()
     {
         _bellStarted = true;
         _ = Bell.RunAsync(Lifetime);
@@ -81,20 +81,74 @@ public sealed partial class MainViewModel
 
     /// <summary>
     /// Admission for an update of the repository at <paramref name="top"/>, on the UI thread before any await: null
-    /// while a chat in it is working or has input waiting (or another update holds it); else a hold under which no new
-    /// turn, command or queued input starts there (AdmitWorktreeChat, CanSend) until it is disposed.
+    /// while another update holds it, or while a chat in it is working or has input waiting unless
+    /// <paramref name="underRunningTurn"/> (the bell's Update now, weighed against the turn's files); else a hold under
+    /// which no new turn, command or queued input starts there (AdmitWorktreeChat, CanSend) until it is disposed.
     /// </summary>
-    internal IDisposable? BeginGitUpdate(string top)
+    internal IDisposable? BeginGitUpdate(string top, bool underRunningTurn = false)
     {
         var canonical = SessionCatalog.ResolveLinks(Path.GetFullPath(top));
         if (GitUpdating(canonical)) return null;
         // Every chat of the shared engine, as worktree removal checks them (a run, input waiting, a deferred builtin)
-        if (OpenChats.Any(c => WorktreeContainsPath(canonical, c.CurrentLaunch.WorkingDirectory)
-            && c.Snapshot() is var s && (!SessionHost.IsIdle(s) || s.Queued.Count > 0 || c.ShouldQueueSubmission(""))))
+        if (!underRunningTurn && OpenChats.Any(c => WorktreeContainsPath(canonical, c.CurrentLaunch.WorkingDirectory) && Working(c, c.Snapshot())))
             return null;
         _gitUpdates.Add(canonical);
         GitUpdateChanged();
         return new GitUpdateHold(this, canonical);
+    }
+
+    private static bool Working(SessionController c, SessionSnapshot s) => !SessionHost.IsIdle(s) || s.Queued.Count > 0 || c.ShouldQueueSubmission("");
+
+    /// <summary>
+    /// The files (relative to <paramref name="top"/>, '/') that the turns working now in that repository changed or
+    /// opened: what their tool calls changed or were pointed at (a read's selector cut off). A subagent's own calls
+    /// are not in its parent's chat; what it changed is uncommitted, and the update's risk counts it.
+    /// </summary>
+    internal IReadOnlyCollection<string> AgentFilesIn(string top)
+    {
+        var root = SessionCatalog.ResolveLinks(Path.GetFullPath(top));
+        var files = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var c in OpenChats)
+        {
+            if (c.CurrentLaunch.WorkingDirectory is not { } folder || !WorktreeContainsPath(root, folder)) continue;
+            var s = c.Snapshot();
+            if (!Working(c, s)) continue;
+            var cwd = SessionCatalog.ResolveLinks(Path.GetFullPath(s.Cwd ?? folder));
+            // The run's calls (those since its last message while it waits on input without a run)
+            var since = s.RunStartedAt is null ? LastIndexOfUser(s.Items) : -1;
+            for (var i = since + 1; i < s.Items.Count; i++)
+            {
+                if (s.Items[i] is not ToolItem t || s.RunStartedAt is { } run && !(t.StartedAt >= run)) continue;
+                foreach (var named in ConversationState.NamedFiles(t))
+                {
+                    string full;
+                    try { full = Path.IsPathRooted(named) ? SessionCatalog.ResolveLinks(named) : Path.GetFullPath(Path.Combine(cwd, named)); }
+                    catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { continue; }
+                    foreach (var path in WithoutSelector(full))
+                    {
+                        var rel = Path.GetRelativePath(root, path);
+                        if (rel != "." && rel != ".." && !rel.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) && !Path.IsPathRooted(rel))
+                            files.Add(rel.Replace('\\', '/'));
+                    }
+                }
+            }
+        }
+        return files;
+    }
+
+    private static int LastIndexOfUser(IReadOnlyList<TranscriptItem> items)
+    {
+        for (var i = items.Count - 1; i >= 0; i--)
+            if (items[i] is UserItem) return i;
+        return -1;
+    }
+
+    /// <summary>The path, and without a read's selector (<c>a.cs:50-80</c>, <c>a.cs:raw</c>) when its name has one.</summary>
+    private static IEnumerable<string> WithoutSelector(string path)
+    {
+        yield return path;
+        var name = Path.GetFileName(path);
+        if (name.IndexOf(':') is > 0 and var colon) yield return path[..(path.Length - name.Length + colon)];
     }
 
     private void GitUpdateChanged()

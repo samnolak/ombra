@@ -1147,10 +1147,21 @@ omp reads only when it starts say so and offer **Restart omp**.
     is updated automatically: the files changed on both sides are listed, **Ask the agent to update** puts a careful
     request in the message box (fetch, rebase or merge keeping both sides, resolve conflicts, run the tests).
   **Show incoming changes** opens the incoming commits and their diff in the Files viewer. While the agent is working
-  in that repository an update waits and runs when the turn ends; while an update runs, nothing new starts there
-  (Send waits, the hint over the message box says why). Typing a message in a chat whose branch is behind
-  shows a hint over the message box — *Branch main is 3 commits behind origin/main — update first?* — with
-  **Review update** (opens the bell); it never blocks sending.
+  in that repository (a turn runs or input waits), **Update** is queued: the card says *Will update when the agent's
+  turn ends* by a spinner, the button stays disabled, **Cancel** drops it, and the update runs when the turn ends. A
+  long turn (an agent waiting for its subagents) need not be waited out: **Update now** is offered while the
+  incoming commits change none of the files the turn changed or opened in the chat (its reads, edits and writes) —
+  your uncommitted changes, a subagent's included, already keep it a fast-forward that touches none of them; both
+  are read again when you press it. Otherwise the card names the files and the update stays queued. While an update
+  runs, nothing new starts there (Send waits, the hint over the message box says why); a failed one says why in the
+  card. When the remote refuses access the card says what to do instead of git's words: *GitHub says owner/repo was
+  not found* (what a private repository looks like to an account without access, or a renamed or deleted one) — sign
+  in with an account that has access (`gh auth login` in Terminal) or check the address (`git remote -v`); a sign-in
+  git has no saved credentials for — `gh auth login`, then `gh auth setup-git` (another host: sign in once in
+  Terminal); an SSH key or host key ssh refused — `ssh-add -l`, `ssh -T`. git gets the app's environment: the login
+  shell's PATH (on macOS with Homebrew's folders added, for credential helpers) and `SSH_AUTH_SOCK`. Typing a
+  message in a chat whose branch is behind shows a hint over the message box — *Branch main is 3 commits behind
+  origin/main — update first?* — with **Review update** (opens the bell); it never blocks sending.
 - **SSH hosts** — the machines omp's ssh tool can run commands on (keys only, no passwords), saved in omp's
   `ssh.json` for all projects or for this project. **Add host…** and **Remove** use omp's `/ssh add` and
   `/ssh remove`; **Test** connects the way omp does — the system `ssh` with your SSH config (its `HostName`, `Port`,

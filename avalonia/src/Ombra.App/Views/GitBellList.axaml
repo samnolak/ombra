@@ -50,10 +50,22 @@
                              FontSize="{DynamicResource GuiFontCaption}" />
                 </Grid>
                 <TextBlock Classes="warning mono" Text="{Binding OverlapText}" TextWrapping="Wrap" IsVisible="{Binding HasOverlap}" FontSize="{DynamicResource GuiFontCaption}" />
-                <TextBlock Classes="tertiary" Text="{Binding Message}" TextWrapping="Wrap" IsVisible="{Binding HasMessage}" />
+                <!-- What the update does now: queued behind the agent's turn or updating (a spinner), done, or why it failed -->
+                <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding HasMessage}">
+                  <ctl:Icon x:Name="BellWaiting" Classes="tool-mark running" Data="{StaticResource IconSpinner}" Size="14" Margin="0,1,6,0"
+                            VerticalAlignment="Top" IsVisible="{Binding IsWaiting}" />
+                  <TextBlock x:Name="BellMessage" Grid.Column="1" Classes.warning="{Binding IsMessageError}" Classes.tertiary="{Binding !IsMessageError}"
+                             Text="{Binding Message}" TextWrapping="Wrap" />
+                </Grid>
+                <TextBlock x:Name="BellNotNow" Classes="tertiary" Text="{Binding NowText}" TextWrapping="Wrap" IsVisible="{Binding HasNowText}"
+                           FontSize="{DynamicResource GuiFontCaption}" />
                 <WrapPanel ItemSpacing="6" LineSpacing="6" Margin="0,4,0,0">
                   <Button x:Name="BellUpdate" Classes="accent sm" Content="{loc:T 'Update'}" Command="{Binding UpdateCommand}" IsVisible="{Binding CanUpdate}" />
                   <Button x:Name="BellUpdateKeep" Classes="accent sm" Content="{loc:T 'Update (keep my changes)'}" Command="{Binding UpdateCommand}" IsVisible="{Binding CanUpdateKeepingChanges}" />
+                  <!-- Queued: the update may go under the running turn when it touched none of the incoming files -->
+                  <Button x:Name="BellUpdateNow" Classes="outline sm" Content="{loc:T 'Update now'}" Command="{Binding UpdateNowCommand}" IsVisible="{Binding CanUpdateNow}"
+                          ToolTip.Tip="{loc:T 'The incoming commits change none of the files the agent changed or opened in this turn, nor your uncommitted ones: a fast-forward now leaves its work as it is.'}" />
+                  <Button x:Name="BellCancelQueued" Classes="flat sm" Content="{loc:T 'Cancel'}" Command="{Binding CancelQueuedCommand}" IsVisible="{Binding IsQueued}" />
                   <Button x:Name="BellAskAgent" Classes="accent sm" Content="{loc:T 'Ask the agent to update'}" Command="{Binding AskAgentCommand}" IsVisible="{Binding CanAskAgent}" />
                   <Button x:Name="BellShowIncoming" Classes="outline sm" Content="{loc:T 'Show incoming changes'}" Command="{Binding ShowIncomingCommand}" IsVisible="{Binding HasNews}" />
                 </WrapPanel>

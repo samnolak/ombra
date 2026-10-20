@@ -143,4 +143,39 @@ public sealed partial class ConversationState
             if (!files.Contains(m.Groups[1].Value)) files.Add(m.Groups[1].Value);
         return files;
     }
+
+    /// <summary>
+    /// The files a tool call changed or was pointed at, as it names them (maybe relative to omp's working directory, a
+    /// read's selector such as <c>:50-80</c> still on): its changes (and where a move came from), its <c>path</c> /
+    /// <c>file_path</c> arguments and an edit's sections. The arguments are read as the row keeps them (the start of a
+    /// long call's; its changes name the rest once it ends). URLs (<c>local://</c>, <c>skill://</c>) are no files.
+    /// </summary>
+    public static IReadOnlyList<string> NamedFiles(ToolItem t)
+    {
+        var files = new List<string>();
+        foreach (var c in t.Changes ?? [])
+        {
+            files.Add(c.Path);
+            if (c.MovedFrom is { } from) files.Add(from);
+        }
+        foreach (Match m in PathArgument().Matches(t.Args))
+            if (JsonText(m.Groups[1].Value) is { } paths) files.AddRange(paths.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+        foreach (Match m in EditSection().Matches(t.Args))
+            if (JsonText(m.Groups["p"].Value) is { Length: > 0 } path) files.Add(path);
+        return [.. files.Where(f => !f.Contains("://", StringComparison.Ordinal)).Distinct(StringComparer.Ordinal)];
+    }
+
+    /// <summary>The text of a JSON string's escaped content; null when it is not one.</summary>
+    private static string? JsonText(string escaped)
+    {
+        try { return JsonSerializer.Deserialize<string>("\"" + escaped + "\""); }
+        catch (JsonException) { return null; }
+    }
+
+    [GeneratedRegex(@"""(?:path|file_path)""\s*:\s*""((?:[^""\\]|\\.)*)""")]
+    private static partial Regex PathArgument();
+
+    /// <summary>An edit's section in its JSON input: <c>[path#1A2B]</c> or <c>*** Update File: path</c> at a line's start.</summary>
+    [GeneratedRegex(@"(?:""|\\n)(?:\[(?<p>(?:[^\[\]""\\]|\\.)+?)#[0-9A-Fa-f]{4}\]|\*\*\* (?:Update|Add|Delete) File: (?<p>(?:[^""\\]|\\[^n])+?)(?=\\n|""))")]
+    private static partial Regex EditSection();
 }
