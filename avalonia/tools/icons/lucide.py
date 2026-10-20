@@ -13,7 +13,6 @@ URL = "https://unpkg.com/lucide-static@{version}/icons/{name}.svg"
 # Our key -> Lucide icon name, chosen by where the key is used
 MAP = {
     # Window chrome, sidebar, composer (Icons.axaml)
-    "IconMenu": "menu",
     "IconPanelLeft": "panel-left",
     "IconCompose": "square-pen",
     "IconBrain": "brain",                      # thinking level, a reply's thinking
@@ -64,7 +63,6 @@ MAP = {
     "IconShrink": "minimize-2",
     "IconChecklist": "list-checks",
     "IconLayers": "layers",                    # tasks, agents
-    "IconMoreVertical": "ellipsis-vertical",
     "IconMoreHorizontal": "ellipsis",
     # Panels (Icons.Panes.axaml)
     "IconPanelRight": "panel-right",
