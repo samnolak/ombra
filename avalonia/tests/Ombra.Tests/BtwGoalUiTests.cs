@@ -1,5 +1,9 @@
+using Avalonia;
+using Avalonia.Input;
 using Avalonia.Controls;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
+using Avalonia.VisualTree;
 using Ombra.App.Localization;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore;
@@ -59,6 +63,58 @@ public sealed class BtwGoalUiTests
         Assert.Equal(["goal create ship the release", "goal pause", "goal drop", "goal create ship the release notes", "goal pause", "goal resume", "goal drop"],
             Sent(e).Where(l => l.StartsWith("goal ", StringComparison.Ordinal)));
         await Close(e);
+    }
+
+    /// <summary>The bar's own buttons, pressed with the mouse where they are drawn, in English and in Russian (whose
+    /// longer labels change the bar's layout): Pause pauses, Resume resumes, the status says so in the app's language.</summary>
+    [AvaloniaTheory]
+    [InlineData("en")]
+    [InlineData("ru")]
+    public async Task Pause_and_resume_clicked_on_the_bar_change_the_goal_in_each_language(string language)
+    {
+        var settings = Path.Combine(TestProcesses.TempDir("goal-lang-" + language), "settings.json");
+        var previous = Loc.Current;
+        Loc.Load(language, settings);
+        try
+        {
+            var e = await OpenAsync();
+            var vm = e.Vm;
+            await Until(() => vm.IsGoalAvailable, "omp reports goal mode");
+            await Send(e, "/goal ship the release");
+            await Until(() => vm.ShowGoalBar && vm.IsGoalActive, "goal set");
+            await Settle();
+            Assert.Equal(Loc.T("Working on it"), Named<TextBlock>(e.W, "GoalStatusLabel").Text);
+
+            var pause = Named<Button>(e.W, "GoalPauseButton");
+            Assert.Equal(Loc.T("Pause"), pause.Content);
+            Click(e.W, pause);
+            await Until(() => vm.IsGoalPaused, "paused by the click");
+            await Settle();
+            Assert.Equal(Loc.T("Paused"), vm.GoalStatusText);
+            Assert.Equal(Loc.T("Paused"), Named<TextBlock>(e.W, "GoalStatusLabel").Text);
+
+            var resume = Named<Button>(e.W, "GoalResumeButton");
+            Assert.Equal(Loc.T("Resume"), resume.Content);
+            Click(e.W, resume);
+            await Until(() => vm.IsGoalActive, "resumed by the click");
+            await Settle();
+            Assert.Equal(Loc.T("Working on it"), Named<TextBlock>(e.W, "GoalStatusLabel").Text);
+            Assert.Equal(["goal create ship the release", "goal pause", "goal resume"], Sent(e).Where(l => l.StartsWith("goal ", StringComparison.Ordinal)));
+            await Close(e);
+        }
+        finally { Loc.Load(previous, settings); }
+    }
+
+    /// <summary>A left click at the button's centre, which must be the button the window hits there.</summary>
+    private static void Click(Window w, Button b)
+    {
+        Assert.True(b.IsEffectivelyVisible && b.IsEffectivelyEnabled, $"{b.Name} visible={b.IsEffectivelyVisible} enabled={b.IsEffectivelyEnabled}");
+        var at = b.TranslatePoint(new Avalonia.Point(b.Bounds.Width / 2, b.Bounds.Height / 2), w)!.Value;
+        var hit = w.InputHitTest(at) as Avalonia.Visual;
+        Assert.True(hit is not null && (ReferenceEquals(hit, b) || b.IsVisualAncestorOf(hit)), $"{b.Name} at {at} is covered by {hit}");
+        w.MouseMove(at);
+        w.MouseDown(at, Avalonia.Input.MouseButton.Left);
+        w.MouseUp(at, Avalonia.Input.MouseButton.Left);
     }
 
     [AvaloniaFact]

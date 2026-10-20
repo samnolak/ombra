@@ -339,9 +339,10 @@ public class ConnectorsFlowTests
     }
 
     /// <summary>A fake omp answering /mcp and friends, a fake CLI, a user mcp.json and a project .omp/mcp.json;
-    /// <paramref name="mcp"/>: omp's own server states (FakeMcp.cs, <c>{"servers":[…]}</c>).</summary>
+    /// <paramref name="mcp"/>: omp's own server states (FakeMcp.cs, <c>{"servers":[…]}</c>); <paramref name="configPathDelayMs"/>:
+    /// how long the CLI takes to answer <c>omp config path</c> (a cold Bun start).</summary>
     internal static async Task<Setup> StartAsync(Dictionary<string, string>? commands = null, Dictionary<string, object>? cli = null, bool start = true,
-        bool projectFiles = true, string? mcp = null)
+        bool projectFiles = true, string? mcp = null, int configPathDelayMs = 0)
     {
         var dir = TestProcesses.TempDir("connectors");
         var project = Path.Combine(dir, "project");
@@ -382,7 +383,7 @@ public class ConnectorsFlowTests
         foreach (var (k, v) in commands ?? []) answers[k] = v;
         var cliAnswers = new Dictionary<string, object>
         {
-            ["config path"] = new { stdout = userDir + "\n" },
+            ["config path"] = new { stdout = userDir + "\n", delayMs = configPathDelayMs },
             ["config get mcp.enableProjectConfig --json"] = new { stdout = "{\n  \"key\": \"mcp.enableProjectConfig\",\n  \"value\": true,\n  \"type\": \"boolean\",\n  \"description\": \"Load .mcp.json/mcp.json from project root\"\n}\n" },
             ["config set mcp.enableProjectConfig"] = new { stdout = "{\"key\":\"mcp.enableProjectConfig\",\"value\":false}\n" },
         };
