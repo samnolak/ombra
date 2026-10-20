@@ -108,7 +108,9 @@ case "$RID" in
     chmod +x "$APP/Contents/MacOS/Ombra" "$APP/Contents/MacOS/OmpGui"
     engine "$APP/Contents/Resources/engine"
     sed "s/VERSION/${VERSION%%-*}/g" "$PKG/Info.plist" > "$APP/Contents/Info.plist"
-    cp "$PKG/macos/ombra.icns" "$APP/Contents/Resources/ombra.icns"
+    # The app icon (docs/PLATFORM_NOTES.md): the Icon Composer catalog (CFBundleIconName) and an Apple-shaped icns
+    # (CFBundleIconFile) for whatever reads only that
+    cp "$PKG/macos/Assets.car" "$PKG/macos/ombra.icns" "$APP/Contents/Resources/"
     docs "$STAGE/$NAME"
     python3 "$HERE/tools/package/native-platform.py" "$RID" "$APP" --prune
     "$HERE/tools/package/sign.sh" macos "$APP" "$SIGNING"
