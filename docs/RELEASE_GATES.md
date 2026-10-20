@@ -68,8 +68,17 @@ continuation, empty/upstream patch handling, and corporate CA configuration.
   dropping accepted commands; upstream output/backpressure and failed/recovered-store
   shutdown regressions passed **7/7** after the fix. OAuth refresh fixtures passed
   **21/21** after mocking the current refresh API; generated wire consistency passed
-  **1/1** after adapting the unvendored SDK generators. These targeted results do not
-  by themselves claim a green complete suite; retain the complete gate's `verdict.json`.
+  **1/1** after adapting the unvendored SDK generators. The complete corrected-harness
+  run executed **211 chunks in 918.7 seconds: 196 passed, 15 failed**. Fourteen
+  chunks contain exactly **40 documented expected test failures** in five contract
+  groups; the remaining chunk exposed an upstream fixture importing the now-private
+  LSP cache. After adapting that fixture to the public trust-scoped accessor, the
+  entire affected ten-file chunk passed **228 tests, 1 skipped, 0 failed**.
+  Reconciliation of that corrective rerun with the complete run yields **zero
+  unexpected failures and zero unused expectations**. This is full-run-plus-targeted
+  correction evidence, not a claim that another complete suite was rerun afterward.
+  Evidence: `.temp/UpstreamTriage/final/{full.log,outcomes.json,verdict.json,lsp-retry.log}`
+  and `.temp/UpstreamTriage/final/corrected/{outcomes.json,verdict.json}`.
 - Final local macOS arm64 ZIP: **263,918,776 bytes**; bundled engine **437 MiB**.
   SHA256: `df2afb0ef16f33e248ce39361a0aa9a64487b4b404eb5ceffe0e2ebb4ad4a80e`.
   The older recorded ZIP is only rounded to 264.0 MB: the new ZIP is approximately
