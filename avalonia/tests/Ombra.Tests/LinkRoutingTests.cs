@@ -22,7 +22,7 @@ public sealed class LinkRoutingTests
         try
         {
             if (language == "ru")
-                foreach (var english in new[] { "Open in Browser page", "Open in default browser", "Open in preview" })
+                foreach (var english in new[] { "Open in Browser page", "Open in default browser", "Open in preview", "Sign in" })
                     Assert.NotEqual(english, Loc.T(english));
             await body();
         }
@@ -113,5 +113,53 @@ public sealed class LinkRoutingTests
         vm.OpenLink("https://example.com/none");
         Assert.Equal(["https://example.com/none"], system);
         Assert.Equal(tabs, p.Tabs.Count);
+    });
+
+    [AvaloniaTheory]
+    [InlineData("en")]
+    [InlineData("ru")]
+    public Task Sign_in_pages_open_in_Ombra_the_chats_browser_or_the_sign_in_window_over_settings(string language) => InLanguage(language, async () =>
+    {
+        await using var vm = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs());
+        var system = new List<string>();
+        vm.OpenUrlRequested += system.Add;
+        var windows = 0;
+        vm.SignInWindowRequested += () => windows++;
+
+        // In a chat (the Browser page gives way): a tab of the right panel's Browser tool, then its local callback
+        vm.OpenBrowserPageCommand.Execute(null);
+        vm.OpenLink("https://auth.example.com/authorize?state=s", LinkTarget.SignIn);
+        Assert.False(vm.ShowBrowserPage);
+        Assert.Equal(SidePane.Browser, vm.ActivePane);
+        Assert.Equal("https://auth.example.com/authorize?state=s", vm.Preview.CurrentUrl!.AbsoluteUri);
+        vm.OpenLink("http://localhost:8765/callback?code=x", LinkTarget.SignIn);
+        Assert.Equal("http://localhost:8765/callback?code=x", vm.Preview.CurrentUrl!.AbsoluteUri);
+        Assert.False(vm.Preview.HasMessage);
+        Assert.Equal((0, null), (windows, vm.SignInBrowser));
+
+        // Over Settings: Ombra's sign-in window (settings stay), its own browser with the agent pane's engine choice
+        vm.IsSettingsOpen = true;
+        var tabs = vm.Preview.Tabs.Count;
+        vm.OpenLink("https://auth.example.com/settings", LinkTarget.SignIn);
+        Assert.True(vm.IsSettingsOpen);
+        Assert.Equal(1, windows);
+        Assert.NotNull(vm.SignInBrowser);
+        Assert.NotSame(vm.Preview, vm.SignInBrowser);
+        Assert.NotSame(vm.Browser, vm.SignInBrowser);
+        Assert.Equal("https://auth.example.com/settings", vm.SignInBrowser!.CurrentUrl!.AbsoluteUri);
+        vm.OpenLink("http://127.0.0.1:8765/callback?code=y", LinkTarget.SignIn);
+        Assert.Equal(2, windows); // the same window, in front
+        Assert.Equal(2, vm.SignInBrowser.Tabs.Count);
+        Assert.Equal("http://127.0.0.1:8765/callback?code=y", vm.SignInBrowser.CurrentUrl!.AbsoluteUri);
+        Assert.Equal(tabs, vm.Preview.Tabs.Count);
+        Assert.Empty(system);
+
+        // Asked for (passkeys, SSO): the default browser; a window without an engine hands it there too
+        vm.OpenLink("https://auth.example.com/sso", LinkTarget.SystemBrowser);
+        Assert.Equal(["https://auth.example.com/sso"], system);
+        vm.SignInBrowser.ReportEngineUnavailable("WebKit", "missing");
+        vm.OpenLink("https://auth.example.com/none", LinkTarget.SignIn);
+        Assert.Equal(["https://auth.example.com/sso", "https://auth.example.com/none"], system);
+        Assert.Equal(2, windows);
     });
 }

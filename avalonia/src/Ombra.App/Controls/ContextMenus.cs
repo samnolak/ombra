@@ -112,8 +112,21 @@ public static class ContextMenus
     public static string? GetCopyOnClick(Button b) => b.GetValue(CopyOnClickProperty);
     public static void SetCopyOnClick(Button b, string? value) => b.SetValue(CopyOnClickProperty, value);
 
+    /// <summary>
+    /// A sign-in button's right-click menu: "Open in default browser" runs this command (the sign-in with its page in the
+    /// system's browser, for passkeys or a company's SSO) instead of Ombra's own browser.
+    /// </summary>
+    public static readonly AttachedProperty<System.Windows.Input.ICommand?> DefaultBrowserSignInProperty =
+        AvaloniaProperty.RegisterAttached<Control, System.Windows.Input.ICommand?>("DefaultBrowserSignIn", typeof(ContextMenus));
+
+    public static System.Windows.Input.ICommand? GetDefaultBrowserSignIn(Control c) => c.GetValue(DefaultBrowserSignInProperty);
+    public static void SetDefaultBrowserSignIn(Control c, System.Windows.Input.ICommand? value) => c.SetValue(DefaultBrowserSignInProperty, value);
+
     static ContextMenus()
     {
+        DefaultBrowserSignInProperty.Changed.AddClassHandler<Control>((c, e) => c.ContextFlyout = e.NewValue is System.Windows.Input.ICommand command
+            ? Menu(new MenuAction(Loc.T("Open in default browser"), "IconExternal", _ => command.Execute(null), () => command.CanExecute(null)))
+            : null);
         PathMenuProperty.Changed.AddClassHandler<Control>((c, e) =>
         {
             c.RemoveHandler(InputElement.ContextRequestedEvent, OnPathMenuRequested);

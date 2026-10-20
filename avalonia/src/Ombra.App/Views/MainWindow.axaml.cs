@@ -629,6 +629,7 @@ public sealed partial class MainWindow : Window
             vm.ScrollToLatestRequested += FollowLatest;
             WireFindModel(vm); // MainWindow.Find.cs
             if (OperatingSystem.IsMacOS()) WireBrowserWindow(vm); // MainWindow.BrowserWindow.cs
+            WireSignInWindow(vm); // MainWindow.SignIn.cs
             vm.ModelRowsNavigated += FocusModelRow;
             vm.FocusComposerRequested += () => Dispatcher.UIThread.Post(() =>
             {

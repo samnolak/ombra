@@ -380,7 +380,16 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     [RelayCommand]
     private void OpenPendingUrl()
     {
-        // A sign-in: the system's browser, where the user's accounts, password manager and passkeys are
+        // A sign-in: in Ombra (the chat's Browser tool), where omp's local callback completes it
+        if (PendingUrl is { } url && IsSafeBrowserUrl(url, out var uri))
+            OpenLink(uri, LinkTarget.SignIn);
+        PendingUrl = null;
+    }
+
+    /// <summary>The link card's other way: the system's browser, where the user's passkeys and a company's SSO are.</summary>
+    [RelayCommand]
+    private void OpenPendingUrlInDefaultBrowser()
+    {
         if (PendingUrl is { } url && IsSafeBrowserUrl(url, out var uri))
             OpenLink(uri, LinkTarget.SystemBrowser);
         PendingUrl = null;

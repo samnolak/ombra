@@ -164,8 +164,17 @@ public class McpAuthTests
         var (c, vm) = (ui.C, ui.Vm);
         var web = c.Servers.Single(s => s.Name == "web");
 
+        // From Settings (no chat on screen): Ombra's sign-in window shows the page, nothing goes to the default browser;
+        // the window closes once omp answers
+        string? shown = null;
+        vm.SignInWindowRequested += () => shown ??= vm.SignInBrowser?.CurrentUrl?.AbsoluteUri;
         await web.SignInCommand.ExecuteAsync(null);
-        Assert.Equal(["https://auth.example.com/authorize?client_id=c&state=s1"], ui.Opened);
+        Assert.Equal("https://auth.example.com/authorize?client_id=c&state=s1", shown);
+        Assert.Empty(ui.Opened);
+        Assert.Null(vm.SignInBrowser);
+        await Settle(100);
+        Assert.Empty(ui.W.OwnedWindows);
+        Assert.True(vm.IsSettingsOpen);
         Assert.Null(vm.PendingUrl); // opened, not left on the link card
         Assert.Contains("mcp_login web", ui.Sent);
         Assert.Equal(("signed_in", ConnectorState.Connected, Loc.Plural(3, "Connected · {0} tool", "Connected · {0} tools")), (web.Auth, web.State, web.StateText));
@@ -179,7 +188,43 @@ public class McpAuthTests
         await Emit(ui, """{ "type": "extension_ui_request", "id": "o1", "method": "open_url", "url": "https://auth.example.com/other", "mcpServer": "web" }""");
         await Until(() => vm.PendingUrl is not null, "link card");
         Assert.Equal("https://auth.example.com/other", vm.PendingUrl);
-        Assert.Single(ui.Opened);
+        Assert.Empty(ui.Opened);
+
+        // The card (in the chat): its Open, the chat's Browser tool; its "Open in default browser", the system's browser
+        vm.ShowChatsCommand.Execute(null);
+        vm.OpenPendingUrlCommand.Execute(null);
+        Assert.Null(vm.PendingUrl);
+        Assert.False(vm.IsSettingsOpen);
+        Assert.Equal(SidePane.Browser, vm.ActivePane);
+        Assert.Equal("https://auth.example.com/other", vm.Preview.CurrentUrl!.AbsoluteUri);
+        Assert.Empty(ui.Opened);
+        await Emit(ui, """{ "type": "extension_ui_request", "id": "o2", "method": "open_url", "url": "https://auth.example.com/sso", "mcpServer": "web" }""");
+        await Until(() => vm.PendingUrl is not null, "link card");
+        vm.OpenPendingUrlInDefaultBrowserCommand.Execute(null);
+        Assert.Equal(["https://auth.example.com/sso"], ui.Opened);
+        Assert.Null(vm.PendingUrl);
+    }
+
+    [AvaloniaFact]
+    public async Task Sign_in_in_the_default_browser_is_the_sign_in_buttons_menu()
+    {
+        await using var ui = await Open();
+        var (c, vm) = (ui.C, ui.Vm);
+        var web = c.Servers.Single(s => s.Name == "web");
+        var requested = 0;
+        vm.SignInWindowRequested += () => requested++;
+
+        await web.SignInInDefaultBrowserCommand.ExecuteAsync(null);
+        Assert.Equal(["https://auth.example.com/authorize?client_id=c&state=s1"], ui.Opened);
+        Assert.Equal((0, null), (requested, vm.SignInBrowser));
+        Assert.Equal("signed_in", web.Auth);
+
+        // The sign-in buttons carry it as their right-click menu
+        ui.Vm.PluginsHub.OpenServerCommand.Execute(web);
+        await Settle(200);
+        var again = ui.W.GetVisualDescendants().OfType<Button>().Single(b => b.Name == "SignInAgainButton");
+        Assert.NotNull(Ombra.App.Controls.ContextMenus.GetDefaultBrowserSignIn(again));
+        Assert.NotNull(again.ContextFlyout);
     }
 
     [AvaloniaFact]
@@ -212,11 +257,19 @@ public class McpAuthTests
         var web = c.Servers.Single(s => s.Name == "web");
 
         var signIn = web.SignInCommand.ExecuteAsync(null);
-        await Until(() => ui.Opened.Count == 1 && web.IsSigningIn, "sign-in page");
+        await Until(() => ui.Vm.SignInBrowser?.CurrentUrl is not null && web.IsSigningIn, "sign-in page");
+        Assert.Equal("https://auth.example.com/authorize?client_id=c&state=s1", ui.Vm.SignInBrowser!.CurrentUrl!.AbsoluteUri);
+        await Settle(100);
+        var window = Assert.Single(ui.W.OwnedWindows);
+        Assert.Equal(Loc.T("Sign in"), window.Title);
+        Assert.Empty(ui.Opened);
         Assert.False(web.SuggestSignIn); // Cancel instead
         await Shot(ui, "connectors-signing-in", scrollTo: "ConnectorList");
         await web.CancelSignInCommand.ExecuteAsync(null);
         await signIn;
+        Assert.Null(ui.Vm.SignInBrowser); // the window closes with the sign-in
+        await Settle(100);
+        Assert.Empty(ui.W.OwnedWindows);
         Assert.False(web.IsSigningIn);
         Assert.Equal(Loc.F("Sign-in to “{0}” cancelled.", "web"), c.Feedback.Notice);
         Assert.Equal("", web.SignInError);
@@ -247,9 +300,12 @@ public class McpAuthTests
         var prompt = Assert.Single(c.AuthPrompts);
         Assert.Equal(("web", true, Loc.T("Sign in again")), (prompt.Server, prompt.Expired, prompt.SignInLabel));
         await Shot(ui, "connectors-prompt");
+        var windows = 0;
+        ui.Vm.SignInWindowRequested += () => windows++;
         await prompt.SignInCommand.ExecuteAsync(null);
         await Until(() => !c.HasAuthPrompts, "prompt gone after sign-in");
-        Assert.Single(ui.Opened);
+        Assert.Equal((1, null), (windows, ui.Vm.SignInBrowser)); // its page in the sign-in window, closed once done
+        Assert.Empty(ui.Opened);
 
         await Emit(ui, """{ "type": "mcp_auth_required", "serverName": "echo", "reason": "signed_out" }""");
         await Until(() => c.HasAuthPrompts, "second prompt");
@@ -337,9 +393,23 @@ public class McpAuthTests
         Assert.Contains(Loc.T("Reload config"), names);
         await Shot(ui, "chat-connectors");
 
-        // Sign in from the chat: the page opens in the default browser, the row connects
+        // Sign in from the chat: the page opens in a tab of the chat's Browser tool, which closes once the row connects
+        // (a page already in the pane, so the sign-in's tab is not its first, which stays; the headless pane finds no
+        // engine once shown, after the page opened)
+        vm.Preview.OpenUserTab(new Uri("https://example.com/before"));
+        var tabs = vm.Preview.Tabs.Count;
+        PreviewTab? signInTab = null;
+        void Watch(object? _, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) =>
+            signInTab ??= e.NewItems?.OfType<PreviewTab>().FirstOrDefault();
+        vm.Preview.Tabs.CollectionChanged += Watch;
         await web.SignInCommand.ExecuteAsync(null);
-        Assert.Equal(["https://auth.example.com/authorize?client_id=c&state=s2"], ui.Opened);
+        vm.Preview.Tabs.CollectionChanged -= Watch;
+        Assert.Empty(ui.Opened);
+        Assert.NotNull(signInTab);
+        Assert.Equal("https://auth.example.com/authorize?client_id=c&state=s2", signInTab!.Url!.AbsoluteUri);
+        Assert.True(signInTab.IsClosed);
+        Assert.Equal(tabs, vm.Preview.Tabs.Count);
+        Assert.Equal(SidePane.Browser, vm.ActivePane);
         Assert.Equal((ConnectorState.Connected, false), (web.State, web.NeedsAttention));
         Assert.Equal(Loc.Plural(3, "Signed in to “{1}”: {0} tool ready.", "Signed in to “{1}”: {0} tools ready.", "web"), c.ChatNotice);
         Assert.Equal(Loc.F("{0} isn't connected", "broken"), c.ChipLabel);
@@ -409,20 +479,28 @@ public class McpAuthTests
     }
 
     [AvaloniaFact]
-    public async Task A_typed_mcp_reauth_opens_its_sign_in_page_in_the_default_browser()
+    public async Task A_typed_mcp_reauth_opens_its_sign_in_page_in_the_chats_browser()
     {
         await using var ui = await Open(connectors: false);
         var vm = ui.Vm;
         vm.ComposerText = "/mcp reauth web";
         await vm.SendCommand.ExecuteAsync(null);
         await Emit(ui, """{ "type": "extension_ui_request", "id": "t1", "method": "open_url", "url": "https://auth.example.com/typed", "mcpServer": "web" }""");
-        await Until(() => ui.Opened.Count == 1, "the typed sign-in's page");
-        Assert.Equal("https://auth.example.com/typed", ui.Opened[0]);
+        await Until(() => vm.Preview.CurrentUrl?.AbsoluteUri == "https://auth.example.com/typed", "the typed sign-in's page");
+        Assert.Equal(SidePane.Browser, vm.ActivePane);
+        Assert.Empty(ui.Opened);
 
         // Another server's page nobody asked for here: the link card
         await Emit(ui, """{ "type": "extension_ui_request", "id": "t2", "method": "open_url", "url": "https://auth.example.com/other", "mcpServer": "echo" }""");
         await Until(() => vm.PendingUrl is not null, "link card");
-        Assert.Single(ui.Opened);
+        Assert.Empty(ui.Opened);
+        Assert.Equal("https://auth.example.com/typed", vm.Preview.CurrentUrl!.AbsoluteUri);
+
+        // A pane that cannot show pages (headless: no web engine, found once the pane showed) hands sign-ins to the
+        // default browser
+        await Until(() => vm.Preview.IsEngineUnavailable, "the headless pane's engine check");
+        vm.OpenLink("http://127.0.0.1:53682/callback?code=c&state=s", LinkTarget.SignIn);
+        Assert.Equal(["http://127.0.0.1:53682/callback?code=c&state=s"], ui.Opened);
     }
 
     private const string Form = """

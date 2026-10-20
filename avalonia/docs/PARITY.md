@@ -192,7 +192,7 @@ extension commands that omp lists itself keep going to omp.
 | `/hub` | TUI | **Done** — opens Background tasks — *Panes* area |
 | `/login [provider]` | TUI (RPC `login`) | **Done** — Settings › Model providers (RPC sign-in with the browser link / code card) |
 | `/logout [provider]` | TUI (RPC `get_logout_accounts`, `logout`, omp 18.8.0) | **Done** — Settings › Model providers (the sign-out icon beside *Signed in*: pick the stored account to remove) |
-| `/mcp …` | yes | **Done** — Plugins page › MCP — *Connectors* area (sign-in / sign in again / sign out, Reconnect, Reload config, server forms over RPC); the chat's connectors plug under the message box; `/mcp reauth <name>` typed opens its sign-in page in the default browser |
+| `/mcp …` | yes | **Done** — Plugins page › MCP — *Connectors* area (sign-in / sign in again / sign out, Reconnect, Reload config, server forms over RPC); the chat's connectors plug under the message box; `/mcp reauth <name>` typed opens its sign-in page in Ombra (the chat's Browser; Settings: the sign-in window; right-click Sign in: the default browser) |
 | `/ssh …` | yes | **Done** — Settings › SSH hosts — *Workspace* area |
 | `/btw` | TUI | **Done** over the owned engine's RPC (`btw`, `btw_cancel`, `get_btw_history`): the BTW panel above the message box, also while omp works (*Session* area); an omp without them: via omp terminal |
 | `/tan`, `/omfg`, `/cleanse`, `/debug` | TUI | **Via omp terminal** |

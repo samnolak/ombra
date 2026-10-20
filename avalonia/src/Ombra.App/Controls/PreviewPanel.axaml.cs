@@ -185,9 +185,10 @@ public partial class PreviewPanel : UserControl
     }
 
     /// <summary>"Open in browser" (and target="_blank" links without the engine's hooks): somewhere other than this pane,
-    /// the Browser page from the right panel's Browser tool, the system's browser from the Browser page.</summary>
+    /// the Browser page from the right panel's Browser tool, the system's browser from the Browser page and the sign-in
+    /// window (a sign-in that needs the user's passkeys).</summary>
     private void OnOpenExternallyRequested(Uri uri) => ContextMenus.OpenLink(this, uri.AbsoluteUri,
-        ConversationMenus.Owner(this) is { } main && ReferenceEquals(_vm, main.Browser) ? LinkTarget.SystemBrowser : LinkTarget.BrowserPage);
+        ConversationMenus.Owner(this) is { } main && !ReferenceEquals(_vm, main.Preview) ? LinkTarget.SystemBrowser : LinkTarget.BrowserPage);
 
     /// <summary>Creates the web views for pending navigations once the panel is shown in a window.</summary>
     private void Realize()
