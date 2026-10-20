@@ -14,7 +14,6 @@
           <SolidColorBrush x:Key="GuiTextLink" Color="#FF2563EB" />
           <SolidColorBrush x:Key="GuiTextLinkHover" Color="#FF1D4ED8" />
           <SolidColorBrush x:Key="GuiTextError" Color="#FFD03B30" />
-          <SolidColorBrush x:Key="GuiTextSuccess" Color="#FF1E7F3A" />
           <SolidColorBrush x:Key="GuiTextWarning" Color="#FF9A5A12" />
           <SolidColorBrush x:Key="GuiTextOnAccent" Color="#FFFFFFFF" />
           <SolidColorBrush x:Key="GuiTextOnDanger" Color="#FFFFFFFF" />
@@ -71,7 +70,6 @@
           <SolidColorBrush x:Key="GuiBorderStrong" Color="#40000000" />
           <SolidColorBrush x:Key="GuiBorderHover" Color="#2E000000" />
           <SolidColorBrush x:Key="GuiBorderFocus" Color="#73000000" />
-          <SolidColorBrush x:Key="GuiBorderDarkOnly" Color="#00FFFFFF" />
           <!-- "In progress" marks (current todo, running pill, counts, the update row): the accent's yellow / amber -->
           <SolidColorBrush x:Key="GuiStatusInfo" Color="#FFB07A00" />
           <SolidColorBrush x:Key="GuiStatusInfoSoft" Color="#FFFBF0CC" />
@@ -84,7 +82,6 @@
           <SolidColorBrush x:Key="GuiStatusNeutral" Color="#FF737373" />
           <SolidColorBrush x:Key="GuiStatusNeutralSoft" Color="#12000000" />
           <SolidColorBrush x:Key="GuiSelection" Color="#FFC7DBFA" />
-          <SolidColorBrush x:Key="GuiTooltip" Color="#FF0D0D0D" />
           <SolidColorBrush x:Key="GuiProgressTrack" Color="#14000000" />
           <SolidColorBrush x:Key="GuiBackdrop" Color="#33000000" />
           <!-- Behind the image viewer: opaque, so nothing of the conversation shows through the image's margins -->
@@ -95,7 +92,6 @@
           <SolidColorBrush x:Key="GuiFocus" Color="#FF2F6BDA" />
           <SolidColorBrush x:Key="GuiModeManual" Color="#FF737373" />
           <SolidColorBrush x:Key="GuiModeAcceptEdits" Color="#FF8700FF" />
-          <SolidColorBrush x:Key="GuiModePlan" Color="#FF006666" />
           <SolidColorBrush x:Key="GuiModeBypass" Color="#FFAB2B3F" />
           <!-- Diffs (Controls/DiffView, the Files pane's Changes): a line's fill, the stronger fill of the words that changed
                in it, the solid bar at its left edge and the sign / count colour; a new file's lighter fill; the "Moved" badge -->
@@ -291,7 +287,6 @@
           <SolidColorBrush x:Key="GuiTextLink" Color="#FF6086CC" />
           <SolidColorBrush x:Key="GuiTextLinkHover" Color="#FF82A3DB" />
           <SolidColorBrush x:Key="GuiTextError" Color="#FFF28B82" />
-          <SolidColorBrush x:Key="GuiTextSuccess" Color="#FF6BC47E" />
           <SolidColorBrush x:Key="GuiTextWarning" Color="#FFE0A04F" />
           <SolidColorBrush x:Key="GuiTextOnAccent" Color="#FFFFFFFF" />
           <SolidColorBrush x:Key="GuiTextOnDanger" Color="#FFFFFFFF" />
@@ -348,7 +343,6 @@
           <SolidColorBrush x:Key="GuiBorderStrong" Color="#33FFFFFF" />
           <SolidColorBrush x:Key="GuiBorderHover" Color="#26FFFFFF" />
           <SolidColorBrush x:Key="GuiBorderFocus" Color="#66FFFFFF" />
-          <SolidColorBrush x:Key="GuiBorderDarkOnly" Color="#14FFFFFF" />
           <!-- "In progress" marks (current todo, running pill, counts, the update row): the accent's yellow / amber -->
           <SolidColorBrush x:Key="GuiStatusInfo" Color="#FFF5C02A" />
           <SolidColorBrush x:Key="GuiStatusInfoSoft" Color="#FF3A3322" />
@@ -361,7 +355,6 @@
           <SolidColorBrush x:Key="GuiStatusNeutral" Color="#FF8E8E8E" />
           <SolidColorBrush x:Key="GuiStatusNeutralSoft" Color="#17FFFFFF" />
           <SolidColorBrush x:Key="GuiSelection" Color="#FF2B4A73" />
-          <SolidColorBrush x:Key="GuiTooltip" Color="#FF2D2D2D" />
           <SolidColorBrush x:Key="GuiProgressTrack" Color="#1AFFFFFF" />
           <SolidColorBrush x:Key="GuiBackdrop" Color="#80000000" />
           <!-- Behind the image viewer: opaque, so nothing of the conversation shows through the image's margins -->
@@ -372,7 +365,6 @@
           <SolidColorBrush x:Key="GuiFocus" Color="#FF5E9CF5" />
           <SolidColorBrush x:Key="GuiModeManual" Color="#FF8E8E8E" />
           <SolidColorBrush x:Key="GuiModeAcceptEdits" Color="#FFAF87FF" />
-          <SolidColorBrush x:Key="GuiModePlan" Color="#FF48968C" />
           <SolidColorBrush x:Key="GuiModeBypass" Color="#FFFF6B80" />
           <!-- Diffs (Controls/DiffView, the Files pane's Changes): a line's fill, the stronger fill of the words that changed
                in it, the solid bar at its left edge and the sign / count colour; a new file's lighter fill; the "Moved" badge -->

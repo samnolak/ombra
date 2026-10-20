@@ -230,19 +230,6 @@ public sealed class RuntimeInstaller
             : options with { Command = Path.Combine(TargetDirectory, "install-required") };
     }
 
-    /// <summary>Removes the packs earlier versions installed, once this version's pack is installed; returns how many.</summary>
-    public int RemovePrevious()
-    {
-        if (FindInstalled() is null) return 0;
-        var removed = 0;
-        foreach (var p in Previous().ToList())
-        {
-            TryDelete(p.Runtime.Directory);
-            if (!Directory.Exists(p.Runtime.Directory)) removed++;
-        }
-        return removed;
-    }
-
     /// <summary>Folders in the root that this installer completed (their <c>installed.json</c> names the folder) for another pack.</summary>
     private IEnumerable<PreviousRuntime> Previous()
     {

@@ -19,9 +19,11 @@ not an official product of the omp, Bun, Anthropic or OpenAI projects.
 
 Download the package for your system from the [latest release](https://github.com/samnolak/ombra/releases/latest)
 (macOS: unzip and move *Ombra.app* to Applications; Windows: unzip and run `Ombra.exe`; Linux: unpack and run
-`install-desktop-entry.sh`). Packages are self-contained: no .NET needed. On first start without omp the app installs
-the pinned omp itself. After that the app finds new releases on its own (Settings → Updates) and installs them when
-you choose to. Model providers and API keys live in omp's configuration; the app has no account or sign-in of its own.
+`install-desktop-entry.sh`). Packages are self-contained: no .NET or separate omp installation is needed. They carry
+Ombra's pinned shared engine; source builds install that engine on first use. Settings → Advanced can repair it.
+An ordinary upstream omp CLI is not a compatible GUI engine. The app finds new releases on its own
+(Settings → Updates) and installs them when you choose to. Model providers and API keys live in omp's
+configuration; the app has no account or sign-in of its own.
 
 ## What it does
 
@@ -56,8 +58,8 @@ taken from the logo, sentence-case wording.
 - **Pet** — an optional pixel pet that reacts to what omp does; drag it anywhere, click it to send a quick message.
 - **Settings** — a full-window page: General, Permissions, Model providers (sign in and sign out, plan usage),
   Connectors (MCP servers, Smithery search), Plugins and skills, Computer use, Git and worktrees, SSH hosts, Pets,
-  Updates, Advanced (which omp to run, corporate network certificates, network privacy) and Diagnostics. What belongs
-  to omp is changed through omp's own commands and settings.
+  Updates, Advanced (shared-engine setup and developer command overrides, corporate network certificates, network
+  privacy) and Diagnostics. What belongs to omp is changed through omp's own commands and settings.
 - **Network privacy** — omp contacts only the model providers you added: on its own, omp asks every provider it
   knows for its model list and probes local model servers, so each time the app starts omp it turns the others off
   for it (omp's `disabledProviders`, passed as a `--config` overlay; your `config.yml` is not changed). Optional

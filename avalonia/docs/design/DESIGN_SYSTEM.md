@@ -104,12 +104,11 @@ Values are light / dark; contrast is against the window. Only the keys the style
 | `GuiStatusUnread` / `GuiStatusUnreadRing` | #E0A100 / #F5C02A | the sidebar's unseen-reply dot (the accent's yellow) |
 | `GuiFocus` / `GuiFocusRing` | #2F6BDA / #5E9CF5 | focused text box border; keyboard-focus ring (2 px, inset) |
 | `GuiInverse` (+`Hover`, `Pressed`) | #0D0D0D / #ECECEC | the primary pill: `accent` and `inverse` buttons (Stop) |
-| `GuiModeManual` / `AcceptEdits` / `Plan` / `Bypass` | #737373 · #8700FF · #006666 · #AB2B3F / #8E8E8E · #AF87FF · #48968C · #FF6B80 | the permission-mode pill and the mode marks in its menu (Send keeps the accent in every mode) |
+| `GuiModeManual` / `AcceptEdits` / `Bypass` | #737373 · #8700FF · #AB2B3F / #8E8E8E · #AF87FF · #FF6B80 | the permission-mode pill and the mode marks in its menu (Send keeps the accent in every mode) |
 | `GuiStatusRunning` / `Waiting` / `Unread` | #2E8B47 · #B5661B · #E0A100 / #6BC47E · #E0A04F · #F5C02A | session status dots: working (pulsing), needs your input (amber), unseen reply (the accent's yellow) |
 | `GuiDiffAddedBg` / `WordBg` / `Bar` / `Text`, `GuiDiffRemovedBg` / `WordBg` / `Bar` / `Text` | row fill 12–14 %, changed words 35–40 %, a solid bar and AA text; dark sampled from Codex: green #6BC47E, red #E75543 (text #EE6A5C) | diff rows (conversation and the Files pane's Changes): fill, word marks inside a changed line, left edge bar, sign and numbers, +N −M counts |
 | `GuiDiffNewFileBg`, `GuiDiffMovedBg` / `Text` | a lighter green fill; blue at 12–20 % with AA text | a new file's lines (not a wall of green); the Renamed / Moved badge |
 | `GuiBorderSoft` / `GuiBorder` / `GuiBorderStrong` | black or white at 6–7 / 10 / 25–20 % | card and code-card hairlines, the composer / menus, text boxes, separators / switch track off |
-| `GuiBorderDarkOnly` | transparent / white 8 % | hairlines that only dark needs |
 | `GuiStatus*Soft` | pale status fills / deep muted fills | badges, `notice`, `banner error`, `chip danger` |
 | `GuiStatusInfo` / `Success` / `Error` / `Warning` | info = amber #B07A00 / the accent #F5C02A | status dots and marks (3:1 is enough for graphics); info marks what is in progress: the current todo, a running pill, the working state dot, counts |
 | `GuiShadow` | `0 1 2 #000 4%, 0 4 14 #000 6%` / none | cards, raised segment |
@@ -374,8 +373,8 @@ sentence-case labels.
   primary with a coloured dot (`Border.status` > `Ellipse`); error and warning lines are primary text with an
   `IconAlert` in `GuiStatusError` / `GuiStatusWarning` (`Icon.error-mark` / `Icon.warning-mark`). Text in a status
   colour on its own pale fill measures 2.5–3.9:1; graphics need only 3:1.
-- **Elevation, not borders, separates surfaces in light**; dark mode relies on the `GuiBorderDarkOnly` hairline
-  because there are no shadows there.
+- **Elevation, not borders, separates surfaces in light**; dark mode uses the shared `GuiBorderSoft` / `GuiBorder`
+  hairlines where cards and controls need separation.
 - Reading text uses `body` (`GuiFontMessage` 16 / 24); dense UI uses 13–14 px; `GuiFontXl` only for the page title.
 
 ## Icons
@@ -387,6 +386,11 @@ stroke 2 on its 24-unit grid, as `StreamGeometry` resources in `Icons.axaml` and
 `IconCompose` → `square-pen`, `IconPanelLeft` → `panel-left`, `IconTerminal` → `square-terminal`, `IconGrid` →
 `blocks`, `IconSkills` → `book-open`, …), downloads the SVGs and rewrites the geometries in place. One key stays
 hand-drawn on the same grid: `IconStop` (a small square for `Filled`, Lucide's `square` fills the whole grid).
+
+Keep only icons with application callers, including resource keys selected by view models and converters.
+When removing an unused mapped icon, remove its `MAP` entry too: the generator rejects mappings without a
+matching geometry. Fluent control-theme resource overrides are different: their consumers can live in Avalonia,
+so absence of an application-side reference alone does not make them unused.
 
 ```xml
 <ctl:Icon Data="{StaticResource IconTerminal}" Size="20" />

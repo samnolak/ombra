@@ -593,7 +593,7 @@ public sealed class UpdateInstallTests
     }
 
     [Fact]
-    public void The_pack_an_earlier_version_installed_is_found_and_removed_only_once_the_new_one_is_in()
+    public void The_pack_an_earlier_version_installed_is_found_and_preserved_after_upgrade()
     {
         var root = TestProcesses.TempDir("rt-prev");
         var installer = new RuntimeInstaller(new HttpClient(), root, "linux-x64");
@@ -606,12 +606,12 @@ public sealed class UpdateInstallTests
         Assert.Null(installer.FindInstalled());
         var prev = installer.FindPrevious();
         Assert.Equal(("omp-18.1.0-bun-1.4.0", "18.1.0"), (prev!.Pack, prev.Omp));
-        Assert.Equal(0, installer.RemovePrevious()); // this version's pack is not installed yet: keep the one in use
 
         FakePack(root, RuntimePack.Name, RuntimePack.OmpVersion);
         Assert.NotNull(installer.FindInstalled());
-        Assert.Equal(2, installer.RemovePrevious());
-        Assert.Null(installer.FindPrevious());
+        Assert.Equal(prev, installer.FindPrevious());
+        Assert.True(Directory.Exists(Path.Combine(root, "omp-18.0.0-bun-1.3.0")));
+        Assert.True(Directory.Exists(Path.Combine(root, "omp-18.1.0-bun-1.4.0")));
         Assert.True(Directory.Exists(Path.Combine(root, "someone-elses-folder")));
         Assert.True(Directory.Exists(Path.Combine(root, "omp-17.0.0-bun-1.2.0")));
     }
