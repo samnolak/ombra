@@ -1,5 +1,7 @@
 using Avalonia.Controls;
 using Ombra.App.Platform.Mac;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using static Ombra.App.Platform.Mac.MacRuntime;
 
 namespace Ombra.App.Nightly;
@@ -8,6 +10,56 @@ internal static partial class NightlyAcceptance
 {
     private sealed partial class Run
     {
+        private static nint sFrameTraceWindow, sFrameTraceImp, sAnimatedFrameTraceImp;
+        private static Action<string>? sFrameTraceLog;
+        private bool _frameTraceAttached;
+
+        private unsafe void TraceRestoreFrames()
+        {
+            if (_frameTraceAttached || Environment.GetEnvironmentVariable("OMBRA_TRACE_WINDOW_FRAME") != "1") return;
+            _frameTraceAttached = true;
+            sFrameTraceWindow = NsWindow;
+            sFrameTraceLog = Log;
+            var cls = MacObjC.Send(NsWindow, "class");
+            sFrameTraceImp = SetImplementation(InstanceMethod(cls, "setFrame:display:"),
+                (nint)(delegate* unmanaged[Cdecl]<nint, nint, CGRect, byte, void>)&TraceSetFrame);
+            sAnimatedFrameTraceImp = SetImplementation(InstanceMethod(cls, "setFrame:display:animate:"),
+                (nint)(delegate* unmanaged[Cdecl]<nint, nint, CGRect, byte, byte, void>)&TraceAnimatedSetFrame);
+            window.PositionChanged += (_, e) => TraceFrameChange("PositionChanged " + e.Point);
+            window.SizeChanged += (_, e) => TraceFrameChange("SizeChanged " + e.NewSize);
+            window.PropertyChanged += (_, e) =>
+            {
+                if (e.Property == Window.WidthProperty || e.Property == Window.HeightProperty || e.Property == Window.WindowStateProperty)
+                    TraceFrameChange($"{e.Property.Name}: {e.OldValue} -> {e.NewValue}");
+            };
+            TraceFrameChange("attached " + RestoreState(out _));
+        }
+
+        private static void TraceFrameChange(string reason)
+        {
+            try
+            {
+                var symbols = MacObjC.Send(MacObjC.Cls("NSThread"), "callStackSymbols");
+                var currentEvent = MacObjC.Send(MacObjC.Send(MacObjC.Cls("NSApplication"), "sharedApplication"), "currentEvent");
+                sFrameTraceLog?.Invoke($"FRAME-TRACE {reason}\nevent={MacObjC.ToStr(MacObjC.Send(currentEvent, "description"))}\n{Environment.StackTrace}\n{MacObjC.ToStr(MacObjC.Send(symbols, "description"))}");
+            }
+            catch { /* Diagnostic code must not interrupt AppKit's window lifecycle. */ }
+        }
+
+        [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+        private static unsafe void TraceSetFrame(nint self, nint cmd, CGRect frame, byte display)
+        {
+            if (self == sFrameTraceWindow) TraceFrameChange("setFrame:display: " + frame);
+            ((delegate* unmanaged<nint, nint, CGRect, byte, void>)sFrameTraceImp)(self, cmd, frame, display);
+        }
+
+        [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+        private static unsafe void TraceAnimatedSetFrame(nint self, nint cmd, CGRect frame, byte display, byte animate)
+        {
+            if (self == sFrameTraceWindow) TraceFrameChange("setFrame:display:animate: " + frame);
+            ((delegate* unmanaged<nint, nint, CGRect, byte, byte, void>)sAnimatedFrameTraceImp)(self, cmd, frame, display, animate);
+        }
+
         // Deliberately not Activate(): its makeKeyAndOrderFront would repair the failure under test.
         private static unsafe void RestoreApplication(bool reopen)
         {
@@ -63,6 +115,7 @@ internal static partial class NightlyAcceptance
 
         private async Task RestoreChecks(string mode)
         {
+            TraceRestoreFrames();
             if (window.Position.X >= 0) throw new InvalidOperationException("Restore checks require a window on the left display.");
             var popup = mode.StartsWith("popup-", StringComparison.Ordinal);
             var starting = mode.StartsWith("starting-", StringComparison.Ordinal);
