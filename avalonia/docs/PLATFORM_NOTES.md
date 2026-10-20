@@ -40,6 +40,36 @@ stay on the left display. The Browser `close` case sends ⌘W to Nightly and che
 On Chats, ⌘W intentionally follows the quit sequence: the process exits, so a later Dock launch is a new
 application, not `applicationShouldHandleReopen` on a hidden retained window.
 
+## Window placement across runs (and the window found at 1100×760)
+
+**What.** The close sequence saves the normal frame, whether the window was maximized and the panels
+(`WindowLayoutOptions`, `MainWindow.UiState.cs`). At the next start the saved frame is applied when the window starts
+to show (`Window.WindowOpenedEvent`, raised before Avalonia sizes, places and shows it), on the display the frame
+overlaps most, fitted to its working area; the primary display takes a frame whose display is gone. The normal frame
+is taken once a move or resize has held for 600 ms in the normal state and AppKit does not call the window zoomed,
+full screen or minimized; full screen keeps the maximized state under it.
+
+**Why.** Restored after the show (as before), the window first appeared at the XAML default (1100×760 in the middle of
+the main display) and was then moved, and a saved maximized window was zoomed before its saved size reached AppKit:
+AppKit's zoom keeps the frame it zoomed from, so Zoom/the green button with ⌥/a title-bar double-click later brought the
+window back to 1100×760 at the saved corner. AppKit also resizes a window to the zoomed or full-screen frame (and
+through the zoom animation) before Avalonia reports the new state, so the "normal" frame saved at quit was the
+maximized or full-screen one (a saved layout of `2560×1288 maximized` on a 2560×1440 display). A frame whose top-left
+corner was just past a display's edge (a window dragged beyond the left edge of a display at negative X) went to the
+primary display.
+
+**Diagnostics.** client.log, source `window`: the saved layout, the displays and the frame chosen at launch, the frame
+shown, every state change and display change, the frame saved at quit, and each settled burst of resizes that neither
+the user's drag nor Ombra's layout asked for (zoom, full screen, a display going away …) or of moves onto another display:
+from where to where, AppKit's zoomed/full-screen/minimized state, the `NSEvent` being handled, and for the first ten
+per run the native and managed stacks. A window found at 1100×760 again is explained by these lines.
+
+**Checks.** `MicroUxStateTests`: the display a frame overlaps most, the frame the window is shown and maximized from,
+the normal frame not taken from frames passed on the way to maximized, full screen keeping the maximized state (the
+two window tests fail on the old order). AppKit's side, with NSWindows never put on screen (osascript): zoomed from
+1100×760 at a corner, then given 1320×860, zoom twice brings back 1100×760 at that corner; zoomed from 1320×860, it
+comes back to 1320×860.
+
 ## macOS: the app icon (no grey plate on macOS 26)
 
 **What.** `Ombra.app` carries two icons (`tools/package/package.sh`, `packaging/Info.plist`): `Assets.car` with

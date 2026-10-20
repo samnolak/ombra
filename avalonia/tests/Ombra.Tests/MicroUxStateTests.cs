@@ -79,6 +79,93 @@ public sealed class MicroUxStateTests
         finally { await vm.DisposeAsync(); window.Close(); }
     }
 
+    [Fact]
+    public void Saved_frame_past_a_display_edge_stays_on_the_display_it_overlaps_most()
+    {
+        // The main display at the origin and a portrait one to its left (negative X), as AppKit reports them in points
+        var main = new MainWindow.PlacementScreen(new PixelRect(0, 30, 2560, 1320), 1, true);
+        var left = new MainWindow.PlacementScreen(new PixelRect(-1440, -994, 1440, 2560), 1, false);
+        MainWindow.PlacementScreen[] screens = [main, left];
+        // The top-left corner just past the left display's left edge: the window stays there, it does not jump to the main one
+        var past = MainWindow.PlaceSavedWindow(new WindowLayoutOptions { X = -1460, Y = 80, Width = 1320, Height = 860 }, screens);
+        Assert.Equal((-1440, 80, 1320.0, 860.0), (past.X, past.Y, past.Width, past.Height));
+        // Mostly on the main display: placed on it
+        var across = MainWindow.PlaceSavedWindow(new WindowLayoutOptions { X = -200, Y = 100, Width = 1320, Height = 860 }, screens);
+        Assert.Equal((0, 100), (across.X, across.Y));
+        // Its display is gone: the primary one takes it, at its size
+        var gone = MainWindow.PlaceSavedWindow(new WindowLayoutOptions { X = 5000, Y = 80, Width = 1320, Height = 860 }, screens);
+        Assert.Equal((2560 - 1320, 80, 1320.0), (gone.X, gone.Y, gone.Width));
+        // No displays reported: kept as saved
+        var kept = new WindowLayoutOptions { X = -1400, Y = 80, Width = 1320, Height = 860 };
+        Assert.Equal(kept, MainWindow.PlaceSavedWindow(kept, []));
+    }
+
+    [AvaloniaFact]
+    public async Task Saved_frame_is_the_frame_the_window_is_shown_and_maximized_from()
+    {
+        var dir = TestProcesses.TempDir("micro-window-first-frame");
+        var settings = new ClientSettingsStore(Path.Combine(dir, "settings.json"));
+        settings.Update(o => o with { WindowLayout = new WindowLayoutOptions { X = 120, Y = 90, Width = 900, Height = 650, Maximized = true } });
+        var vm = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs(), settings: settings);
+        var log = new Ombra.App.Services.ClientLog(Path.Combine(dir, "client.log"));
+        var window = new MainWindow { DataContext = vm, WindowLog = log };
+        (Size Size, PixelPoint Position, WindowState State, WindowStartupLocation Startup)? atOpen = null;
+        window.Opened += (_, _) => atOpen = (window.ClientSize, window.Position, window.WindowState, window.WindowStartupLocation);
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            // Applied before the platform showed it: no XAML 1100×760 in the middle first, and maximized from the saved
+            // frame (AppKit's Zoom goes back to the frame it zoomed from)
+            Assert.Equal((new Size(900, 650), new PixelPoint(120, 90), WindowState.Maximized, WindowStartupLocation.Manual), atOpen);
+            window.WindowState = WindowState.Normal;
+            window.SaveWindowLayout();
+            Assert.Equal((120, 90, 900.0, 650.0, false), settings.Load().WindowLayout is { } l ? (l.X, l.Y, l.Width, l.Height, l.Maximized) : default);
+            var text = log.ReadTail(int.MaxValue)!;
+            Assert.Contains("[window] restore saved=120,90 900×650 maximized placed=120,90 900×650 maximized screens=[0,0 1920×1280 x1 primary]", text);
+            Assert.Contains("[window] shown at 120,90 900×650", text);
+            Assert.Contains("[window] state Maximized -> Normal", text);
+            Assert.Contains("[window] saved 120,90 900×650 state=Normal", text);
+        }
+        finally { await vm.DisposeAsync(); window.Close(); }
+    }
+
+    [AvaloniaFact]
+    public async Task Normal_frame_is_not_one_passed_through_on_the_way_to_maximized()
+    {
+        var settings = new ClientSettingsStore(Path.Combine(TestProcesses.TempDir("micro-window-transit"), "settings.json"));
+        settings.Update(o => o with { WindowLayout = new WindowLayoutOptions { X = 120, Y = 90, Width = 900, Height = 650 } });
+        var vm = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs(), settings: settings);
+        var window = new MainWindow { DataContext = vm };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            // AppKit's zoom: the window takes the display's frame while it still reports the normal state, then says maximized
+            window.Width = 1900;
+            window.Height = 1200;
+            Dispatcher.UIThread.RunJobs();
+            window.WindowState = WindowState.Maximized;
+            await Task.Delay(MainWindow.PlacementSettle * 1.5);
+            Dispatcher.UIThread.RunJobs();
+            window.SaveWindowLayout();
+            Assert.Equal((900.0, 650.0, true), settings.Load().WindowLayout is { } zoomed ? (zoomed.Width, zoomed.Height, zoomed.Maximized) : default);
+            // A frame that holds in the normal state is the normal frame, also when the window quits right after it
+            window.WindowState = WindowState.Normal;
+            window.Width = 1000;
+            window.Height = 700;
+            Dispatcher.UIThread.RunJobs();
+            window.SaveWindowLayout();
+            Assert.Equal((1000.0, 700.0, false), settings.Load().WindowLayout is { } normal ? (normal.Width, normal.Height, normal.Maximized) : default);
+            // Full screen keeps the state under it (maximized), so quitting in full screen restores that
+            window.WindowState = WindowState.Maximized;
+            window.WindowState = WindowState.FullScreen;
+            window.SaveWindowLayout();
+            Assert.True(settings.Load().WindowLayout!.Maximized);
+        }
+        finally { await vm.DisposeAsync(); window.Close(); }
+    }
+
     [AvaloniaFact]
     public async Task Initial_catalog_load_has_feedback_but_refresh_keeps_existing_rows_without_flash()
     {
