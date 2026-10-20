@@ -402,9 +402,15 @@ internal static partial class NightlyAcceptance
             ((delegate* unmanaged<nint, nint, ulong, byte>)MacObjC.MsgSend)(
                 MacObjC.Send(MacObjC.Cls("NSRunningApplication"), "currentApplication"), MacObjC.Sel("activateWithOptions:"), 3);
 
-        /// <summary>Finder (always running) takes the focus, as when the user switches apps.</summary>
-        private static unsafe void AnotherAppTakesFocus()
+        /// <summary>Finder (always running) takes the focus, as when the user switches apps; in a run that never activates
+        /// an app (<see cref="Platform.TestFocus"/>) the window loses Ombra's activation in-process instead.</summary>
+        private unsafe void AnotherAppTakesFocus()
         {
+            if (Platform.TestFocus.NoActivate)
+            {
+                Platform.TestFocus.Deactivate(window);
+                return;
+            }
             var apps = MacObjC.Send(MacObjC.Cls("NSRunningApplication"), "runningApplicationsWithBundleIdentifier:", MacObjC.Str("com.apple.finder"));
             if (MacObjC.SendLong(apps, "count") > 0)
                 ((delegate* unmanaged<nint, nint, ulong, byte>)MacObjC.MsgSend)(MacObjC.Send(apps, "objectAtIndex:", 0), MacObjC.Sel("activateWithOptions:"), 3);

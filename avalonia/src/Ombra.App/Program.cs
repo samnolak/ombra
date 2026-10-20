@@ -148,6 +148,11 @@ internal static class Program
                 if (Services.LegacyNames.RenameMacBundleAndRelaunch(args, m => Services.ClientLog.Shared.Write("rename", m), ReleaseOwnership)) return 0;
                 Services.ClientLog.Shared.Write("path", LoginShellPath.Initialize().Diagnostic);
             }
+            // A run a harness drives (feature smoke, NightlyAcceptance, package smoke, benchmark) never takes the owner's
+            // focus (Platform/TestFocus.cs: OMBRA_TEST_NO_ACTIVATE).
+            Platform.TestFocus.Configure(Args.IsUnattended
+                || Environment.GetEnvironmentVariable("OMBRA_FEATURE_SMOKE") is { Length: > 0 }
+                || Environment.GetEnvironmentVariable("OMBRA_NIGHTLY_ACCEPTANCE") is { Length: > 0 });
             // A run nobody watches waits a bounded time, rather than hanging on a sleeping display.
             TimeSpan? displayLimit = Args.IsUnattended ? Platform.DisplayWait.UnattendedLimit : null;
             if (OperatingSystem.IsMacOS())
@@ -179,7 +184,7 @@ internal static class Program
     private const string RelaunchVariable = "OMBRA_DISPLAY_RELAUNCH";
     private const int MaxRelaunches = 3;
 
-    public static AppBuilder BuildAvaloniaApp() =>
+    public static AppBuilder BuildAvaloniaApp() => Platform.TestFocus.Apply(
         AppBuilder.Configure<App>()
             .UsePlatformDetect()
             // macOS: Avalonia 12.1's Metal path can present a frame rendered for the old size after a resize, and Core
@@ -192,5 +197,5 @@ internal static class Program
                 OverlayPopups = true,
             })
             .WithInterFont()
-            .LogToTrace();
+            .LogToTrace());
 }

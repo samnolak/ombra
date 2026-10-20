@@ -213,6 +213,14 @@ tools/ci/real-omp-smoke.sh <work-dir>           # installs the pinned runtime, b
 #   teams folders: tools/verify/HarnessIsolation.cs fails the test, or stops the smoke before anything starts, otherwise
 #   (an unreadable smoke settings file once ran on the defaults and left a chat in the user's ~/.omp/agent/sessions).
 
+# Native GUI checks (macOS) never take the focus of the Mac's user (AGENTS.md "Native GUI checks", Platform/TestFocus.cs)
+tools/verify/feature-smoke/run.sh <work> <installed-runtime> [sections]   # <work>/front.log: fails if the app became the front app
+tools/verify/front-app-watch.sh <log> <command…>   # any other GUI run (NightlyAcceptance drivers): front app every 100 ms,
+#   STOLEN when the command or a descendant became it, PROMPT for macOS permission windows; exit 3 on STOLEN.
+#   OMBRA_TEST_NO_ACTIVATE (default 1 in every harness run): activation policy Prohibited, activation calls refused, no Dock
+#   bounce, window behind other apps on the left display, Nightly's mozilla.widget.raise-on-setfocus off, no screencapture
+#   without Screen Recording; =0 only for checks of activation itself (NightlyAcceptance restore, macos-gate restore).
+
 # Real-model environment: SmolLM2-135M on llama.cpp, both from PyPI with checked hashes, on 127.0.0.1:18090
 tools/real-model/setup.sh <work> <omp-runtime-dir> 18090    # writes <work>/realmodel.json
 OMBRA_REAL_MODEL_CONFIG=<work>/realmodel.json OMBRA_REAL_MODEL_ROUTE=local-llamacpp/smollm2-135m-instruct-q4_1 dotnet test … --filter RealModelTests

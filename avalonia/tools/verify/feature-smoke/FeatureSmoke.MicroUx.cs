@@ -46,12 +46,13 @@ internal static partial class FeatureSmoke
                 window.Show();
                 await Task.Delay(500);
                 Shot("41-dock-waiting-question");
-                using (var capture = Process.Start(new ProcessStartInfo("/usr/sbin/screencapture", ["-x", Path.Combine(dir, "41-dock-desktop.png")]))!) capture.WaitForExit();
+                if (CanShoot(Path.Combine(dir, "41-dock-desktop.png")))
+                    using (var capture = Process.Start(new ProcessStartInfo("/usr/sbin/screencapture", ["-x", Path.Combine(dir, "41-dock-desktop.png")]))!) capture.WaitForExit();
                 vm.NotificationsEnabled = false;
                 Check("dock-settings-clear-badge", string.IsNullOrEmpty(Badge()) && vm.DockWaitingCount == 0, Badge() ?? "null");
                 vm.NotificationsEnabled = true;
                 Check("dock-settings-restore-no-bounce", Badge() == "1" && requests == 1, $"badge={Badge()} requests={requests}");
-                window.Activate();
+                Activate();
                 vm.CurrentDialog!.DismissCommand.Execute(null);
                 Check("dock-answer-clears-badge", await Until(() => vm.CurrentDialog is null && vm.DockWaitingCount == 0 && string.IsNullOrEmpty(Badge()), 30), Badge() ?? "null");
                 await Task.Delay(500);
@@ -62,7 +63,7 @@ internal static partial class FeatureSmoke
                 vm.DockAttentionChanged -= Changed;
                 MacObjC.SendVoid(app, "unhideWithoutActivation");
                 window.Show();
-                window.Activate();
+                Activate();
             }
         }
     }

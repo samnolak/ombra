@@ -8,6 +8,8 @@
 #    this machine's (osx-x64 under Rosetta 2: the app picks the native arm64 Bun) is the mismatch fallback: installed.
 # 2. GUI: the window starts, omp reaches its first-run state, the window closes itself, no omp is left running.
 set -euo pipefail
+# The window never takes the focus of the machine's user (src/Ombra.App/Platform/TestFocus.cs).
+export OMBRA_TEST_NO_ACTIVATE=${OMBRA_TEST_NO_ACTIVATE:-1}
 RID=${1:?rid}; DIST=${2:?dist}; WORK=${3:?work}; VERSION=${4:?version}
 NAME="ombra-$VERSION-$RID"
 mkdir -p "$WORK"; WORK=$(cd "$WORK" && pwd)

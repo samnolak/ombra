@@ -27,6 +27,12 @@ public sealed partial class MainWindow
 
     private void WireWindowLayout()
     {
+        if (Platform.TestFocus.NoActivate)
+        {
+            // A harness run never takes the owner's focus, nor covers his windows (Platform/TestFocus.cs)
+            ShowActivated = false;
+            Opened += (_, _) => Platform.TestFocus.SendBehind(this);
+        }
         AddHandler(WindowOpenedEvent, (_, _) => RestoreWindowLayout());
         Opened += (_, _) =>
         {
@@ -68,6 +74,12 @@ public sealed partial class MainWindow
             _wasMaximized = saved.Maximized;
             if (saved.Maximized) WindowState = WindowState.Maximized;
             LogFrame($"restore saved={Describe(saved)} placed={Describe(placement)} screens=[{Describe(screens)}]");
+        }
+        else if (Platform.TestFocus.LeftDisplay(this) is { } left)
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Position = left;
+            LogFrame($"restore: no saved layout, harness run on the left display at {left} screens=[{Describe(screens)}]");
         }
         else LogFrame($"restore: no saved layout (XAML default, centered) screens=[{Describe(screens)}]");
         _layoutRestored = true;

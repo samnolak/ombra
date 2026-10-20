@@ -58,6 +58,9 @@ with open(os.path.join(PROFILE, "user.js"), "w") as f:
         ("browser.aboutwelcome.enabled", False),
         ("zen.tabs.auto-groups.enabled", True),
         ("zen.tabs.auto-groups.threshold", 4),
+        # Never the front app (OMBRA_TEST_NO_ACTIVATE, src/Ombra.App/Platform/TestFocus.cs): Gecko activates the app to
+        # raise a window it focuses unless this is off.
+        *([("mozilla.widget.raise-on-setfocus", False)] if os.environ.get("OMBRA_TEST_NO_ACTIVATE", "1") != "0" else []),
     ]:
         f.write(f"user_pref({name!r}, {str(value).lower() if isinstance(value, bool) else repr(value)});\n".replace("'", '"'))
 
@@ -108,11 +111,25 @@ with open(WINDOW_ID_TOOL + ".swift", "w") as f:
 subprocess.run(["swiftc", "-O", WINDOW_ID_TOOL + ".swift", "-o", WINDOW_ID_TOOL], check=True)
 
 
+def may_shoot():
+    """screencapture needs Screen Recording; without it a run that never takes the focus (OMBRA_TEST_NO_ACTIVATE) does
+    not start it: macOS would ask in a window that takes the focus (src/Ombra.App/Platform/TestFocus.cs)."""
+    if os.environ.get("OMBRA_TEST_NO_ACTIVATE", "1") == "0":
+        return True
+    import ctypes
+    cg = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+    cg.CGPreflightScreenCaptureAccess.restype = ctypes.c_bool
+    return cg.CGPreflightScreenCaptureAccess()
+
+
 def shot(name):
     """Nightly's window (its dialogs and toasts are inside it), even under Ombra's."""
     time.sleep(0.6)
-    number = subprocess.run([WINDOW_ID_TOOL, str(nightly.pid)], capture_output=True, text=True, check=True).stdout.strip()
     path = os.path.join(SHOTS, name + ".png")
+    if not may_shoot():
+        log(f"SHOT {path} skipped: no Screen Recording")
+        return
+    number = subprocess.run([WINDOW_ID_TOOL, str(nightly.pid)], capture_output=True, text=True, check=True).stdout.strip()
     subprocess.run(["/usr/sbin/screencapture", "-x", "-o", "-l", number, path], check=True)
     log(f"SHOT {path}")
 

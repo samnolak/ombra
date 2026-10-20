@@ -66,10 +66,13 @@ internal static partial class NightlyAcceptance
                 if (!white) Shot("p-browser-window-space-second");
             }
             Check("browser-window-space-keys", switched, detail);
+            // A swipe while the last switch still animates is dropped by Zen: the luma changes before the switch ends.
+            await Task.Delay(1000);
 
             Swipe(pane, sidebar, -1);
             var next = await Until(Dark, 5);
             detail = $"left: luma={luma:0}; ";
+            await Task.Delay(1000);
             Swipe(pane, sidebar, 1);
             var back = await Until(White, 5);
             Check("browser-window-space-swipe", next && back, detail + $"right: luma={luma:0}");

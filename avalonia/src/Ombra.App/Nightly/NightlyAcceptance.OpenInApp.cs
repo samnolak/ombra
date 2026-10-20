@@ -125,7 +125,9 @@ internal static partial class NightlyAcceptance
                 && Exec("/usr/bin/plutil", "-replace", "CFBundleIdentifier", "-string", $"app.ombra.acceptance.open-in-app-{Environment.ProcessId}", plist) == 0
                 && Exec("/usr/bin/plutil", "-replace", "CFBundleURLTypes", "-json",
                     $"[{{\"CFBundleURLName\":\"Ombra acceptance\",\"CFBundleURLSchemes\":[\"{scheme}\"]}}]", plist) == 0
-                && Exec("/usr/bin/plutil", "-replace", "LSUIElement", "-bool", "YES", plist) == 0
+                // A run that never activates an app (Platform/TestFocus.cs): LaunchServices activates an agent app it
+                // opens a URL with, never a background-only one.
+                && Exec("/usr/bin/plutil", "-replace", Platform.TestFocus.NoActivate ? "LSBackgroundOnly" : "LSUIElement", "-bool", "YES", plist) == 0
                 && Exec("/usr/bin/codesign", "--force", "--deep", "--sign", "-", app) == 0
                 && Exec(LsRegister, "-f", app) == 0;
             Log($"open-in-app probe {app} scheme={scheme} ok={ok}");

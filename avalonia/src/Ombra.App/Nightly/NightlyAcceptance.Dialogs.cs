@@ -158,6 +158,12 @@ internal static partial class NightlyAcceptance
             detail = "";
             var number = NightlyWindowNumbers(pid).FirstOrDefault();
             if (number == 0) return false;
+            if (!Platform.TestFocus.ScreenCaptureAllowed)
+            {
+                // Another app's window needs Screen Recording; macOS would ask in a window that takes the focus (Shot).
+                detail = "no Screen Recording: not checked";
+                return false;
+            }
             var file = Path.Combine(dir, "dlg-doorhanger-window.png");
             using (var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("/usr/sbin/screencapture",
                        ["-x", "-o", "-l", number.ToString(System.Globalization.CultureInfo.InvariantCulture), file]))!)

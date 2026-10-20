@@ -11,6 +11,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Ombra.App.Controls;
 using Ombra.App.Nightly;
+using Ombra.App.Platform;
 using Ombra.App.Platform.Mac;
 using Ombra.App.ViewModels;
 using Ombra.ClientCore;
@@ -157,9 +158,10 @@ internal static partial class FeatureSmoke
 
         private async Task Startup()
         {
-            // OMBRA_FEATURE_SMOKE_POSITION=x,y puts the window elsewhere (another display) than the top-left of the main one
+            // OMBRA_FEATURE_SMOKE_POSITION=x,y puts the window elsewhere; by default the display left of the main one when
+            // there is one (the owner works on the main one: TestFocus), else the top-left of the main one
             window.Position = Environment.GetEnvironmentVariable("OMBRA_FEATURE_SMOKE_POSITION")?.Split(',') is [var px, var py]
-                && int.TryParse(px, out var x) && int.TryParse(py, out var y) ? new PixelPoint(x, y) : new PixelPoint(40, 40);
+                && int.TryParse(px, out var x) && int.TryParse(py, out var y) ? new PixelPoint(x, y) : TestFocus.Position(window, new PixelPoint(40, 40));
             window.Width = 1360;
             window.Height = 880;
             vm.SettingsTheme = "dark";
@@ -642,12 +644,8 @@ internal static partial class FeatureSmoke
         private nint NsWindow => NightlyCocoa.WindowOf(window.TryGetPlatformHandle()?.Handle ?? 0);
         private static double Uptime() => SendDouble(MacObjC.Send(MacObjC.Cls("NSProcessInfo"), "processInfo"), "systemUptime");
 
-        private unsafe void Activate()
-        {
-            ((delegate* unmanaged<nint, nint, byte, void>)MacObjC.MsgSend)(App, MacObjC.Sel("activateIgnoringOtherApps:"), 1);
-            MacObjC.SendVoid(NsWindow, "makeKeyAndOrderFront:", 0);
-            window.Activate();
-        }
+        /// <summary>The window takes the keyboard without activating the app (<see cref="TestFocus.Activate"/>).</summary>
+        private void Activate() => TestFocus.Activate(window);
 
         private unsafe void Post(nint ev) => ((delegate* unmanaged<nint, nint, nint, byte, void>)MacObjC.MsgSend)(App, MacObjC.Sel("postEvent:atStart:"), ev, 0);
 
@@ -727,10 +725,20 @@ internal static partial class FeatureSmoke
         }
 
         // ── screenshots ──
+        // screencapture needs Screen Recording; without it a harness run never starts it (macOS would ask in a window that
+        // takes the focus: TestFocus.ScreenCaptureAllowed) and the shot is skipped.
+
+        private bool CanShoot(string file)
+        {
+            if (TestFocus.ScreenCaptureAllowed) return true;
+            Log($"SHOT {file} skipped: no Screen Recording");
+            return false;
+        }
 
         private void Shot(string name)
         {
             var file = Path.Combine(dir, name + ".png");
+            if (!CanShoot(file)) return;
             var number = MacObjC.SendLong(NsWindow, "windowNumber");
             using var p = Process.Start(new ProcessStartInfo("/usr/sbin/screencapture", ["-x", "-o", "-l", number.ToString(), file]))!;
             p.WaitForExit();
@@ -741,6 +749,7 @@ internal static partial class FeatureSmoke
         private unsafe void ShotScreenRegion(string name)
         {
             var file = Path.Combine(dir, name + ".png");
+            if (!CanShoot(file)) return;
             var frame = ((delegate* unmanaged<nint, nint, CGRect>)MacObjC.MsgSend)(NsWindow, MacObjC.Sel("frame"));
             var screens = MacObjC.Send(MacObjC.Cls("NSScreen"), "screens");
             var primaryHeight = ((delegate* unmanaged<nint, nint, CGRect>)MacObjC.MsgSend)(MacObjC.Send(screens, "firstObject"), MacObjC.Sel("frame")).Height;
