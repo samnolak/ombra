@@ -201,7 +201,7 @@ Evidence (trx, logs, screenshots): `.temp/RcQa/final-evidence/`.
 ## Nightly release build
 
 macOS arm64 only, unsigned by Apple (no Developer ID, no notarization); `pack-nightly.py` signs the runtime copy ad
-hoc and pins its cdhash.
+hoc and pins its cdhash, and signs the standalone image's copy the same way (step 5).
 
 **Configuration.** The desktop repo's `engine/mozconfig` (from `configs/common/mozconfig` + `configs/macos/mozconfig`)
 is used as is, without `ZEN_RELEASE`: objdir `engine/obj-aarch64-apple-darwin`, `--disable-debug`, `MOZ_OPTIMIZE=1`
@@ -220,17 +220,26 @@ and it sets `--disable-tests`, which would leave the package without the mochite
 3. `MOZ_PKG_DIR=ombra-release ./mach package` (14 s). `MOZ_PKG_DIR` keeps the staging app out of
    `dist/nightly/Nightly.app` (the owner's daily app, never overwritten); output:
    `dist/ombra-release/Nightly.app` and `dist/nightly-<version>.en-US.mac.dmg`, copied to
-   `omp/.temp/ReleaseNightly/`.
+   `omp/.temp/ReleaseNightly/`. That image is input only, never shipped: its app keeps the build's signature, whose
+   seal no longer matches the bundle (`codesign --verify --deep --strict`: "code has no resources but signature
+   indicates they must be present"; with quarantine macOS calls such an app damaged).
 4. Gate, against the packaged binary:
    `./mach mochitest --appname $PWD/obj-aarch64-apple-darwin/dist/ombra-release/Nightly.app/Contents/MacOS/nightly --headless --setpref security.sandbox.content.mac.testing_read_path1=$HOME/Developer/arclike/desktop/ zen/teams/tests zen/gallery/tests zen/tests/tabs`.
    A packaged app also needs the read path (desktop root, not just `src/`): its content processes otherwise cannot
    load the harness's `resource://testing-common` actors and every test times out.
 5. In omp: `python3 runtime/nightly/pack-nightly.py --app <dmg> --stage`, then
-   `python3 runtime/nightly/pack-nightly.py --check`; commit `runtime/nightly/nightly-runtime.json`.
+   `python3 runtime/nightly/pack-nightly.py --check`; commit `runtime/nightly/nightly-runtime.json`. Besides the runtime
+   archive, `pack` writes the standalone image `.temp/nightly-runtime/Nightly-<version>-<build>-macos-arm64.dmg`: a
+   copy of the same build re-signed ad hoc with the hardened runtime and `nightly.entitlements.plist`, keeping
+   `io.github.samnolak.nightly` and its URL handlers, next to an `Applications` link (UDZO).
+   **Image gate** (run by `pack`, and before any upload: `python3 runtime/nightly/pack-nightly.py --check-dmg <image>`):
+   the one `Nightly.app` mounted from the image passes `codesign --verify --deep --strict`, is signed
+   `flags=0x10002(adhoc,runtime)` and has bundle id `io.github.samnolak.nightly`.
 6. Publish the asset the pin's `url` names (`nightly-<version>-<build>` / `nightly-runtime-<version>-<build>.zip`):
    `gh release create nightly-<version>-<build> -R samnolak/nightly-browser --target next --prerelease <omp>/.temp/nightly-runtime/<archive>`;
-   check `curl -sIL <url>` ends `200` with the pin's `size`. Then `rm -rf engine/obj-aarch64-apple-darwin/dist/ombra-release`
-   (`dist/Nightly.app` stays).
+   check `curl -sIL <url>` ends `200` with the pin's `size`. A standalone image is uploaded only as the
+   `Nightly-<version>-<build>-macos-arm64.dmg` from step 5 after the image gate passed, never the `mach package` one.
+   Then `rm -rf engine/obj-aarch64-apple-darwin/dist/ombra-release` (`dist/Nightly.app` stays).
 7. Embed trust with the ad-hoc (self-signed) signatures: a Release Ombra launcher (`package.sh`, signed by
    `sign.sh`, no `OMBRA_NIGHTLY_ALLOW_UNSIGNED`) installs the pinned package from the `url` into a fresh `.temp`
    profile; the Nightly log must show `embedder pid … authenticated (cdhash H"…")` with the launcher's cdhash from
@@ -282,8 +291,10 @@ No Developer ID, so both apps are signed ad hoc with the hardened runtime and ea
   --entitlements runtime/nightly/nightly.entitlements.plist`) and writes `cdhash` into `nightly-runtime.json`; `--check`
   re-verifies the archive's signature and cdhash. Ombra accepts on the embed channel and the team link only a Nightly
   process with that cdhash (`SecCodeCheckValidity` with `cdhash H"…"` on the audit token).
-- **Ombra** — `avalonia/tools/package/sign.sh` (no certificate in the secrets) signs ad hoc with the hardened runtime and
-  records the cdhash in `<package>.signing.txt`. At each launch Ombra writes its own cdhash into the runtime profile's
+- **Ombra** — `avalonia/tools/package/sign.sh` signs with the hardened runtime: with the project's self-signed
+  certificate when `MACOS_SELFSIGN_*` are in the secrets (a throwaway keychain in the search list, no trust setting, no
+  sudo, a hard deadline on every `security`/`codesign` call), else ad hoc; either way it records the cdhash in
+  `<package>.signing.txt`. At each launch Ombra writes its own cdhash into the runtime profile's
   `user.js` (`zen.embed.peer-cdhash`); Nightly (`ZenEmbedHost.mm`, `ZenTeamLink.sys.mjs` / `ZenTeamLinkWorker.js`) accepts
   only that code. A Developer ID requirement (`zen.embed.peer-requirement`) takes precedence when one exists.
 - `OMBRA_NIGHTLY_ALLOW_UNSIGNED=1` / `zen.embed.allow-unsigned-peer` stay development-only; the runs below set neither.
