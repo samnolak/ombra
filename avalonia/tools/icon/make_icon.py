@@ -7,8 +7,8 @@ lifted off it (the tile's glow subtracted, everything away from the swirl droppe
 square; every platform icon starts from that square:
 - macOS 26: packaging/macos/Ombra.icon (Icon Composer: black fill + the swirl as one layer, no glass), compiled by
   Xcode 26's actool into packaging/macos/Assets.car (CFBundleIconName "Ombra"); the system applies its own mask.
-  Without Xcode 26 the existing Assets.car stays; the macOS package job of avalonia-package.yml compiles the
-  checked-in Ombra.icon and uploads the result (artifact ombra-icon-catalog).
+  Without Xcode 26 on macOS 26 the existing Assets.car stays; the "icon" job of avalonia-package.yml compiles the
+  checked-in Ombra.icon on a macOS 26 runner and uploads the result (artifact ombra-icon-catalog).
 - Older macOS: packaging/macos/ombra.icns (CFBundleIconFile), the square inside Apple's app icon shape and grid:
   824/1024 body, continuous corners of radius 185.4 (SwiftUI RoundedRectangle(style: .continuous)). macOS 26 also
   accepts this shape as its own and re-masks it, so even without the catalog it gets no grey plate.
@@ -260,7 +260,7 @@ def main():
     }, indent=2) + "\n")
     if not compile_car(MACOS):
         print("Assets.car NOT rebuilt (needs Xcode 26's actool): take it from the ombra-icon-catalog artifact of an "
-              "avalonia-package.yml run for osx-arm64")
+              "avalonia-package.yml run")
 
 
 if __name__ == "__main__":
