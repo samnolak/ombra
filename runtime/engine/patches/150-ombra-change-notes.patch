@@ -8,7 +8,7 @@ Why: Ombra embeds multiple concurrent sessions and renders native host features.
 Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
 
 diff --git a/CHANGELOG.md b/CHANGELOG.md
-index 8b299b899693383a7e24627e841874cafae0bd9a..32071a53089c8ca08089a37c76f93be087b2d88b 100644
+index 8b299b899693383a7e24627e841874cafae0bd9a..b99702c321876da910a2d5381fea588536999ceb 100644
 --- a/CHANGELOG.md
 +++ b/CHANGELOG.md
 @@ -2,6 +2,43 @@
@@ -44,7 +44,7 @@ index 8b299b899693383a7e24627e841874cafae0bd9a..32071a53089c8ca08089a37c76f93be0
 +### Security
 +
 +- An approval the tool or the user's policy insists on every time (a critical bash command, a bash pattern with `approval: prompt`, an explicit `tools.approval.<tool>: prompt`) offers only the `once` scope, so no host may keep the answer and answer the next such call by itself.
-+- Critical bash commands (`rm -rf /…`, `sudo rm`, `mkfs`, `curl … | sh`, …) ask for approval in `yolo` mode too, so they are refused where nobody can answer; before, yolo ran them unasked.
++- Catastrophic bash commands (recursive removal of `/`, `~`/`$HOME`, system directories or root/home-level globs; `sudo`; `mkfs`; `curl … | sh`; …) ask in `yolo` too. Ordinary project/temp cleanup, including absolute paths under workspace/home subfolders, and `pkill -f` do not prompt solely because of this guardrail. Explicit user `prompt`/`deny` policies still apply; this is not a shell sandbox.
 +- A bash approval names the call's `cwd` (request `cwd`, prompt line `Cwd: …`): a command run in another folder runs that folder's scripts and is no longer shown as if it ran in the session's own.
 +- MCP tools' approvals carry `origin: "mcp"` with the `server` name and the call's arguments (bounded JSON); before, MCP tools with their declared `write` tier showed neither.
 +- Session takeover requests are bound to the claim they ask for and expire after the requester's 30 s wait: a request a requester left behind is dropped instead of closing a later holder's chat mid-reply, and one requester never withdraws another's request. `session_lease_lost` says (`interrupted`) when a running reply was stopped.

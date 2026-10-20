@@ -1,7 +1,7 @@
 import { afterAll, afterEach, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 // The real engine host (host.ts --mode engine) with a local OpenAI-compatible model that calls `bash`: the tool
@@ -104,13 +104,29 @@ function modelServer() {
 	return { url: `http://127.0.0.1:${server.port}/v1`, toolResults, stop: () => server.stop(true) };
 }
 
-async function fixture() {
+async function fixture(approvalMode: "write" | "yolo" = "write") {
 	await mkdir(runRoot, { recursive: true });
 	const root = await mkdtemp(join(runRoot, "case-"));
 	const agentDir = join(root, "agent");
 	const project = join(root, "project");
 	await mkdir(agentDir, { recursive: true });
 	await mkdir(project, { recursive: true });
+	const cleanupDirectory = join(root, "cleanup");
+	const homeSentinel = join(root, "home-sentinel");
+	await mkdir(cleanupDirectory);
+	await writeFile(join(cleanupDirectory, "temporary-file"), "delete me");
+	await writeFile(homeSentinel, "keep me");
+	const bin = join(root, "bin");
+	await mkdir(bin);
+	// Even a broken approval gate must never execute home deletion. Only the disposable cleanup
+	// directory may reach real rm; the protected command still goes through the real RPC/tool gate.
+	await writeFile(join(bin, "rm"), `#!/bin/sh
+if [ "$#" -eq 2 ] && [ "$1" = "-rf" ] && [ "$2" = ${JSON.stringify(cleanupDirectory)} ]; then
+	exec /bin/rm "$@"
+fi
+echo "Test guard refused deletion outside the disposable cleanup directory" >&2
+exit 97
+`, { mode: 0o755 });
 	const model = modelServer();
 	cleanups.push(model.stop);
 	const provider = join(root, "provider.ts");
@@ -119,7 +135,7 @@ async function fixture() {
 		models: [{ id: "m", name: "m", reasoning: false, input: ["text"],
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32768, maxTokens: 1024 }],
 	});`);
-	const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: root, PI_CODING_AGENT_DIR: agentDir, PI_PROFILE: "", OMP_PROFILE: "",
+	const env: NodeJS.ProcessEnv = { PATH: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: root, PI_CODING_AGENT_DIR: agentDir, PI_PROFILE: "", OMP_PROFILE: "",
 		XDG_CONFIG_HOME: join(root, "config"), XDG_STATE_HOME: join(root, "state"), XDG_DATA_HOME: join(root, "data"), XDG_CACHE_HOME: join(root, "cache"),
 		PI_TEST_SESSION_OWNERS_DIR: join(root, "owners"), PI_NOTIFICATIONS: "off" };
 	const host = new Host(env, project);
@@ -128,10 +144,10 @@ async function fixture() {
 	expect(await host.request("negotiate_protocol", { protocolVersion: 2 })).toMatchObject({ success: true });
 	const key = "chat";
 	expect(await host.request("engine_open", { sessionKey: key, cwd: project, arguments: [
-		"--extension", provider, "--no-extensions", "--model", "approval-probe/m", "--approval-mode", "write", "--tools", "bash",
+		"--extension", provider, "--no-extensions", "--model", "approval-probe/m", "--approval-mode", approvalMode, "--tools", "bash",
 		"--no-lsp", "--no-skills", "--no-rules", "--no-prewalk",
 	] })).toMatchObject({ success: true });
-	return { host, key, model };
+	return { host, key, model, cleanupDirectory, homeSentinel };
 }
 
 const isApproval = (frame: Frame) => frame.type === "extension_ui_request" && frame.method === "select" && frame.approval !== undefined;
@@ -179,7 +195,7 @@ test("Approve runs the call; a plain Deny without reason stays a plain denial", 
 // ReviewLease P1/P2: what the engine insists a person answers offers only "once", and bash's cwd is in the request.
 test("a critical command offers only once; a command in another folder names that folder", async () => {
 	const { host, key, model } = await fixture();
-	expect(await host.command(key, "prompt", { message: "RUN rm -rf /ombra-approval-probe-never-runs" })).toMatchObject({ success: true });
+	expect(await host.command(key, "prompt", { message: "RUN rm -rf ~" })).toMatchObject({ success: true });
 	const critical = await host.waitSession(key, isApproval, "critical approval");
 	expect(critical.approval).toMatchObject({ tool: "bash", reason: "Critical pattern detected", scopes: ["once"] });
 	host.sendSession(key, { type: "extension_ui_response", id: critical.id, value: "Deny" });
@@ -193,4 +209,29 @@ test("a critical command offers only once; a command in another folder names tha
 	expect(elsewhere.title).toContain("\nCwd: ../elsewhere");
 	host.sendSession(key, { type: "extension_ui_response", id: elsewhere.id, value: "Deny" });
 	await host.waitSession(key, frame => frame.type === "prompt_result", "cwd prompt result", mark);
+}, 90_000);
+
+test("yolo runs absolute temporary cleanup without approval but still asks before home deletion", async () => {
+	const { host, key, model, cleanupDirectory, homeSentinel } = await fixture("yolo");
+	const cleanupCommand = `rm -rf ${JSON.stringify(cleanupDirectory)}`;
+	expect(await host.command(key, "prompt", { message: `RUN ${cleanupCommand}` })).toMatchObject({ success: true });
+	const cleanupResult = await host.waitSession(key, frame => isApproval(frame) || frame.type === "prompt_result", "unprompted cleanup result");
+	expect(cleanupResult.type).toBe("prompt_result");
+	expect(host.frames.some(frame => frame.type === "engine_session_frame" && frame.sessionKey === key && isApproval(frame.frame))).toBe(false);
+	expect(model.toolResults).toHaveLength(1);
+	await expect(stat(cleanupDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+
+	const mark = host.frames.length;
+	expect(await host.command(key, "prompt", { message: "RUN rm -rf ~" })).toMatchObject({ success: true });
+	const critical = await host.waitSession(key, frame => isApproval(frame) || frame.type === "prompt_result", "protected home approval", mark);
+	expect(isApproval(critical)).toBe(true);
+	expect(critical.approval).toMatchObject({
+		tool: "bash", command: "rm -rf ~", reason: "Critical pattern detected", scopes: ["once"],
+	});
+	expect(model.toolResults).toHaveLength(1);
+	host.sendSession(key, { type: "extension_ui_response", id: critical.id, value: "Deny" });
+	await host.waitSession(key, frame => frame.type === "prompt_result", "denied home deletion result", mark);
+	expect(model.toolResults).toHaveLength(2);
+	expect(model.toolResults[1]).toContain("Tool call denied by user: bash");
+	expect(await readFile(homeSentinel, "utf8")).toBe("keep me");
 }, 90_000);

@@ -25,8 +25,8 @@
       "attestation": "https://registry.npmjs.org/-/npm/v1/attestations/@oh-my-pi%2fpi-coding-agent@18.12.2",
       "verification": "npm tarball integrity verified; SLSA payload decoded, signatures not independently verified"
     },
-    "sha256": "53898ffbc843256ef52b42ee8e250e8b5d3589651586388822a7c4fcbcc317e9",
-    "bytes": 23747554,
+    "sha256": "98b93c41786c78def47caa0bfdfa1a3a3b89fc30a846b82c50d8f68cb6b103ed",
+    "bytes": 23749937,
     "files": [
       {
         "path": "approval-lease.test.ts",
@@ -45,8 +45,8 @@
       },
       {
         "path": "coding-agent/CHANGELOG.md",
-        "size": 266148,
-        "sha256": "c0a279cf8c2dc6298a5d11ad61eb1de16c5f007cb07b251b07743cba8da714c8"
+        "size": 266357,
+        "sha256": "16389b687888d1a8a0239e9ed108417c4e2f7907e4bdb15fa513c1b3d5789f9d"
       },
       {
         "path": "coding-agent/LICENSE",
@@ -7300,8 +7300,8 @@
       },
       {
         "path": "coding-agent/src/tools/bash.ts",
-        "size": 66376,
-        "sha256": "d0a0579fb8706eb3da1e97b96983c9be054ad80b984cb997ed8f7032fb68cfca"
+        "size": 67550,
+        "sha256": "f993c89cfe6b85efa05239075a78b955a4ee2cebf1fb654c77620c167821747a"
       },
       {
         "path": "coding-agent/src/tools/browser.ts",
@@ -9225,8 +9225,8 @@
       },
       {
         "path": "yolo-critical-approval.test.ts",
-        "size": 2496,
-        "sha256": "b23b2d1043d2cda5be08a4d3fe1ff585c18534d8388440230194a57dbd0296c4"
+        "size": 3496,
+        "sha256": "526502654aa3eb8841131c42fb3ff73895d381a576df3d2dede0962511780b1e"
       }
     ]
   },
