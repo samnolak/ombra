@@ -22,6 +22,14 @@ internal static partial class NightlyAcceptance
         /// </summary>
         private async Task DragDropChecks(NightlyPane pane)
         {
+            var maxWindows = 0;
+            var samples = 0;
+            using var monitor = Avalonia.Threading.DispatcherTimer.Run(() =>
+            {
+                maxWindows = Math.Max(maxWindows, NightlyWindowRects(pane.RuntimePid).Count);
+                samples++;
+                return true;
+            }, TimeSpan.FromMilliseconds(40));
             var page = Path.Combine(dir, "dnd.html");
             var file = Path.Combine(dir, "dnd-file.txt");
             await File.WriteAllTextAsync(page, DragDropPage);
@@ -74,6 +82,8 @@ internal static partial class NightlyAcceptance
             await DropFile(At(W * 0.85, H * 0.85), file);
             Check("browser-window-drag-files", await Until(() => Body(0, 30), 5), $"body luma={luma:0} (black: the page got dnd-file.txt)");
             Shot("p-browser-window-drag-files");
+            Check("browser-window-drag-no-native-windows", maxWindows == 0 && NightlyWindowRects(pane.RuntimePid).Count == 0,
+                $"CGWindowList on-screen Nightly windows: max={maxWindows}, samples={samples}, after={NightlyWindowRects(pane.RuntimePid).Count}");
             KeyPress("w", 0x0D, 1UL << 20);
             await Task.Delay(500);
         }

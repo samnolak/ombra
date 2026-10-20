@@ -30,8 +30,8 @@ internal static class NightlyProtocol
     public const int Dialog = 120, DialogClosed = 121, Download = 122;
     // Drags (protocol 4): Ombra → Nightly 44–45, Nightly → Ombra 123–124 (desktop ZenEmbedHost.mm, "Drags").
     public const int DragTarget = 44, DragSource = 45, DragStarted = 123, DragStatus = 124;
-    /// <summary>Bytes of a DialogReply's JSON (kMaxText).</summary>
-    public const int MaxReply = MaxText;
+    /// <summary>Bytes of a DialogReply's JSON, including archived native printer settings (kMaxDialogReply).</summary>
+    public const int MaxReply = 1 << 20;
     /// <summary>UTF-16 units of text a Text or MarkedText message carries.</summary>
     public const int MaxInputText = 64;
 

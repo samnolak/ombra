@@ -485,12 +485,13 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         var runtime = _runtime;
         var window = _windowId;
         if (runtime is null || window == 0) return;
-        // The Browser page's window keeps Nightly's own dialogs; only the system's open and save panels are Ombra's (a
-        // sheet on its window, NightlyFilePanel), then the keyboard goes back to the page as it would in Nightly.
+        // Native file and print panels are sheets on Ombra, never on Nightly's hidden window.
         var panel = IsBrowserWindow ? NightlyFilePanel.Parse(json) : null;
         var storage = panel is null ? null : TopLevel.GetTopLevel(this)?.StorageProvider;
         if (storage is null) panel = null;
-        if (panel is null && Page is null || _closed)
+        var print = OperatingSystem.IsMacOS() ? NightlyPrintPanel.Parse(json) : null;
+        var nativeWindow = print is null ? 0 : NightlyCocoa.WindowOf(TopLevel.GetTopLevel(this)?.TryGetPlatformHandle()?.Handle ?? 0);
+        if (panel is null && print is null && Page is null || _closed)
         {
             await runtime.ReplyDialogAsync(window, dialogId, "{}");
             return;
@@ -500,9 +501,11 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         string answer;
         try
         {
-            answer = panel is not null
-                ? await NightlyFilePanel.ShowAsync(storage!, panel)
-                : await NightlyDialogs.AnswerAsync(Page!, dialogId, json, _pageUrl, d => runtime.TrackDownload(window, d), cts.Token);
+            answer = print is not null && OperatingSystem.IsMacOS()
+                ? await NightlyPrintPanel.ShowAsync(nativeWindow, print, cts.Token)
+                : panel is not null
+                    ? await NightlyFilePanel.ShowAsync(storage!, panel)
+                    : await NightlyDialogs.AnswerAsync(Page!, dialogId, json, _pageUrl, d => runtime.TrackDownload(window, d), cts.Token);
         }
         catch (Exception e)
         {
@@ -515,7 +518,7 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         }
         // Withdrawn meanwhile (its window gone or Nightly closed it): Nightly no longer waits.
         if (!cts.IsCancellationRequested && _windowId == window) await runtime.ReplyDialogAsync(window, dialogId, answer);
-        if (panel is not null && IsEffectivelyVisible) FocusPage();
+        if ((panel is not null || print is not null) && IsEffectivelyVisible) FocusPage();
     }
 
     void INightlyView.OnDialogClosed(uint dialogId)
