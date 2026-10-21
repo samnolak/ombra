@@ -1760,6 +1760,16 @@ await foreach (var cmd in session.Commands.ReadAllAsync(session.Stopping))
                 Respond(id, type, new { inputDisposition = "local", agentInvoked = false });
                 break;
             }
+            // omp queues a prompt sent with streamingBehavior while it works, as a steer or a follow-up (a skill does)
+            if (streaming && cmd?["streamingBehavior"]?.GetValue<string>() is { } behavior)
+            {
+                queue.Enqueue((slash, behavior == "steer", cmd?["images"]?.DeepClone() as JsonArray));
+                lastQueuedAt = DateTime.UtcNow;
+                Interlocked.Increment(ref queuedCount);
+                EmitQueueUpdate();
+                Respond(id, type, new { inputDisposition = "admitted", agentInvoked = true });
+                break;
+            }
             if (streaming) { Respond(id, type, error: "Agent is busy"); break; }
             // Like omp: the run exists as soon as the prompt is accepted (abort then waits for it).
             streaming = true;

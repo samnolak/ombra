@@ -112,7 +112,9 @@ public sealed partial class SessionController
     {
         try
         {
-            var disposition = await conn.FollowUpAsync(input.Text, Wire(input.Images)).ConfigureAwait(false);
+            var disposition = SkillTokens.HasInvocation(input.Text)
+                ? await conn.QueuePromptAsync(input.Text, Wire(input.Images), steer: false).ConfigureAwait(false)
+                : await conn.FollowUpAsync(input.Text, Wire(input.Images)).ConfigureAwait(false);
             return ApplyQueuedInputDisposition(input, disposition, pendingRun: true);
         }
         catch (Exception e) when (e is RpcCommandException or TimeoutException or RpcConnectionClosedException or ArgumentException)

@@ -56,6 +56,8 @@ public sealed partial class MainViewModel
     partial void OnComposerCaretIndexChanged(int value)
     {
         if (_mention is not null) CheckMention(canStart: false);
+        // A skill typed after other text: the menu follows the word at the caret (the text changes before the caret moves)
+        else if (_skillToken is not null || FindSkillToken(ComposerText, value) is not null) UpdateSlashSuggestions();
     }
 
     /// <summary>The text changed before the caret moved: look once both have.</summary>

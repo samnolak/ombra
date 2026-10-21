@@ -253,7 +253,11 @@ project yet), so the OS warns on first start:
   **+** opens *Attach images* (up to 3 per message; paste or drag & drop works too, other files are inserted as
   paths), *Commands and skills*, *MCP servers*, *Plugins* and *Comment on the page*. Type `/` for commands: ↑/↓ or
   Tab/Shift+Tab choose, Tab or Enter completes, Esc closes; what only omp's terminal runs is listed last, under
-  *Terminal only*. Type `@` anywhere in a message for a file or folder of the project: the menu lists the project's
+  *Terminal only*. A skill can also go after text and with images: type `/` after a space anywhere in the message (the
+  menu lists skills only — other commands work only at the start), or pick **+ → Commands and skills** with something
+  already written, which adds ` /` at the end. omp runs one skill per message: further skills are sent as
+  `skill://name` references the model reads. A skill sent while omp works queues like a follow-up and still runs as a
+  skill. Type `@` anywhere in a message for a file or folder of the project: the menu lists the project's
   top level, then narrows as you type a name (letters in order work, as in **Go to file**; what `.gitignore` excludes
   is left out); ↑/↓ choose, Tab or Enter puts `@path` in place of what you typed — as the Files pane's **@** button
   writes it, so omp reads the file with your message. A folder ends in `/` and lists what is in it next. Esc closes

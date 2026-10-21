@@ -101,10 +101,57 @@ public sealed partial class MainViewModel
         UpdateSlashSuggestions();
     }
 
+    /// <summary>A <c>/word</c> typed after other text, ending at the caret: only a skill can go there (omp runs a
+    /// <c>/skill:</c> token anywhere in a message, other commands only at its start). Start, end of the word, query.</summary>
+    internal sealed record SkillToken(int Start, int End, string Query);
+
+    private SkillToken? _skillToken;
+
+    internal static SkillToken? FindSkillToken(string text, int caret)
+    {
+        if (caret < 2 || caret > text.Length || !SkillTokensAllowed(text)) return null;
+        var at = caret - 1;
+        while (text[at] != '/')
+        {
+            if (char.IsWhiteSpace(text[at]) || --at < 0) return null;
+        }
+        // A word of its own after other text (at the message's start the slash menu lists every command)
+        if (at == 0 || !char.IsWhiteSpace(text[at - 1]) || string.IsNullOrWhiteSpace(text[..at])) return null;
+        var end = caret;
+        while (end < text.Length && !char.IsWhiteSpace(text[end])) end++;
+        return new SkillToken(at, end, text[(at + 1)..caret]);
+    }
+
+    // omp reads /skill: tokens in a message unless it is another slash command or a !/$ shell line (SkillTokens)
+    private static bool SkillTokensAllowed(string text)
+    {
+        var t = text.TrimStart();
+        return t.StartsWith("/skill:", StringComparison.Ordinal) || !(t.StartsWith('/') || t.StartsWith('!') || t.StartsWith('$'));
+    }
+
     private void UpdateSlashSuggestions()
     {
         var text = ComposerText;
         var list = new List<CommandSuggestionViewModel>();
+        _skillToken = text.StartsWith('/') && !text.Contains('\n') && !text.Contains(' ') ? null : FindSkillToken(text, ComposerCaretIndex);
+        if (_skillToken is { } skill)
+        {
+            // Mid-message: the skills whose name (with or without "skill:") starts with what was typed
+            var typed = skill.Query.StartsWith("skill:", StringComparison.OrdinalIgnoreCase) ? skill.Query[6..] : skill.Query;
+            list.AddRange(SlashMenuCommands()
+                .Where(c => c.Source == "skill" && c.Name.StartsWith("skill:", StringComparison.Ordinal)
+                    && c.Name[6..].StartsWith(typed, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(c => c.Name, StringComparer.Ordinal)
+                .Select(c => new CommandSuggestionViewModel("/" + c.Name + " ", "/" + c.Name, c.Description, c.Hint, c.Source)));
+            if (list.Count == 1 && list[0].Label == "/" + skill.Query) list.Clear(); // typed out in full
+            CommandSuggestions.Clear();
+            foreach (var s in list) CommandSuggestions.Add(s);
+            _selectedSuggestion = 0;
+            if (list.Count > 0) list[0].IsSelected = true;
+            ShowNoCommandMatch = false; // a path ("see /tmp") is no command typed wrong
+            IsCommandMenuOpen = list.Count > 0;
+            return;
+        }
         if (text.StartsWith('/') && !text.Contains('\n'))
         {
             var space = text.IndexOf(' ');
@@ -200,6 +247,17 @@ public sealed partial class MainViewModel
             InsertMention(s);
             return;
         }
+        if (_skillToken is { } token && token.End <= ComposerText.Length)
+        {
+            // A skill after other text: in place of the word typed, the rest of the message kept
+            var text = ComposerText;
+            var rest = text[token.End..].TrimStart(' ');
+            ComposerText = text[..token.Start] + s.Insert + rest;
+            ComposerCaretIndex = token.Start + s.Insert.Length;
+            _skillToken = null;
+            IsCommandMenuOpen = false;
+            return;
+        }
         ComposerText = s.Insert;
         UpdateCommandSuggestions(); // offers subcommands next, if any
         CaretToEndRequested?.Invoke();
@@ -247,7 +305,8 @@ public sealed partial class MainViewModel
     /// <summary>Asks the view to put the keyboard in the message box (after a menu choice).</summary>
     public event Action? FocusComposerRequested;
 
-    /// <summary>"+" → Commands: a "/" in an empty message box opens omp's command list.</summary>
+    /// <summary>"+" → Commands and skills: a "/" in an empty message box opens omp's command list; after what is
+    /// written (an image, text) a " /" at the end lists the skills that can go with it.</summary>
     [RelayCommand]
     private void StartSlashCommand()
     {
@@ -255,6 +314,13 @@ public sealed partial class MainViewModel
         {
             ComposerText = "/";
             ComposerCaretIndex = 1;
+        }
+        else if (SkillTokensAllowed(ComposerText))
+        {
+            var text = ComposerText.TrimEnd(' ');
+            ComposerText = text + (text.EndsWith('\n') ? "/" : " /");
+            ComposerCaretIndex = ComposerText.Length;
+            UpdateSlashSuggestions(); // the caret is where the "/" is already: no wait for the view
         }
         FocusComposerRequested?.Invoke();
     }
