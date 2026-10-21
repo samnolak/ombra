@@ -376,6 +376,7 @@
     "Close image viewer": "Закрыть просмотр изображений",
     "Close keyboard shortcuts": "Закрыть сочетания клавиш",
     "Close tab": "Закрыть вкладку",
+    "{0} · {1} tabs": "{0} · вкладок: {1}",
     "Close terminal": "Закрыть терминал",
     "Close the file": "Закрыть файл",
     "Close the focused pane": "Закрыть панель с фокусом",

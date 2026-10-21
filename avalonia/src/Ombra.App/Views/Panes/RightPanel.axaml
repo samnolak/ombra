@@ -24,8 +24,9 @@
           <ScrollViewer x:Name="PanelTabScroller" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
             <ItemsControl x:Name="PanelTabItems" ItemsSource="{Binding PanelTabs}">
               <ItemsControl.Styles>
+                <!-- A page in a site group shows only as the group's chip, in its first page's place (TabSiteGroup) -->
                 <Style Selector="ContentPresenter" x:DataType="vm:PanelTab">
-                  <Setter Property="IsVisible" Value="{Binding ShowsInStrip}" />
+                  <Setter Property="IsVisible" Value="{Binding HasStripItem}" />
                 </Style>
               </ItemsControl.Styles>
               <ItemsControl.ItemsPanel>
@@ -35,7 +36,18 @@
               </ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
                 <DataTemplate x:DataType="vm:PanelTab">
-                  <Border Classes="panel-tab" Classes.active="{Binding IsActive}" ctl:TabMenus.Enabled="True">
+                  <Panel>
+                    <ctl:TabGroupChip x:Name="SiteGroupChip" Group="{Binding SiteGroup}" IsVisible="{Binding IsGroupHead}"
+                                      SelectCommand="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).SelectPageCommand}"
+                                      CloseCommand="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).ClosePageCommand}">
+                      <ctl:TabGroupChip.IsActive>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                          <Binding Path="$parent[ItemsControl].((vm:MainViewModel)DataContext).IsPreviewOpen" />
+                          <Binding Path="SiteGroup.ContainsActive" FallbackValue="False" />
+                        </MultiBinding>
+                      </ctl:TabGroupChip.IsActive>
+                    </ctl:TabGroupChip>
+                  <Border Classes="panel-tab" Classes.active="{Binding IsActive}" ctl:TabMenus.Enabled="True" IsVisible="{Binding ShowsAsTab}">
                     <DockPanel>
                       <Button DockPanel.Dock="Right" Classes="icon panel-tab-close" Width="20" Height="20" Margin="0,0,4,0"
                               Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).ClosePanelTabCommand}" CommandParameter="{Binding}"
@@ -57,6 +69,7 @@
                       </Button>
                     </DockPanel>
                   </Border>
+                  </Panel>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>

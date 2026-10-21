@@ -141,6 +141,14 @@ public partial class MainViewModel
         if (!HasTabFor(ActivePane)) ShowNeighbour(at);
     }
 
+    /// <summary>A page picked in a site group's list (TabGroupChip): as its tab clicked.</summary>
+    [RelayCommand]
+    private void SelectPage(PreviewTab? page) => SelectPanelTab(PanelTabs.FirstOrDefault(t => t.Page == page));
+
+    /// <summary>A page's × in a site group's list: as its tab's ×.</summary>
+    [RelayCommand]
+    private void ClosePage(PreviewTab? page) => ClosePanelTab(PanelTabs.FirstOrDefault(t => t.Page == page));
+
     /// <summary>
     /// A tool on the new-tab page: it takes the page's place in the strip. The browser, already in the panel, opens a
     /// new page of its own.

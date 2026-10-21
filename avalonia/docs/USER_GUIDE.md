@@ -380,6 +380,10 @@ project yet), so the OS warns on first start:
   Browser tabs have the same close actions plus **Copy page URL** and **Reload**. The Browser rail has its own tab
   strip; Ctrl+Tab / Ctrl+Shift+Tab cycle its tabs, not chat history. Ctrl/⌘+L focuses the address, +T opens a tab,
   +R reloads, +[ / +] move through page history, and +Shift+C copies the address.
+  Four or more pages of one site (localhost: of one port) show in both strips as one chip — the site or the pages'
+  shared title, how many, a chevron; click it for a list under it to switch to or close a page. The chip stays at
+  three pages and turns back into tabs at two. A page omp has finished with leaves the strip once you look at
+  another tab (open an address in it to keep it).
   Normal window bounds/maximized state and panel sizes/visibility survive a normal close and are clamped to the
   available screen on reopening. A restored terminal panel does not start a shell by itself.
 - **Project menu** — click the project's name next to the session title: **Browse files** (the Files pane),

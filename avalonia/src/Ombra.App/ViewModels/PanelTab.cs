@@ -40,6 +40,17 @@ public sealed partial class PanelTab : ObservableObject, IDisposable
     /// <summary>The strip lists it: always for a tool; a page as the browser's own strip did (an empty, unshown tab is not).</summary>
     public bool ShowsInStrip => Page?.ShowsInStrip ?? true;
 
+    /// <summary>The strip shows it as a tab: a tool, or a page in no site group.</summary>
+    public bool ShowsAsTab => Page?.ShowsAsTab ?? true;
+
+    /// <summary>The page's site group, whose chip the strip shows in place of its first page (<see cref="TabSiteGroup"/>).</summary>
+    public TabSiteGroup? SiteGroup => Page?.SiteGroup;
+
+    public bool IsGroupHead => Page?.IsGroupHead == true;
+
+    /// <summary>The strip has something in this tab's place: the tab, or its group's chip.</summary>
+    public bool HasStripItem => ShowsAsTab || IsGroupHead;
+
     public bool IsLoading => Page?.IsLoading == true;
 
     public bool IsPopup => Page?.IsPopup == true;
@@ -56,8 +67,19 @@ public sealed partial class PanelTab : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(ToolTip));
                 OnPropertyChanged(nameof(ShowsInStrip));
                 break;
-            case nameof(PreviewTab.ShowsInStrip) or nameof(PreviewTab.IsActive):
+            case nameof(PreviewTab.ShowsInStrip) or nameof(PreviewTab.IsActive) or nameof(PreviewTab.ShowsAsTab):
                 OnPropertyChanged(nameof(ShowsInStrip));
+                OnPropertyChanged(nameof(ShowsAsTab));
+                OnPropertyChanged(nameof(HasStripItem));
+                break;
+            case nameof(PreviewTab.SiteGroup):
+                OnPropertyChanged(nameof(SiteGroup));
+                OnPropertyChanged(nameof(ShowsAsTab));
+                OnPropertyChanged(nameof(HasStripItem));
+                break;
+            case nameof(PreviewTab.IsGroupHead):
+                OnPropertyChanged(nameof(IsGroupHead));
+                OnPropertyChanged(nameof(HasStripItem));
                 break;
             case nameof(PreviewTab.IsLoading):
                 OnPropertyChanged(nameof(IsLoading));
