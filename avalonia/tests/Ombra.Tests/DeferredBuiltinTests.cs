@@ -92,7 +92,7 @@ public sealed class DeferredBuiltinTests
         Assert.Equal([QueueKind.FollowUp, QueueKind.BuiltinCommand, QueueKind.DeferredFollowUp,
             QueueKind.DeferredFollowUp, QueueKind.DeferredFollowUp, QueueKind.BuiltinCommand],
             vm.QueuedMessages.Select(q => q.Model.Kind));
-        Assert.Empty(Sent(log));
+        Assert.Equal([before], Sent(log)); // a skill goes as a prompt (omp runs /skill: only there), queued by streamingBehavior
         Assert.Equal(1, (await session.Connection!.GetStateAsync()).QueuedMessageCount);
         Assert.Null(session.Snapshot().SessionName);
         Assert.DoesNotContain(session.Snapshot().Items.OfType<UserItem>(), u => u.Text == Rename);
@@ -103,10 +103,10 @@ public sealed class DeferredBuiltinTests
                  && s.Items.OfType<CommandOutputItem>().Any(), Wait, "deferred builtins executed at idle");
         vm.Apply(done);
         vm.Apply(session.Snapshot());
-        Assert.Equal([Rename, "/stats"], Sent(log));
+        Assert.Equal([before, Rename, after, "/stats"], Sent(log));
         Assert.Equal(["LONG", before, Rename, after, "continue after rename", ordinary, "/stats"],
             done.Items.OfType<UserItem>().Select(u => u.Text));
-        Assert.Equal(["prompt LONG", "follow_up " + before, "prompt " + Rename, "follow_up " + after,
+        Assert.Equal(["prompt LONG", "prompt " + before, "prompt " + Rename, "prompt " + after,
             "follow_up continue after rename", "follow_up " + ordinary, "prompt /stats"],
             File.ReadAllLines(Path.Combine(Path.GetDirectoryName(log)!, "inputs.log")));
         Assert.Equal("new edit must stay", vm.ComposerText);

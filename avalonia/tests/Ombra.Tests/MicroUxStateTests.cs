@@ -223,7 +223,8 @@ public sealed class MicroUxStateTests
             var line = window.FindControl<TextBlock>("StartupProgressText")!;
             Assert.True(window.FindControl<StackPanel>("StartupProgress")!.IsVisible);
             Assert.Equal(Loc.F("Starting omp… {0}s", 0), line.Text);
-            await SessionAreaTests.Until(() => line.Text == Loc.F("Starting omp… {0}s", 1), "the startup line counts seconds");
+            // Counts on by itself: any later second (a loaded machine may pass one between two looks)
+            await SessionAreaTests.Until(() => Enumerable.Range(1, 30).Any(n => line.Text == Loc.F("Starting omp… {0}s", n)), "the startup line counts seconds");
 
             await vm.OpenModelMenuCommand.ExecuteAsync(null);
             Assert.True(vm.IsModelMenuOpen);

@@ -172,6 +172,14 @@ public static class OmpCommands
     public static async Task<OmpInputAcknowledgement> FollowUpAsync(this RpcConnection c, string message, IReadOnlyList<(string MimeType, byte[] Data)> images, CancellationToken ct = default) =>
         InputAcknowledgement(Ok(await c.RequestAsync("follow_up", w => { w.WriteString("message", message); WriteImages(w, images); }, ct: ct).ConfigureAwait(false)));
 
+    /// <summary>
+    /// A message for a run under way sent as a <c>prompt</c> with <c>streamingBehavior</c> (<c>steer</c> or
+    /// <c>followUp</c>), queued like <see cref="SteerAsync"/> / <see cref="FollowUpAsync"/>: omp expands a
+    /// <c>/skill:</c> invocation only on <c>prompt</c>, and passes a steer or follow-up's text on as it is.
+    /// </summary>
+    public static async Task<OmpInputAcknowledgement> QueuePromptAsync(this RpcConnection c, string message, IReadOnlyList<(string MimeType, byte[] Data)> images, bool steer, CancellationToken ct = default) =>
+        InputAcknowledgement(await c.PromptAsync(message, images, steer ? "steer" : "followUp", ct).ConfigureAwait(false));
+
     public static OmpInputAcknowledgement InputAcknowledgement(RpcResponse response)
     {
         if (response.Data is { ValueKind: JsonValueKind.Object } data

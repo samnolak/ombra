@@ -784,6 +784,7 @@ public sealed partial class SessionController : IAsyncDisposable
     public async Task<bool> PromptAsync(string text, IReadOnlyList<ImageAttachment> images, CancellationToken ct = default, string? submissionId = null)
     {
         var conn = RequireConnection();
+        text = SkillTokens.ForOmp(text); // one skill runs per message: the others go as skill:// references
         if (RefuseWhileSigningIn()) return false;
         long ticket = 0, key = 0;
         Mutate(s =>
@@ -965,6 +966,7 @@ public sealed partial class SessionController : IAsyncDisposable
     public async Task<bool> QueueAsync(QueueKind kind, string text, IReadOnlyList<ImageAttachment> images, CancellationToken ct = default, string? submissionId = null)
     {
         var conn = RequireConnection();
+        text = SkillTokens.ForOmp(text);
         ValidateMessage(text, images);
         ct.ThrowIfCancellationRequested();
         QueuedMessage? queued = null;
@@ -991,9 +993,11 @@ public sealed partial class SessionController : IAsyncDisposable
                     s.RecoverQueued(queued.Seq);
             });
             if (queued!.Deferred) return true;
-            var disposition = kind == QueueKind.Steer
-                ? await conn.SteerAsync(text, Wire(images), ct).ConfigureAwait(false)
-                : await conn.FollowUpAsync(text, Wire(images), ct).ConfigureAwait(false);
+            var disposition = SkillTokens.HasInvocation(text)
+                ? await conn.QueuePromptAsync(text, Wire(images), steer: kind == QueueKind.Steer, ct).ConfigureAwait(false)
+                : kind == QueueKind.Steer
+                    ? await conn.SteerAsync(text, Wire(images), ct).ConfigureAwait(false)
+                    : await conn.FollowUpAsync(text, Wire(images), ct).ConfigureAwait(false);
             return ApplyQueuedInputDisposition(queued, disposition, pendingRun: false);
         }
         catch (Exception e) when (e is RpcCommandException or TimeoutException or RpcConnectionClosedException or ArgumentException or IOException or UnauthorizedAccessException or OperationCanceledException)
