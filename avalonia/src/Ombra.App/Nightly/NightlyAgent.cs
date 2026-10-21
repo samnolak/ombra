@@ -31,7 +31,7 @@ namespace Ombra.App.Nightly;
 /// Any thread.
 /// </remarks>
 [SupportedOSPlatform("macos")]
-internal sealed class NightlyAgent(NightlyAgent.ITarget target, NightlyFrames frames) : IIsolatedScripts, INativeInput
+internal sealed class NightlyAgent(NightlyAgent.ITarget target, NightlyFrames frames) : IIsolatedScripts, INativeInput, IAgentSpeculation
 {
     /// <summary>The pane the agent drives (read from any thread).</summary>
     public interface ITarget
@@ -41,6 +41,14 @@ internal sealed class NightlyAgent(NightlyAgent.ITarget target, NightlyFrames fr
         uint WindowId { get; }
         /// <summary><see cref="Environment.TickCount64"/> of the user's last input to the pane; 0 for none.</summary>
         long LastUserInput { get; }
+        /// <summary>The agent acts on the pane until the result is disposed: its page counts as seen meanwhile and for
+        /// <see cref="Controls.NightlyPane.AgentSeen"/> after, wherever its tab or window is (not out of a window).
+        /// Completes once the pane has applied that (Nightly told the page is seen), so what follows reaches a visible
+        /// page. Any thread.</summary>
+        Task<IDisposable> AgentActsAsync();
+        /// <summary>Completes once the pane shows a frame Nightly painted since its page last came back on screen (at once when
+        /// it does, or when it cannot be seen at all), or after <paramref name="timeout"/>. Any thread.</summary>
+        Task ShownFrameAsync(TimeSpan timeout, CancellationToken ct);
     }
 
     private const string NoWindow = "Nightly has no page for this tab yet.";
@@ -61,6 +69,7 @@ internal sealed class NightlyAgent(NightlyAgent.ITarget target, NightlyFrames fr
 
     public async Task<string?> RunPageScriptAsync(string script, CancellationToken ct)
     {
+        using var acting = await target.AgentActsAsync().ConfigureAwait(false);
         var result = await RunAsync(NightlyProtocol.ScriptKind.Page, script, "", ct);
         return result.Status switch
         {
@@ -72,6 +81,7 @@ internal sealed class NightlyAgent(NightlyAgent.ITarget target, NightlyFrames fr
 
     public async Task<string?> CallAsync(string functionSource, string argsJson, CancellationToken ct)
     {
+        using var acting = await target.AgentActsAsync().ConfigureAwait(false);
         NightlyProtocol.ScriptResultInfo result;
         try
         {
@@ -98,12 +108,26 @@ internal sealed class NightlyAgent(NightlyAgent.ITarget target, NightlyFrames fr
 
     // ── screenshots ──
 
-    public Task<AgentScreenshot> CaptureAsync(CancellationToken ct) => frames.CaptureAsync(ct);
+    public async Task<AgentScreenshot> CaptureAsync(CancellationToken ct)
+    {
+        // A page that was off screen paints again once it is seen: the screenshot is of that frame, not the one before.
+        using var acting = await target.AgentActsAsync().ConfigureAwait(false);
+        await target.ShownFrameAsync(TimeSpan.FromMilliseconds(250), ct).ConfigureAwait(false);
+        return await frames.CaptureAsync(ct).ConfigureAwait(false);
+    }
+
+    // ── intent hints (Augur) ──
+
+    /// <summary>Hints the page's window (0 while it has none) that the agent is about to load a URL: Nightly may warm a connection.</summary>
+    public void Speculate(SpeculationHint hint) => target.Runtime?.Speculate(target.WindowId, hint);
+
+    public void CancelSpeculation(string id) => target.Runtime?.CancelSpeculation(target.WindowId, id);
 
     // ── input ──
 
     public async Task SendAsync(IReadOnlyList<NativeInputStep> steps, CancellationToken ct)
     {
+        using var acting = await target.AgentActsAsync().ConfigureAwait(false);
         await _serial.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -235,25 +259,75 @@ internal sealed class NightlyAgent(NightlyAgent.ITarget target, NightlyFrames fr
 /// The IOSurfaces a Nightly pane got and which one holds its latest frame, for screenshots (<see cref="CaptureAsync"/>).
 /// Holds its own reference to each surface. Any thread.
 /// </summary>
+/// <remarks>
+/// Mirrors Nightly's sent-surface list (<c>WindowExporter::SendLocked</c>, <c>kMaxSentSurfaces</c> in
+/// ZenEmbedHost.mm): Nightly announces a surface once, appends its id to a FIFO of <see cref="MaxSurfaces"/>, drops
+/// the oldest id when full and announces a dropped surface again before it presents it again, and clears the list
+/// when the size changes. Keeping the same FIFO here (in announcement order, a repeated id moved to the end, other
+/// sizes dropped) holds exactly the ids Nightly counts as known, so a frame never names a surface this list let go,
+/// and the pool's churn (resizes, new pools) no longer piles up surfaces. The pane's layer keeps its own reference to
+/// what it shows (a CALayer's contents is retained), so dropping a surface here never frees a frame on screen.
+/// </remarks>
 [SupportedOSPlatform("macos")]
 internal sealed class NightlyFrames : IDisposable
 {
+    /// <summary>Nightly's <c>kMaxSentSurfaces</c>; never fewer, or a frame could name a surface dropped here.</summary>
+    internal const int MaxSurfaces = 16;
+
     private readonly Lock _gate = new();
     private readonly Dictionary<uint, (nint Surface, int Width, int Height)> _surfaces = [];
+    private readonly List<uint> _order = []; // announcement order, oldest first
+    private readonly Func<nint, nint> _retain;
+    private readonly Action<nint> _release;
     private uint _latest;
 
-    /// <summary>A surface of the window (the caller keeps its own reference); surfaces of another size are done with.</summary>
+    public NightlyFrames() : this(NightlyMach.CFRetain, NightlyMach.CFRelease) { }
+
+    /// <summary>With these reference calls instead of CoreFoundation's (tests).</summary>
+    internal NightlyFrames(Func<nint, nint> retain, Action<nint> release)
+    {
+        _retain = retain;
+        _release = release;
+    }
+
+    /// <summary>The surfaces held now.</summary>
+    internal int Count
+    {
+        get
+        {
+            lock (_gate) return _surfaces.Count;
+        }
+    }
+
+    /// <summary>A surface of the window (the caller keeps its own reference); surfaces of another size, the one it
+    /// replaces and the oldest past <see cref="MaxSurfaces"/> are done with.</summary>
     public void AddSurface(NightlyProtocol.SurfaceInfo info, nint surface)
     {
+        var retained = _retain(surface);
+        List<nint> done = [];
         lock (_gate)
         {
-            foreach (var (id, old) in _surfaces.Where(p => p.Key == info.SurfaceId || p.Value.Width != info.Width || p.Value.Height != info.Height).ToList())
+            if (_surfaces.Values.Any(s => s.Width != info.Width || s.Height != info.Height))
             {
-                NightlyMach.CFRelease(old.Surface);
-                _surfaces.Remove(id);
+                done.AddRange(_surfaces.Values.Select(s => s.Surface));
+                _surfaces.Clear();
+                _order.Clear();
             }
-            _surfaces[info.SurfaceId] = (NightlyMach.CFRetain(surface), info.Width, info.Height);
+            else if (_surfaces.Remove(info.SurfaceId, out var old))
+            {
+                done.Add(old.Surface);
+                _order.Remove(info.SurfaceId);
+            }
+            while (_order.Count >= MaxSurfaces)
+            {
+                _surfaces.Remove(_order[0], out var oldest);
+                done.Add(oldest.Surface);
+                _order.RemoveAt(0);
+            }
+            _surfaces[info.SurfaceId] = (retained, info.Width, info.Height);
+            _order.Add(info.SurfaceId);
         }
+        foreach (var s in done) _release(s);
     }
 
     public void SetLatest(NightlyProtocol.FrameInfo frame)
@@ -278,12 +352,15 @@ internal sealed class NightlyFrames : IDisposable
     /// <summary>The window is gone: its surfaces are void.</summary>
     public void Clear()
     {
+        List<nint> done;
         lock (_gate)
         {
-            foreach (var (surface, _, _) in _surfaces.Values) NightlyMach.CFRelease(surface);
+            done = [.. _surfaces.Values.Select(s => s.Surface)];
             _surfaces.Clear();
+            _order.Clear();
             _latest = 0;
         }
+        foreach (var s in done) _release(s);
     }
 
     public void Dispose() => Clear();
@@ -296,7 +373,7 @@ internal sealed class NightlyFrames : IDisposable
         {
             if (!_surfaces.TryGetValue(_latest, out var entry))
                 throw new AgentBrowserException("no_page", "The Nightly pane has not shown a frame yet.");
-            surface = NightlyMach.CFRetain(entry.Surface);
+            surface = _retain(entry.Surface);
         }
         try
         {
@@ -304,7 +381,7 @@ internal sealed class NightlyFrames : IDisposable
         }
         finally
         {
-            NightlyMach.CFRelease(surface);
+            _release(surface);
         }
     }
 }

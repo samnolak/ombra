@@ -26,15 +26,19 @@ public sealed class NativeInputActions(INativeInput input, Func<TimeSpan, Cancel
 
     private Task SendAsync(NativeInputStep step, CancellationToken ct) => Input.SendAsync([step], ct);
 
+    /// <summary>The pause between two moves of the pointer's path, in ms (from, to).</summary>
+    private const int MovePauseFrom = 14, MovePauseTo = 28;
+
     /// <summary>Moves the pointer to (x, y) along a short eased path from where it was (no path before the first move).</summary>
-    public async Task MoveAsync(double x, double y, CancellationToken ct, NativeMouseButton held = NativeMouseButton.Left, bool buttonDown = false)
+    public Task MoveAsync(double x, double y, CancellationToken ct, NativeMouseButton held = NativeMouseButton.Left, bool buttonDown = false) =>
+        TravelAsync(x, y, PathSteps(buttonDown), held, ct);
+
+    /// <summary>How many moves the path to a target takes: none where moves without a button do not reach the page (the
+    /// press itself tells the page where the pointer is), one for the first move, else a few.</summary>
+    private int PathSteps(bool buttonDown) => !Input.CanHover && !buttonDown ? 0 : Pointer is null ? 1 : _random.Next(4, 8);
+
+    private async Task TravelAsync(double x, double y, int steps, NativeMouseButton held, CancellationToken ct)
     {
-        if (!Input.CanHover && !buttonDown)
-        {
-            Pointer = (x, y); // the press itself tells the page where the pointer is
-            return;
-        }
-        var steps = Pointer is null ? 1 : _random.Next(4, 8);
         var (fromX, fromY) = Pointer ?? (x, y);
         for (var i = 1; i <= steps; i++)
         {
@@ -44,17 +48,24 @@ public sealed class NativeInputActions(INativeInput input, Func<TimeSpan, Cancel
             var py = fromY + (y - fromY) * eased;
             await SendAsync(new NativeMouseStep(NativeMouseAction.Move, px, py, held, 0, NativeModifiers.None), ct).ConfigureAwait(false);
             Pointer = (px, py);
-            if (i < steps) await PauseAsync(14, 28, ct).ConfigureAwait(false);
+            if (i < steps) await PauseAsync(MovePauseFrom, MovePauseTo, ct).ConfigureAwait(false);
         }
         Pointer = (x, y);
     }
 
-    /// <summary>Pointer to (x, y), then press and release (<paramref name="count"/> 2 = double click).</summary>
+    /// <summary>
+    /// Pointer to (x, y), then press and release (<paramref name="count"/> 2 = double click). <paramref name="pressing"/>
+    /// hears once, before the pointer moves, how long until the press: the path's pauses on average and the rest before
+    /// the press (what is left of the travel, for a hint that the click is coming).
+    /// </summary>
     public async Task ClickAsync(double x, double y, CancellationToken ct, int count = 1, NativeModifiers modifiers = NativeModifiers.None,
-        NativeMouseButton button = NativeMouseButton.Left)
+        NativeMouseButton button = NativeMouseButton.Left, Action<TimeSpan>? pressing = null)
     {
-        await MoveAsync(x, y, ct).ConfigureAwait(false);
-        await PauseAsync(50, 120, ct).ConfigureAwait(false);
+        var steps = PathSteps(buttonDown: false);
+        var rest = _random.Next(50, 121);
+        pressing?.Invoke(TimeSpan.FromMilliseconds(Math.Max(0, steps - 1) * (MovePauseFrom + MovePauseTo) / 2.0 + rest));
+        await TravelAsync(x, y, steps, NativeMouseButton.Left, ct).ConfigureAwait(false);
+        await _delay(TimeSpan.FromMilliseconds(rest), ct).ConfigureAwait(false);
         for (var n = 1; n <= Math.Max(1, count); n++)
         {
             if (n > 1) await PauseAsync(60, 110, ct).ConfigureAwait(false);

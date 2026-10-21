@@ -20,8 +20,10 @@ namespace Ombra.App.Controls;
 /// the seal and the sign over its head are drawn around it (<see cref="OverflowFor"/>). Frames come from the screen's
 /// own clock (<see cref="TopLevel.RequestAnimationFrame"/>) and only while there is something to move: on screen in the
 /// active window (on the desktop: while the app is in front, or behind it while omp works, asks or reports), not asleep
-/// or waiting for long, and not with reduced motion; otherwise it shows the pose's still and asks for no frames. Back
-/// on screen it goes on from where the pet is now (its time ran on; the drawing moves at most 0.1 s at once). The
+/// or waiting for long, and not with reduced motion; otherwise it shows the pose's still and asks for no frames, and a
+/// frame it was waiting for on its timer is called off at once. In the app's window it asks for half the frames it
+/// does in its own small window on the desktop, since each one redraws the whole window (<see cref="FrameInterval"/>).
+/// Back on screen it goes on from where the pet is now (its time ran on; the drawing moves at most 0.1 s at once). The
 /// sheets are shared by every view of the same size (<see cref="OniAtlases"/>) and let go when the view is unloaded.
 /// </summary>
 public sealed class OniView : Control, ICustomHitTest
@@ -79,6 +81,13 @@ public sealed class OniView : Control, ICustomHitTest
         set
         {
             _carry = value;
+            // Picked up: it follows the pointer from the screen's next refresh, not after the wait between two frames
+            // of a calmer pose
+            if (value is { Moving: true } && _slow is { IsEnabled: true } && _top is { } top)
+            {
+                _slow.Stop();
+                top.RequestAnimationFrame(OnFrame);
+            }
             Pump();
         }
     }
@@ -94,6 +103,9 @@ public sealed class OniView : Control, ICustomHitTest
 
     /// <summary>True while frames are asked for (tests: none when hidden, in the background, at rest or reduced).</summary>
     internal bool IsPlaying => _frameRequested;
+
+    /// <summary>True while the next frame is waited for on the view's own timer (tests: called off at once when it should stop).</summary>
+    internal bool IsTimed => _slow is { IsEnabled: true };
 
     /// <summary>Moving (frames come), not showing the pose's still.</summary>
     internal bool IsLive => _live && !Reduced;
@@ -162,12 +174,7 @@ public sealed class OniView : Control, ICustomHitTest
             atlases.Release();
             _atlases = null;
         }
-        _lastFrame = null;
-        if (_slow is { IsEnabled: true })
-        {
-            _slow.Stop();
-            _frameRequested = false;
-        }
+        Stop();
     }
 
     private void OnThemeChanged(object? sender, EventArgs e) => InvalidateVisual();
@@ -243,17 +250,25 @@ public sealed class OniView : Control, ICustomHitTest
     }
 
     /// <summary>
-    /// Seconds from one frame to the next. Every frame costs a redraw of the whole window on macOS, so the pet moves at
-    /// 30 frames a second, as the reference's recordings do (its drawings are held for tens of milliseconds; the
-    /// spirits move slowly); carried, it follows the pointer at up to 90; a question or a fault nobody has answered
-    /// for a while goes on at 15.
+    /// Seconds from one frame to the next. On macOS a frame redraws the whole window the pet is in (Avalonia.Native's
+    /// OpenGL target draws each frame into a new window-sized surface: <see cref="Program.BuildAvaloniaApp"/>), so in the
+    /// app's window a pose that loops moves at 15 frames a second (its drawings are held 85 ms or more; the flames' 7 or
+    /// 8 drawings a second still get about two frames each), and a question or a fault nobody has answered for a while
+    /// at 10. Transitions and joy's quick drawings (44 ms each) go at 30, as the reference's recordings do, and so does
+    /// every pose in the pet's own small window on the desktop (<paramref name="ownWindow"/>; a question or a fault left
+    /// for a while: 15). Carried, it follows the pointer at up to 90.
     /// </summary>
-    private double FrameInterval(OniDirector d)
+    internal static double FrameInterval(OniDirector d, bool carried, bool ownWindow)
     {
-        if (_carry is { Moving: true }) return MinFrameMs / 1000;
-        if (d.Mode == "loop" && d.Cue is "waiting" or "error" && d.CueAge > AlertSlow) return 1 / 15.0;
-        return 1 / 30.0;
+        if (carried) return MinFrameMs / 1000;
+        if (d.Mode != "loop" || d.State == "joy") return 1 / 30.0;
+        var alert = d.Cue is "waiting" or "error" && d.CueAge > AlertSlow;
+        if (ownWindow) return alert ? 1 / 15.0 : 1 / 30.0;
+        return alert ? 1 / 10.0 : 1 / 15.0;
     }
+
+    /// <summary>The interval for this view's pet now: carried or not, in the app's window or its own.</summary>
+    private double IntervalNow(OniDirector d) => FrameInterval(d, _carry is { Moving: true }, InForeground is not null);
 
     /// <summary>Something changed: a new picture, and frames if it should move.</summary>
     private void Refresh()
@@ -264,16 +279,17 @@ public sealed class OniView : Control, ICustomHitTest
 
     private void Pump()
     {
-        if (_frameRequested || _top is null) return;
+        if (_top is null) return;
         if (!ShouldAnimate())
         {
             Stop();
             return;
         }
+        if (_frameRequested) return;
         _frameRequested = true;
         // Asleep on a timer for most of the wait, then frame by frame of the screen until it is time: the frames stay
-        // on the screen's refreshes, evenly spaced (every 5th at 160 Hz, every 4th at 120, every 2nd at 60)
-        var sleep = _lastFrame is null ? 0 : FrameInterval(Pet!.Director) - 3.5 * _refresh;
+        // on the screen's refreshes, evenly spaced (at 15 a second: every 8th refresh at 120 Hz, every 4th at 60)
+        var sleep = _lastFrame is null ? 0 : IntervalNow(Pet!.Director) - 3.5 * _refresh;
         if (sleep < .004)
         {
             _top.RequestAnimationFrame(OnFrame);
@@ -298,9 +314,18 @@ public sealed class OniView : Control, ICustomHitTest
         else _frameRequested = false;
     }
 
-    /// <summary>No more frames: the still is shown, and the next frame starts from a fresh clock.</summary>
+    /// <summary>
+    /// No more frames: a wait on the timer is called off at once (a frame already asked of the screen finds nothing to
+    /// do), a moving picture gives way to the still, and the next frame starts from a fresh clock.
+    /// </summary>
     private void Stop()
     {
+        if (_slow is { IsEnabled: true })
+        {
+            _slow.Stop();
+            _frameRequested = false;
+        }
+        if (_live) InvalidateVisual();
         _lastFrame = null;
         _lastCallback = null;
         _live = false;
@@ -316,10 +341,9 @@ public sealed class OniView : Control, ICustomHitTest
         if (!ShouldAnimate())
         {
             Stop();
-            InvalidateVisual();
             return;
         }
-        if (_lastFrame is { } prev && Pet is { } p && (at - prev).TotalSeconds < FrameInterval(p.Director) - _refresh / 2 && _top is { } top)
+        if (_lastFrame is { } prev && Pet is { } p && (at - prev).TotalSeconds < IntervalNow(p.Director) - _refresh / 2 && _top is { } top)
         {
             _frameRequested = true;
             top.RequestAnimationFrame(OnFrame);

@@ -392,6 +392,61 @@ Driver `deactivate` activates Finder without releasing a held drag; `activate` r
 Not verifiable here (no Accessibility, no HID drag): the carried drag's drop into another app; AppKit ends it at once
 without a held button.
 
+### 1e. Visibility, frame rate and connection hints (protocol 5, 2026-10-21)
+
+Before: Ombra never told Nightly that a pane was hidden. A background tab's page stayed `visible` with rAF at 160/s and
+its video decoding; each hidden pane kept its shown frame in the layer (and one more held), so the surfaces stayed in
+use; and the embedded compositor redrew the whole window for a 20 px spinner. Protocol 5 (`kProtocolVersion`,
+`NightlyProtocol.Version`; a runtime speaking 4 is refused, so the pin moves with it):
+
+- **Visibility (46, Ombra → Nightly)** `{+24 windowId, +28 visible 0|1, +32 generation}`, 40 bytes. The page can be
+  seen when the pane is in a window, effectively visible (its tab in front, what holds it shown), the window shown and
+  not minimized, and not covered whole (AppKit's `occlusionState` and its notification, `Platform/Mac/MacWindowOcclusion.cs`;
+  Avalonia reports none; ignored in a harness run, whose window lies behind the owner's on purpose). `NightlyPane`
+  looks again after every layout pass, its `IsVisible`, its window's state and visibility, an occlusion change, the
+  agent acting and each frame. `Nightly/NightlyVisibility.cs` sends only changes (and the state once when a window
+  attaches), each with a generation above every earlier one of the pane, one whose send failed included; a state that
+  could not be sent (queue full) goes again every 100 ms until Nightly has it or the window goes. Nightly ignores a
+  generation not above the last it applied. Hidden: the layer's contents go first (`CATransaction flush`, so the
+  window server no longer shows the surface), then Visibility, then the shown and the held frame go back (Release);
+  a frame still in flight goes back as it comes; Nightly makes the browser inactive
+  (`document.hidden`, rAF and timers throttled as a background tab's), exports nothing, gives back its own in-flight
+  use counts and logs the transition (ZenEmbed:3). Visible again: Nightly paints one fresh frame; until it comes the
+  pane shows its background (the hole is cut only while it holds a frame).
+- **The agent's panes stay seen.** While omp's browser acts on a pane (`NightlyAgent`: page scripts, isolated calls,
+  input, screenshots; an open or goto through the tab's hooks) and for `NightlyPane.AgentSeen` (10 s) after its last
+  action, the page counts as seen with its tab in the background or the window minimized or covered; not out of a
+  window. A script, input batch or screenshot goes out only after the pane has applied that on the UI thread
+  (`ITarget.AgentActsAsync`), so Nightly has the page visible first. Otherwise an agent working while the user is in
+  another app drives a hidden page: rAF stopped, the refresh driver at about 1 Hz (lazy loading stalls), and
+  screenshots of the frame from before. A screenshot waits up to 250 ms
+  for the first frame after the page comes back on screen, then reads what there is (a hung page paints none).
+- **60 Hz** (`layout.frame_rate` in the runtime's user.js): the embedded window is composited whole into the IOSurface
+  it exports, so any animation redraws the entire pane every refresh; a standalone Nightly keeps the display's rate.
+  `browser-window-frames` now wants at least 55 fps (it wanted 120 at the display's 160 Hz). Reconsider once frames
+  carry their damaged rects.
+- **`media.devices.unfocused.enabled`** (user.js, owner's decision): the embedded window is AppKit's key window only
+  while its pane has the keyboard, so `enumerateDevices()` never resolved there and pages awaiting it (anti-bot
+  scripts) stalled.
+- **Speculate (`Command` op 9; op 9's window controls are gone, see 1c)**, Augur v1: Nightly opens the connection to an
+  origin (DNS, TCP, TLS through `nsISpeculativeConnect` with an overrider, so `network.http.speculative-parallel-limit`
+  stays 0) for a navigation already committed to it, never an HTTP request, with the window's origin attributes,
+  never the JSON's. Text: `{"v":1,"id":"<16 lowercase hex>","source":"agent_open|agent_click|agent_goto|address_commit",
+  "action":"hint","url","p","leadMs","ttlMs"}` or `{"v":1,"id","action":"cancel"}`, built by
+  `NightlyProtocol.SpeculateJson` from `Ombra.ClientCore.Browser.SpeculationHint` and refused outside Nightly's bounds
+  (absolute http(s) without user info, p 0–1, lead 0–5000 ms, TTL 100–30000 ms, at most 8192 bytes). Raw priors: open
+  0.98 (250 ms ahead), anchor click 0.90 (the pointer's remaining travel, else 120 ms), goto 0.98 (10 ms), the preview's
+  address box 0.995 (20 ms); TTL 10 s; Nightly calibrates per source. Window 0 is a pane whose window is still being
+  opened (an agent open, an address entered in a tab without its pane yet): a new chrome-less window's origin
+  attributes, matched by origin to the next navigation in any window. Sent by omp's browser tools (`AgentBrowserBridge`:
+  open, anchor click, goto; cancelled when the action is abandoned) and the preview's address box on Enter
+  (`PreviewViewModel.AddressCommitted` → `PreviewPanel`); never for forms, buttons without a resolved link, downloads
+  or other schemes.
+
+`NightlyVisibilityAndSpeculationTests`: the layouts against the native structs, only changes sent, generations never
+repeated or lowered, hiding and leaving the window give every frame back, a gone window's frames void, and Speculate's
+bounds and round trip.
+
 ## 2. Gecko facts the options rely on (file:line in `engine/`)
 
 - macOS defaults: GPU process on (`StaticPrefList.yaml:10484-10493`). Native CoreAnimation compositor on

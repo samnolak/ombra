@@ -156,9 +156,10 @@ internal static partial class NightlyAcceptance
 
         /// <summary>
         /// The Browser page's frames go to the screen as Nightly makes them: during a trackpad pan over a long page (a new
-        /// tab of the window), at least 90 % of the frames Nightly presents reach the screen, at least 120 a second (Nightly
-        /// draws at the display's rate). What Ombra draws over the pane stays above the page (a box in the window's adorner
-        /// layer over the frames' layer: its colour in a shot of the window, the page's round it).
+        /// tab of the window), at least 90 % of the frames Nightly presents reach the screen, at least 55 a second (the
+        /// embedded runtime draws at 60 Hz: <c>layout.frame_rate</c> in NightlyRuntime's user.js). What Ombra draws over
+        /// the pane stays above the page (a box in the window's adorner layer over the frames' layer: its colour in a shot
+        /// of the window, the page's round it).
         /// </summary>
         private async Task FrameChecks(NightlyPane pane)
         {
@@ -176,9 +177,9 @@ internal static partial class NightlyAcceptance
                 await Task.Delay(300);
                 stats = TakeStats(pane);
                 Log($"frames pan {attempt + 1}: {stats}");
-                if (stats is { } s && s.Distinct >= 0.9 * s.Received && s.Fps >= 120) break;
+                if (stats is { } s && s.Distinct >= 0.9 * s.Received && s.Fps >= 55) break;
             }
-            Check("browser-window-frames", loaded && stats is { } f && f.Distinct >= 0.9 * f.Received && f.Fps >= 120,
+            Check("browser-window-frames", loaded && stats is { } f && f.Distinct >= 0.9 * f.Received && f.Fps >= 55,
                 $"page rgb={page} {stats}");
 
             var box = new Border

@@ -35,7 +35,23 @@ public sealed partial class AgentBrowserBridge
     private readonly ConditionalWeakTable<INativeInput, NativeInputActions> _actuators = new();
     private readonly ConditionalWeakTable<IAgentBrowserPage, StrongBox<long>> _lastAction = new();
 
-    private NativeInputActions Actuator(INativeInput input) => _actuators.GetValue(input, i => new NativeInputActions(i, Pause));
+    private NativeInputActions Actuator(INativeInput input) => _actuators.GetValue(input, i => new NativeInputActions(new BoundedInput(i, this), Pause));
+
+    /// <summary>A page's input whose every batch has <see cref="InputDeadline"/>: a hung page never answers the batch's
+    /// closing round trip, and the action answers <c>page_unresponsive</c> instead of waiting for it.</summary>
+    private sealed class BoundedInput(INativeInput input, AgentBrowserBridge bridge) : INativeInput
+    {
+        public string? Unsupported => input.Unsupported;
+
+        public bool CanHover => input.CanHover;
+
+        public Task SendAsync(IReadOnlyList<NativeInputStep> steps, CancellationToken ct) =>
+            BoundedAsync(async d =>
+            {
+                await input.SendAsync(steps, d).ConfigureAwait(false);
+                return true;
+            }, Deadline.Start(bridge.InputDeadline), ct);
+    }
 
     // ── the page library: isolated world first ──
 
@@ -48,7 +64,8 @@ public sealed partial class AgentBrowserBridge
         string? text;
         try
         {
-            text = await UnlessDialogAsync(page, c => world.CallAsync(_scripts.IsolatedCall, call, c), ct).ConfigureAwait(false);
+            var deadline = Deadline.Start(ScriptDeadline);
+            text = await UnlessDialogAsync(page, c => BoundedAsync(d => world.CallAsync(_scripts.IsolatedCall, call, d), deadline, c), ct).ConfigureAwait(false);
         }
         catch (IsolatedScriptException e) when (e.Domain is not null)
         {
@@ -146,10 +163,26 @@ public sealed partial class AgentBrowserBridge
                     if (target.Menu)
                         throw new ScriptEventsInstead($"A <{target.Tag}> opens the web view's own menu over the app, so it is set by script events.");
                     var watched = await ArmAsync(page, selector, "click", ct).ConfigureAwait(false);
-                    await actuator.ClickAsync(target.X, target.Y, ct, action == "dblclick" ? 2 : 1).ConfigureAwait(false);
-                    await SettleAsync(page, ct).ConfigureAwait(false);
-                    if (watched && await ArmedAsync(page, ct).ConfigureAwait(false) is { Reached: false })
-                        result["note"] = "The click landed on something else than the element (it moved or was covered meanwhile): observe the page again.";
+                    // A link: its engine hears where the click goes as the pointer sets off (the hint's lead is the
+                    // travel left), and that it will not when the click fails or lands on something else
+                    Intent? intent = null;
+                    try
+                    {
+                        await actuator.ClickAsync(target.X, target.Y, ct, action == "dblclick" ? 2 : 1,
+                            pressing: left => intent = Intend(page.Speculation, SpeculationHint.AgentClick, target.Href,
+                                (int)Math.Round(left.TotalMilliseconds))).ConfigureAwait(false);
+                        await SettleAsync(page, ct).ConfigureAwait(false);
+                        if (watched && await ArmedAsync(page, ct).ConfigureAwait(false) is { Reached: false })
+                        {
+                            intent?.Cancel();
+                            result["note"] = "The click landed on something else than the element (it moved or was covered meanwhile): observe the page again.";
+                        }
+                    }
+                    catch (Exception e) when (e is not (ScriptEventsInstead or NotSupportedException))
+                    {
+                        intent?.Cancel(); // script events do the same click instead after those two: the hint stands
+                        throw;
+                    }
                     break;
                 }
                 case "check" or "uncheck":
@@ -281,16 +314,19 @@ public sealed partial class AgentBrowserBridge
 
     // ── where to act ──
 
-    /// <summary>What the library says about an action's target (<c>A.target</c>).</summary>
+    /// <summary>What the library says about an action's target (<c>A.target</c>). <paramref name="Href"/>: the http(s)
+    /// address of the link the element is in, absolute (null: no link, a download, another scheme).</summary>
     private sealed record Target(double X, double Y, string Tag, bool Visible, bool Disabled, bool Editable, bool Focused, bool Checkable,
-        bool Checked, bool Menu, bool InView, string? Covered)
+        bool Checked, bool Menu, bool InView, string? Covered, string? Href)
     {
         public static Target From(JsonObject o) => new(
             o["x"]?.GetValue<double>() ?? 0, o["y"]?.GetValue<double>() ?? 0, o["tag"]?.GetValue<string>() ?? "",
             Flag(o, "visible"), Flag(o, "disabled"), Flag(o, "editable"), Flag(o, "focused"), Flag(o, "checkable"), Flag(o, "checked"),
-            Flag(o, "menu"), Flag(o, "inView"), o["covered"]?.GetValueKind() == JsonValueKind.String ? o["covered"]!.GetValue<string>() : null);
+            Flag(o, "menu"), Flag(o, "inView"), Text(o, "covered"), Text(o, "href"));
 
         private static bool Flag(JsonObject o, string name) => o[name]?.GetValueKind() == JsonValueKind.True;
+
+        private static string? Text(JsonObject o, string name) => o[name]?.GetValueKind() == JsonValueKind.String ? o[name]!.GetValue<string>() : null;
     }
 
     /// <summary>

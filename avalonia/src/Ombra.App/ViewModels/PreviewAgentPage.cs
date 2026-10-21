@@ -1,4 +1,5 @@
 using Avalonia.Threading;
+using Ombra.App.Nightly;
 using Ombra.ClientCore;
 using Ombra.ClientCore.Browser;
 
@@ -8,7 +9,7 @@ namespace Ombra.App.ViewModels;
 /// The preview panel as omp's browser (<see cref="AgentBrowserBridge"/>): every page omp opens gets a tab of its own
 /// in the panel (<see cref="PreviewViewModel.OpenAgentTab"/>), and the panel opens while the agent uses it.
 /// </summary>
-internal sealed class PreviewAgentHost(MainViewModel main) : IAgentBrowserHost
+internal sealed class PreviewAgentHost(MainViewModel main) : IAgentBrowserHost, IAgentSpeculation
 {
     public async Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, CancellationToken ct) =>
         await Dispatcher.UIThread.InvokeAsync<IAgentBrowserPage>(() =>
@@ -18,6 +19,20 @@ internal sealed class PreviewAgentHost(MainViewModel main) : IAgentBrowserHost
             main.IsPreviewOpen = true;
             return new PreviewAgentPage(main, p.OpenAgentTab(surfaceId));
         });
+
+    public IAgentSpeculation? Speculation => OperatingSystem.IsMacOS() ? this : null;
+
+    // The tab the agent opens next has no Nightly window yet: window 0 is "a window about to open" (its default
+    // OriginAttributes). Posted ahead of the tab's creation, so the hint goes out before the pane asks for its window.
+    public void Speculate(SpeculationHint hint) => Dispatcher.UIThread.Post(() =>
+    {
+        if (OperatingSystem.IsMacOS() && main.Preview.UseNightly && NightlyHost.Get().Runtime is { } runtime) runtime.Speculate(0, hint);
+    });
+
+    public void CancelSpeculation(string id) => Dispatcher.UIThread.Post(() =>
+    {
+        if (OperatingSystem.IsMacOS() && main.Preview.UseNightly && NightlyHost.Get().Runtime is { } runtime) runtime.CancelSpeculation(0, id);
+    });
 }
 
 /// <summary>One of omp's tabs in the preview panel (<see cref="PreviewTab"/>). Everything runs on the UI thread.</summary>
@@ -36,6 +51,9 @@ internal sealed class PreviewAgentPage(MainViewModel main, PreviewTab tab) : IAg
     public INativeInput? Input => tab.Input;
 
     public IIsolatedScripts? Isolated => tab.Isolated;
+
+    // The Nightly runtime's agent takes intent hints for its window; the built-in preview's engines take none.
+    public IAgentSpeculation? Speculation => tab.Input as IAgentSpeculation;
 
     public IDisposable? BeginAction() => tab.AgentAction();
 
@@ -80,7 +98,8 @@ internal sealed class PreviewAgentPage(MainViewModel main, PreviewTab tab) : IAg
             var p = main.Preview;
             p.NoteAgentActivity();
             var active = p.ActiveTab == tab;
-            return new AgentPageState(tab.Url, tab.IsLoading, active ? p.LoadFailed : tab.LoadFailed, p.IsEngineUnavailable ? Unavailable(p) : null);
+            return new AgentPageState(tab.Url, tab.IsLoading, active ? p.LoadFailed : tab.LoadFailed, p.IsEngineUnavailable ? Unavailable(p) : null,
+                tab.Title.Length > 0 ? tab.Title : null);
         });
 
     public async Task<string> RunScriptAsync(string script, CancellationToken ct)
@@ -89,7 +108,17 @@ internal sealed class PreviewAgentPage(MainViewModel main, PreviewTab tab) : IAg
         var (hasPage, raw) = await Dispatcher.UIThread.InvokeAsync<(bool, string?)>(async () =>
         {
             main.Preview.NoteAgentActivity();
-            return tab.RunScript is { } run ? (true, await run(script)) : (false, (string?)null);
+            if (tab.RunScript is not { } run) return (false, null);
+            try
+            {
+                return (true, await run(script, ct));
+            }
+            catch (Exception e) when (e is not (OperationCanceledException or AgentBrowserException or IsolatedScriptException))
+            {
+                // What the engine's evaluate throws is its word that the script threw or did not run (a syntax error, a
+                // document between two loads); the runtime's own failures come typed (AgentBrowserException)
+                throw new IsolatedScriptException(e.Message);
+            }
         }).WaitAsync(ct);
         return hasPage ? raw ?? "" : throw new AgentBrowserException("no_page", NoPage);
     }

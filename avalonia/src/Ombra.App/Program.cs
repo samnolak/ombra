@@ -190,7 +190,13 @@ internal static class Program
             // macOS: Avalonia 12.1's Metal path can present a frame rendered for the old size after a resize, and Core
             // Animation stretches it (everything squeezed until the next repaint; AvaloniaUI/Avalonia#22215, unmerged).
             // Native popups resizing (the permission menu's confirmation) hit the same path and can freeze
-            // (AvaloniaUI/Avalonia#22297). OpenGL first, popups drawn inside the window.
+            // (AvaloniaUI/Avalonia#22297). OpenGL first, popups drawn inside the window. Both are still open and 12.1.4's
+            // metal.mm is 12.1.3's (checked 2026-10-21), and Metal missed vsyncs in the renderer runs
+            // (docs/browser-research/k1-gecko-embedding.md). OpenGL's price: Avalonia.Native's target (rendertarget.mm,
+            // getNextSurfaceInSafeContext) takes a new window-sized IOSurface for every frame the render thread draws,
+            // where Metal reuses its CAMetalLayer's drawables, and the compositor copies its whole-window layer into it;
+            // only the dirty part is redrawn, but every frame costs the whole window (about 50 MB at 2560×1320 pt, 2×).
+            // What animates in the window keeps its frames few (Controls/Pulse, Controls/OniView.FrameInterval).
             .With(new AvaloniaNativePlatformOptions
             {
                 RenderingMode = [AvaloniaNativeRenderingMode.OpenGl, AvaloniaNativeRenderingMode.Software],

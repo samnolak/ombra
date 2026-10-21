@@ -136,6 +136,9 @@ public sealed partial class NightlyRuntimeTests
         public NightlyRuntime? Runtime => runtime;
         public uint WindowId => Window;
         public long LastUserInput => 0;
+        public Task<IDisposable> AgentActsAsync() => Task.FromResult<IDisposable>(new NoScope());
+        public Task ShownFrameAsync(TimeSpan timeout, CancellationToken ct) => Task.CompletedTask;
+        private sealed class NoScope : IDisposable { public void Dispose() { } }
         public void OnRuntimeState(NightlyState state, string? detail) { }
         public void OnAttached(uint windowId)
         {

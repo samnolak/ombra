@@ -466,12 +466,15 @@ internal sealed class AgentBrowserScripts
     if (action !== "focus") reveal(el);
     const doc = el.ownerDocument, view = doc.defaultView, r = el.getBoundingClientRect(), off = offsetOf(doc);
     const type = el.tagName === "INPUT" ? (el.type || "text").toLowerCase() : "";
+    // The link a click on it follows (Augur's hint): http(s) only, never a download; an SVG link's href is no string
+    const link = el.closest("a[href], area[href]");
+    const href = link && !link.hasAttribute("download") && typeof link.href === "string" && /^https?:/i.test(link.href) ? link.href : null;
     const t = {
       tag: el.tagName.toLowerCase(), visible: !hidden(el) && r.width > 0 && r.height > 0,
       disabled: !!el.disabled || el.getAttribute("aria-disabled") === "true",
       editable: textField(el) || el.isContentEditable, focused: focusedIn(el),
       checkable: checkable(el), checked: isChecked(el), menu: el.tagName === "SELECT" || MENU_INPUTS.has(type),
-      x: off.x + r.left + r.width / 2, y: off.y + r.top + r.height / 2, covered: null, inView: false,
+      x: off.x + r.left + r.width / 2, y: off.y + r.top + r.height / 2, covered: null, inView: false, href,
     };
     if (!t.visible) return t;
     // The centre, else the first other point where a click would land on the element (not on what covers it)

@@ -16,7 +16,8 @@ namespace Ombra.ClientCore;
 /// <param name="IsLoading">A navigation has not finished.</param>
 /// <param name="LoadFailed">The last navigation failed (the server did not answer).</param>
 /// <param name="Unavailable">Why no page can be shown here (the web engine is missing); null when it can.</param>
-public readonly record struct AgentPageState(Uri? Url, bool IsLoading, bool LoadFailed, string? Unavailable);
+/// <param name="Title">The page's title as the engine last reported it to the preview; null when it has none yet.</param>
+public readonly record struct AgentPageState(Uri? Url, bool IsLoading, bool LoadFailed, string? Unavailable, string? Title = null);
 
 /// <summary>A failure the bridge reports to omp with a code (cmux's error shape: <c>code: message</c>).</summary>
 public sealed class AgentBrowserException(string code, string message) : Exception(message)
@@ -72,6 +73,22 @@ public interface IAgentBrowserHost
     /// shows it unless the user picked another tab. Throws <see cref="AgentBrowserException"/> when no tab can open.
     /// </summary>
     Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, CancellationToken ct);
+
+    /// <summary>Intent hints for the tab the agent opens next, before it exists (<c>agent_open</c>); null where the
+    /// engine new tabs open in takes none. Any thread.</summary>
+    IAgentSpeculation? Speculation => null;
+}
+
+/// <summary>
+/// An engine that can warm the connection to a page the agent is about to load (Augur v1: DNS, TCP and TLS ahead of
+/// the navigation, never a request): the Nightly runtime. Hints are fire-and-forget; a hint whose action fails is
+/// cancelled by its id. Any thread.
+/// </summary>
+public interface IAgentSpeculation
+{
+    void Speculate(SpeculationHint hint);
+
+    void CancelSpeculation(string id);
 }
 
 /// <summary>One tab of the preview pane as the agent's browser (implemented by the app on its UI thread).</summary>
@@ -87,7 +104,10 @@ public interface IAgentBrowserPage
     Task<AgentPageState> GetStateAsync(CancellationToken ct);
 
     /// <summary>Runs <paramref name="script"/> in the page: the engine's result as text ("" when nothing came back).
-    /// Throws <see cref="AgentBrowserException"/> ("no_page") when no page is open.</summary>
+    /// <paramref name="ct"/> stops waiting for it (the bridge's deadline). Throws <see cref="IsolatedScriptException"/>
+    /// when the engine says the script threw or did not run (a syntax error, a document between two loads), and
+    /// <see cref="AgentBrowserException"/>: "no_page" when no page is open, "window_closed" / "runtime_disconnected"
+    /// when the engine lost the page meanwhile.</summary>
     Task<string> RunScriptAsync(string script, CancellationToken ct);
 
     /// <summary>Captures what the tab shows as a PNG. Throws <see cref="AgentBrowserException"/>: "no_page" when no
@@ -110,6 +130,9 @@ public interface IAgentBrowserPage
     /// <summary>The app's script world in the page, apart from the page's own (the bridge's library lives there); null
     /// where the engine has none: the library then runs in the page world. Any thread.</summary>
     IIsolatedScripts? Isolated => null;
+
+    /// <summary>Intent hints for this tab's engine (<c>agent_goto</c>, <c>agent_click</c>); null where it takes none. Any thread.</summary>
+    IAgentSpeculation? Speculation => null;
 
     /// <summary>omp acts on the page until the result is disposed: what the page asks meanwhile goes to omp first. Any thread.</summary>
     IDisposable? BeginAction() => null;
@@ -137,8 +160,17 @@ public interface IAgentBrowserPage
 /// (sessions, the TUI tab) stay valid side by side until omp closes them (<c>surface.close</c>) or the user does.
 /// While a page shows a JavaScript dialog its scripts wait: requests answer <c>dialog_open</c> with the dialog's kind
 /// and text instead of stalling, and <c>browser.press</c> Enter/Escape answers it. <c>browser.wait</c> answers about a
-/// second before <c>timeout_ms</c>, when omp's own socket timer would give up. Screenshots capture the visible part of
-/// the page only (the web view's own snapshot call: no element clip, no full page), the same as a cmux surface.
+/// second before <c>timeout_ms</c>, when omp's own socket timer would give up. Every page script (and every input
+/// batch) has a deadline well inside omp's 30-second socket timer (<see cref="ScriptDeadline"/>), and every request
+/// as a whole answers a second before it (<see cref="RequestBudget"/>, the steps of an action sharing it): a hung or
+/// slow page answers <c>page_unresponsive</c> (<c>script_timeout</c> past a <c>timeout_ms</c> browser.eval asked for)
+/// instead of making omp drop the connection, whose next queued request would then fail with "cmux socket is not
+/// connected". The address (<c>browser.url.get</c>, a screenshot's <c>url</c>) is the one the preview knows, never a
+/// page script, and omp's own reads of the title, of the CSS width before a screenshot and of the geometry beside an
+/// observe wait for the page 300 ms at most (the title is then the preview's), so a frozen page's screenshot is immediate.
+/// Screenshots capture the visible part of the page only (the web view's own snapshot call: no element clip, no full
+/// page), the same as a cmux surface. Where the tab's engine takes intent hints (<see cref="IAgentSpeculation"/>, the
+/// Nightly runtime), opening a page, going to one and clicking a link tell it first, so it can warm the connection.
 /// </remarks>
 public sealed partial class AgentBrowserBridge : IDisposable
 {
@@ -153,6 +185,10 @@ public sealed partial class AgentBrowserBridge : IDisposable
     private static readonly TimeSpan Poll = TimeSpan.FromMilliseconds(100);
     /// <summary>How much earlier than <c>timeout_ms</c> browser.wait answers: omp's socket timer uses the same value.</summary>
     private static readonly TimeSpan WaitMargin = TimeSpan.FromSeconds(1);
+    /// <summary>omp's own socket timer for a request that names none (cmux <c>socket-client.ts</c>).</summary>
+    private static readonly TimeSpan OmpRequestTimeout = TimeSpan.FromSeconds(30);
+    /// <summary>The longest <c>timeout_ms</c> a browser.eval may ask for its script.</summary>
+    internal static readonly TimeSpan ScriptTimeoutLimit = TimeSpan.FromMinutes(2);
     private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
     private static readonly JsonNodeOptions NodeOptions = new();
     private static readonly JsonDocumentOptions DocumentOptions = new() { MaxDepth = 512 };
@@ -380,7 +416,27 @@ public sealed partial class AgentBrowserBridge : IDisposable
 
     // ── Methods (the ones omp 18.8.0's cmux backend sends) ──
 
-    internal async Task<JsonObject> DispatchAsync(string method, JsonObject p, CancellationToken ct)
+    /// <summary>
+    /// How long a whole request may take (every script, input batch and pause of an action together): it answers
+    /// before omp's own socket timer gives up on it (<see cref="WaitBudget"/> of omp's 30 s), so omp never drops the
+    /// connection. browser.wait keeps its own budget; a browser.eval with <c>timeout_ms</c> has that one.
+    /// </summary>
+    internal TimeSpan RequestBudget { get; set; } = WaitBudget(OmpRequestTimeout);
+
+    /// <summary>
+    /// One request within its deadline (<see cref="RequestBudget"/>): each step of it gets the time left (its token is
+    /// the request's), and a request still running at the deadline answers <c>page_unresponsive</c> (<c>script_timeout</c>
+    /// for a browser.eval's <c>timeout_ms</c>), even when a step does not stop.
+    /// </summary>
+    internal Task<JsonObject> DispatchAsync(string method, JsonObject p, CancellationToken ct)
+    {
+        // browser.wait answers its own timeout a second before omp's timer for it (WaitBudget of its timeout_ms)
+        if (method == "browser.wait") return DispatchCoreAsync(method, p, ct);
+        var deadline = method == "browser.eval" && ScriptTimeout(p) is { } asked ? Deadline.Start(asked, asked: true) : Deadline.Start(RequestBudget);
+        return BoundedAsync(c => DispatchCoreAsync(method, p, c), deadline, ct);
+    }
+
+    private async Task<JsonObject> DispatchCoreAsync(string method, JsonObject p, CancellationToken ct)
     {
         var host = Host ?? throw new AgentBrowserException("unavailable", "The Ombra window is not ready yet.");
         switch (method)
@@ -407,7 +463,17 @@ public sealed partial class AgentBrowserBridge : IDisposable
             case "browser.navigate":
             {
                 var address = Str(p, "url") ?? throw new AgentBrowserException("invalid_params", "browser.navigate needs a url");
-                var uri = await page.NavigateAsync(address, ct).ConfigureAwait(false);
+                var intent = Intend(page.Speculation, SpeculationHint.AgentGoto, address);
+                Uri uri;
+                try
+                {
+                    uri = await page.NavigateAsync(address, ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    intent?.Cancel();
+                    throw;
+                }
                 result = new JsonObject { ["url"] = uri.AbsoluteUri };
                 break;
             }
@@ -417,7 +483,7 @@ public sealed partial class AgentBrowserBridge : IDisposable
             case "browser.eval":
             {
                 var script = Str(p, "script") ?? throw new AgentBrowserException("invalid_params", "browser.eval needs a script");
-                result = new JsonObject { ["value"] = await EvaluateAsync(page, script, ct).ConfigureAwait(false) };
+                result = new JsonObject { ["value"] = await EvalAsync(page, script, p, ct).ConfigureAwait(false) };
                 break;
             }
             case "browser.wait":
@@ -456,7 +522,8 @@ public sealed partial class AgentBrowserBridge : IDisposable
             case "browser.screenshot":
             {
                 // cmux's answer: the viewport as base64 PNG (omp's cmux backend scrolls a selector into view itself and
-                // says the image is the whole viewport; it resizes and saves the image)
+                // says the image is the whole viewport; it resizes and saves the image). Nothing here runs in the page:
+                // a hung page is still captured (its last frame) at once.
                 var shot = await page.CaptureAsync(ct).ConfigureAwait(false);
                 if (shot.Png.Length == 0) throw new AgentBrowserException("screenshot_failed", "The preview returned an empty screenshot.");
                 result = new JsonObject
@@ -509,7 +576,18 @@ public sealed partial class AgentBrowserBridge : IDisposable
     {
         var address = Str(p, "url") is { Length: > 0 } u ? u : "about:blank";
         var id = Guid.NewGuid().ToString().ToUpperInvariant();
-        var page = await host.OpenTabAsync(id, ct).ConfigureAwait(false);
+        // Before the tab exists: its engine starts on the connection while the pane and its window are made
+        var intent = Intend(host.Speculation, SpeculationHint.AgentOpen, address);
+        IAgentBrowserPage page;
+        try
+        {
+            page = await host.OpenTabAsync(id, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            intent?.Cancel();
+            throw;
+        }
         Watch(page.Dialogs);
         string url;
         try
@@ -523,11 +601,34 @@ public sealed partial class AgentBrowserBridge : IDisposable
         }
         catch
         {
+            intent?.Cancel();
             await page.CloseAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
         lock (_gate) _surfaces[id] = page;
         return new JsonObject { ["surface_id"] = id, ["url"] = url, ["workspace_id"] = "ombra", ["created_split"] = false };
+    }
+
+    // ── intent hints (Augur v1) ──
+
+    /// <summary>A hint that went out, cancelled when its action fails or goes elsewhere.</summary>
+    private readonly record struct Intent(IAgentSpeculation Engine, string Id)
+    {
+        public void Cancel() => Engine.CancelSpeculation(Id);
+    }
+
+    /// <summary>
+    /// Tells <paramref name="engine"/> the agent is about to load <paramref name="address"/> (<paramref name="source"/>,
+    /// the load due in <paramref name="leadMs"/>; null: the source's usual lead). Nothing for an engine without hints or
+    /// an address that is not an absolute http(s) URL without credentials.
+    /// </summary>
+    private static Intent? Intend(IAgentSpeculation? engine, string source, string? address, int? leadMs = null)
+    {
+        if (engine is null || address is null || !Uri.TryCreate(address, UriKind.Absolute, out var url)
+            || SpeculationHint.For(source, url, leadMs) is not { } hint)
+            return null;
+        engine.Speculate(hint);
+        return new Intent(engine, hint.Id);
     }
 
     /// <summary>The explicit tab identity supplied by the originating browser handle; never the active or newest tab.</summary>
@@ -663,10 +764,13 @@ public sealed partial class AgentBrowserBridge : IDisposable
     /// meanwhile (the script itself opened it, e.g. a click on a "Delete" button that confirms): <c>dialog_open</c>.
     /// An alert omp caused is accepted and the script goes on.
     /// </summary>
-    private Task<string> RunScriptAsync(IAgentBrowserPage page, string script, CancellationToken ct) =>
-        UnlessDialogAsync(page, c => page.RunScriptAsync(script, c), ct);
+    private Task<string> RunScriptAsync(IAgentBrowserPage page, string script, CancellationToken ct, Deadline? deadline = null)
+    {
+        var limit = deadline ?? Deadline.Start(ScriptDeadline);
+        return UnlessDialogAsync(page, c => BoundedAsync(d => page.RunScriptAsync(script, d), limit, c), ct);
+    }
 
-    /// <summary><paramref name="start"/> with <see cref="RunScriptAsync(IAgentBrowserPage, string, CancellationToken)"/>'s rules for JavaScript dialogs.</summary>
+    /// <summary><paramref name="start"/> with <see cref="RunScriptAsync(IAgentBrowserPage, string, CancellationToken, Deadline?)"/>'s rules for JavaScript dialogs.</summary>
     private async Task<T> UnlessDialogAsync<T>(IAgentBrowserPage page, Func<CancellationToken, Task<T>> start, CancellationToken ct)
     {
         if (page.Dialogs is not { } broker) return await start(ct).ConfigureAwait(false);
@@ -687,8 +791,7 @@ public sealed partial class AgentBrowserBridge : IDisposable
                 if (Blocking(broker) is { } dialog)
                 {
                     // The script finishes once the dialog is answered; nobody waits for its value any more
-                    _ = run.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
-                        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                    Observe(run);
                     throw DialogOpen(dialog);
                 }
                 opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); // came and went already
@@ -701,37 +804,128 @@ public sealed partial class AgentBrowserBridge : IDisposable
         }
     }
 
-    private async Task<string> UrlAsync(IAgentBrowserPage page, CancellationToken ct)
+    // ── deadlines: a hung page never holds omp's socket ──
+
+    /// <summary>
+    /// How long a page script (or the isolated library's call) may take before the request answers
+    /// <c>page_unresponsive</c>: well inside omp's own 30-second socket timer, which would otherwise drop the
+    /// connection (and fail omp's next queued request with "cmux socket is not connected").
+    /// </summary>
+    internal TimeSpan ScriptDeadline { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>How long one batch of native input may take: a batch first waits up to 10 s for the user to pause
+    /// (their input to the pane wins), then ends with a round trip through the page.</summary>
+    internal TimeSpan InputDeadline { get; set; } = TimeSpan.FromSeconds(15);
+
+    /// <summary>How long omp's own probes (<see cref="TitleProbe"/>, <see cref="WidthProbe"/>, <see cref="GeometryProbe"/>) wait for the page.</summary>
+    internal TimeSpan ProbeDeadline { get; set; } = TimeSpan.FromMilliseconds(300);
+
+    /// <summary>
+    /// The time a request's scripts share, from <see cref="Start"/> on: every script of one evaluation (the expression,
+    /// the check whether it ran, the statements form) gets what is left, so together they never take longer than
+    /// <paramref name="Limit"/>. <paramref name="Asked"/> when omp set the limit (<c>timeout_ms</c>), else the bridge's own.
+    /// </summary>
+    internal readonly record struct Deadline(TimeSpan Limit, bool Asked, long Started)
     {
-        try
-        {
-            var href = await RunScriptAsync(page, "location.href", ct).ConfigureAwait(false);
-            href = Unquote(href);
-            if (Uri.TryCreate(href, UriKind.Absolute, out var u)) return u.AbsoluteUri;
-        }
-        catch (Exception e) when (e is not OperationCanceledException && e is not AgentBrowserException { Code: not ("no_page" or "dialog_open") })
-        {
-            // No page yet, a dialog holds the page's scripts, or the engine refused the script mid-navigation: the
-            // address the preview knows
-        }
-        var state = await page.GetStateAsync(ct).ConfigureAwait(false);
-        return state.Url?.AbsoluteUri ?? "about:blank";
+        public static Deadline Start(TimeSpan limit, bool asked = false) => new(limit, asked, Stopwatch.GetTimestamp());
+
+        /// <summary>What is left of <see cref="Limit"/> (zero or less: spent).</summary>
+        public TimeSpan Left => Limit - Stopwatch.GetElapsedTime(Started);
+
+        public AgentBrowserException Expired() => Asked
+            ? new AgentBrowserException("script_timeout", $"The script did not finish within timeout_ms ({Limit.TotalMilliseconds:0} ms).")
+            : new AgentBrowserException("page_unresponsive",
+                $"The page did not answer within {Limit.TotalSeconds:0.#} s: it is busy or hung. A screenshot and the address still work; load the page again (browser.navigate) or try later.");
     }
 
-    /// <summary>The value of <paramref name="expression"/> in the page, as JSON.</summary>
-    internal async Task<JsonNode?> EvaluateAsync(IAgentBrowserPage page, string expression, CancellationToken ct)
+    /// <summary>
+    /// What omp's cmux backend (the pinned 18.12.2, <c>cmux-tab.ts</c> / <c>rpc.ts</c>) sends as browser.eval scripts
+    /// to read what the preview mostly knows: <c>tab.title()</c>; the CSS width before every screenshot (it goes on
+    /// without it when the read fails); <c>GEOMETRY_SCRIPT</c> beside every observe's snapshot. Matched exactly.
+    /// </summary>
+    private const string TitleProbe = "document.title", WidthProbe = "window.innerWidth",
+        GeometryProbe = "(() => ({ innerWidth: window.innerWidth, innerHeight: window.innerHeight, dpr: window.devicePixelRatio||1, scrollX: window.scrollX, scrollY: window.scrollY, scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight }))()";
+
+    /// <summary>
+    /// <paramref name="start"/> (a script, an input batch) given what is left of <paramref name="deadline"/>. Past it the
+    /// bridge stops waiting and cancels it, so the engine forgets the request (the Nightly runtime drops a late answer),
+    /// and the request answers <c>page_unresponsive</c>, or <c>script_timeout</c> when omp asked for the limit
+    /// (browser.eval's <c>timeout_ms</c>); a spent deadline answers so without starting. The caller's own cancellation
+    /// stays a cancellation.
+    /// </summary>
+    private static async Task<T> BoundedAsync<T>(Func<CancellationToken, Task<T>> start, Deadline deadline, CancellationToken ct)
     {
+        var left = deadline.Left;
+        if (left <= TimeSpan.Zero) throw deadline.Expired();
+        using var timer = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timer.CancelAfter(left);
+        Task<T>? run = null;
+        try
+        {
+            run = start(timer.Token);
+            // An engine that cannot stop its script still answers here on time
+            return await run.WaitAsync(timer.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (timer.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            if (run is not null) Observe(run);
+            throw deadline.Expired();
+        }
+    }
+
+    /// <summary>A task nobody waits for any more: its failure, if it comes, is observed.</summary>
+    private static void Observe(Task run) =>
+        _ = run.ContinueWith(static t => _ = t.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
+    /// <summary>The script deadline browser.eval asked for (<c>timeout_ms</c>, at most <see cref="ScriptTimeoutLimit"/>),
+    /// answered a little before omp's own timer for it (<see cref="WaitBudget"/>); null: <see cref="ScriptDeadline"/>.</summary>
+    internal static TimeSpan? ScriptTimeout(JsonObject p) =>
+        Num(p, "timeout_ms") is { } ms ? WaitBudget(TimeSpan.FromMilliseconds(Math.Clamp(ms, 100, ScriptTimeoutLimit.TotalMilliseconds))) : null;
+
+    /// <summary>
+    /// browser.eval: its scripts bounded together by the <c>timeout_ms</c> omp asked for, else <see cref="ScriptDeadline"/>.
+    /// omp's probes of what the preview mostly knows get <see cref="ProbeDeadline"/>: when the page does not answer that
+    /// fast the title is the one the preview knows, and the width and geometry fail at once (the preview knows neither
+    /// the page's scroll nor its pixel ratio), so neither tab.title(), a screenshot nor an observe waits on a hung page.
+    /// </summary>
+    private async Task<JsonNode?> EvalAsync(IAgentBrowserPage page, string script, JsonObject p, CancellationToken ct)
+    {
+        if (ScriptTimeout(p) is { } asked) return await EvaluateAsync(page, script, ct, Deadline.Start(asked, asked: true)).ConfigureAwait(false);
+        if (script is not (TitleProbe or WidthProbe or GeometryProbe)) return await EvaluateAsync(page, script, ct).ConfigureAwait(false);
+        AgentBrowserException hung;
+        try
+        {
+            return await EvaluateAsync(page, script, ct, Deadline.Start(ProbeDeadline)).ConfigureAwait(false);
+        }
+        catch (AgentBrowserException e) when (e.Code == "page_unresponsive" && script == TitleProbe)
+        {
+            hung = e;
+        }
+        return (await page.GetStateAsync(ct).ConfigureAwait(false)).Title is { } title ? JsonValue.Create(title) : throw hung;
+    }
+
+    /// <summary>The address the preview knows for the tab (what it loaded, where the page moved since): never a page
+    /// script, so a hung page still has one.</summary>
+    private static async Task<string> UrlAsync(IAgentBrowserPage page, CancellationToken ct) =>
+        (await page.GetStateAsync(ct).ConfigureAwait(false)).Url?.AbsoluteUri ?? "about:blank";
+
+    /// <summary>The value of <paramref name="expression"/> in the page, as JSON. Its scripts share
+    /// <paramref name="deadline"/> (null: <see cref="ScriptDeadline"/> from now).</summary>
+    internal async Task<JsonNode?> EvaluateAsync(IAgentBrowserPage page, string expression, CancellationToken ct, Deadline? deadline = null)
+    {
+        var limit = deadline ?? Deadline.Start(ScriptDeadline);
         var run = Interlocked.Increment(ref _run);
-        var text = await RunAsync(page, _scripts.Wrap(expression, run, viaEval: false), ct).ConfigureAwait(false);
+        var text = await RunAsync(page, _scripts.Wrap(expression, run, viaEval: false), ct, limit).ConfigureAwait(false);
         if (text is null)
         {
             // Nothing came back: the script did not parse as an expression (nothing ran: try it as statements), or the
             // page went away while it ran (a click that navigates): then there is no value.
             string ran;
-            try { ran = Unquote(await RunScriptAsync(page, _scripts.RanCheck(run), ct).ConfigureAwait(false)); }
-            catch (Exception e) when (e is not OperationCanceledException and not AgentBrowserException) { return null; }
+            try { ran = Unquote(await RunScriptAsync(page, _scripts.RanCheck(run), ct, limit).ConfigureAwait(false)); }
+            catch (IsolatedScriptException) { return null; }
             if (ran != "false") return null;
-            text = await RunAsync(page, _scripts.Wrap(expression, run, viaEval: true), ct).ConfigureAwait(false)
+            text = await RunAsync(page, _scripts.Wrap(expression, run, viaEval: true), ct, limit).ConfigureAwait(false)
                 ?? throw new AgentBrowserException("js_error", "The page did not run the script.");
         }
         JsonObject answer;
@@ -763,12 +957,13 @@ public sealed partial class AgentBrowserBridge : IDisposable
         return value;
     }
 
-    private async Task<string?> RunAsync(IAgentBrowserPage page, string script, CancellationToken ct)
+    /// <summary>The script's answer; null when nothing came back or the engine says the script threw or did not run
+    /// (<see cref="IsolatedScriptException"/>). Every other failure (a deadline, a closed window, no page) goes on as it is.</summary>
+    private async Task<string?> RunAsync(IAgentBrowserPage page, string script, CancellationToken ct, Deadline? deadline)
     {
         string text;
-        try { text = await RunScriptAsync(page, script, ct).ConfigureAwait(false); }
-        catch (AgentBrowserException) { throw; }
-        catch (Exception e) when (e is not OperationCanceledException) { return null; }
+        try { text = await RunScriptAsync(page, script, ct, deadline).ConfigureAwait(false); }
+        catch (IsolatedScriptException) { return null; }
         text = Unquote(text);
         return text.Length == 0 || text == "null" || text == "undefined" ? null : text;
     }
@@ -824,7 +1019,7 @@ public sealed partial class AgentBrowserBridge : IDisposable
             string ready;
             try { ready = Unquote(await RunScriptAsync(page, "document.readyState", ct).ConfigureAwait(false)); }
             catch (AgentBrowserException e) when (e.Code == "no_page") { return true; } // an empty tab is loaded
-            catch (Exception e) when (e is not OperationCanceledException and not AgentBrowserException) { return false; } // between two documents
+            catch (IsolatedScriptException) { return false; } // between two documents
             if (load == "interactive" ? ready == "loading" : ready is not ("complete" or "")) return false;
         }
         if (urlPart is not null && !(await UrlAsync(page, ct).ConfigureAwait(false)).Contains(urlPart, StringComparison.Ordinal)) return false;
@@ -856,7 +1051,7 @@ public sealed partial class AgentBrowserBridge : IDisposable
     };
 
     private static double? Num(JsonObject p, string name) =>
-        p[name] is { } n && n.GetValueKind() == JsonValueKind.Number ? n.GetValue<double>() : null;
+        p[name] is { } n && n.GetValueKind() == JsonValueKind.Number ? n.Deserialize<double>() : null;
 
     /// <summary>browser.set_device's parameters: <c>clear: true</c> ends the device mode (null), else a preset and/or
     /// <c>width</c>+<c>height</c> (whole CSS pixels), <c>dpr</c>, <c>touch</c>, <c>platform</c>, <c>landscape</c>.</summary>

@@ -319,7 +319,10 @@ omp's own interface for them.
   backend (`CMUX_SOCKET_PATH`, see `AgentBrowserBridge`), so pages omp opens show there instead of in headless Chromium
   (each `browser.open_split` is a pane tab with its own web view, `ViewModels/PreviewTab`, valid until
   `surface.close` or the user closes it, so tabs of different omp processes never evict each other; `browser.wait`
-  answers ~1 s before `timeout_ms`, ahead of omp's socket timer; while the page shows a JavaScript dialog requests
+  answers ~1 s before `timeout_ms`, ahead of omp's socket timer; a page that stops answering costs at most 10 s per
+  script (`page_unresponsive`, the connection stays usable) and its screenshot and address come from the preview,
+  never from a page script; Nightly tabs hear an intent hint before an open, a goto or a link click (Augur v1,
+  preconnect only); while the page shows a JavaScript dialog requests
   answer `dialog_open` with its kind and text and `browser.press` Enter/Escape answers it (an alert omp caused is
   accepted at once; a confirm/prompt omp caused goes to the user's card after 10 s unanswered); on macOS the helper
   library runs in the app's own `WKContentWorld` (`Platform/Mac/IsolatedWorld`, without a user gesture) and element

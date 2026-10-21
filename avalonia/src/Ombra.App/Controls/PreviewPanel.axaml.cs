@@ -54,6 +54,7 @@ public partial class PreviewPanel : UserControl
         {
             Uncover(old);
             old.NavigationRequested -= OnNavigationRequested;
+            old.AddressCommitted -= OnAddressCommitted;
             old.TabNavigationRequested -= NavigateTab;
             old.TabClosed -= OnTabClosed;
             old.AddressFocusRequested -= FocusAddress;
@@ -81,6 +82,7 @@ public partial class PreviewPanel : UserControl
         if (_vm is { } vm)
         {
             vm.NavigationRequested += OnNavigationRequested;
+            vm.AddressCommitted += OnAddressCommitted;
             vm.TabNavigationRequested += NavigateTab;
             vm.TabClosed += OnTabClosed;
             vm.AddressFocusRequested += FocusAddress;
@@ -137,6 +139,20 @@ public partial class PreviewPanel : UserControl
     private void OnNavigationRequested(Uri uri)
     {
         if (_vm is { } vm) NavigateTab(vm.ActiveTab, uri);
+    }
+
+    /// <summary>
+    /// The user entered an address for a Nightly tab: Nightly opens the connection to it while the navigation starts
+    /// (Augur, <c>address_commit</c>), for the tab's window, or for the one its pane is about to get.
+    /// </summary>
+    private void OnAddressCommitted(Uri uri)
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        if (_vm is not { UseNightly: true, IsEngineUnavailable: false } vm || vm.ActiveTab.Popup is not null
+            || Ombra.ClientCore.Browser.SpeculationHint.For(Ombra.ClientCore.Browser.SpeculationHint.AddressCommit, uri) is not { } hint)
+            return;
+        if (_nightly.TryGetValue(vm.ActiveTab, out var pane)) ((NightlyPane)pane).Speculate(hint);
+        else if (Nightly.NightlyHost.Get().Runtime is { } runtime) runtime.Speculate(0, hint);
     }
 
     /// <summary>Loads <paramref name="uri"/> in <paramref name="tab"/>'s web view (created once the panel is in a window).</summary>
@@ -273,7 +289,7 @@ public partial class PreviewPanel : UserControl
     /// <summary>The agent's browser (AgentBrowserBridge) runs its scripts in the tab's web view and takes its screenshots.</summary>
     private static void Connect(PreviewTab tab, NativeWebView web)
     {
-        tab.RunScript = script => RunScriptAsync(web, script);
+        tab.RunScript = (script, _) => RunScriptAsync(web, script);
         tab.CaptureScreenshot = ct => CaptureScreenshotAsync(web, ct);
     }
 
@@ -362,7 +378,7 @@ public partial class PreviewPanel : UserControl
         var host = new PopupViewHost(popup) { IsVisible = tab == _vm?.ActiveTab };
         _popups[tab] = host;
         this.FindControl<Panel>("WebHost")!.Children.Add(host);
-        tab.RunScript = popup.RunScriptAsync;
+        tab.RunScript = (script, _) => popup.RunScriptAsync(script);
         tab.CaptureScreenshot = ct => Platform.WebViewSnapshot.CaptureAsync(host.Handle, ct);
         var (input, isolated) = Platform.NativeInputs.For(host.Handle); // the agent's input and helper world (B4)
         tab.SetNative(host.Handle, input, isolated);
@@ -419,7 +435,7 @@ public partial class PreviewPanel : UserControl
     {
         var pane = new NightlyPane { IsVisible = tab == _vm?.ActiveTab, AdoptWindow = adoptWindow, Page = tab.Page };
         _nightly[tab] = pane;
-        tab.RunScript = pane.Agent.RunScriptAsync;
+        tab.RunScript = pane.Agent.RunPageScriptAsync;
         tab.CaptureScreenshot = pane.Agent.CaptureAsync;
         tab.SetNative(null, pane.Agent, pane.Agent);
         var annotations = _vm is { } owner ? _nightlyAnnotations[tab] = new IsolatedPageAnnotations(pane.Agent, owner, () => _vm?.ActiveTab == tab) : null;
