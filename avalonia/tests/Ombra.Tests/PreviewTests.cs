@@ -652,4 +652,83 @@ public sealed class PreviewTests
     [InlineData("null", "")]
     [InlineData(null, "")]
     public void Script_results_are_decoded(string? raw, string expected) => Assert.Equal(expected, PreviewPanel.DecodeScriptString(raw));
+
+    // ── Site groups: four or more pages of one site are one chip with a list under it ──
+
+    [Theory]
+    [InlineData("https://codepen.io/dermalhealth/full/XJNNOWo", "codepen.io")]
+    [InlineData("https://www.pinterest.com/pin/1", "pinterest.com")]
+    [InlineData("https://news.bbc.co.uk/a", "bbc.co.uk")]
+    [InlineData("http://localhost:4321/?screen=menu", "localhost:4321")]
+    [InlineData("http://localhost:3000/", "localhost:3000")]
+    [InlineData("http://127.0.0.1:8000/docs", "127.0.0.1:8000")]
+    [InlineData("about:blank", null)]
+    [InlineData("file:///tmp/a.html", null)]
+    public void A_pages_site_is_its_registrable_domain_or_its_local_server(string url, string? key) =>
+        Assert.Equal(key, TabSiteGroup.SiteKey(new Uri(url)));
+
+    [AvaloniaFact]
+    public async Task Four_pages_of_one_site_become_one_chip_whose_list_opens_downward_and_two_left_are_tabs_again()
+    {
+        var (w, panel, main) = ShowPanel(720);
+        var vm = main.Preview;
+        PreviewTab Open(string id, string url, string title)
+        {
+            var tab = vm.OpenAgentTab(id);
+            Assert.Null(vm.NavigateTabForAgent(tab, url));
+            tab.Title = title;
+            return tab;
+        }
+        var pen = Open("pen", "https://codepen.io/dermalhealth/full/XJNNOWo", "Bold modern landing page");
+        var kiosks = Enumerable.Range(0, 3).Select(i => Open("k" + i, "http://localhost:4321/", "Kiosk · Mix")).ToList();
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(4, PanelTabs(panel).Count); // three of a site are still tabs
+        Assert.All(kiosks, k => Assert.Null(k.SiteGroup));
+
+        kiosks.Add(Open("k3", "http://localhost:4321/?screen=menu", "Kiosk · Mix"));
+        Dispatcher.UIThread.RunJobs();
+        var group = Assert.IsType<TabSiteGroup>(kiosks[0].SiteGroup);
+        Assert.Equal((4, "Kiosk · Mix", "localhost:4321"), (group.Count, group.Label, group.Key));
+        Assert.Equal(kiosks, group.Members);
+        Assert.Null(pen.SiteGroup);
+        var chip = panel.GetVisualDescendants().OfType<TabGroupChip>().Single(c => c.IsEffectivelyVisible);
+        Assert.Equal(2, PanelTabs(panel).Count); // codepen's tab and the group's chip
+        Assert.True(chip.IsActive); // the newest Kiosk page is the one shown
+        Assert.Equal("4", chip.FindControl<TextBlock>("CountText")!.Text);
+
+        // The chip opens its list under it; a row shows its page and closes the list
+        chip.FindControl<Button>("ChipButton")!.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(group.IsOpen);
+        var popup = chip.FindControl<Popup>("ListPopup")!;
+        Assert.True(popup.IsOpen);
+        Assert.Equal(PlacementMode.BottomEdgeAlignedLeft, popup.Placement);
+        var rows = chip.FindControl<ItemsControl>("Rows")!.GetRealizedContainers().ToList();
+        Assert.Equal(4, rows.Count);
+        for (var t = 0; t < 25; t++) // the list's entrance (card, then rows 40 ms apart) settles
+        {
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            await Task.Delay(20);
+        }
+        Assert.All(rows, r => Assert.Equal(1, ((Avalonia.Controls.Presenters.ContentPresenter)r).Child!.Opacity));
+        MicroUxTabTests.Shot(w, "site-group-open");
+        var second = rows[1].GetVisualDescendants().OfType<Button>().First(b => b.Classes.Contains("menu-item"));
+        second.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+        Assert.Same(kiosks[1], vm.ActiveTab);
+        Assert.False(group.IsOpen);
+        Assert.True(chip.IsActive);
+
+        // Closing pages: three stay a group (no flicker), two are tabs again
+        main.ClosePageCommand.Execute(kiosks[3]);
+        Assert.Equal(3, group.Count);
+        Assert.Same(group, kiosks[0].SiteGroup);
+        main.ClosePageCommand.Execute(kiosks[2]);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Null(kiosks[0].SiteGroup);
+        Assert.Equal(3, PanelTabs(panel).Count);
+        Assert.DoesNotContain(panel.GetVisualDescendants().OfType<TabGroupChip>(), c => c.IsEffectivelyVisible);
+        w.Close();
+        await main.DisposeAsync();
+    }
 }

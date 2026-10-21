@@ -64,7 +64,12 @@
           <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:PreviewTab">
-              <Border Classes="panel-tab" Classes.active="{Binding IsActive}" IsVisible="{Binding ShowsInStrip}" ctl:TabMenus.Enabled="True">
+              <Panel IsVisible="{Binding HasStripItem}">
+                <!-- Four or more pages of one site: one chip in the first one's place, the others nowhere (TabSiteGroup) -->
+                <ctl:TabGroupChip Group="{Binding SiteGroup}" IsVisible="{Binding IsGroupHead}" IsActive="{Binding SiteGroup.ContainsActive, FallbackValue=False}"
+                                  SelectCommand="{Binding $parent[ctl:PreviewPanel].((vm:PreviewViewModel)DataContext).SelectTabCommand}"
+                                  CloseCommand="{Binding $parent[ctl:PreviewPanel].((vm:PreviewViewModel)DataContext).CloseTabCommand}" />
+              <Border Classes="panel-tab" Classes.active="{Binding IsActive}" IsVisible="{Binding ShowsAsTab}" ctl:TabMenus.Enabled="True">
                 <DockPanel>
                   <Button DockPanel.Dock="Right" Classes="icon panel-tab-close" IsEnabled="{Binding CanClose}"
                           Command="{Binding $parent[ctl:PreviewPanel].((vm:PreviewViewModel)DataContext).CloseTabCommand}" CommandParameter="{Binding}"
@@ -77,6 +82,7 @@
                   </Button>
                 </DockPanel>
               </Border>
+              </Panel>
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>

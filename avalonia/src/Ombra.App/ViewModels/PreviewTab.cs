@@ -29,6 +29,11 @@ public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableO
     /// <summary>The user opened it with the strip's + (closable, unlike their first tab).</summary>
     public bool IsOpenedByUser { get; init; }
 
+    /// <summary>omp let go of this agent tab (<c>surface.close</c>) while the user was looking at it: it stays only until
+    /// another tab is shown (or the user goes somewhere in it, which makes it theirs), so an agent that opens and lets
+    /// go of a page on every step does not leave a tab behind each time.</summary>
+    internal bool IsReleasedByAgent { get; set; }
+
     /// <summary>The engine hooks of this tab's web view (questions, loading events, downloads, pop-ups); configured by <see cref="PreviewViewModel"/>.</summary>
     public BrowserPageHooks Page { get; } = new();
 
@@ -54,6 +59,22 @@ public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableO
 
     /// <summary>The strip lists it: an empty tab of the user's only while it is the one shown (no "New tab" left behind).</summary>
     public bool ShowsInStrip => HasContent || IsActive;
+
+    /// <summary>The site group the strips show this page in (<see cref="TabSiteGroup"/>); null: a tab of its own.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowsAsTab), nameof(HasStripItem))]
+    private TabSiteGroup? _siteGroup;
+
+    /// <summary>The group's first page: the strip shows the group's chip in its place, and nothing for the others.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasStripItem))]
+    private bool _isGroupHead;
+
+    /// <summary>The strip shows it as a tab (in the strip and not in a group).</summary>
+    public bool ShowsAsTab => ShowsInStrip && SiteGroup is null;
+
+    /// <summary>The strip has something in its place: the tab, or its group's chip.</summary>
+    public bool HasStripItem => ShowsAsTab || IsGroupHead;
 
     /// <summary>
     /// omp's browser tool acts on this page until the result is disposed (and <see cref="AgentGrace"/> after): what the
@@ -82,8 +103,13 @@ public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableO
     }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Header), nameof(ToolTip), nameof(HasContent), nameof(ShowsInStrip))]
+    [NotifyPropertyChangedFor(nameof(Header), nameof(ToolTip), nameof(HasContent), nameof(ShowsInStrip), nameof(ShowsAsTab), nameof(HasStripItem), nameof(ShortAddress))]
     private Uri? _url;
+
+    /// <summary>The address without its scheme or a lone trailing slash (<c>localhost:4321/?screen=menu</c>): what tells
+    /// apart a site group's pages that share a title.</summary>
+    public string ShortAddress => Url is not { } u ? ""
+        : ((u.IsDefaultPort ? u.Host : u.Host + ":" + u.Port) + (u.PathAndQuery == "/" ? "" : u.PathAndQuery));
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(Header), nameof(ToolTip))]
@@ -93,7 +119,7 @@ public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableO
 
     /// <summary>The tab the pane shows.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowsInStrip))]
+    [NotifyPropertyChangedFor(nameof(ShowsInStrip), nameof(ShowsAsTab), nameof(HasStripItem))]
     private bool _isActive;
 
     /// <summary>What the tab strip shows: the page title, its host, or "New tab".</summary>

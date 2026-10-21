@@ -818,4 +818,36 @@ public sealed class AgentBrowserTests
         Assert.Equal("not_found", Code(await UrlOf(b)));
         await main.DisposeAsync();
     }
+
+    [AvaloniaFact]
+    public async Task An_agent_that_opens_and_lets_go_of_a_page_each_step_leaves_one_tab_not_one_per_step()
+    {
+        // A KSO session: each eval cell did browser.open({name, url}) … browser.close, so omp let go of the tab shown
+        // every time and the strip filled with "Kiosk …" tabs, one per cell
+        var main = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs());
+        var bridge = new AgentBrowserBridge(new PreviewAgentHost(main));
+        var preview = main.Preview;
+        async Task<string> OpenAndRelease()
+        {
+            var id = (await Call(bridge, "browser.open_split", new JsonObject { ["url"] = "http://localhost:4321/" }))["result"]!["surface_id"]!.GetValue<string>();
+            Assert.Equal("ok", Code(await Call(bridge, "surface.close", new JsonObject { ["surface_id"] = id })));
+            return id;
+        }
+
+        var first = await OpenAndRelease();
+        Assert.Equal(first, preview.ActiveTab.Id); // the page stays while it is on screen
+        string last = first;
+        for (var i = 0; i < 4; i++) last = await OpenAndRelease();
+        Assert.Equal(["", last], preview.Tabs.Select(t => t.Id));
+        Assert.Equal(["", last], main.PanelTabs.Where(t => t.IsPage).Select(t => t.Page!.Id));
+
+        // Shown elsewhere, the page omp let go of goes; one the user went somewhere in is theirs and stays
+        preview.SelectTabCommand.Execute(preview.Tabs[0]);
+        Assert.Equal([""], preview.Tabs.Select(t => t.Id));
+        var kept = await OpenAndRelease();
+        preview.NavigateCommand.Execute("localhost:4321/menu");
+        preview.SelectTabCommand.Execute(preview.Tabs[0]);
+        Assert.Equal(["", kept], preview.Tabs.Select(t => t.Id));
+        await main.DisposeAsync();
+    }
 }

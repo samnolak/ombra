@@ -53,6 +53,8 @@ public partial class RightPanel : UserControl
         Dispatcher.UIThread.Post(() =>
         {
             if (_vm?.PanelTabs.FirstOrDefault(t => t.IsActive) is not { } active) return;
+            // A page in a site group is in the strip as its group's chip, in the group's first page's place
+            if (active.SiteGroup is { Members.Count: > 0 } group && _vm.PanelTabs.FirstOrDefault(t => t.Page == group.Members[0]) is { } head) active = head;
             if (PanelTabItems.ContainerFromItem(active) is { } container) container.BringIntoView();
         }, DispatcherPriority.Loaded);
 }

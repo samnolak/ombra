@@ -98,6 +98,14 @@ public sealed partial class PreviewViewModel : ObservableObject
     /// right panel's strip lists them (MainViewModel.Panes.cs).</summary>
     public ObservableCollection<PreviewTab> Tabs { get; }
 
+    /// <summary>Four or more pages of one site show as one chip with a list (<see cref="PreviewTab.SiteGroup"/>).</summary>
+    private readonly TabSiteGrouping _siteGroups = new();
+
+    private void OnTabChangedForGroups(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(PreviewTab.Url) or nameof(PreviewTab.ShowsInStrip)) _siteGroups.Regroup(Tabs);
+    }
+
     /// <summary>The tab the pane shows; the page properties of this model (address, title, loading…) are its.</summary>
     [ObservableProperty]
     private PreviewTab _activeTab;
@@ -147,6 +155,13 @@ public sealed partial class PreviewViewModel : ObservableObject
         Tabs = [Configure(new PreviewTab("", isAgentTab: false) { IsActive = true })];
         _activeTab = Tabs[0];
         Dialogs.Follow(_activeTab.Dialogs);
+        Tabs[0].PropertyChanged += OnTabChangedForGroups;
+        Tabs.CollectionChanged += (_, e) =>
+        {
+            foreach (var gone in e.OldItems?.OfType<PreviewTab>() ?? []) gone.PropertyChanged -= OnTabChangedForGroups;
+            foreach (var added in e.NewItems?.OfType<PreviewTab>() ?? []) added.PropertyChanged += OnTabChangedForGroups;
+            _siteGroups.Regroup(Tabs);
+        };
         Suggestions.CollectionChanged += (_, _) =>
         {
             OnPropertyChanged(nameof(HasSuggestions));
@@ -234,6 +249,7 @@ public sealed partial class PreviewViewModel : ObservableObject
             Message = error;
             return;
         }
+        ActiveTab.IsReleasedByAgent = false; // the user goes somewhere in a tab omp let go of: it is theirs now
         Message = "";
         Address = Display(uri);
         CurrentUrl = uri;
@@ -276,11 +292,14 @@ public sealed partial class PreviewViewModel : ObservableObject
         TabNavigationRequested?.Invoke(tab, new Uri("about:blank"));
     }
 
-    /// <summary>omp's browser tool opened a page (a cmux surface): a tab of its own, shown unless the user picked another.</summary>
+    /// <summary>omp's browser tool opened a page (a cmux surface): a tab of its own, shown unless the user picked another.
+    /// Shown in place of a tab omp let go of while it was on screen, which then goes (<see cref="OnActiveTabChanged"/>).</summary>
     public PreviewTab OpenAgentTab(string id)
     {
         var tab = Configure(new PreviewTab(id, isAgentTab: true));
-        Tabs.Add(tab);
+        var replaces = FollowsAgent && ActiveTab is { IsReleasedByAgent: true } released ? Tabs.IndexOf(released) : -1;
+        if (replaces > 0) Tabs.Insert(replaces + 1, tab);
+        else Tabs.Add(tab);
         _agentTab = tab;
         if (FollowsAgent) ActiveTab = tab;
         return tab;
@@ -450,11 +469,16 @@ public sealed partial class PreviewViewModel : ObservableObject
         RemoveTab(tab);
     }
 
-    /// <summary>omp is done with <paramref name="tab"/>: it leaves the pane, unless the user is looking at it (then it stays until they close it).</summary>
+    /// <summary>omp is done with <paramref name="tab"/>: it leaves the pane, unless the user is looking at it (then it
+    /// stays until another tab is shown: <see cref="PreviewTab.IsReleasedByAgent"/>).</summary>
     public void CloseTabForAgent(PreviewTab tab)
     {
         if (_agentTab == tab) _agentTab = null;
-        if (tab == ActiveTab && Tabs.Contains(tab)) return;
+        if (tab == ActiveTab && Tabs.Contains(tab))
+        {
+            tab.IsReleasedByAgent = true;
+            return;
+        }
         RemoveTab(tab);
     }
 
@@ -518,11 +542,13 @@ public sealed partial class PreviewViewModel : ObservableObject
         Message = value.Message;
         LoadError = value.LoadError;
         IsCrashed = value.Crashed;
-        // A tab the user opened and left empty goes (it would only be a "New tab" in the strip)
-        if (_leaving is { IsOpenedByUser: true, HasContent: false } empty && empty != value && empty != _closing)
+        // A tab the user opened and left empty goes (it would only be a "New tab" in the strip), and so does one omp let
+        // go of while it was shown
+        if (_leaving is { } left && left != value && left != _closing
+            && (left is { IsOpenedByUser: true, HasContent: false } || left.IsReleasedByAgent))
         {
             _leaving = null;
-            RemoveTab(empty);
+            RemoveTab(left);
         }
         _leaving = null;
     }
