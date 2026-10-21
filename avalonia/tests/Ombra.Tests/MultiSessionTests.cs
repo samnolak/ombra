@@ -43,14 +43,14 @@ public sealed class MultiSessionTests
 
     private sealed record Opened(MainWindow W, MainViewModel Vm, AttentionTests.RecordingNotifier N, string Root, string Cwd);
 
-    private static async Task<Opened> OpenAsync(string? resume = null, string? root = null, string? cwd = null)
+    private static async Task<Opened> OpenAsync(string? resume = null, string? root = null, string? cwd = null, DraftStore? drafts = null)
     {
         root ??= TestProcesses.TempDir("multi-sessions");
         // As omp records it: its working directory with symbolic links resolved (macOS: /var is /private/var)
         cwd ??= SessionCatalog.ResolveLinks(TestProcesses.TempDir("multi-project"));
         var s = new SessionController(TestProcesses.FakeFactory("multi", root), new LaunchRequest(cwd, resume, ApprovalMode: "write"));
         var n = new AttentionTests.RecordingNotifier();
-        var vm = new MainViewModel(s, new AppArgs());
+        var vm = new MainViewModel(s, new AppArgs(), drafts: drafts);
         var w = new MainWindow { DataContext = vm, Width = 1180, Height = 760, Notifier = n };
         w.Show();
         vm.OnWindowOpened();
@@ -272,6 +272,134 @@ public sealed class MultiSessionTests
 
         vm.CurrentDialog.AllowCommand.Execute(null);
         await Until(() => vm.Phase == SessionPhase.Ready && Row(vm, file)?.Status == SessionStatus.None, "A finished");
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    /// <summary>The row of <paramref name="file"/> as drawn (its <c>Button.session</c>).</summary>
+    private static Button RowButton(Window w, string file) => w.GetVisualDescendants().OfType<Button>()
+        .Single(b => b.Classes.Contains("session") && b.DataContext is SessionItemViewModel i && i.Model.Path == file);
+
+    private static Ombra.App.Controls.Icon RowIcon(Window w, string file, string cls) =>
+        RowButton(w, file).GetVisualDescendants().OfType<Ombra.App.Controls.Icon>().Single(i => i.Classes.Contains(cls));
+
+    private static Avalonia.Controls.Shapes.Ellipse RowDot(Window w, string file) =>
+        RowButton(w, file).GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Ellipse>().Single(e => e.Classes.Contains("session-dot"));
+
+    [AvaloniaFact]
+    public async Task A_chat_not_shown_with_unsent_input_shows_a_pencil_until_it_is_sent_or_cleared()
+    {
+        var root = TestProcesses.TempDir("multi-sessions");
+        var cwd = SessionCatalog.ResolveLinks(TestProcesses.TempDir("multi-project"));
+        // A chat not open whose draft was saved earlier (DraftStore keeps it for its session file)
+        var saved = ChatScrollTests.WriteSession(root, cwd, "Saved chat", ChatScrollTests.LongConversation(1));
+        using var drafts = new DraftStore(null);
+        drafts.Update("saved-draft", d => d with { Composer = new DraftContent("finish this later", [], [], []) }, cwd, saved);
+        var (w, vm, _, _, _) = await OpenAsync(root: root, cwd: cwd, drafts: drafts);
+        await RunAsync(vm, "first in A");
+        var fileA = vm.Session.SessionFile!;
+        await Until(() => Row(vm, saved) is { HasDraft: true } && Row(vm, fileA) is not null, "the saved draft marks its chat");
+
+        // Text in the chat shown marks nothing; left for another chat, its row gets the pencil
+        vm.ComposerText = "half a thought";
+        Assert.False(Row(vm, fileA)!.HasDraft);
+        await NewChatAsync(vm);
+        await Until(() => Row(vm, fileA) is { HasDraft: true }, "A left with unsent text");
+        Frame(w);
+        var pencil = RowIcon(w, fileA, "session-draft");
+        Assert.True(pencil.IsEffectivelyVisible);
+        Assert.Equal(Loc.T("Unsent draft"), ToolTip.GetTip(pencil));
+        Assert.Equal(Loc.T("Unsent draft"), Avalonia.Automation.AutomationProperties.GetName(pencil));
+        Assert.Contains(Loc.T("Unsent draft"), Avalonia.Automation.AutomationProperties.GetName(RowButton(w, fileA)));
+        Assert.True(RowIcon(w, saved, "session-draft").IsEffectivelyVisible);
+
+        // Back in A the draft is in its composer (the row shown has no pencil); sent, it leaves no pencil behind
+        await vm.OpenSessionCommand.ExecuteAsync(Row(vm, fileA));
+        Assert.Equal("half a thought", vm.ComposerText);
+        Assert.False(Row(vm, fileA)!.HasDraft);
+        vm.SendCommand.Execute(null);
+        await Until(() => vm.Phase == SessionPhase.Ready && vm.Rows.OfType<UserRowViewModel>().Any(u => u.Text == "half a thought")
+            && vm.Rows.OfType<AssistantRowViewModel>().LastOrDefault() is { HasText: true }, "the draft sent");
+        await NewChatAsync(vm);
+        Frame(w);
+        Assert.False(Row(vm, fileA)!.HasDraft);
+        Assert.False(RowIcon(w, fileA, "session-draft").IsEffectivelyVisible);
+        Assert.DoesNotContain(Loc.T("Unsent draft"), Avalonia.Automation.AutomationProperties.GetName(RowButton(w, fileA)));
+
+        // The chat that was not open: opened, its draft is there; cleared, its pencil goes once another chat is shown
+        Assert.True(Row(vm, saved)!.HasDraft);
+        await vm.OpenSessionCommand.ExecuteAsync(Row(vm, saved));
+        await Until(() => vm.ComposerText == "finish this later", "the saved draft in its composer");
+        vm.ComposerText = "";
+        await vm.OpenSessionCommand.ExecuteAsync(Row(vm, fileA));
+        await Until(() => Row(vm, saved) is { HasDraft: false }, "the cleared draft unmarked");
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task A_finished_chat_shows_a_check_and_a_waiting_one_the_yellow_attention_dot()
+    {
+        var (w, vm, _, _, _) = await OpenAsync();
+        // A asks for an approval in the background
+        await RunAsync(vm, "first in A");
+        var fileA = vm.Session.SessionFile!;
+        await SendAsync(vm, "LONG, then APPROVE a command");
+        // B finishes its run in the background
+        var b = await NewChatAsync(vm);
+        await RunAsync(vm, "first in B");
+        var fileB = b.SessionFile!;
+        await SendAsync(vm, "LONG second in B");
+        // C keeps unsent text
+        var c = await NewChatAsync(vm);
+        await RunAsync(vm, "first in C");
+        var fileC = c.SessionFile!;
+        vm.ComposerText = "a reply to finish later";
+        await NewChatAsync(vm);
+
+        await Until(() => Row(vm, fileA)?.Status == SessionStatus.Waiting, "A waits on the user");
+        await Until(() => Row(vm, fileB)?.Status == SessionStatus.Unread, "B finished, not seen");
+        await Until(() => Row(vm, fileC) is { HasDraft: true }, "C has a draft");
+        Frame(w);
+
+        // Waiting: the yellow dot (the attention colour, pulsing), no check
+        var waiting = RowDot(w, fileA);
+        Assert.True(waiting.IsEffectivelyVisible);
+        Assert.Contains("waiting", waiting.Classes);
+        Assert.Equal(((Avalonia.Media.ISolidColorBrush)w.FindResource(w.ActualThemeVariant, "GuiStatusAttention")!).Color,
+            ((Avalonia.Media.ISolidColorBrush)waiting.Fill!).Color);
+        Assert.False(RowIcon(w, fileA, "session-done").IsEffectivelyVisible);
+        Assert.Equal(Loc.T("Needs your input"), ToolTip.GetTip(waiting));
+
+        // Finished: a check, no dot
+        var done = RowIcon(w, fileB, "session-done");
+        Assert.True(done.IsEffectivelyVisible);
+        Assert.False(RowDot(w, fileB).IsEffectivelyVisible);
+        Assert.Equal(Loc.T("omp finished · new reply"), ToolTip.GetTip(done));
+        Assert.Equal(Loc.T("omp finished · new reply"), Avalonia.Automation.AutomationProperties.GetName(done));
+        Assert.Equal($"{Row(vm, fileB)!.Title}, {Loc.T("omp finished · new reply")}", Avalonia.Automation.AutomationProperties.GetName(RowButton(w, fileB)));
+
+        // A draft marks C with the pencil and no status
+        Assert.True(RowIcon(w, fileC, "session-draft").IsEffectivelyVisible);
+        Assert.False(RowDot(w, fileC).IsEffectivelyVisible);
+        MicroUxTabTests.Shot(w, "sidebar-marks");
+        w.RequestedThemeVariant = Avalonia.Styling.ThemeVariant.Dark;
+        Frame(w);
+        MicroUxTabTests.Shot(w, "sidebar-marks-dark");
+        w.RequestedThemeVariant = null;
+
+        // The chips keep their meaning: Unread lists the finished chat, Needs input the waiting one
+        vm.SetStatusFilterCommand.Execute(SessionStatusFilter.Unread);
+        Assert.Equal([fileB], vm.SessionGroups.SelectMany(g => g.Items).Select(i => i.Model.Path));
+        vm.SetStatusFilterCommand.Execute(SessionStatusFilter.NeedsInput);
+        Assert.Equal([fileA], vm.SessionGroups.SelectMany(g => g.Items).Select(i => i.Model.Path));
+        vm.SetStatusFilterCommand.Execute(SessionStatusFilter.NeedsInput);
+
+        // Seen, the check goes
+        await vm.OpenSessionCommand.ExecuteAsync(Row(vm, fileB));
+        Assert.Equal(SessionStatus.None, Row(vm, fileB)!.Status);
+        Frame(w);
+        Assert.False(RowIcon(w, fileB, "session-done").IsEffectivelyVisible);
         await vm.DisposeAsync();
         w.Close();
     }

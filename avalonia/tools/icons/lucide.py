@@ -98,7 +98,6 @@ MAP = {
     "IconBolt": "zap",                         # fast mode
     "IconExtendedContext": "move-horizontal",
     "IconAdvisor": "eye",
-    "IconHand": "hand",                        # a session waits for the user
     "IconSpinner": "loader-circle",            # a running tool call (it turns)
     # Requirement states (Icons.Workspace.axaml)
     "IconCheckCircle": "circle-check",

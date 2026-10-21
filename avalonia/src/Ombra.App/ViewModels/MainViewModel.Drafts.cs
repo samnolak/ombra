@@ -69,6 +69,8 @@ public sealed partial class MainViewModel
         // Authentication replies are credentials, not chat drafts.
         var reply = open.InFlightReply ?? (open.Controller.Snapshot().SigningIn is null ? dialog?.ReplyForRecovery ?? "" : "");
         _draftStore.Update(open.DraftId, d => d with { Composer = content, QuestionReply = reply }, open.DraftProject, open.DraftSessionFile);
+        // Input recovered into a chat in the background changes its row's pencil (the shown chat's row has none)
+        if (open != _open) SetDraftMarks();
     }
 
     private bool FlushDrafts()
@@ -224,6 +226,7 @@ public sealed partial class MainViewModel
         }
         open.ComposerMessage = Loc.T("Recovered unsent input. Review it before sending; nothing was sent automatically.");
         if (open == _open) ComposerMessage = open.ComposerMessage;
+        else SetDraftMarks();
     }
 
     private void RecoverReply(OpenSession open, DialogViewModel dialog)

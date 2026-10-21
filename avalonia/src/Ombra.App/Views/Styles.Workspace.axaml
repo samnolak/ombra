@@ -133,7 +133,8 @@
   <Style Selector="Button.session-action.on">
     <Setter Property="Background" Value="Transparent" />
   </Style>
-  <!-- What omp is doing in a session: working (pulsing), needs your input, a reply you have not seen, stopped by an error -->
+  <!-- What omp is doing in a session: working (pulsing), needs your input (the attention yellow), stopped by an error;
+       a finished run not seen yet is a check (session-done) -->
   <Style Selector="Ellipse.session-dot">
     <Setter Property="Width" Value="8" />
     <Setter Property="Height" Value="8" />
@@ -144,24 +145,26 @@
   <Style Selector="Ellipse.session-dot.running">
     <Setter Property="ctl:Pulse.Low" Value="0.3" />
   </Style>
-  <!-- Waiting on the user (an approval or a question): a raised hand in the waiting colour, gently pulsing -->
-  <Style Selector="ctl|Icon.session-hand">
-    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiStatusWaiting}" />
-    <Setter Property="StrokeThickness" Value="1.75" />
-    <Setter Property="ctl:Pulse.Low" Value="0.55" />
-  </Style>
+  <!-- Waiting on the user (an approval or a question): the brand yellow, gently pulsing; the only yellow mark in the
+       list, so yellow always means the chat needs you -->
   <Style Selector="Ellipse.session-dot.waiting">
-    <Setter Property="Fill" Value="{DynamicResource GuiStatusWaiting}" />
-  </Style>
-  <!-- Unread: the brand yellow with a deep amber ring in light (yellow alone is 2.1:1 on the sidebar, under the 3:1 a
-       graphic needs; a darker yellow would match the waiting dot). Dark needs no ring. -->
-  <Style Selector="Ellipse.session-dot.unread">
-    <Setter Property="Fill" Value="{DynamicResource GuiStatusUnread}" />
-    <Setter Property="Stroke" Value="{DynamicResource GuiStatusUnreadRing}" />
+    <Setter Property="Fill" Value="{DynamicResource GuiStatusAttention}" />
+    <Setter Property="Stroke" Value="{DynamicResource GuiStatusAttentionRing}" />
     <Setter Property="StrokeThickness" Value="1.5" />
+    <Setter Property="ctl:Pulse.Low" Value="0.55" />
   </Style>
   <Style Selector="Ellipse.session-dot.error">
     <Setter Property="Fill" Value="{DynamicResource GuiStatusError}" />
+  </Style>
+  <!-- Finished, the reply not seen yet: a check in the success green -->
+  <Style Selector="ctl|Icon.session-done">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiStatusSuccess}" />
+    <Setter Property="StrokeThickness" Value="2.5" />
+  </Style>
+  <!-- Unsent input in a chat not shown: a small pencil before the title, in the secondary text colour -->
+  <Style Selector="ctl|Icon.session-draft">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="VerticalAlignment" Value="Center" />
   </Style>
   <!-- The sidebar's right edge: drag to resize (a hairline in the focus colour, centred on the edge, while hovered or dragged) -->
   <Style Selector="Border.sidebar-grip-line">
