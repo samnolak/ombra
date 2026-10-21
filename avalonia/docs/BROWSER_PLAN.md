@@ -130,6 +130,21 @@ Done (`ClientCore/AgentBrowserBridge.cs`, `AgentBrowserScripts.cs`; `ViewModels/
   `AgentBrowserTests.Omps_tabs_show_in_the_preview_and_the_users_pick_holds`, `PreviewTests.Omps_tabs_show_in_a_strip_the_user_can_switch_and_close`
 - [x] R7: `browser.wait` answers 1 s before `timeout_ms` (¼ earlier under 4 s), also when the page never answers a
   script — `AgentBrowserTests.Waiting_answers_about_a_second_before_omp_gives_up_on_the_socket`
+- [x] bounded failures (2026-10-21): every page script and isolated-library call has a 10 s deadline (a browser.eval
+  `timeout_ms` up to 2 min, answered ¼ / 1 s early like `wait`, one budget for its fallback scripts), every native
+  input batch 15 s (after the user's 10 s), and every request as a whole 29 s (an action's steps share it; `wait` keeps
+  its own);
+  past it the request answers `page_unresponsive` (`script_timeout` past an asked `timeout_ms`) and the engine forgets
+  the script (Nightly drops its late `ScriptResult`); a closed window or a stopped runtime answers `window_closed` /
+  `runtime_disconnected`, never a null value; screenshots and `browser.url.get` take the preview's own address, never a
+  page script, and omp's `document.title` / `window.innerWidth` reads wait 300 ms at most (then the preview's title;
+  omp's screenshot goes on without the width). omp's "cmux socket is not connected" after a hung page: omp's client
+  destroys the socket at its 30 s timer, reconnects for the next queued request, and the destroyed socket's late
+  `close` event clears the new one; answering inside that timer avoids it — `AgentBrowserBridgeTimeoutTests`
+- [x] Augur v1 intent hints (tabs whose engine takes them, `IAgentSpeculation`: Nightly): `agent_open` before the tab
+  is made (window 0), `agent_goto` before `browser.navigate`, `agent_click` when the click target is inside an http(s)
+  `<a href>` / `<area href>` that is no download, as the pointer sets off (lead: the travel left); cancelled when the
+  action fails or the click lands on something else — `AgentBrowserBridgeTimeoutTests`
 - [x] open JS dialog → `dialog_open` with kind and text, nothing sent into the page, `browser.press` Enter/Escape
   answers it; a script that opens one answers at once — `…An_open_dialog_is_reported_instead_of_stalling_later_requests`,
   `…A_script_that_opens_a_dialog_answers_dialog_open_at_once` (modal state from B1's `DialogBroker.CurrentModal`)

@@ -76,7 +76,7 @@ public sealed partial class NightlyRuntimeTests
         Assert.Equal("UA \"x\"", json["userAgent"]!.GetValue<string>());
         Assert.True(json["touch"]!.GetValue<bool>());
         Assert.False(json["landscape"]!.GetValue<bool>());
-        Assert.Equal(4u, NightlyProtocol.Version);
+        Assert.Equal(5u, NightlyProtocol.Version);
 
         var off = NightlyProtocol.DeviceMessage(5, null)!;
         Assert.Equal(7u, BinaryPrimitives.ReadUInt32LittleEndian(off.AsSpan(28)));
@@ -100,7 +100,8 @@ public sealed partial class NightlyRuntimeTests
 
     /// <summary>user.js: no "Update Complete!" toast on the runtime's first start, a page's popup a tab of the Browser
     /// page's window (not a Nightly window outside Ombra), the previous session resumed as in a standalone Nightly (Zen
-    /// keeps only the pinned tabs otherwise), and the appearance's current state.</summary>
+    /// keeps only the pinned tabs otherwise), the embed's 60 Hz cap, media devices listed while the window is not key,
+    /// and the appearance's current state.</summary>
     [Fact]
     public void UserPrefsCarryTheToastAndTheTheme()
     {
@@ -117,6 +118,8 @@ public sealed partial class NightlyRuntimeTests
             Assert.Contains("user_pref(\"browser.link.open_newwindow.restriction\", 0);", prefs);
             Assert.Contains("user_pref(\"browser.startup.page\", 3);", prefs);
             Assert.Contains("user_pref(\"browser.sessionstore.resume_from_crash\", true);", prefs);
+            Assert.Contains("user_pref(\"layout.frame_rate\", 60);", prefs);
+            Assert.Contains("user_pref(\"media.devices.unfocused.enabled\", true);", prefs);
 
             runtime.DarkTheme = true;
             runtime.WriteUserPrefs();

@@ -172,8 +172,17 @@ internal sealed class AgentNativeScenario : IScenario
             return new AgentPageState(url is null ? null : new Uri(url), false, false, null);
         }
 
-        public async Task<string> RunScriptAsync(string script, CancellationToken ct) =>
-            await (await MacRuntime.OnMainAsync(() => view.EvalRawAsync(script))) ?? "";
+        public async Task<string> RunScriptAsync(string script, CancellationToken ct)
+        {
+            try
+            {
+                return await (await MacRuntime.OnMainAsync(() => view.EvalRawAsync(script))) ?? "";
+            }
+            catch (JsException e)
+            {
+                throw new IsolatedScriptException(e.Message); // the engine's word that the script threw or did not run
+            }
+        }
 
         public Task<AgentScreenshot> CaptureAsync(CancellationToken ct) =>
             Task.FromException<AgentScreenshot>(new AgentBrowserException("not_supported", "No capture in this scenario."));

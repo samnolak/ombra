@@ -366,6 +366,93 @@ public sealed class PetsTests
         await Until(() => second.IsFreed, "the last sheets freed", 10);
     }
 
+    [Fact]
+    public void In_the_apps_window_a_looping_pose_takes_half_the_frames_it_does_in_its_own()
+    {
+        // Idle, looping: every frame redraws the whole window it is in, so 15 a second in the app's window and 30 in
+        // the pet's own small one; carried, up to 90 anywhere
+        var (pet, clock) = NewPet();
+        var d = pet.Director;
+        Assert.Equal(("idle", "loop"), (d.State, d.Mode));
+        Assert.Equal(1 / 15.0, OniView.FrameInterval(d, carried: false, ownWindow: false), 6);
+        Assert.Equal(1 / 30.0, OniView.FrameInterval(d, carried: false, ownWindow: true), 6);
+        Assert.Equal(.011, OniView.FrameInterval(d, carried: true, ownWindow: false), 6);
+        // A transition plays at 30 wherever it is; the loop it leads to goes back to 15 in the app's window
+        pet.Show("working");
+        clock.Run(.1, pet);
+        Assert.Equal("bridge", d.Mode);
+        Assert.Equal(1 / 30.0, OniView.FrameInterval(d, carried: false, ownWindow: false), 6);
+        clock.Run(3, pet);
+        Assert.Equal(("working", "loop"), (d.State, d.Mode));
+        Assert.Equal(1 / 15.0, OniView.FrameInterval(d, carried: false, ownWindow: false), 6);
+        // Joy's drawings change every 44 ms: 30 a second while it lasts
+        (pet, clock) = NewPet();
+        d = pet.Director;
+        pet.Show("done");
+        clock.Run(1.5, pet);
+        Assert.Equal(("joy", "loop"), (d.State, d.Mode));
+        Assert.Equal(1 / 30.0, OniView.FrameInterval(d, carried: false, ownWindow: false), 6);
+        // A question nobody answers for a while: 10 a second in the app's window, 15 in its own
+        (pet, clock) = NewPet();
+        d = pet.Director;
+        pet.Show("waiting");
+        clock.Run(2, pet);
+        Assert.Equal(("waiting", "loop"), (d.State, d.Mode));
+        Assert.Equal(1 / 15.0, OniView.FrameInterval(d, carried: false, ownWindow: false), 6);
+        clock.Now += TimeSpan.FromSeconds(OniView.AlertSlow + 1);
+        pet.Sync();
+        Assert.Equal(1 / 10.0, OniView.FrameInterval(d, carried: false, ownWindow: false), 6);
+        Assert.Equal(1 / 15.0, OniView.FrameInterval(d, carried: false, ownWindow: true), 6);
+    }
+
+    /// <summary>Frames until one is drawn and the next is waited for on the view's own timer.</summary>
+    private static async Task BetweenFrames(OniView view, string what)
+    {
+        var until = DateTime.UtcNow.AddSeconds(20);
+        while (true)
+        {
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            Dispatcher.UIThread.RunJobs();
+            if (view.IsTimed) return;
+            if (DateTime.UtcNow > until) throw new TimeoutException("never between two frames: " + what);
+            await Task.Delay(2);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Hidden_minimised_suspended_or_reduced_it_calls_off_the_frame_it_waits_for_at_once()
+    {
+        var (pet, _) = NewPet();
+        var view = new OniView { Pet = pet, HeightPx = 80 };
+        var host = new Border { Child = view };
+        var w = new Window { Width = 300, Height = 220, Content = host };
+        w.Show();
+        await Until(() => view.Atlases is { IsReady: true }, "sheets decoded");
+        // Between two frames it waits on its own timer. Each of these stops it there and then: no frame of the screen
+        // (each would redraw the whole window) is needed to find out it has nothing to move
+        (string What, Action Stop, Action Resume)[] stops =
+        [
+            ("hidden", () => view.IsVisible = false, () => view.IsVisible = true),
+            ("an ancestor hidden", () => host.IsVisible = false, () => host.IsVisible = true),
+            ("minimised", () => w.WindowState = WindowState.Minimized, () => w.WindowState = WindowState.Normal),
+            ("the window hidden", w.Hide, w.Show),
+            ("suspended", () => view.Suspended = true, () => view.Suspended = false),
+            ("reduced motion", () => view.Reduced = true, () => view.Reduced = false),
+        ];
+        foreach (var (what, stop, resume) in stops)
+        {
+            await BetweenFrames(view, what);
+            stop();
+            Dispatcher.UIThread.RunJobs(); // an ancestor's or the window's change reaches the view as a posted job
+            Assert.False(view.IsTimed, what);
+            Assert.False(view.IsPlaying, what);
+            resume();
+            await Settle(50);
+            Assert.True(view.IsPlaying, what + ", undone");
+        }
+        w.Close();
+    }
+
     [AvaloniaFact]
     public async Task Only_the_pets_box_takes_the_pointer_and_every_size_draws()
     {

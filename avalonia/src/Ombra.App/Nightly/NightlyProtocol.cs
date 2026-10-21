@@ -1,10 +1,11 @@
 using System.Buffers.Binary;
 using System.Text;
+using Ombra.ClientCore.Browser;
 
 namespace Ombra.App.Nightly;
 
 /// <summary>
-/// Nightly's embed protocol, version 4 (desktop <c>src/zen/embed/ZenEmbedHost.mm</c>): plain Mach messages, a 24-byte
+/// Nightly's embed protocol, version 5 (desktop <c>src/zen/embed/ZenEmbedHost.mm</c>): plain Mach messages, a 24-byte
 /// <c>mach_msg_header_t</c> then fixed little-endian fields. Nightly → Ombra messages arrive on Ombra's bootstrap service
 /// port; Ombra → Nightly go to the receive right Nightly hands over in Hello. Script, ScriptResult and Popup carry their
 /// text out of line (one OOL descriptor at 28, fields from 44). This class only lays out and reads bytes (no Mach calls),
@@ -12,7 +13,7 @@ namespace Ombra.App.Nightly;
 /// </summary>
 internal static class NightlyProtocol
 {
-    public const uint Version = 4;
+    public const uint Version = 5;
     public const int HeaderSize = 24;
     /// <summary>URL and title bytes in Command and Location (kMaxText).</summary>
     public const int MaxText = 8192;
@@ -30,6 +31,8 @@ internal static class NightlyProtocol
     public const int Dialog = 120, DialogClosed = 121, Download = 122;
     // Drags (protocol 4): Ombra → Nightly 44–45, Nightly → Ombra 123–124 (desktop ZenEmbedHost.mm, "Drags").
     public const int DragTarget = 44, DragSource = 45, DragStarted = 123, DragStatus = 124;
+    // Protocol 5: whether a window's pane is on screen (Ombra → Nightly).
+    public const int Visibility = 46;
     /// <summary>Bytes of a DialogReply's JSON, including archived native printer settings (kMaxDialogReply).</summary>
     public const int MaxReply = 1 << 20;
     /// <summary>UTF-16 units of text a Text or MarkedText message carries.</summary>
@@ -45,8 +48,9 @@ internal static class NightlyProtocol
     public enum DragSourceState : uint { Carried = 1, Ended = 2, Cancelled = 3 }
 
     /// <summary>Device (protocol 4): JSON of the emulated device (<see cref="DeviceMessage"/>), empty to end the device mode.
-    /// Theme (protocol 4): Ombra's appearance for the whole runtime (<see cref="ThemeMessage"/>).</summary>
-    public enum CommandOp : uint { Navigate = 1, Reload = 2, Back = 3, Forward = 4, Stop = 5, Close = 6, Device = 7, Theme = 8 }
+    /// Theme (protocol 4): Ombra's appearance for the whole runtime (<see cref="ThemeMessage"/>). Speculate (protocol 5):
+    /// an intent's JSON (<see cref="SpeculateJson"/>, <see cref="CancelSpeculationJson"/>).</summary>
+    public enum CommandOp : uint { Navigate = 1, Reload = 2, Back = 3, Forward = 4, Stop = 5, Close = 6, Device = 7, Theme = 8, Speculate = 9 }
 
     /// <summary>
     /// A device the page in a window emulates (desktop <c>zen-embed.js</c> ZenEmbedDevice). <paramref name="Mobile"/>: a
@@ -131,6 +135,21 @@ internal static class NightlyProtocol
         var m = New(Focus, 32);
         U32(m, 24, windowId);
         U32(m, 28, focused ? 1u : 0u);
+        return m;
+    }
+
+    /// <summary>
+    /// Whether the window's pane is on screen (protocol 5, id 46): hidden, Nightly makes its browser inactive
+    /// (<c>document.hidden</c>, rAF and timers throttled as a background tab's), exports no frames and gives back those
+    /// in flight; visible, it paints a fresh frame. <paramref name="generation"/> grows with every message for a window;
+    /// Nightly ignores one that is not above the last it applied.
+    /// </summary>
+    public static byte[] VisibilityMessage(uint windowId, bool visible, uint generation)
+    {
+        var m = New(Visibility, 40);
+        U32(m, 24, windowId);
+        U32(m, 28, visible ? 1u : 0u);
+        U32(m, 32, generation);
         return m;
     }
 
@@ -256,19 +275,68 @@ internal static class NightlyProtocol
     /// and the pages' <c>prefers-color-scheme</c>); not tied to a window.</summary>
     public static byte[] ThemeMessage(bool dark) => CommandMessage(0, CommandOp.Theme, dark ? "dark" : "light")!;
 
-    internal static string DeviceJson(Device d)
+    internal static string DeviceJson(Device d) => Json(json =>
     {
-        using var buffer = new MemoryStream();
-        using (var json = new System.Text.Json.Utf8JsonWriter(buffer))
+        json.WriteStartObject();
+        json.WriteBoolean("mobile", d.Mobile);
+        json.WriteNumber("dpr", d.PixelRatio > 0 ? d.PixelRatio : 0);
+        json.WriteString("userAgent", d.UserAgent);
+        json.WriteBoolean("touch", d.Touch);
+        json.WriteBoolean("landscape", d.Landscape);
+        json.WriteEndObject();
+    });
+
+    /// <summary>
+    /// An intent for window <paramref name="windowId"/> (protocol 5, Command op 9; 0: a pane whose window is still being
+    /// opened, which Nightly gives a new chrome-less window's origin attributes): <paramref name="json"/> from
+    /// <see cref="SpeculateJson"/> or <see cref="CancelSpeculationJson"/>. Null when it is longer than <see cref="MaxText"/> bytes.
+    /// </summary>
+    public static byte[]? SpeculateMessage(uint windowId, string json) => CommandMessage(windowId, CommandOp.Speculate, json);
+
+    /// <summary>
+    /// A hint as Speculate's JSON, <c>{"v":1,"id","source","action":"hint","url","p","leadMs","ttlMs"}</c>: Nightly opens
+    /// a connection to the URL's origin (never an HTTP request) and validates the same bounds. Null when the hint breaks
+    /// them: an id other than 16 lowercase hex digits, an unknown source, a URL that is not absolute http(s) or carries
+    /// user info, p outside 0–1, a lead outside 0–5000 ms, a TTL outside 100–30000 ms.
+    /// </summary>
+    internal static string? SpeculateJson(SpeculationHint hint)
+    {
+        if (!SpeculationHint.IsId(hint.Id) || !SpeculationHint.Eligible(hint.Url) || !(hint.P is >= 0.0 and <= 1.0)
+            || hint.Source is not (SpeculationHint.AgentOpen or SpeculationHint.AgentClick or SpeculationHint.AgentGoto or SpeculationHint.AddressCommit)
+            || hint.LeadMs is < 0 or > SpeculationHint.MaxLeadMs || hint.TtlMs is < SpeculationHint.MinTtlMs or > SpeculationHint.MaxTtlMs)
+            return null;
+        return Json(json =>
         {
             json.WriteStartObject();
-            json.WriteBoolean("mobile", d.Mobile);
-            json.WriteNumber("dpr", d.PixelRatio > 0 ? d.PixelRatio : 0);
-            json.WriteString("userAgent", d.UserAgent);
-            json.WriteBoolean("touch", d.Touch);
-            json.WriteBoolean("landscape", d.Landscape);
+            json.WriteNumber("v", 1);
+            json.WriteString("id", hint.Id);
+            json.WriteString("source", hint.Source);
+            json.WriteString("action", "hint");
+            json.WriteString("url", hint.Url.AbsoluteUri);
+            json.WriteNumber("p", hint.P);
+            json.WriteNumber("leadMs", hint.LeadMs);
+            json.WriteNumber("ttlMs", hint.TtlMs);
             json.WriteEndObject();
-        }
+        });
+    }
+
+    /// <summary>Withdraws hint <paramref name="id"/> (its action was abandoned): <c>{"v":1,"id","action":"cancel"}</c>;
+    /// null when <paramref name="id"/> is not a hint id.</summary>
+    internal static string? CancelSpeculationJson(string id) => SpeculationHint.IsId(id)
+        ? Json(json =>
+        {
+            json.WriteStartObject();
+            json.WriteNumber("v", 1);
+            json.WriteString("id", id);
+            json.WriteString("action", "cancel");
+            json.WriteEndObject();
+        })
+        : null;
+
+    private static string Json(Action<System.Text.Json.Utf8JsonWriter> write)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new System.Text.Json.Utf8JsonWriter(buffer)) write(json);
         return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
     }
 

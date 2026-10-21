@@ -4,6 +4,7 @@ using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 using Ombra.App.Localization;
+using Ombra.ClientCore.Browser;
 
 namespace Ombra.App.Nightly;
 
@@ -157,7 +158,8 @@ internal sealed class NightlyRuntime : IDisposable
     // Nightly checked Ombra's code signature after HelloAck: it drops what Ombra sends before (UI thread).
     private bool _peerTrusts;
     private bool _disposed;
-    // Scripts waiting for Nightly's answer, by request id (answered on the receive thread).
+    // Scripts waiting for Nightly's answer, by request id (answered on the receive thread). A request leaves the map when
+    // it is answered, failed or cancelled (the agent's deadline): a ScriptResult that comes later finds nothing and is dropped.
     private readonly ConcurrentDictionary<uint, (uint WindowId, TaskCompletionSource<NightlyProtocol.ScriptResultInfo> Done)> _scripts = new();
     private int _nextRequest;
     // Downloads whose path a dialog chose, by dialog id: Nightly reports their progress (UI thread).
@@ -321,6 +323,25 @@ internal sealed class NightlyRuntime : IDisposable
 
     public void ReleaseFrame(uint windowId, ulong seq) => Send(NightlyProtocol.ReleaseMessage(windowId, seq));
 
+    /// <summary>
+    /// Augur v1 (protocol 5, Command op 9): a navigation about to start in window <paramref name="windowId"/> (0: a
+    /// pane whose window is still being opened, which Nightly gives a new chrome-less window's origin attributes).
+    /// Nightly opens the connection to the URL's origin meanwhile (DNS, TCP, TLS; never an HTTP request), within its own
+    /// budgets and calibration. Nothing is sent for a hint outside the protocol's bounds
+    /// (<see cref="NightlyProtocol.SpeculateJson"/>) or while Nightly is not connected. Any thread.
+    /// </summary>
+    public void Speculate(uint windowId, SpeculationHint hint)
+    {
+        if (NightlyProtocol.SpeculateJson(hint) is { } json && NightlyProtocol.SpeculateMessage(windowId, json) is { } m) Send(m);
+    }
+
+    /// <summary>Withdraws hint <paramref name="id"/> (its action was abandoned); a connection already open stays for
+    /// Gecko's idle timeout. Any thread.</summary>
+    public void CancelSpeculation(uint windowId, string id)
+    {
+        if (NightlyProtocol.CancelSpeculationJson(id) is { } json && NightlyProtocol.SpeculateMessage(windowId, json) is { } m) Send(m);
+    }
+
     private uint _activeWindow;
 
     /// <summary>The window Gecko takes as the active one (keys and text go to its focused element); 0 for none.</summary>
@@ -345,8 +366,10 @@ internal sealed class NightlyRuntime : IDisposable
     /// <summary>
     /// Runs a script in the top-level document of window <paramref name="windowId"/> (the agent's browser tools): in the
     /// page's own world, or <paramref name="source"/> as a function called with the JSON array <paramref name="args"/>
-    /// in Ombra's isolated world. Any thread. Throws <see cref="InvalidOperationException"/> when Nightly is not
-    /// connected, stops, or the window goes before it answers.
+    /// in Ombra's isolated world. Any thread. Throws <see cref="Ombra.ClientCore.AgentBrowserException"/>:
+    /// <c>runtime_disconnected</c> when Nightly is not connected or stops before it answers, <c>window_closed</c> when the
+    /// window goes first, <c>invalid_params</c> for a script larger than the channel carries. Cancelling
+    /// <paramref name="ct"/> (the caller's deadline) forgets the request at once: a page that never answers holds nothing.
     /// </summary>
     public async Task<NightlyProtocol.ScriptResultInfo> RunScriptAsync(uint windowId, NightlyProtocol.ScriptKind kind, string source, string args,
         CancellationToken ct)
@@ -354,16 +377,16 @@ internal sealed class NightlyRuntime : IDisposable
         var sourceLength = Encoding.UTF8.GetByteCount(source);
         var argsLength = Encoding.UTF8.GetByteCount(args);
         if ((long)sourceLength + argsLength > NightlyProtocol.MaxScript)
-            throw new InvalidOperationException("The script is larger than the Nightly embed channel carries.");
+            throw new Ombra.ClientCore.AgentBrowserException("invalid_params", "The script is larger than the Nightly embed channel carries.");
         var id = (uint)Interlocked.Increment(ref _nextRequest);
         var done = new TaskCompletionSource<NightlyProtocol.ScriptResultInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
         _scripts[id] = (windowId, done);
         try
         {
+            await using var cancel = ct.Register(() => done.TrySetCanceled(ct)).ConfigureAwait(false);
             // A full queue waits a little (frames go the other way, input this way): off the caller's thread.
             if (!await Task.Run(() => SendScript(windowId, id, kind, source, sourceLength, args, argsLength), ct).ConfigureAwait(false))
-                throw new InvalidOperationException("Nightly is not connected.");
-            await using var cancel = ct.Register(() => done.TrySetCanceled(ct)).ConfigureAwait(false);
+                throw new Ombra.ClientCore.AgentBrowserException("runtime_disconnected", NotConnected);
             return await done.Task.ConfigureAwait(false);
         }
         finally
@@ -371,6 +394,8 @@ internal sealed class NightlyRuntime : IDisposable
             _scripts.TryRemove(id, out _);
         }
     }
+
+    private const string NotConnected = "Nightly is not connected (it is starting or restarting): try again in a moment.";
 
     private unsafe bool SendScript(uint windowId, uint id, NightlyProtocol.ScriptKind kind, string source, int sourceLength, string args, int argsLength)
     {
@@ -391,11 +416,13 @@ internal sealed class NightlyRuntime : IDisposable
         }
     }
 
-    /// <summary>The scripts waiting on <paramref name="windowId"/> (null: all) get <paramref name="why"/>.</summary>
+    /// <summary>The scripts waiting on <paramref name="windowId"/> (null: all, the runtime stopped) get <paramref name="why"/>:
+    /// <c>window_closed</c> for one window, <c>runtime_disconnected</c> for all.</summary>
     private void FailScripts(uint? windowId, string why)
     {
+        var code = windowId is null ? "runtime_disconnected" : "window_closed";
         foreach (var (_, (window, done)) in _scripts)
-            if (windowId is null || window == windowId) done.TrySetException(new InvalidOperationException(why));
+            if (windowId is null || window == windowId) done.TrySetException(new Ombra.ClientCore.AgentBrowserException(code, why));
     }
 
     /// <summary>The pane's window, when it has one.</summary>
@@ -504,6 +531,13 @@ internal sealed class NightlyRuntime : IDisposable
             "user_pref(\"browser.link.open_newwindow.restriction\", 0);",
             // Zen's automatic scheme, which follows ui.systemUsesDarkTheme (Ombra's appearance; DarkTheme).
             "user_pref(\"zen.view.window.scheme\", 2);",
+            // 60 Hz, not the display's 160: an embedded window is composited whole into the IOSurface it exports, so a
+            // 20 px spinner redraws the entire pane every refresh (GPU process and Ombra's compositing); a standalone
+            // Nightly keeps the display's rate. Reconsider once frames carry their damaged rects.
+            "user_pref(\"layout.frame_rate\", 60);",
+            // The embedded window is never AppKit's key window unless its pane has the keyboard, so without this
+            // navigator.mediaDevices.enumerateDevices() never resolves there and pages (anti-bot scripts) awaiting it stall.
+            "user_pref(\"media.devices.unfocused.enabled\", true);",
         }) prefs.AppendLine(line);
         prefs.AppendLine($"user_pref(\"ui.systemUsesDarkTheme\", {(_darkTheme ? 1 : 0)});");
         // A harness run (Platform/TestFocus.cs, set for what it starts): Nightly never activates itself to raise a window.

@@ -140,7 +140,7 @@ internal static partial class NightlyAcceptance
         {
             try
             {
-                return vm.Preview.ActiveTab.RunScript is { } run && await run("String(window.c)") is { } text
+                return vm.Preview.ActiveTab.RunScript is { } run && await run("String(window.c)", CancellationToken.None) is { } text
                     && int.TryParse(text.Trim('"'), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : -1;
             }
             catch (Exception e)

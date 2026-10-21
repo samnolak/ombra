@@ -90,7 +90,7 @@ public sealed class BrowserHooksTests
         // The engine's own view is hosted in the page area; omp's browser drives it like any tab
         var host = Assert.Single(Named<Panel>(panel, "WebHost").Children.OfType<PopupViewHost>());
         Assert.Same(popup, host.Popup);
-        Assert.Equal("\"ok\"", await tab.RunScript!("document.title"));
+        Assert.Equal("\"ok\"", await tab.RunScript!("document.title", CancellationToken.None));
         Assert.Equal(new[] { "document.title" }, popup.Scripts);
 
         // Its own delegate reports the loading (pop-ups have no NativeWebView)

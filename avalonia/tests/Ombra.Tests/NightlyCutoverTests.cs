@@ -130,7 +130,6 @@ public sealed class NightlyCutoverTests
     [Fact]
     public void Protocol_four_messages_have_the_layout_of_the_native_structs()
     {
-        Assert.Equal(4u, NightlyProtocol.Version);
         var quit = NightlyProtocol.QuitMessage();
         Assert.Equal(32, quit.Length);
         Assert.Equal(40, BinaryPrimitives.ReadInt32LittleEndian(quit.AsSpan(20)));

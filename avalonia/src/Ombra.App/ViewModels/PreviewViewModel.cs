@@ -232,6 +232,9 @@ public sealed partial class PreviewViewModel : ObservableObject
 
     /// <summary>The view navigates its web view to this address (already checked: http or https).</summary>
     public event Action<Uri>? NavigationRequested;
+    /// <summary>The user committed the address box (Enter), just before <see cref="NavigationRequested"/>: the view may
+    /// warm the connection to it meanwhile (the Nightly runtime's Augur, <c>address_commit</c>).</summary>
+    public event Action<Uri>? AddressCommitted;
     public event Action? ReloadRequested;
     public event Action? BackRequested;
     public event Action? ForwardRequested;
@@ -245,6 +248,7 @@ public sealed partial class PreviewViewModel : ObservableObject
     [RelayCommand]
     private void Navigate(string? address = null)
     {
+        var fromBox = address is null;
         if (address is not null) Address = address;
         if (string.IsNullOrWhiteSpace(Address)) return;
         if (!TryNormalize(Address, out var uri, out var error))
@@ -262,6 +266,7 @@ public sealed partial class PreviewViewModel : ObservableObject
         LoadError = null;
         IsCrashed = false;
         Dialogs.Broker.CancelAll(); // the questions of the page left behind
+        if (fromBox) AddressCommitted?.Invoke(uri);
         NavigationRequested?.Invoke(uri);
     }
 

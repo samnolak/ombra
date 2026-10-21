@@ -15,6 +15,7 @@ using Avalonia.Threading;
 using Ombra.App.Localization;
 using Ombra.App.Nightly;
 using Ombra.App.Platform.Mac;
+using Ombra.ClientCore.Browser;
 using SkiaSharp;
 
 namespace Ombra.App.Controls;
@@ -30,7 +31,9 @@ namespace Ombra.App.Controls;
 /// The page's popups (<c>&lt;select&gt;</c>, autocomplete, context menu) are Ombra's (<see cref="NightlyPopupPresenter"/>),
 /// so is its pointer shape; the input method composes in Ombra (the pane is a <see cref="TextInputMethodClient"/>) and
 /// Nightly gets the composition, the commit and the keys it did not take. A window the page opens goes to whoever
-/// listens to <see cref="PopupWindowOpened"/> (a tab of its own). While the runtime starts, restarts or fails, the pane
+/// listens to <see cref="PopupWindowOpened"/> (a tab of its own). While the page cannot be seen (its tab in the
+/// background, the pane out of a window, the window hidden, minimized or covered) Nightly renders none of it and the
+/// pane holds none of its frames (<see cref="NightlyVisibility"/>). While the runtime starts, restarts or fails, the pane
 /// says so over its last picture.
 /// </summary>
 [SupportedOSPlatform("macos")]
@@ -51,16 +54,15 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
 
     // The frames: a Core Animation layer under Avalonia's view, seen through the hole _host clears where the frame is.
     private NightlyLayer? _layer;
-    // The frame the layer shows, held from Nightly until a newer one replaces it.
-    private NightlyProtocol.FrameInfo? _shownFrame;
+    // Whether Nightly renders the window, and the frames held from it (the shown one, one waiting for the layer).
+    private readonly NightlyVisibility _visibility;
+    // Whether the window is covered whole by others (Avalonia does not say).
+    private MacWindowOcclusion? _occlusion;
 
     private int _frameWidth, _frameHeight;
     private double _geckoScale = 2;
     private Rect _shown;
     private bool _hasFrame;
-    // The latest frame that could not be shown when it came (the layer not set up yet, or the pane hidden), kept
-    // from Nightly until it can: a page that paints once and then stays still would otherwise never show.
-    private NightlyProtocol.FrameInfo? _heldFrame;
     private (double W, double H, (double X, double Y)? Origin) _lastResize;
     private int _pressedButton = -1;
     private TopLevel? _top;
@@ -87,6 +89,8 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
 
     public NightlyPane()
     {
+        _visibility = new NightlyVisibility(m => _runtime?.Send(m) == true, (window, seq) => _runtime?.ReleaseFrame(window, seq),
+            HideFrame, (delay, retry) => DispatcherTimer.RunOnce(retry, delay));
         _status = new TextBlock { TextWrapping = TextWrapping.Wrap, TextAlignment = TextAlignment.Center, MaxWidth = 420 };
         _status.Classes.Add("muted");
         _retry = new Button { Content = Loc.T("Try again"), HorizontalAlignment = HorizontalAlignment.Center, IsVisible = false };
@@ -111,6 +115,7 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         WireInput();
         LayoutUpdated += (_, _) =>
         {
+            UpdateVisibility();
             if (_layer is null) EnsureLayer();
             PlaceLayer();
         };
@@ -192,12 +197,30 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
     /// <summary>Loads <paramref name="uri"/> (a browser window: in a new tab).</summary>
     public void Navigate(Uri uri)
     {
+        // The agent's open or goto (its tab's hooks say it acts now): the page is seen while it loads (AgentSeen).
+        if (Page?.AgentActive() == true) NoteAgentAction();
         if (_pendingUrls.Count > 0 || !SendNavigate(uri))
             _pendingUrls.Add(uri); // sent when the window exists
     }
 
     private bool SendNavigate(Uri uri) => _windowId != 0 && _runtime is not null
         && NightlyProtocol.CommandMessage(_windowId, NightlyProtocol.CommandOp.Navigate, uri.AbsoluteUri) is { } m && _runtime.Send(m);
+
+    /// <summary>
+    /// A navigation of this pane about to start (Augur: <see cref="SpeculationHint"/>): Nightly opens the connection to
+    /// its origin meanwhile. Before the pane has a window it goes for window 0 (a pane whose window is being opened);
+    /// nothing is sent while the runtime is not connected.
+    /// </summary>
+    public void Speculate(SpeculationHint hint)
+    {
+        if (!_closed) _runtime?.Speculate(_windowId, hint);
+    }
+
+    /// <summary>Withdraws hint <paramref name="id"/> (<see cref="Speculate"/>): its navigation will not come.</summary>
+    public void CancelSpeculation(string id)
+    {
+        if (!_closed) _runtime?.CancelSpeculation(_windowId, id);
+    }
 
     /// <summary>The page takes the keyboard (the Browser page shown).</summary>
     public void FocusPage()
@@ -263,6 +286,9 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         if (_runtime is { } runtime && _token != 0) runtime.Unregister(_token);
         _runtime = null;
         OnDetached();
+        _agentSeen?.Stop();
+        _occlusion?.Dispose();
+        _occlusion = null;
         _layer?.Remove();
         _layer = null;
     }
@@ -282,10 +308,12 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
                 w.PositionChanged += OnScreenChanged;
                 w.Activated += OnWindowActivation;
                 w.Deactivated += OnWindowActivation;
+                w.PropertyChanged += OnWindowPropertyChanged;
             }
         }
         NightlyScrollMonitor.Add(this);
         if (IsBrowserWindow) NightlyShortcutMonitor.Add(this);
+        UpdateVisibility();
     }
 
     // The layer goes into the window's view once the pane is in a laid out window.
@@ -308,9 +336,13 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
                 w.PositionChanged -= OnScreenChanged;
                 w.Activated -= OnWindowActivation;
                 w.Deactivated -= OnWindowActivation;
+                w.PropertyChanged -= OnWindowPropertyChanged;
             }
         }
         _top = null;
+        _occlusion?.Dispose();
+        _occlusion = null;
+        UpdateVisibility(); // out of the window: hidden, its frames back to Nightly
         _layer?.Remove(); // the pane may come back in another window
         _layer = null;
     }
@@ -329,9 +361,146 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         _layer?.Remove();
         _layer = NightlyLayer.Under(handle.Handle);
         if (_layer is null) return;
-        if (_shownFrame is { } shown && _frames.Surface(shown.SurfaceId) is var surface and not 0) _layer.Show(surface);
+        if (_visibility.Shown is { } shown && _frames.Surface(shown.SurfaceId) is var surface and not 0) _layer.Show(surface);
         LayoutFrame();
         ShowHeldFrame();
+    }
+
+    // ── visibility (protocol 5 Visibility, NightlyVisibility) ──
+
+    /// <summary>
+    /// How long after the agent's last action on the pane its page still counts as seen, wherever its tab or window is:
+    /// the agent works while the user is elsewhere (another tab, another app over Ombra), and in a hidden page rAF
+    /// stops, the refresh driver and timers crawl (lazy loading stalls) and no frame comes for a screenshot.
+    /// </summary>
+    internal static readonly TimeSpan AgentSeen = TimeSpan.FromSeconds(10);
+
+    // The agent's actions on the pane under way, and when the last began or ended (Environment.TickCount64; 0: never).
+    private int _agentActions;
+    private long _agentActed;
+    private DispatcherTimer? _agentSeen;
+    // A screenshot waiting for the first frame since the page came back on screen (ShownFrameAsync).
+    private TaskCompletionSource? _frameWaiters;
+
+    /// <summary>
+    /// Whether the page can be seen: the pane in a window and shown (its tab in front, everything holding it shown), the
+    /// window shown and not minimized, and not covered whole by other windows (AppKit's occlusion; not in a harness run,
+    /// whose window lies behind the owner's on purpose: <see cref="Platform.TestFocus"/>). While the agent acts on the
+    /// pane, and <see cref="AgentSeen"/> after, it counts as seen whenever the pane is in a window.
+    /// </summary>
+    private bool OnScreen() =>
+        !_closed && _top is { } top
+        && (AgentActing || (IsEffectivelyVisible && (top is not Window w || (w.IsVisible && w.WindowState != WindowState.Minimized))
+            && (_occlusion is null || _occlusion.Visible || Platform.TestFocus.NoActivate)));
+
+    private bool AgentActing => Volatile.Read(ref _agentActions) > 0
+        || (Interlocked.Read(ref _agentActed) is var at and not 0 && Environment.TickCount64 - at < (long)AgentSeen.TotalMilliseconds);
+
+    /// <summary>
+    /// After anything that can show or hide the page (a layout pass, the tab shown or hidden, the pane in or out of a
+    /// window, the window minimized, hidden or covered, the agent acting or done): Nightly is told when that changed; off
+    /// screen the layer lets its surface go first (NightlyVisibility's hide), then Nightly has every frame back. Shown
+    /// again, the next frame Nightly paints comes.
+    /// </summary>
+    private void UpdateVisibility()
+    {
+        EnsureOcclusion();
+        if (!_visibility.Update(OnScreen()) || _visibility.Visible) return;
+        PlaceLayer();
+        FrameShown(); // none comes while hidden
+    }
+
+    /// <summary>The layer lets the frame's surface go and Core Animation commits that now, not at the end of this run
+    /// loop turn: Nightly reuses a surface as soon as it has it back (NightlyVisibility releases right after).</summary>
+    private void HideFrame()
+    {
+        if (_layer is null) return;
+        _layer.Show(0);
+        MacObjC.SendVoid(MacObjC.Cls("CATransaction"), "flush");
+    }
+
+    async Task<IDisposable> NightlyAgent.ITarget.AgentActsAsync()
+    {
+        Interlocked.Increment(ref _agentActions);
+        var scope = new AgentScope(this);
+        Interlocked.Exchange(ref _agentActed, Environment.TickCount64);
+        try
+        {
+            // Applied before the agent's script or input goes out: Nightly has the page visible by then.
+            if (Dispatcher.UIThread.CheckAccess()) AgentActed();
+            else await Dispatcher.UIThread.InvokeAsync(AgentActed);
+        }
+        catch
+        {
+            scope.Dispose();
+            throw;
+        }
+        return scope;
+    }
+
+    private sealed class AgentScope(NightlyPane pane) : IDisposable
+    {
+        private int _done;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _done, 1) != 0) return;
+            Interlocked.Decrement(ref pane._agentActions);
+            pane.NoteAgentAction();
+        }
+    }
+
+    /// <summary>The agent acts on the pane (any thread): its page is seen now, and until <see cref="AgentSeen"/> after the
+    /// last action, when it is looked at again.</summary>
+    private void NoteAgentAction()
+    {
+        Interlocked.Exchange(ref _agentActed, Environment.TickCount64);
+        if (Dispatcher.UIThread.CheckAccess()) AgentActed();
+        else Dispatcher.UIThread.Post(AgentActed);
+    }
+
+    private void AgentActed()
+    {
+        UpdateVisibility();
+        if (_closed) return;
+        _agentSeen ??= new DispatcherTimer(AgentSeen, DispatcherPriority.Background, (_, _) =>
+        {
+            _agentSeen!.Stop();
+            UpdateVisibility();
+        });
+        _agentSeen.Stop();
+        _agentSeen.Start();
+    }
+
+    async Task NightlyAgent.ITarget.ShownFrameAsync(TimeSpan timeout, CancellationToken ct)
+    {
+        var shown = await Dispatcher.UIThread.InvokeAsync<Task>(() =>
+            _closed || _windowId == 0 || !_visibility.Visible || _visibility.Shown is not null
+                ? Task.CompletedTask
+                : (_frameWaiters ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task);
+        try { await shown.WaitAsync(timeout, ct).ConfigureAwait(false); }
+        catch (TimeoutException) { } // a page that does not paint (its process hangs): the frame before it is all there is
+    }
+
+    /// <summary>What waits for a frame (<see cref="NightlyAgent.ITarget.ShownFrameAsync"/>) goes on: one is shown, or none comes.</summary>
+    private void FrameShown()
+    {
+        var waiting = _frameWaiters;
+        _frameWaiters = null;
+        waiting?.TrySetResult();
+    }
+
+    private void EnsureOcclusion()
+    {
+        if (_occlusion is not null || _closed || _top?.TryGetPlatformHandle() is not { Handle: not 0 } handle) return;
+        var window = NightlyCocoa.WindowOf(handle.Handle);
+        // Posted: AppKit says it while it orders the window, before Avalonia has its state.
+        if (window != 0) _occlusion = new MacWindowOcclusion(window, () => Dispatcher.UIThread.Post(UpdateVisibility));
+    }
+
+    private void OnWindowPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property == Window.WindowStateProperty || e.Property == IsVisibleProperty) UpdateVisibility();
     }
 
     private void Connect()
@@ -388,6 +557,7 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
     void INightlyView.OnAttached(uint windowId)
     {
         _windowId = windowId;
+        _visibility.Attach(windowId, OnScreen());
         _lastResize = default;
         SendResize();
         SendFocus();
@@ -404,8 +574,8 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
     {
         _windowId = 0;
         _hasFrame = false;
-        _heldFrame = null; // its window is gone
-        _shownFrame = null;
+        _visibility.Detach(); // its window is gone, and with it the frames held from it
+        FrameShown(); // none comes from it
         _layer?.Show(0);
         _frames.Clear();
         _frameWidth = _frameHeight = 0;
@@ -431,22 +601,18 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
     void INightlyView.OnFrame(NightlyProtocol.FrameInfo frame)
     {
         Timing?.Received();
-        _frames.SetLatest(frame);
-        if (_heldFrame is { } older)
-        {
-            _heldFrame = null;
-            _runtime?.ReleaseFrame(older.WindowId, older.Seq);
-        }
-        if (_layer is null) EnsureLayer();
-        if (_layer is null || !IsEffectivelyVisible) _heldFrame = frame;
-        else Show(frame);
+        UpdateVisibility();
+        if (_layer is null && _visibility.Visible) EnsureLayer();
+        // Off screen it goes back at once; without a layer it waits for one (a page that paints once and then stays
+        // still would otherwise never show).
+        var show = _visibility.Arrived(frame, canShow: _layer is not null);
+        if (show || _visibility.Held == frame) _frames.SetLatest(frame);
+        if (show) Show(frame);
     }
 
     private void ShowHeldFrame()
     {
-        if (_heldFrame is not { } frame || _layer is null || !IsEffectivelyVisible) return;
-        _heldFrame = null;
-        Show(frame);
+        if (_layer is not null && _visibility.TakeHeld() is { } frame) Show(frame);
     }
 
     /// <summary>The layer shows <paramref name="frame"/> from now on; the one it showed goes back to Nightly.</summary>
@@ -456,12 +622,12 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         var surface = _frames.Surface(frame.SurfaceId);
         if (_layer is null || surface == 0 || frame.WindowId != _windowId)
         {
-            _runtime?.ReleaseFrame(frame.WindowId, frame.Seq);
+            _visibility.Release(frame);
             return;
         }
         _layer.Show(surface);
-        if (_shownFrame is { } replaced) _runtime?.ReleaseFrame(replaced.WindowId, replaced.Seq);
-        _shownFrame = frame;
+        _visibility.Showing(frame);
+        FrameShown();
         _frameWidth = frame.Width;
         _frameHeight = frame.Height;
         FramesShown++;
@@ -724,7 +890,7 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
-        if (change.Property == IsVisibleProperty && IsVisible) ShowHeldFrame(); // its tab is shown again
+        if (change.Property == IsVisibleProperty) UpdateVisibility(); // its tab is shown or hidden
     }
 
     // The page takes the space it is given (as a web view does); with a Viewport the pane is that size, scaled down
@@ -771,11 +937,12 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
 
     /// <summary>
     /// The layer where the frame is drawn in the window, and the hole over it in what Avalonia draws; both gone while the
-    /// pane has no frame or is not shown (after every layout pass too: the pane moves or hides with what holds it).
+    /// pane shows no frame (none yet, or none since it was shown again) or is not shown (after every layout pass too: the
+    /// pane moves or hides with what holds it).
     /// </summary>
     private void PlaceLayer()
     {
-        var shown = _hasFrame && _top is not null && IsEffectivelyVisible && _shown.Width > 0;
+        var shown = _visibility.Shown is not null && _top is not null && IsEffectivelyVisible && _shown.Width > 0;
         var at = shown ? _host.TranslatePoint(_shown.TopLeft, _top!) : null;
         _layer?.Place(at is { } p ? new Rect(p, _shown.Size) : default, _top?.RenderScaling ?? 2, hidden: at is null || _layer is null);
         _host.Hole = at is not null && _layer is not null ? _shown : default;

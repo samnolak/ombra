@@ -145,8 +145,9 @@ public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableO
     internal BrowserLoadFailure? LoadError { get; set; }
     internal bool Crashed { get; set; }
 
-    /// <summary>Runs a script in this tab's page; set by the view once its web view exists.</summary>
-    public Func<string, Task<string?>>? RunScript { get; set; }
+    /// <summary>Runs a script in this tab's page; set by the view once its web view exists. The token stops waiting for
+    /// the answer (engines that can, the Nightly runtime, also forget the request: a late answer is dropped).</summary>
+    public Func<string, CancellationToken, Task<string?>>? RunScript { get; set; }
 
     /// <summary>Captures this tab's page as a PNG (Platform/WebViewSnapshot); set by the view with <see cref="RunScript"/>.</summary>
     public Func<CancellationToken, Task<Ombra.ClientCore.AgentScreenshot>>? CaptureScreenshot { get; set; }
