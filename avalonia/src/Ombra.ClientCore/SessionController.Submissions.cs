@@ -133,7 +133,8 @@ public sealed partial class SessionController
                 s.QueuedThinkingApplied(command.Seq);
             });
         }
-        catch (Exception e) when (e is RpcCommandException or TimeoutException or RpcConnectionClosedException)
+        // Any failure settles the head: left eligible, the same failure would be retried at once, without end.
+        catch (Exception e)
         {
             Mutate(s =>
             {
@@ -177,7 +178,7 @@ public sealed partial class SessionController
                 if (s.NextThinkingLevel == level) s.NextThinkingLevel = null;
             });
         }
-        catch (Exception e) when (e is RpcCommandException or TimeoutException or RpcConnectionClosedException)
+        catch (Exception e)
         {
             Mutate(s =>
             {
