@@ -14,11 +14,15 @@ public sealed partial class MainViewModel
     private IReadOnlyList<SessionSummary> _catalog = [];
     // Requests counted, scans run one at a time; a request that arrives during a scan causes one more scan.
     private int _catalogRequests;
-    private sealed record CatalogRequest(string Root, string File);
+    private sealed record CatalogRequest(string Root);
     private CatalogRequest? _catalogRequest;
     private string? _catalogRoot;
     private bool _catalogLoaded;
     internal Func<string, CancellationToken, Task<SessionCatalogScanResult>> ScanCatalogAsync { get; set; }
+    /// <summary>The root the last saved scan covered (<see cref="SessionCatalogCache.StoredRoot"/>): the sidebar lists it
+    /// at startup, before omp has started and reported a session file of its own.</summary>
+    internal Func<string?> StoredCatalogRoot { get; set; }
+    private string? _startupCatalogRoot;
     internal Task CatalogRefreshTask { get; private set; } = Task.CompletedTask;
 
     [ObservableProperty]
@@ -328,15 +332,24 @@ public sealed partial class MainViewModel
         return line.Length <= 80 ? line : line[..GraphemeText.PrefixLength(line, 80)] + "…";
     }
 
+    /// <summary>At startup, the sessions the last run listed: the sidebar is not empty while omp is still starting.</summary>
+    private async Task ListStoredSessionsAsync()
+    {
+        var root = await Task.Run(() => StoredCatalogRoot() is { } r && Directory.Exists(r) ? r : null);
+        if (root is null || _catalogRoot is not null) return;
+        _startupCatalogRoot = root;
+        RequestCatalogRefresh();
+    }
+
     /// <summary>Rescans omp's session folder off the UI thread; overlapping requests collapse into one more scan.</summary>
     internal void RequestCatalogRefresh()
     {
         if (IsClosing) return;
         var ct = _cts.Token;
         // omp keeps every project's sessions under one folder: any open chat's file says where (the shown one may not
-        // have reported its own yet)
+        // have reported its own yet); until one has, the folder the last run listed
         var file = _open.Last?.SessionFile ?? _opens.Values.Select(o => o.Controller.SessionFile).FirstOrDefault(f => f is not null);
-        if (file is null || SessionCatalog.SessionsRootOf(file) is not { } root) return;
+        if ((file is null ? _startupCatalogRoot : SessionCatalog.SessionsRootOf(file)) is not { } root) return;
         if (_catalogRoot is null || !SessionCatalog.SamePath(_catalogRoot, root))
         {
             // A different profile/account must never inherit rows or pins from the old root, even on failure.
@@ -347,7 +360,7 @@ public sealed partial class MainViewModel
             CatalogNotice = null;
             ApplySessionFilter();
         }
-        Volatile.Write(ref _catalogRequest, new CatalogRequest(root, file));
+        Volatile.Write(ref _catalogRequest, new CatalogRequest(root));
         IsLoadingSessions = !_catalogLoaded;
         // Only the request that finds the counter at zero starts the worker; the worker scans until it has
         // covered every request made before its last scan began.
@@ -367,7 +380,7 @@ public sealed partial class MainViewModel
                     var result = await ScanCatalogAsync(request.Root, ct).ConfigureAwait(false);
                     ct.ThrowIfCancellationRequested();
                     var pinsVersion = Volatile.Read(ref _pinsVersion);
-                    var pins = ReadPinnedSessionIds(request.File); // omp's pinned sessions come first (MainViewModel.Session.cs)
+                    var pins = SessionPins.Read(SessionPins.PathForRoot(request.Root)); // omp's pinned sessions come first (MainViewModel.Session.cs)
                     await UiDispatcher.InvokeAsync(() =>
                     {
                         if (IsClosing || ct.IsCancellationRequested || !ReferenceEquals(request, Volatile.Read(ref _catalogRequest))) return;

@@ -50,6 +50,7 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
         _settings = settings;
         var catalog = new SessionCatalogCache(settings is null ? null : SessionCatalogCache.PathFor(settings.Path));
         ScanCatalogAsync = (root, ct) => catalog.ScanAsync(root, CatalogLimit, ct); // CatalogLimit: MainViewModel.SidebarNav.cs
+        StoredCatalogRoot = catalog.StoredRoot;
         _ownsDraftStore = drafts is null;
         _draftStore = drafts ?? new DraftStore(settings is null ? null : DraftStore.PathFor(settings.Path));
         Documents = new WorkspaceDocumentService(settings is null ? null : settings.Path + ".editor-recovery");
@@ -227,6 +228,9 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             StartTeamProgressIfShared(); // MainViewModel.TeamProgress.cs
             StartGitBell(); // MainViewModel.GitBell.cs
             MoveOmpToNewPack();
+            _ = ListStoredSessionsAsync(); // MainViewModel.Sessions.cs
+            UpdateStartupProgress(); // the clock of the startup line starts with the window, not with omp's spawn
+            UpdateElapsedTimer();
             _ = StartAsync();
         }, DispatcherPriority.Background);
     }
@@ -787,25 +791,33 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
     partial void OnPhaseChanged(SessionPhase value)
     {
         UpdateStatus();
+        UpdateStartupProgress(); // MainViewModel.UiState.cs
         UpdateElapsedTimer();
+        if (value == SessionPhase.Ready && IsModelMenuOpen && ModelsNotice is not null) _ = OpenModelMenuAsync(); // MainViewModel.Settings.cs
         ApplyHistory();
     }
 
-    /// <summary>Cosmetic once-a-second tick for the elapsed time while running. Nothing depends on it.</summary>
+    /// <summary>Cosmetic once-a-second tick for the elapsed time while running or starting. Nothing depends on it.</summary>
     private void UpdateElapsedTimer()
     {
-        if (IsRunning && _elapsedTimer is null)
+        var needed = IsRunning || _startingSince != 0;
+        if (needed && _elapsedTimer is null)
         {
             _elapsedTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) =>
             {
                 UpdateStatus();
+                if (_startingSince != 0)
+                {
+                    UpdateStartupProgress();
+                    if (_startingSince == 0) UpdateElapsedTimer(); // the chat became read only or another window's
+                }
                 // The live "Thinking… 4s" label of the reply being written
                 for (var i = Rows.Count - 1; i >= 0 && i >= Rows.Count - 8; i--)
                     if (Rows[i] is AssistantRowViewModel { IsThinkingLive: true } live) live.Tick();
             });
             _elapsedTimer.Start();
         }
-        else if (!IsRunning && _elapsedTimer is not null)
+        else if (!needed && _elapsedTimer is not null)
         {
             _elapsedTimer.Stop();
             _elapsedTimer = null;

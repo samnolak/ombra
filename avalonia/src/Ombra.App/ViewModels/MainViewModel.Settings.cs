@@ -179,6 +179,8 @@ public sealed partial class MainViewModel
     [ObservableProperty] private string _modelFilter = "";
     [ObservableProperty] private bool _isModelMenuOpen;
     [ObservableProperty] private bool _modelsLoading;
+    /// <summary>Why the model menu lists nothing yet (omp is still starting); null otherwise.</summary>
+    [ObservableProperty] private string? _modelsNotice;
     [ObservableProperty] private string _currentModel = Loc.T("no model");
     [ObservableProperty] private string? _selectedThinking;
     [ObservableProperty] private bool _showThinking = true;
@@ -494,9 +496,13 @@ public sealed partial class MainViewModel
             IsModelMenuOpen = true;
             ModelFilter = "";
             _openModelFamily = null;
+            // omp lists the models; before it has started there is no one to ask (the menu fills in once it is ready:
+            // OnPhaseChanged, MainViewModel.cs)
+            ModelsNotice = Phase is SessionPhase.NotStarted or SessionPhase.Starting ? Loc.T("Models appear here once omp has started.") : null;
+            if (ModelsNotice is not null) return;
             ModelsLoading = true;
-            _allModels = await Session.GetModelsAsync(_cts.Token);
-            ModelsLoading = false;
+            try { _allModels = await Session.GetModelsAsync(_cts.Token); }
+            finally { ModelsLoading = false; }
             // The current model's provider opens (the others stay as the user left them in this run of the app)
             if (_allModels.FirstOrDefault(m => m.Key == _open.Last?.Model) is { } current) _expandedModelProviders.Add(current.Provider);
             ApplyModelFilter();

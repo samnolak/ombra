@@ -1238,7 +1238,13 @@
       </Border>
       <!-- A session action (compact, export, share…) or a terminal-only command: Views/Session/SessionCard -->
       <session:SessionCard x:Name="SessionCardHost" DataContext="{Binding SessionCard}" IsVisible="{Binding $parent[Window].((vm:MainViewModel)DataContext).HasSessionCard}" />
-      <TextBlock x:Name="OpeningSessionText" Classes="muted" Text="{loc:T 'Opening…'}" IsVisible="{Binding IsOpeningSession}" />
+      <!-- Until the chat can take a message: the engine install's step, else how long omp has been starting or opening
+           it (MainViewModel.UiState.cs StartupProgressText), so a slow start never looks like an empty window -->
+      <StackPanel x:Name="StartupProgress" Spacing="4" IsVisible="{Binding ShowStartupProgress}">
+        <TextBlock x:Name="StartupProgressText" Classes="muted" Text="{Binding StartupProgressText}" TextWrapping="Wrap" />
+        <ProgressBar Value="{Binding RuntimeInstallPercent}" Maximum="100" MaxWidth="320" HorizontalAlignment="Left"
+                     IsIndeterminate="{Binding StartupProgressIndeterminate}" />
+      </StackPanel>
       <TextBlock x:Name="PastingText" Classes="muted" Text="{loc:T 'Pasting…'}" IsVisible="{Binding IsPasting}" />
       <TextBlock x:Name="RenamingText" Classes="muted" Text="{loc:T 'Renaming…'}" IsVisible="{Binding IsSavingRename}" />
       <!-- Activity (Claude Code's spinner line): what the run does now — Thinking, Writing, Running bash, Waiting for your
@@ -1947,6 +1953,8 @@
                       </TextBox.InnerLeftContent>
                     </TextBox>
                     <TextBlock DockPanel.Dock="Top" Classes="muted" Text="{loc:T 'Loading models…'}" IsVisible="{Binding ModelsLoading}" Margin="10,6" />
+                    <TextBlock x:Name="ModelsNoticeText" DockPanel.Dock="Top" Classes="muted" Text="{Binding ModelsNotice}" TextWrapping="Wrap" Margin="10,6"
+                               IsVisible="{Binding ModelsNotice, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                     <!-- Fast mode, extended context, advisor, auto-compact, auto-retry (Views/Session/ModelOptions) -->
                     <session:ModelOptions x:Name="ModelOptions" DockPanel.Dock="Bottom" />
                     <ListBox x:Name="ModelList" ItemsSource="{Binding Models}" MaxHeight="300" Classes="menu-list">

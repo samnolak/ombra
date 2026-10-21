@@ -171,7 +171,7 @@ internal static class NightlyRuntimePackage
                 using var client = http is null ? new HttpClient() : null;
                 await using (var response = await (http ?? client!).GetStreamAsync(uri, ct).ConfigureAwait(false))
                 await using (var file = File.Create(package))
-                    await response.CopyToAsync(file, ct).ConfigureAwait(false);
+                    await CopyWithProgressAsync(response, file, pin, progress, ct).ConfigureAwait(false);
             }
             progress?.Report(Loc.T("Checking the Nightly package"));
             string sha;
@@ -205,6 +205,23 @@ internal static class NightlyRuntimePackage
         }
         RemoveOlder(root, pin, inUse);
         return Path.Combine(target, "Nightly.app");
+    }
+
+    /// <summary>Copies the download, saying how much of the pin's size has arrived (at most a few times a second).</summary>
+    private static async Task CopyWithProgressAsync(Stream from, Stream to, Manifest pin, IProgress<string>? progress, CancellationToken ct)
+    {
+        var buffer = new byte[81920];
+        long done = 0;
+        var last = System.Diagnostics.Stopwatch.StartNew();
+        int read;
+        while ((read = await from.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+        {
+            await to.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
+            done += read;
+            if (progress is null || last.ElapsedMilliseconds < 250) continue;
+            last.Restart();
+            progress.Report(Loc.F("Downloading Nightly {0}: {1:0} / {2:0} MB", pin.Version, done / 1_000_000.0, pin.Size / 1_000_000.0));
+        }
     }
 
     /// <summary>Removes installed versions other than the pin's that no runtime runs; returns how many.</summary>

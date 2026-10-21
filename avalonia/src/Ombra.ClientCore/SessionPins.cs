@@ -14,10 +14,11 @@ public static class SessionPins
     public const string FileName = "session-pins.json";
 
     /// <summary>The pins file for the sessions folder that holds <paramref name="sessionFile"/>, or null.</summary>
-    public static string? PathFor(string? sessionFile) =>
-        SessionCatalog.SessionsRootOf(sessionFile) is { } root && Path.GetDirectoryName(root) is { } agentDir
-            ? Path.Combine(agentDir, FileName)
-            : null;
+    public static string? PathFor(string? sessionFile) => PathForRoot(SessionCatalog.SessionsRootOf(sessionFile));
+
+    /// <summary>The pins file next to the sessions folder <paramref name="sessionsRoot"/>, or null.</summary>
+    public static string? PathForRoot(string? sessionsRoot) =>
+        sessionsRoot is not null && Path.GetDirectoryName(sessionsRoot) is { } agentDir ? Path.Combine(agentDir, FileName) : null;
 
     /// <summary>The pinned session ids; empty when the file is missing or unreadable (as omp treats it).</summary>
     public static HashSet<string> Read(string? pinsFile)
