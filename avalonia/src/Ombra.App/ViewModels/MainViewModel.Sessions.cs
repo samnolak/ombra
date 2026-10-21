@@ -304,6 +304,25 @@ public sealed partial class MainViewModel
             item.Status = StatusOfFile(opens, item.Model.Path);
             item.IsMarkedUnread = MarkedUnread().Contains(item.Model.Path) || opens?.GetValueOrDefault(item.Model.Path)?.Unread == true;
         }
+        SetDraftMarks(opens);
+    }
+
+    /// <summary>
+    /// The pencil on each row whose chat keeps unsent composer input, other than the chat shown: a chat open in the
+    /// background by its own composer, a chat not open by the draft saved for its file (DraftStore, MainViewModel.Drafts.cs).
+    /// </summary>
+    private void SetDraftMarks(Dictionary<string, OpenSession>? opens = null)
+    {
+        opens ??= OpenChatsByFile();
+        var files = new HashSet<string>(SessionCatalog.PathComparer);
+        foreach (var d in _draftStore.All)
+            if (d.SessionFile is { } file && !d.Composer.IsEmpty && !IsDraftClaimed(d.Id)) files.Add(file);
+        if (opens is not null)
+            foreach (var (file, open) in opens)
+                if (open != _open && !open.Controller.CurrentLaunch.ReadOnly && !CaptureDraft(open).IsEmpty) files.Add(file);
+        var shown = ShownFile;
+        foreach (var item in Sessions)
+            item.HasDraft = files.Contains(item.Model.Path) && !SessionCatalog.PathComparer.Equals(item.Model.Path, shown);
     }
 
     /// <summary>Each open chat by its session file (a live chat over a read-only view of the same file).</summary>

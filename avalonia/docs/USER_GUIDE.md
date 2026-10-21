@@ -88,8 +88,11 @@ project yet), so the OS warns on first start:
   that belong to no project under **Chats** (after pinned projects, before the other projects). Sessions are
   ordered by their last message (yours or the agent's), newest first, and groups by their newest session; opening a
   session does not reorder the list. Each row shows how long ago its last message was (*now*, *5m*, *3h*, *2d*, then
-  the date), or a dot for a chat that is open: green and pulsing while omp works in it, an amber raised hand when it
-  waits for your approval or answer, yellow for a reply you have not seen yet, red when its omp stopped with an error. A **pinned** session stays in its own
+  the date), or a mark for a chat that is open: a green pulsing dot while omp works in it, a yellow pulsing dot when it
+  waits for your approval or answer (yellow always means the chat needs you), a green check when omp finished and you
+  have not seen the reply yet, a red dot when its omp stopped with an error. A pencil before the title means that
+  chat's message box holds something you have not sent (text, pasted text, images or comments) — in a chat open in
+  the background or one you left earlier; it goes once you send or clear it. A **pinned** session stays in its own
   project (or Chats), at its top, marked with a pin (pins are omp's own, so `/pin` and omp's session picker agree). **Search** filters by title or
   folder at once; after a short pause in typing it also searches what was said in the sessions (your messages and the
   agent's answers; not tool output or thinking). Sessions found only by their messages come under the title matches in
@@ -111,7 +114,7 @@ project yet), so the OS warns on first start:
   It keeps working while you read or write in another one; changing chats never stops a run. Coming back shows
   it as you left it: the whole reply that came meanwhile, your place in the conversation (or its end, if you were
   following it), what you had typed and attached in its message box, a card or question it showed. A chat in the
-  background that finishes, asks something or stops with an error gets its dot and a notification (see
+  background that finishes, asks something or stops with an error gets its mark (a check, a yellow or a red dot) and a notification (see
   Notifications); a question waits for you in that chat. Chats in different projects run side by side.
   Closing or stopping one chat does not stop the others. There is no per-chat process limit or spare omp.
   A failure of the shared engine affects its open chats; unsent input is recovered, never automatically resent.
