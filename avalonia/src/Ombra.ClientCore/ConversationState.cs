@@ -82,6 +82,18 @@ public sealed partial class ConversationState
             Touch();
         }
     }
+    private string? _nextThinkingLevel;
+    /// <summary>The level picked while omp was busy (SessionSnapshot.NextThinkingLevel); null: none pending.</summary>
+    public string? NextThinkingLevel
+    {
+        get => _nextThinkingLevel;
+        set
+        {
+            if (_nextThinkingLevel == value) return;
+            _nextThinkingLevel = value;
+            Touch();
+        }
+    }
     /// <summary>Changes whenever the transcript is replaced (other session, new session, omp restarted). Unique across
     /// every conversation of the app, not only this one: the window shows several omp processes' conversations in turn,
     /// and a number two of them shared would make one look like the other.</summary>
@@ -299,6 +311,7 @@ public sealed partial class ConversationState
         _endedBeforeMessageEnd = null;
         _messageRows.Clear();
         RecoverQueue();
+        NextThinkingLevel = null;
         ResetEngineQueue(newProcess); // ConversationState.QueueUpdate.cs
         ResetBtwGoal(newProcess); // ConversationState.BtwGoal.cs
         if (newProcess)
@@ -446,14 +459,19 @@ public sealed partial class ConversationState
         var index = _queued.FindIndex(q => q.Seq == sequence);
         if (index < 0 || _queued[index].Recovered) return;
         _queued[index] = _queued[index] with { Recovered = true, LiveSteered = false, Images = images ?? _queued[index].Images };
+        // Input that comes back to the message box brings its thinking level back to the picker.
+        if (_queued[index].ThinkingLevel is { } level) NextThinkingLevel = level;
         QueueChanged?.Invoke();
         Touch();
     }
 
+    /// <summary>Whether a waiting message carries its own thinking level: later ones must then carry theirs too.</summary>
+    public bool QueueCarriesThinking => _queued.Any(q => !q.Recovered && q.ThinkingLevel is not null);
+
     /// <summary>Pending input, checkpointed before runtime delivery or local builtin dispatch.</summary>
-    public QueuedMessage Enqueue(QueueKind kind, string text, IReadOnlyList<ImageAttachment> images, string? submissionId = null)
+    public QueuedMessage Enqueue(QueueKind kind, string text, IReadOnlyList<ImageAttachment> images, string? submissionId = null, string? thinkingLevel = null)
     {
-        var q = new QueuedMessage(++_queueSeq, kind, text, images) { SubmissionId = submissionId };
+        var q = new QueuedMessage(++_queueSeq, kind, text, images) { SubmissionId = submissionId, ThinkingLevel = thinkingLevel };
         _queued.Add(q);
         if (kind is QueueKind.Steer or QueueKind.FollowUp) _awaitingEngine.Add(q.Seq);
         QueueChanged?.Invoke();
@@ -468,6 +486,16 @@ public sealed partial class ConversationState
         if (index < 0) return;
         _queued[index] = _queued[index] with { Kind = QueueKind.FollowUp };
         _awaitingEngine.Add(sequence);
+        QueueChanged?.Invoke();
+        Touch();
+    }
+
+    /// <summary>The local FIFO head's thinking level is set in omp; the head itself is dispatched next.</summary>
+    public void QueuedThinkingApplied(long sequence)
+    {
+        var index = _queued.FindIndex(q => q.Seq == sequence && !q.Recovered);
+        if (index < 0) return;
+        _queued[index] = _queued[index] with { ThinkingApplied = true };
         QueueChanged?.Invoke();
         Touch();
     }
@@ -884,6 +912,7 @@ public sealed partial class ConversationState
             SessionTitleHint = SessionTitleHint,
             Cwd = Cwd,
             ThinkingLevel = ThinkingLevel,
+            NextThinkingLevel = NextThinkingLevel,
             Subagents = SubagentsSnapshot(),
             PlanHistory = PlansSnapshot(),
             SubagentsSupported = SubagentsSupported,

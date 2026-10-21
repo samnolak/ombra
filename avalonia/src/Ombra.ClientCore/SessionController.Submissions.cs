@@ -6,6 +6,8 @@ public sealed partial class SessionController
 {
     // Guarded by _lock. A claimed FIFO head stays checkpointed through admission and cannot be selected twice.
     private QueuedMessage? _dispatchingDeferred;
+    // Guarded by _lock. The level picked while omp worked is being set now that nothing waits.
+    private bool _applyingNextThinking;
 
     public bool ShouldQueueSubmission(string text)
     {
@@ -44,7 +46,7 @@ public sealed partial class SessionController
         Task<bool> sent;
         lock (_lock)
         {
-            if (_dispatchingDeferred is not null || _restoringQueue || _stopRequested || Volatile.Read(ref _disposed) != 0
+            if (_dispatchingDeferred is not null || _applyingNextThinking || _restoringQueue || _stopRequested || Volatile.Read(ref _disposed) != 0
                 || _state.Phase != SessionPhase.Ready || _state.SigningIn is not null
                 || _omp?.Connection is not { CloseReason: null } conn) return;
             // A plugin reload can replace the catalog while commands wait. Recover removed handlers without
@@ -52,14 +54,26 @@ public sealed partial class SessionController
             while (true)
             {
                 command = _state.Queued.FirstOrDefault(q => !q.Recovered);
+                if (command is null)
+                {
+                    StartNextThinkingLevel(conn);
+                    return;
+                }
                 // Earlier runtime follow-ups may still be awaiting admission or idle drain.
-                if (command is null || !command.Deferred) return;
+                if (!command.Deferred) return;
                 if (command.Kind == QueueKind.DeferredFollowUp || OmpBuiltins.RunsOverRpc(command.Text, _state.Commands)) break;
                 _state.RecoverQueued(command.Seq);
                 _state.AddNotice(NoticeLevel.Warning, "The deferred command is no longer available. Recovered input was not sent.");
                 _changes.Writer.TryWrite(true);
             }
             _dispatchingDeferred = command;
+            if (command.ThinkingLevel is { } level && !command.ThinkingApplied)
+            {
+                // omp takes no thinking level with a message: set it now, while omp is idle, then dispatch this
+                // head as usual. The claim keeps every later input behind it meanwhile.
+                _ = ApplyQueuedThinkingAsync(conn, command, level);
+                return;
+            }
             if (command.Kind == QueueKind.BuiltinCommand)
             {
                 // Start under the claim lock, before Stop can recover waiting input. Keep command_output in the
@@ -103,6 +117,77 @@ public sealed partial class SessionController
         finally
         {
             lock (_lock) _dispatchingDeferred = null;
+            DispatchDeferredInput();
+            _changes.Writer.TryWrite(true);
+        }
+    }
+
+    private async Task ApplyQueuedThinkingAsync(RpcConnection conn, QueuedMessage command, string level)
+    {
+        try
+        {
+            var applied = await ApplyThinkingLevelAsync(conn, level, CancellationToken.None).ConfigureAwait(false);
+            Mutate(s =>
+            {
+                s.ThinkingLevel = applied;
+                s.QueuedThinkingApplied(command.Seq);
+            });
+        }
+        catch (Exception e) when (e is RpcCommandException or TimeoutException or RpcConnectionClosedException)
+        {
+            Mutate(s =>
+            {
+                s.RecoverQueued(command.Seq);
+                // The level could not be set: the picker shows the session's own level again.
+                s.NextThinkingLevel = null;
+                s.AddNotice(NoticeLevel.Error, $"Could not set thinking to {level} for the queued message ({e.Message}). Recovered input was not sent.");
+            });
+        }
+        finally
+        {
+            lock (_lock) _dispatchingDeferred = null;
+            DispatchDeferredInput();
+            _changes.Writer.TryWrite(true);
+        }
+    }
+
+    /// <summary>Under <c>_lock</c>, at idle with nothing waiting: the level picked while omp worked becomes the session's.</summary>
+    private void StartNextThinkingLevel(RpcConnection conn)
+    {
+        if (_state.NextThinkingLevel is not { } next) return;
+        if (next == _state.ThinkingLevel)
+        {
+            _state.NextThinkingLevel = null;
+            _changes.Writer.TryWrite(true);
+            return;
+        }
+        _applyingNextThinking = true;
+        _ = ApplyNextThinkingAsync(conn, next);
+    }
+
+    private async Task ApplyNextThinkingAsync(RpcConnection conn, string level)
+    {
+        try
+        {
+            var applied = await ApplyThinkingLevelAsync(conn, level, CancellationToken.None).ConfigureAwait(false);
+            Mutate(s =>
+            {
+                if (!ReferenceEquals(conn, Connection)) return;
+                s.ThinkingLevel = applied;
+                if (s.NextThinkingLevel == level) s.NextThinkingLevel = null;
+            });
+        }
+        catch (Exception e) when (e is RpcCommandException or TimeoutException or RpcConnectionClosedException)
+        {
+            Mutate(s =>
+            {
+                if (s.NextThinkingLevel == level) s.NextThinkingLevel = null;
+                s.AddNotice(NoticeLevel.Error, $"Could not set thinking to {level}: {e.Message}");
+            });
+        }
+        finally
+        {
+            lock (_lock) _applyingNextThinking = false;
             DispatchDeferredInput();
             _changes.Writer.TryWrite(true);
         }

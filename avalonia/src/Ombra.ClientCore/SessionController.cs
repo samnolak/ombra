@@ -534,20 +534,39 @@ public sealed partial class SessionController : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Sets the session's thinking level. While omp works or input waits, the level is kept for the next message
+    /// (<see cref="SessionSnapshot.NextThinkingLevel"/>): set now, omp would apply it to the current run.
+    /// </summary>
     public async Task SetThinkingLevelAsync(string level, CancellationToken ct = default)
     {
         var conn = RequireConnection();
         if (RefuseWhileSigningIn()) return;
+        var later = false;
+        Mutate(s =>
+        {
+            var busy = _dispatchingDeferred is not null || _applyingNextThinking;
+            later = busy || s.Phase != SessionPhase.Ready || s.Queued.Any(q => !q.Recovered);
+            s.NextThinkingLevel = later && (busy || level != s.ThinkingLevel || s.QueueCarriesThinking) ? level : null;
+        });
+        if (later) return;
         try
         {
-            await conn.SetThinkingLevelAsync(level, ct).ConfigureAwait(false);
-            var state = await conn.GetStateAsync(ct).ConfigureAwait(false);
-            Mutate(s => s.ThinkingLevel = state.ThinkingLevel ?? level);
+            var applied = await ApplyThinkingLevelAsync(conn, level, ct).ConfigureAwait(false);
+            Mutate(s => s.ThinkingLevel = applied);
         }
         catch (Exception e) when (e is RpcCommandException or TimeoutException or RpcConnectionClosedException)
         {
             Mutate(s => s.AddNotice(NoticeLevel.Error, $"Could not set thinking to {level}: {e.Message}"));
         }
+    }
+
+    /// <summary><c>set_thinking_level</c>, then the level omp actually uses (it can clamp to what the model offers).</summary>
+    private static async Task<string> ApplyThinkingLevelAsync(RpcConnection conn, string level, CancellationToken ct)
+    {
+        await conn.SetThinkingLevelAsync(level, ct).ConfigureAwait(false);
+        var state = await conn.GetStateAsync(ct).ConfigureAwait(false);
+        return state.ThinkingLevel ?? level;
     }
 
     public async Task<IReadOnlyList<OmpLoginProvider>> GetLoginProvidersAsync(CancellationToken ct = default)
@@ -980,7 +999,16 @@ public sealed partial class SessionController : IAsyncDisposable
                 else if (kind == QueueKind.BuiltinCommand) throw new ArgumentException("This command is no longer an omp builtin.");
                 else if (kind == QueueKind.FollowUp && (_dispatchingDeferred is not null || s.Queued.Any(q => q.Deferred && !q.Recovered)))
                     kind = QueueKind.DeferredFollowUp;
-                queued = s.Enqueue(kind, text, images, submissionId);
+                // A level picked while omp works belongs to this message. omp takes none with a message and, set now,
+                // would change the current run: Ombra keeps the message and sets the level right before omp starts it.
+                // A steer joins the current run, so it keeps that run's level.
+                string? level = null;
+                if (kind != QueueKind.Steer && s.NextThinkingLevel is { } next && (next != s.ThinkingLevel || s.QueueCarriesThinking))
+                {
+                    level = next;
+                    if (kind == QueueKind.FollowUp) kind = QueueKind.DeferredFollowUp;
+                }
+                queued = s.Enqueue(kind, text, images, submissionId, level);
                 try { QueueCheckpoint?.Invoke(s.Queued.ToArray()); }
                 catch
                 {
