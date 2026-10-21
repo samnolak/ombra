@@ -8,10 +8,10 @@ Why: Ombra embeds multiple concurrent sessions and renders native host features.
 Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
 
 diff --git a/CHANGELOG.md b/CHANGELOG.md
-index 8b299b899693383a7e24627e841874cafae0bd9a..22f153b91059f67bd6646918836b2af41527ba14 100644
+index 8b299b899693383a7e24627e841874cafae0bd9a..951fc2b6de53704a3b8b1a8b100e47a1b7ade5a9 100644
 --- a/CHANGELOG.md
 +++ b/CHANGELOG.md
-@@ -2,6 +2,49 @@
+@@ -2,6 +2,51 @@
  
  ## [Unreleased]
  
@@ -44,6 +44,8 @@ index 8b299b899693383a7e24627e841874cafae0bd9a..22f153b91059f67bd6646918836b2af4
 +- Compound session operations explicitly delegate their own writer lease: collab replicas retain their identity across live entries and resyncs, and session transfer markers and local-copy replacements no longer conflict with the operation's lease. Independent managers still cannot write, move or delete an owned journal.
 +- Parked subagents' settings overlays are no longer retained by the ambient settings proxy's bound-method cache; cached methods remain scoped to their owning settings instance.
 +- RPC `abort_and_prompt` no longer fails with "Agent is already processing" when a steer (for example a follow-up sent early with `promote_queued_message`) was still queued: the stopped run's queued input used to resume as the abort settled and take the session from the new prompt. The new prompt now runs next and queued input follows it.
++- An RPC `prompt` that runs `/fresh` is acknowledged as a local command (`inputDisposition: "local"`) instead of `cancelled`: the check that the input is still current compared `session.sessionId`, which `/fresh` changes to a new provider session id in the same chat; it now compares the transcript's id.
++- `/export` and RPC `export_html` without an absolute path write into the session's folder instead of the engine process's working directory: an engine host serves sessions of many folders from one process, so the file used to land elsewhere (or nowhere, under a read-only process folder) while the printed path named the session's.
 +- A server whose real context window is smaller than the model's configured one (a local vLLM, llama.cpp or LM Studio started with a short context) no longer dead-ends the run with "Compaction freed too little context" when one large tool result overflows it: the window the overflow error names is adopted for the session (and kept when the same model is selected again or its metadata is refreshed), the recovery elide is no longer skipped after an auto-shake that removed nothing or failed (its protected recent tail can be the whole small window), and a retry that fits after the elide counts as recovery even when nothing is left to summarize.
 +- `read` returns files of up to 300 lines (`read.summarize.minTotalLines`, was 100 — one default read page) verbatim instead of as a structural outline; agents re-read outlined 100–300-line files range by range.
 +
@@ -61,7 +63,7 @@ index 8b299b899693383a7e24627e841874cafae0bd9a..22f153b91059f67bd6646918836b2af4
  ## [18.12.2] - 2026-10-18
  
  ### Added
-@@ -786,7 +829,6 @@
+@@ -786,7 +831,6 @@
  - Corrected tool behavior and configuration documentation for `read`, background `bash`, Python evaluation, replace editing, goal removal, and `advisor.immuneTurns`.
  - Fixed custom glob backends from hanging indefinitely; scans now respect the tool deadline and report incomplete results when necessary.
  - Fixed `--resume <path>` from silently creating a new session for a missing path; it now reports the missing path, consistent with `--fork <path>` and `--resume <id>`.

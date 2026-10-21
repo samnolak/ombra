@@ -510,6 +510,7 @@
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/exec/settings.ts" LogicalName="runtime-pack/engine/coding-agent/src/exec/settings.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/export/custom-share.ts" LogicalName="runtime-pack/engine/coding-agent/src/export/custom-share.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/export/html/args.ts" LogicalName="runtime-pack/engine/coding-agent/src/export/html/args.ts" WithCulture="false" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/export/html/export-session-cwd.test.ts" LogicalName="runtime-pack/engine/coding-agent/src/export/html/export-session-cwd.test.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/export/html/index.ts" LogicalName="runtime-pack/engine/coding-agent/src/export/html/index.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/export/html/share-loader.js" LogicalName="runtime-pack/engine/coding-agent/src/export/html/share-loader.js" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/export/html/template.css" LogicalName="runtime-pack/engine/coding-agent/src/export/html/template.css" WithCulture="false" />
@@ -835,6 +836,7 @@
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/rpc/rpc-editor.test.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/rpc/rpc-editor.test.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/rpc/rpc-editor.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/rpc/rpc-editor.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/rpc/rpc-frame.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/rpc/rpc-frame.ts" WithCulture="false" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/rpc/rpc-fresh-admission.test.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/rpc/rpc-fresh-admission.test.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/rpc/rpc-goal.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/rpc/rpc-goal.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/rpc/rpc-input-admission.test.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/rpc/rpc-input-admission.test.ts" WithCulture="false" />
     <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/coding-agent/src/modes/rpc/rpc-input.ts" LogicalName="runtime-pack/engine/coding-agent/src/modes/rpc/rpc-input.ts" WithCulture="false" />
