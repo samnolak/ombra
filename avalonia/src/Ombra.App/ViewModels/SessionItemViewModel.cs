@@ -53,7 +53,8 @@ public sealed partial class SessionItemViewModel(SessionSummary model) : Observa
     public string SnippetText => ContentMatch?.Text ?? "";
 
     /// <summary>The row menu's commands (MainViewModel's, set when the row is made): a menu opens in a popup, outside
-    /// the window's visual tree, so it cannot reach the window's DataContext.</summary>
+    /// the window's visual tree, so it cannot reach the window's DataContext. Open is also a click or Enter on the row,
+    /// which in selection mode toggles the row instead.</summary>
     public System.Windows.Input.ICommand? OpenCommand { get; init; }
     public System.Windows.Input.ICommand? DeleteCommand { get; init; }
     public System.Windows.Input.ICommand? RenameCommand { get; init; }
@@ -68,6 +69,15 @@ public sealed partial class SessionItemViewModel(SessionSummary model) : Observa
     public System.Windows.Input.ICommand? MarkAllReadCommand { get; init; }
     public System.Windows.Input.ICommand? RevealCommand { get; init; }
     public System.Windows.Input.ICommand? OpenTerminalCommand { get; init; }
+    /// <summary>Menu: Select (selection mode, this row selected); on a selected row, Delete N chats.</summary>
+    public System.Windows.Input.ICommand? SelectCommand { get; init; }
+    public System.Windows.Input.ICommand? DeleteSelectedCommand { get; init; }
+
+    /// <summary>The window's selection mode (one shared instance): the row's check box and its menu follow it.</summary>
+    public SessionSelectionViewModel? Selection { get; init; }
+
+    /// <summary>Picked in selection mode (its check box is checked).</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(AccessibleName))] private bool _isSelected;
 
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(ReadLabel))] private bool _isMarkedUnread;
     public string ReadLabel => IsMarkedUnread ? Loc.T("Mark as read") : Loc.T("Mark as unread");
@@ -110,14 +120,16 @@ public sealed partial class SessionItemViewModel(SessionSummary model) : Observa
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(AccessibleName))] private bool _hasDraft;
     public string DraftText => Loc.T("Unsent draft");
 
-    /// <summary>What a screen reader says for the row: the title, then the draft and the status the row's marks show.</summary>
+    /// <summary>What a screen reader says for the row: the title, then the draft and the status the row's marks show,
+    /// and "selected" while it is picked in selection mode.</summary>
     public string AccessibleName
     {
         get
         {
             var name = Title;
             if (HasDraft) name += ", " + DraftText;
-            return HasStatus ? name + ", " + StatusText : name;
+            if (HasStatus) name += ", " + StatusText;
+            return IsSelected ? name + ", " + Loc.T("selected") : name;
         }
     }
 

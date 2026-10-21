@@ -72,6 +72,35 @@
   <Style Selector="Panel.session-row:pointerover Panel.session-meta, Panel.session-row.actions-shown Panel.session-meta">
     <Setter Property="MinWidth" Value="76" />
   </Style>
+  <!-- Selection mode (MainViewModel.SessionSelection.cs): a check box leads each row, a picked row has the open
+       chat's fill, and the age stays (the hover actions are hidden: a click picks the row) -->
+  <Style Selector="CheckBox.session-check">
+    <Setter Property="MinWidth" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="0,0,8,0" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.session.selected">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+  </Style>
+  <Style Selector="Button.session.selected /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+  </Style>
+  <Style Selector="Panel.session-row.selecting:pointerover Panel.session-meta">
+    <Setter Property="Opacity" Value="1" />
+    <Setter Property="MinWidth" Value="20" />
+  </Style>
+  <!-- The bar over the list while rows are picked: their number, Select all, Delete, Cancel -->
+  <Style Selector="Border.selection-bar">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="10,8" />
+  </Style>
+  <Style Selector="TextBlock.selection-count">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="Medium" />
+  </Style>
   <!-- The header's search icon while the search field is open -->
   <Style Selector="Button#SessionSearchButton.on ctl|Icon">
     <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextPrimary}" />
