@@ -179,9 +179,12 @@ internal sealed class FakeEngineHost
                 case "engine_delete_session":
                     try
                     {
-                        // Transport fixture only; real-process tests exercise native ownership.
+                        // Transport fixture only; real-process tests exercise native ownership. A "<file>.fakelease"
+                        // holder is refused as the runtime refuses another live writer's session.
                         var path = command?["path"]?.GetValue<string>()
                             ?? throw new IOException("Missing session path");
+                        if (LeaseHolder(path) is not null)
+                            throw new IOException($"Session is busy in another live writer; nothing was deleted: {path}");
                         File.Delete(path);
                         var artifacts = path[..^".jsonl".Length];
                         if (Directory.Exists(artifacts)) Directory.Delete(artifacts, recursive: true);

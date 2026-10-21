@@ -144,6 +144,16 @@ project yet), so the OS warns on first start:
   and **⋯** (or right-click it): **Rename** (opens it and edits its name in the header), **Pin / Unpin**, **Copy path**
   (the session file) and **Delete…**, after a confirmation; deleting the open session works like the session menu's
   Delete (a new session starts), and deleting a chat that works in the background says so and stops its omp first.
+  **Several chats at once**: right-click a chat → **Select** (or ⌘-click a chat — Ctrl-click on Windows and Linux —
+  or Shift-click for a range from the open chat) to pick chats; every row then shows a check box and a click toggles
+  it instead of opening it (⌘/Ctrl-click toggles, Shift-click adds the range from the chat picked last). The bar over
+  the list says how many are selected, with **Select all** (the chats the list shows now — a search or a status chip
+  narrows it), **Delete** and **Cancel**; a selected chat's right-click menu also has **Delete N chats**, and Delete or
+  Backspace in the list does the same. One confirmation names the count and that the files are deleted; then each
+  chat goes as a single delete does (an idle chat open in this window is closed first). A chat that works, or that
+  another Ombra window or a terminal omp has open, is skipped, never stopped: the card says what was deleted and what
+  was skipped and why (*Deleted 4, 1 skipped: working*). Esc or **Cancel** leaves without deleting; a search keeps only
+  the selected chats it lists.
   The folder button at the top of the sidebar **adds a project folder** to the list;
   right-click a project's header for **New session here**, **Rename** (the name the sidebar and the header show; the
   folder is not renamed, an empty name brings the folder's back), **Pin project** (pinned projects stay first, in the
@@ -659,7 +669,8 @@ project yet), so the OS warns on first start:
 | Ctrl+L / Ctrl+Esc (⌘L / ⌘Esc) | focus the message box; ⌘L/Ctrl+L remains the address shortcut in either browser surface, while ⌘Esc/Ctrl+Esc returns from the Browser page to chat |
 | Ctrl+Shift+I / Ctrl+Shift+E (⇧⌘I / ⇧⌘E) | choose a model / thinking effort |
 | Ctrl+\\ (⌘\\) | hide the focused sidebar, right pane, terminal panel or event log; terminal processes keep running |
-| ↑ / ↓, Enter, F2, Delete (session list) | move focus without opening, open, rename, or ask to delete the focused chat; double-click a chat to rename |
+| ↑ / ↓, Enter, F2, Delete (session list) | move focus without opening, open, rename, or ask to delete the focused chat; double-click a chat to rename. In selection mode Enter or Space toggles the focused chat, Delete or Backspace asks to delete the selected ones, Esc leaves |
+| ⌘-click / Shift-click a chat (Ctrl-click on Windows and Linux) | select it / select the range from the open or last picked chat |
 | ← / →, Home, End (sidebar resize handle) | change width by 20 pixels, restore its default, or use the maximum; Tab reaches the handle |
 | Ctrl+Shift+U (⇧⌘U), Shift+Esc | mark the focused/current chat read or unread; mark all chats read |
 | Ctrl+W (⌘W) | close the focused terminal/panel/browser tab before closing the window |

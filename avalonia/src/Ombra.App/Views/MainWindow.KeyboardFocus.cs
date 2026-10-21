@@ -28,8 +28,17 @@ public sealed partial class MainWindow
         SessionList.AddHandler(KeyDownEvent, OnSessionListKey, RoutingStrategies.Tunnel);
         SessionList.AddHandler(PointerPressedEvent, (_, e) =>
         {
-            if (e.ClickCount != 2 || !e.GetCurrentPoint(SessionList).Properties.IsLeftButtonPressed
-                || SessionButton(e.Source as Visual) is not { DataContext: SessionItemViewModel row }) return;
+            if (!e.GetCurrentPoint(SessionList).Properties.IsLeftButtonPressed
+                || SessionButton(e.Source as Visual) is not { DataContext: SessionItemViewModel row } || Vm is not { } vm) return;
+            // ⌘-click (Ctrl-click elsewhere; on macOS Control-click is the right click) toggles a row and Shift-click adds
+            // a range, in or into selection mode (MainViewModel.SessionSelection.cs); the row is not opened
+            var command = OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control;
+            if (e.KeyModifiers == command || e.KeyModifiers == KeyModifiers.Shift)
+            {
+                if (e.KeyModifiers == KeyModifiers.Shift ? vm.ExtendSessionSelection(row) : vm.ToggleSessionSelection(row)) e.Handled = true;
+                return;
+            }
+            if (e.ClickCount != 2 || vm.Selection.IsActive) return;
             if (row.RenameCommand?.CanExecute(row) == true) row.RenameCommand.Execute(row);
             e.Handled = true;
         }, RoutingStrategies.Tunnel);
@@ -96,6 +105,14 @@ public sealed partial class MainWindow
             : focused?.GetSelfAndVisualAncestors().OfType<Controls.PreviewPanel>().FirstOrDefault();
         browser?.HandleBrowserShortcut(e);
         if (e.Handled) return;
+        // Selection mode: Delete or Backspace deletes the picked chats (after asking), unless a text field has the key
+        if (e.KeyModifiers == KeyModifiers.None && e.Key is Key.Delete or Key.Back && vm.Selection.IsActive
+            && focused is not TextBox && (focused is null || WithinHost(Sidebar, focused)))
+        {
+            if (vm.DeleteSelectedSessionsCommand.CanExecute(null)) vm.DeleteSelectedSessionsCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
         if (e.KeyModifiers == KeyModifiers.Shift && e.Key == Key.Escape && !vm.ShowBrowserPage)
         {
             vm.MarkAllReadCommand.Execute(null);
