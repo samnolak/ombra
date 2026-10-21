@@ -731,4 +731,33 @@ public sealed class PreviewTests
         w.Close();
         await main.DisposeAsync();
     }
+
+    /// <summary>Regression: closing the first page (a link opened in the panel) took every page and the panel with it.</summary>
+    [AvaloniaFact]
+    public async Task Closing_the_first_page_closes_only_it_and_the_panel_stays_with_the_others()
+    {
+        var (w, panel, main) = ShowPanel(720);
+        var vm = main.Preview;
+        main.ShowPaneCommand.Execute(SidePane.Browser);
+        Assert.Null(vm.OpenUserTab(new Uri("https://example.com/first")));
+        var first = vm.Tabs[0];
+        var second = vm.OpenAgentTab("second");
+        Assert.Null(vm.NavigateTabForAgent(second, "https://codepen.io/pen"));
+        vm.SelectTabCommand.Execute(first);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(2, PanelTabs(panel).Count);
+        Assert.True(first.CanClose);
+
+        main.ClosePanelTabCommand.Execute(main.PanelTabs.Single(t => t.Page == first));
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(first.IsClosed);
+        Assert.False(second.IsClosed);
+        Assert.Same(second, vm.ActiveTab);
+        Assert.Equal(SidePane.Browser, main.ActivePane);
+        Assert.Single(PanelTabs(panel));
+        Assert.False(vm.Tabs[0].HasContent); // an empty first tab of the user's again, out of the strip
+        Assert.False(vm.Tabs[0].CanClose);
+        w.Close();
+        await main.DisposeAsync();
+    }
 }
