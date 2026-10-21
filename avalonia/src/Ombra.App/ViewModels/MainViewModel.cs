@@ -425,6 +425,8 @@ public sealed partial class MainViewModel : ObservableObject, IAsyncDisposable
             RenameSessionItemCommand.NotifyCanExecuteChanged();
             TogglePinItemCommand.NotifyCanExecuteChanged();
             DeleteSessionItemCommand.NotifyCanExecuteChanged();
+            SelectSessionItemCommand.NotifyCanExecuteChanged();
+            DeleteSelectedSessionsCommand.NotifyCanExecuteChanged();
         }
         if (IsReadOnly) OnPropertyChanged(nameof(ReadOnlyExplanation));
         RecoverRuntimeInput(open, s);

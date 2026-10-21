@@ -199,6 +199,26 @@
           <TextBlock x:Name="SessionsLoadingText" IsVisible="{Binding IsLoadingSessions}" Text="{loc:T 'Loading sessions…'}"
                      Classes="muted" Margin="4,6" />
         </StackPanel>
+        <!-- Selection mode (MainViewModel.SessionSelection.cs): how many rows are picked, Select all (the rows listed),
+             Delete (asks once), Cancel (Esc too) -->
+        <Border x:Name="SelectionBar" DockPanel.Dock="Top" Classes="selection-bar" Margin="8,2,8,2" IsVisible="{Binding Selection.IsActive}">
+          <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+            <TextBlock x:Name="SelectionCountText" Classes="selection-count" Text="{Binding Selection.CountText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            <Button x:Name="SelectAllButton" Grid.Column="1" Classes="link action" Content="{loc:T 'Select all'}" Command="{Binding SelectAllSessionsCommand}"
+                    ToolTip.Tip="{loc:T 'Select every chat the list shows'}" AutomationProperties.Name="{loc:T 'Select all chats'}" />
+            <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
+              <Button x:Name="DeleteSelectedButton" Classes="danger" Command="{Binding DeleteSelectedSessionsCommand}"
+                      ToolTip.Tip="{loc:T 'Delete the selected chats (asks first)'}" AutomationProperties.Name="{Binding Selection.DeleteLabel}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <ctl:Icon Data="{StaticResource IconTrash}" Size="14" VerticalAlignment="Center" />
+                  <TextBlock Text="{loc:T 'Delete'}" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+              <Button x:Name="CancelSelectionButton" Classes="outline" Content="{loc:T 'Cancel'}" Command="{Binding CancelSessionSelectionCommand}"
+                      ToolTip.Tip="{loc:T 'Cancel (Esc)'}" AutomationProperties.Name="{loc:T 'Cancel selection'}" />
+            </StackPanel>
+          </Grid>
+        </Border>
         <!-- Bottom: an update, when there is one (Settings lives in the icon rail) -->
         <StackPanel DockPanel.Dock="Bottom" Margin="8,4,8,10" Spacing="2" IsVisible="{Binding ShowUpdatePill}">
           <Border Height="1" Background="{DynamicResource GuiBorderSoft}" Margin="2,0,2,6" />
@@ -354,14 +374,16 @@
                 <ItemsControl ItemsSource="{Binding Items}" IsVisible="{Binding IsExpanded}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:SessionItemViewModel">
-                      <!-- The row's right-click menu is on the row, so it opens over the title, the age and the hover actions alike -->
-                      <Panel Classes="session-row">
+                      <!-- The row's right-click menu is on the row, so it opens over the title, the age and the hover actions alike.
+                           In selection mode a check box leads the row and a click toggles it (Enter and Space too) -->
+                      <Panel Classes="session-row" Classes.selecting="{Binding Selection.IsActive}">
                         <Panel.ContextFlyout>
                           <Flyout Placement="Pointer" ctl:ChoiceMenu.CloseOnChoice="True">
                             <sidebar:SessionRowMenu />
                           </Flyout>
                         </Panel.ContextFlyout>
                         <Button AutomationProperties.Name="{Binding AccessibleName}" AutomationProperties.HelpText="{Binding SnippetText}" Classes="session" Classes.current="{Binding IsCurrent}"
+                                Classes.selected="{Binding IsSelected}"
                                 Command="{Binding OpenCommand}"
                                 CommandParameter="{Binding}"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
@@ -380,18 +402,21 @@
                           <!-- The title takes the row, after a pin and a pencil (unsent input waits in that chat's composer);
                                on the right its age, or what omp is doing there (a dot: working, needs input in the attention
                                yellow, stopped by an error; a check: finished, not seen yet), in the chat shown or in the background -->
-                          <Grid ColumnDefinitions="Auto,Auto,*,Auto">
-                            <ctl:Icon Data="{StaticResource IconPin}" Size="14" Margin="0,0,5,0" VerticalAlignment="Center" Opacity="0.6"
+                          <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto">
+                            <CheckBox Classes="session-check" IsVisible="{Binding Selection.IsActive, FallbackValue=False}" IsChecked="{Binding IsSelected, Mode=OneWay}"
+                                      IsHitTestVisible="False" Focusable="False" IsTabStop="False"
+                                      AutomationProperties.Name="{Binding Title, StringFormat={loc:T 'Select {0}'}}" />
+                            <ctl:Icon Grid.Column="1" Data="{StaticResource IconPin}" Size="14" Margin="0,0,5,0" VerticalAlignment="Center" Opacity="0.6"
                                       IsVisible="{Binding IsPinned}" />
-                            <ctl:Icon Grid.Column="1" Classes="session-draft" Data="{StaticResource IconPencil}" Size="13" Margin="0,0,6,0"
+                            <ctl:Icon Grid.Column="2" Classes="session-draft" Data="{StaticResource IconPencil}" Size="13" Margin="0,0,6,0"
                                       IsVisible="{Binding HasDraft}" ToolTip.Tip="{Binding DraftText}" AutomationProperties.Name="{Binding DraftText}" />
-                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                            <StackPanel Grid.Column="3" VerticalAlignment="Center">
                               <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
                               <!-- Found in its messages: the words around the match, the match emphasized -->
                               <TextBlock x:Name="SessionSnippet" IsVisible="{Binding HasSnippet}" TextTrimming="CharacterEllipsis" FontSize="12" Margin="0,1,0,2"
                                          Foreground="{DynamicResource GuiTextSecondary}"><Run Text="{Binding SnippetBefore}" /><Run Text="{Binding SnippetMatch}" FontWeight="SemiBold" Foreground="{DynamicResource GuiTextPrimary}" /><Run Text="{Binding SnippetAfter}" /></TextBlock>
                             </StackPanel>
-                            <Panel Grid.Column="3" Classes="session-meta" Margin="10,0,0,0">
+                            <Panel Grid.Column="4" Classes="session-meta" Margin="10,0,0,0">
                               <TextBlock Classes="session-age" Text="{Binding When}" IsVisible="{Binding !HasStatus}" HorizontalAlignment="Right" VerticalAlignment="Center" />
                               <Ellipse Classes="session-dot" Classes.running="{Binding IsActive}" Classes.waiting="{Binding IsWaiting}"
                                        Classes.error="{Binding IsFailed}"
@@ -403,8 +428,9 @@
                             </Panel>
                           </Grid>
                         </Button>
-                        <!-- On hover, in place of the age: pin and the row's menu -->
-                        <StackPanel Classes="session-actions" Orientation="Horizontal" Spacing="0" Margin="0,0,3,0" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <!-- On hover, in place of the age: pin and the row's menu (not in selection mode: a click picks the row) -->
+                        <StackPanel Classes="session-actions" Orientation="Horizontal" Spacing="0" Margin="0,0,3,0" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                    IsVisible="{Binding !Selection.IsActive, FallbackValue=True}">
                           <Button Classes="icon session-action" Classes.on="{Binding IsPinned}" Width="26" Height="26"
                                   Command="{Binding TogglePinCommand}" CommandParameter="{Binding}"
                                   ToolTip.Tip="{Binding PinTooltip}" AutomationProperties.Name="{Binding PinLabel}">

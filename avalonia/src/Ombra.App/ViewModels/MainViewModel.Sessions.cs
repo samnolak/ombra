@@ -455,12 +455,14 @@ public sealed partial class MainViewModel
             if (rows.Remove(c.Path, out var item)) item.Model = c;
             else item = new SessionItemViewModel(c)
             {
-                OpenCommand = OpenSessionCommand, DeleteCommand = DeleteSessionItemCommand, RenameCommand = RenameSessionItemCommand,
+                OpenCommand = ActivateSessionRowCommand, DeleteCommand = DeleteSessionItemCommand, RenameCommand = RenameSessionItemCommand,
                 TogglePinCommand = TogglePinItemCommand, CopyPathCommand = CopySessionPathCommand, CopyIdCommand = CopySessionItemIdCommand,
                 ExportCommand = ExportHtmlCommand, ShareCommand = ShareSessionCommand, ToggleArchiveCommand = ToggleArchiveCommand,
                 ToggleReadCommand = ToggleReadItemCommand, MarkAllReadCommand = MarkAllReadCommand,
                 RevealCommand = RevealSessionItemCommand, OpenTerminalCommand = TerminalSessionItemCommand,
+                SelectCommand = SelectSessionItemCommand, DeleteSelectedCommand = DeleteSelectedSessionsCommand, Selection = Selection,
             };
+            item.IsSelected = _selectedSessions.Contains(c.Path); // MainViewModel.SessionSelection.cs
             item.IsCurrent = c.Path == current;
             item.ContentMatch = match;
             item.IsPinned = _pinnedIds.Contains(c.Id);
@@ -470,6 +472,7 @@ public sealed partial class MainViewModel
             target.Add(item);
         }
         Reconcile(Sessions, target);
+        KeepListedSelection(target); // MainViewModel.SessionSelection.cs
         SetSessionStatuses();
         RebuildSessionGroups();
     }
@@ -798,32 +801,41 @@ public sealed partial class MainViewModel
         card.Primary = card.Secondary = card.Tertiary = null;
         var failed = new List<string>();
         foreach (var chat in chats)
-        {
-            var open = FindOpen(chat.Model.Path);
-            var draftId = open?.DraftId;
-            var composer = open == _open ? CaptureDraft(_open) : null;
-            if (open is not null)
-            {
-                if (open == _open) await NewChatAsync(); // off the chat on screen first (to a chat: the project goes), so it can be closed
-                if (FindOpen(chat.Model.Path) is { } still) await CloseSessionAsync(still);
-            }
-            try
-            {
-                if (FindOpen(chat.Model.Path) is not null) throw new IOException(Loc.T("The session could not be closed safely."));
-                await _host.DeleteSessionAsync(chat.Model.Path);
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or RpcConnectionClosedException or TimeoutException)
-            {
-                failed.Add($"{chat.Title}: {e.Message}");
-                continue;
-            }
-            RemoveDeletedDrafts(chat.Model.Path, chat.Model.Cwd, draftId, closedComposer: composer);
-        }
+            if (await DeleteListedChatAsync(chat) is { } error) failed.Add($"{chat.Title}: {error}");
         RequestCatalogRefresh();
         HideProject(group, announce: false);
         if (failed.Count > 0)
             card.Finish(false, Loc.T("Some chats were not deleted"), string.Join("\n", failed), secondary: new SessionCardAction(Loc.T("Dismiss"), new RelayCommand(CloseSessionCard)));
         else ShowBrief("IconTrash", Loc.F("“{0}” removed", group.Name), chats.Count == 1 ? Loc.T("1 chat deleted") : Loc.F("{0} chats deleted", chats.Count));
+    }
+
+    /// <summary>
+    /// Deletes one listed chat through the runtime (its lease decides: a chat another process holds is refused). One open
+    /// here is closed first, the one on screen after a new chat took its place (its unsent input moves along); its drafts
+    /// go once the file is gone. Null when it was deleted, else why not.
+    /// </summary>
+    private async Task<string?> DeleteListedChatAsync(SessionItemViewModel chat)
+    {
+        var open = FindOpen(chat.Model.Path);
+        var draftId = open?.DraftId;
+        // Only unsent input moves along: an empty composer restored would claim "Recovered unsent input"
+        var composer = open == _open && CaptureDraft(_open) is { IsEmpty: false } typed ? typed : null;
+        if (open is not null)
+        {
+            if (open == _open) await NewChatAsync(); // off the chat on screen first, so it can be closed
+            if (FindOpen(chat.Model.Path) is { } still) await CloseSessionAsync(still);
+        }
+        try
+        {
+            if (FindOpen(chat.Model.Path) is not null) throw new IOException(Loc.T("The session could not be closed safely."));
+            await _host.DeleteSessionAsync(chat.Model.Path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or RpcConnectionClosedException or TimeoutException)
+        {
+            return e.Message;
+        }
+        RemoveDeletedDrafts(chat.Model.Path, chat.Model.Cwd, draftId, closedComposer: composer);
+        return null;
     }
 
     /// <summary>Only the client's list changes (nothing on disk), so it is done at once, with Undo on the card that says so.</summary>
