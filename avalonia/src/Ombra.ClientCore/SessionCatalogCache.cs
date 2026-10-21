@@ -29,6 +29,28 @@ public sealed class SessionCatalogCache
     public static string PathFor(string settingsPath) =>
         SessionCatalog.ResolveLinks(System.IO.Path.GetFullPath(settingsPath)) + ".session-catalog.json";
 
+    /// <summary>The session root the last saved scan covered, so the sidebar can list it before omp has started and
+    /// reported its own; null without a readable cache of this profile.</summary>
+    public string? StoredRoot()
+    {
+        if (Path is null) return null;
+        try
+        {
+            using var stream = new FileStream(Path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+            using var doc = JsonDocument.Parse(stream);
+            var r = doc.RootElement;
+            return r.ValueKind == JsonValueKind.Object
+                && r.TryGetProperty(nameof(Document.Version), out var v) && v.ValueKind == JsonValueKind.Number && v.GetInt32() == 1
+                && r.TryGetProperty(nameof(Document.Profile), out var p) && p.ValueKind == JsonValueKind.String && p.GetString() == Path
+                && r.TryGetProperty(nameof(Document.Root), out var root) && root.GetString() is { } s && System.IO.Path.IsPathFullyQualified(s)
+                ? s : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or FormatException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     public Task<SessionCatalogScanResult> ScanAsync(string sessionsRoot, int limit = 500, CancellationToken ct = default) =>
         ScanAsync(sessionsRoot, limit, ct, static root => root.EnumerateDirectories(),
             static project => project.EnumerateFiles("*.jsonl"), static file => file.LastWriteTimeUtc);

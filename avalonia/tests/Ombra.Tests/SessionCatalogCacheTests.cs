@@ -121,6 +121,27 @@ public sealed class SessionCatalogCacheTests
         Assert.Equal("Private first root", Assert.Single((await profileCache.ScanAsync(f.Root)).Sessions).Title);
     }
 
+    [Fact]
+    public async Task Stored_root_is_the_last_saved_scan_of_this_profile_only()
+    {
+        // The sidebar lists this root at startup, before omp has started and reported its own (MainViewModel.Sessions.cs)
+        var f = new CatalogFiles();
+        Assert.Null(f.Cache().StoredRoot());
+        f.Add("one", "First");
+        await f.Cache().ScanAsync(f.Root);
+        Assert.Equal(f.Root, f.Cache().StoredRoot());
+        var otherRoot = Path.Combine(f.Directory, "other-root");
+        f.Add("other", "Other", otherRoot);
+        await f.Cache().ScanAsync(otherRoot);
+        Assert.Equal(otherRoot, f.Cache().StoredRoot());
+
+        var otherProfile = SessionCatalogCache.PathFor(Path.Combine(f.Directory, "other-profile.json"));
+        File.Copy(f.CachePath, otherProfile);
+        Assert.Null(new SessionCatalogCache(otherProfile).StoredRoot());
+        File.WriteAllText(f.CachePath, "{\"Version\":1,");
+        Assert.Null(f.Cache().StoredRoot());
+    }
+
     [Theory]
     [InlineData("truncated")]
     [InlineData("version")]

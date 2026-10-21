@@ -202,6 +202,39 @@ public sealed class MicroUxStateTests
     }
 
     [AvaloniaFact]
+    public async Task While_omp_is_still_starting_the_window_says_so_lists_the_last_runs_chats_and_explains_the_model_menu()
+    {
+        // After an update omp took minutes to start: the sidebar was empty, the model menu listed nothing, and nothing
+        // said the app was busy. "silent" never answers past the handshake, so omp stays Starting.
+        var root = TestProcesses.TempDir("micro-starting-sessions");
+        var cwd = SessionCatalog.ResolveLinks(TestProcesses.TempDir("micro-starting-project"));
+        var saved = ChatScrollTests.WriteSession(root, cwd, "Chat from the last run", [new { role = "user", content = "hello", timestamp = 1700000000000L }]);
+        var controller = new SessionController(TestProcesses.FakeFactory("silent", root), new LaunchRequest(cwd));
+        var vm = new MainViewModel(controller, new AppArgs()) { StoredCatalogRoot = () => root };
+        var window = new MainWindow { DataContext = vm };
+        try
+        {
+            window.Show();
+            vm.OnWindowOpened();
+            await SessionAreaTests.Until(() => vm.Sessions.Any(s => s.Model.Path == saved), "the last run's chat listed before omp is ready");
+            Assert.Equal(SessionPhase.Starting, vm.Phase);
+            Assert.Null(controller.SessionFile);
+
+            var line = window.FindControl<TextBlock>("StartupProgressText")!;
+            Assert.True(window.FindControl<StackPanel>("StartupProgress")!.IsVisible);
+            Assert.Equal(Loc.F("Starting omp… {0}s", 0), line.Text);
+            await SessionAreaTests.Until(() => line.Text == Loc.F("Starting omp… {0}s", 1), "the startup line counts seconds");
+
+            await vm.OpenModelMenuCommand.ExecuteAsync(null);
+            Assert.True(vm.IsModelMenuOpen);
+            Assert.Equal(Loc.T("Models appear here once omp has started."), vm.ModelsNotice);
+            Assert.False(vm.ModelsLoading);
+            MicroUxTabTests.Shot(window, "omp-still-starting");
+        }
+        finally { await vm.DisposeAsync(); window.Close(); }
+    }
+
+    [AvaloniaFact]
     public async Task Opening_paste_and_rename_feedback_are_localized_and_clear_after_completion()
     {
         var env = await SessionAreaTests.OpenAsync();
