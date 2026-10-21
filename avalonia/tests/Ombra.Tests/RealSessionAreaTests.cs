@@ -111,15 +111,17 @@ public sealed class RealSessionAreaTests(ITestOutputHelper log)
 
         await vm.FreshProviderSessionCommand.ExecuteAsync(null);
         Assert.Equal("Fresh provider session", vm.SessionCard!.Title);
+        MicroUxTabTests.Shot(w, "real-session-fresh-card");
         await vm.WorkspaceFoldersCommand.ExecuteAsync(null);
         Assert.Equal(options.WorkingDirectory, vm.SessionCard!.Folders.Single().Path);
         await vm.ExportHtmlCommand.ExecuteAsync(null);
         Assert.Equal("Exported as HTML", vm.SessionCard!.Title);
         Assert.True(File.Exists(vm.SessionCard.Detail), vm.SessionCard.Detail);
+        MicroUxTabTests.Shot(w, "real-session-export-card");
         File.Delete(vm.SessionCard.Detail);
 
-        // A terminal-only command stays in the window
-        vm.ComposerText = "/plan make a plan";
+        // A terminal-only command stays in the window (/plan is plan mode over the owned engine's RPC now)
+        vm.ComposerText = "/vibe make it fast";
         vm.SendCommand.Execute(null);
         Assert.Equal("terminal", vm.SessionCard!.Kind);
         Assert.Empty(vm.Rows.OfType<UserRowViewModel>());
