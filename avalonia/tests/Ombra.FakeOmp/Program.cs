@@ -469,10 +469,19 @@ object UserMessage(string text, JsonArray? images)
     return new JsonObject { ["role"] = "user", ["content"] = content };
 }
 
+// FAKE_OMP_THINKING_LOG: the level each turn starts at and every set_thinking_level, in order, with whether a run was
+// under way then (a queued message's level must reach omp only between runs).
+void LogThinking(string line)
+{
+    if (Environment.GetEnvironmentVariable("FAKE_OMP_THINKING_LOG") is { Length: > 0 } thinkingLog)
+        Ombra.FakeOmp.FakeEngineHost.AppendLog(thinkingLog, line + "\n");
+}
+
 async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int delayMs, JsonArray? images = null)
 {
     streaming = true;
     Emit(new { type = "agent_start" });
+    LogThinking($"turn {message} thinking={thinking}");
     Emit(new { type = "message_start", message = UserMessage(message, images) });
     Emit(new { type = "message_start", message = new { role = "assistant", content = Array.Empty<object>() } });
     var sb = new StringBuilder();
@@ -983,6 +992,7 @@ async Task RunAgentAsync(string message, CancellationToken ct, int deltas, int d
     {
         // Like omp: the snapshot without it comes first (turn_end), then its user message.
         EmitQueueUpdate();
+        LogThinking($"turn {queued.Text} thinking={thinking}");
         Emit(new { type = "message_start", message = UserMessage(queued.Text, queued.Images) });
         var reply = "followed: " + queued.Text;
         Emit(new { type = "message_start", message = new { role = "assistant", content = Array.Empty<object>() } });
@@ -1474,6 +1484,7 @@ await foreach (var cmd in session.Commands.ReadAllAsync(session.Stopping))
             break;
         case "set_thinking_level":
             thinking = cmd?["level"]?.GetValue<string>();
+            LogThinking($"set_thinking_level {thinking} {(streaming ? "during a run" : "idle")}");
             Respond(id, type);
             break;
         case "set_fast_mode":

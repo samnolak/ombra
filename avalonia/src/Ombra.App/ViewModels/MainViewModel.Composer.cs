@@ -52,6 +52,8 @@ public sealed partial class QueuedItemViewModel : ObservableObject, IDisposable
             // Promotion turns a follow-up into a steer: label, tooltip and Send now follow.
             OnPropertyChanged(nameof(Kind));
             OnPropertyChanged(nameof(Tooltip));
+            OnPropertyChanged(nameof(ThinkingLabel));
+            OnPropertyChanged(nameof(HasThinking));
             OnPropertyChanged(nameof(CanSendNow));
             OnPropertyChanged(nameof(CanWithdraw));
             RemoveCommand.NotifyCanExecuteChanged();
@@ -69,10 +71,15 @@ public sealed partial class QueuedItemViewModel : ObservableObject, IDisposable
         QueueKind.BuiltinCommand => Loc.T("Command"),
         _ => Loc.T("Queued"),
     };
+    /// <summary>The thinking level picked for this message while omp worked (a small tag); null: the session's level.</summary>
+    public string? ThinkingLabel => Model.ThinkingLevel is { } level ? ThinkingLevelText.Label(level) : null;
+    public bool HasThinking => Model.ThinkingLevel is not null;
     public string Tooltip => Model.LiveSteered ? Loc.T("omp already has that message.")
         : Model.Kind == QueueKind.Steer
             ? Loc.T("omp reads this at its next step. ↑ in the empty message box edits it.")
-            : Loc.T("Sent when omp finishes its current work. ↑ in the empty message box edits it.");
+            : Model.ThinkingLevel is { } level
+                ? Loc.F("Sent when omp finishes its current work, thinking effort: {0}. ↑ in the empty message box edits it.", ThinkingLevelText.Label(level))
+                : Loc.T("Sent when omp finishes its current work. ↑ in the empty message box edits it.");
 
     /// <summary>Only omp's follow-up queue can be promoted; a steer is already read at the next step.</summary>
     public bool CanSendNow => Model is { Kind: QueueKind.FollowUp, Recovered: false };
@@ -501,6 +508,7 @@ public sealed partial class MainViewModel
             {
                 var restored = false;
                 var text = item.Model.Text;
+                var level = item.Model.ThinkingLevel;
                 var card = new SessionCardViewModel("brief", "IconTrash", Loc.T("Message removed from queue"),
                     Loc.T("Undo restores it to the composer without sending."));
                 card.Primary = new SessionCardAction(Loc.T("Undo"), new RelayCommand(() =>
@@ -509,6 +517,9 @@ public sealed partial class MainViewModel
                     restored = true;
                     CloseSessionCard();
                     AppendRecovered(open, text, images);
+                    // Its thinking level comes back with it, like an edited one (ConversationState.RecoverQueued).
+                    if (level is not null && open.Last?.Phase is SessionPhase.Ready or SessionPhase.Running)
+                        _ = open.Controller.SetThinkingLevelAsync(level, _cts.Token).ContinueWith(_ => PostToUi(() => ApplyIfShown(open)), TaskScheduler.Default);
                     SaveDraft(open);
                     FlushDrafts();
                     if (open == _open) FocusComposerRequested?.Invoke();
