@@ -421,6 +421,10 @@ use; and the embedded compositor redrew the whole window for a 20 px spinner. Pr
   another app drives a hidden page: rAF stopped, the refresh driver at about 1 Hz (lazy loading stalls), and
   screenshots of the frame from before. A screenshot waits up to 250 ms
   for the first frame after the page comes back on screen, then reads what there is (a hung page paints none).
+  Ombra's own isolated calls are not the agent acting (`NightlyAgent.Background`): a right-panel tab's annotations
+  (`IsolatedPageAnnotations`) start their script, sync and keep one reader waiting on `__ompAnnotate.next()`, which
+  answers only when the page has a message, often never. Counted as acting (0.1.1, release gate), that reader kept
+  every right-panel tab seen for as long as it lived: behind another tab, under the Browser page, minimized.
 - **60 Hz** (`layout.frame_rate` in the runtime's user.js): the embedded window is composited whole into the IOSurface
   it exports, so any animation redraws the entire pane every refresh; a standalone Nightly keeps the display's rate.
   `browser-window-frames` now wants at least 55 fps (it wanted 120 at the display's 160 Hz). Reconsider once frames

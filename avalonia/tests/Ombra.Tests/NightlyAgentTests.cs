@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json.Nodes;
+using Ombra.App.Controls;
 using Ombra.App.Nightly;
 using Ombra.ClientCore;
 using Ombra.ClientCore.Browser;
@@ -136,19 +137,43 @@ public sealed partial class NightlyRuntimeTests
         public NightlyRuntime? Runtime => runtime;
         public uint WindowId => Window;
         public long LastUserInput => 0;
-        public Task<IDisposable> AgentActsAsync() => Task.FromResult<IDisposable>(new NoScope());
+        public Task<IDisposable> AgentActsAsync()
+        {
+            Interlocked.Increment(ref Acting);
+            UpdateVisibility();
+            return Task.FromResult<IDisposable>(new Scope(this));
+        }
         public Task ShownFrameAsync(TimeSpan timeout, CancellationToken ct) => Task.CompletedTask;
-        private sealed class NoScope : IDisposable { public void Dispose() { } }
+        private sealed class Scope(AgentPane pane) : IDisposable
+        {
+            private int _done;
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _done, 1) != 0) return;
+                Interlocked.Decrement(ref pane.Acting);
+                pane.UpdateVisibility();
+            }
+        }
+        // The agent's actions under way (NightlyPane's count). With Visibility set (on Serial, the runtime's thread) the
+        // pane tells Nightly whether its page can be seen as NightlyPane does: while the agent acts, else while Shown
+        // (without NightlyPane.AgentSeen after an action).
+        public int Acting;
+        public NightlyVisibility? Visibility;
+        public Serial? Serial;
+        public volatile bool Shown = true;
+        public void UpdateVisibility() => Serial?.Run(() => Visibility?.Update(Volatile.Read(ref Acting) > 0 || Shown));
         public void OnRuntimeState(NightlyState state, string? detail) { }
         public void OnAttached(uint windowId)
         {
             Window = windowId;
             runtime.Send(NightlyProtocol.ResizeMessage(windowId, 800, 600, null));
+            Visibility?.Attach(windowId, Volatile.Read(ref Acting) > 0 || Shown);
         }
         public void OnDetached()
         {
             Window = 0;
             Frames.Clear();
+            Visibility?.Detach();
         }
         public void OnWindow(NightlyProtocol.WindowInfo window)
         {
@@ -366,6 +391,103 @@ public sealed partial class NightlyRuntimeTests
         }
         finally
         {
+            server.Stop();
+            serial.Run(runtime.Dispose);
+            pane.Frames.Dispose();
+            try { Directory.Delete(profile, recursive: true); } catch (IOException) { }
+        }
+    }
+}
+
+public sealed partial class NightlyRuntimeTests
+{
+    /// <summary>A page that counts its animation frames where the isolated world reads them (the DOM).</summary>
+    private const string FramesFixture = """
+        <!doctype html><html><head><meta charset="utf-8"><title>K1 frames</title></head><body>
+        <script nonce="k1">
+          window.rafs = 0;
+          (function frame() { document.documentElement.dataset.rafs = ++window.rafs; requestAnimationFrame(frame); })();
+        </script></body></html>
+        """;
+
+    /// <summary>
+    /// An agent tab of the right panel behind another tab, with its annotations reader waiting on the page (annotate.js's
+    /// <c>next()</c>, which answers only when the page has a message): the reader is not the agent acting, so Nightly is
+    /// told the page is hidden (<c>document.hidden</c>, no animation frames). The agent's own call shows it while it runs,
+    /// and it is hidden again after. Release gate 0.1.1: the reader held the pane "acting" for as long as the page lived,
+    /// and such tabs rendered at ~52 fps behind other tabs, in a hidden panel and in a minimized window.
+    /// </summary>
+    [Fact]
+    public async Task An_agent_tab_behind_another_is_hidden_while_its_annotations_reader_waits()
+    {
+        var app = Environment.GetEnvironmentVariable("OMBRA_TEST_NIGHTLY_APP");
+        var root = Environment.GetEnvironmentVariable("OMBRA_TEST_NIGHTLY_PROFILE_ROOT");
+        Assert.SkipUnless(OperatingSystem.IsMacOS() && app is { Length: > 0 } && root is { Length: > 0 },
+            "set OMBRA_TEST_NIGHTLY_APP (an embed-capable Nightly.app) and OMBRA_TEST_NIGHTLY_PROFILE_ROOT");
+        Assert.Empty(NightlyProcesses(app!));
+        var profile = Path.Combine(root!, "hidden-test-" + Guid.NewGuid().ToString("N")[..8]);
+        var serial = new Serial();
+        var options = new NightlyRuntimeOptions(NightlyMach.RealPath(Path.Combine(app!, "Contents", "MacOS", "nightly")), profile, null, null, null, AllowUnsignedPeer: true);
+        var runtime = new NightlyRuntime(options, serial.Post);
+        var pane = new AgentPane(runtime) { Serial = serial };
+        pane.Visibility = new NightlyVisibility(runtime.Send, runtime.ReleaseFrame, () => { },
+            (delay, retry) => _ = Task.Delay(delay).ContinueWith(_ => serial.Run(retry), TaskScheduler.Default));
+        var (server, url) = ServeFixture(FramesFixture);
+        IsolatedPageAnnotations? annotations = null;
+        try
+        {
+            var token = serial.Run(() => runtime.Register(pane));
+            await Until(() => serial.Run(() => runtime.State == NightlyState.Running && pane.Window != 0 && pane.FrameCount > 0), "a window with frames", 90);
+            serial.Run(() => runtime.Send(NightlyProtocol.CommandMessage(pane.Window, NightlyProtocol.CommandOp.Navigate, url)!));
+            await Until(() => serial.Run(() => pane.Location is { } l && l.Url == url && !l.Flags.HasFlag(NightlyProtocol.LocationFlags.Loading)), "the page loaded", 30);
+            var agent = new NightlyAgent(pane, pane.Frames);
+
+            // The tab's annotations as the right panel starts them after the load: the script, then the reader waiting
+            annotations = Ombra.App.Controls.PreviewPanel.NightlyAnnotations(agent, new Ombra.App.ViewModels.PreviewViewModel(), () => false);
+            await annotations.OnLoadedAsync(url);
+            Assert.Equal("true", await agent.Background.CallAsync("() => typeof window.__ompAnnotate === 'object'", "[]", CancellationToken.None));
+            await Task.Delay(500); // the reader took the script's "ready" and waits for the next message
+
+            // Another tab comes to the front: this one is hidden, however long the reader waits
+            pane.Shown = false;
+            pane.UpdateVisibility();
+            async Task<(bool Hidden, long Frames)> Probe()
+            {
+                var json = await agent.Background.CallAsync("() => [document.hidden, Number(document.documentElement.dataset.rafs)]", "[]", CancellationToken.None);
+                var a = JsonNode.Parse(json!)!.AsArray();
+                return (a[0]!.GetValue<bool>(), a[1]!.GetValue<long>());
+            }
+            var hiddenBy = DateTime.UtcNow.AddSeconds(5);
+            while (!(await Probe()).Hidden)
+            {
+                Assert.True(DateTime.UtcNow < hiddenBy, $"the page is not hidden (the agent acts {Volatile.Read(ref pane.Acting)} times)");
+                await Task.Delay(100);
+            }
+            Assert.Equal(0, Volatile.Read(ref pane.Acting));
+            var before = await Probe();
+            await Task.Delay(2000);
+            var after = await Probe();
+            Assert.True(after.Hidden);
+            Assert.True(after.Frames - before.Frames <= 2, $"{after.Frames - before.Frames} animation frames in 2 s while hidden");
+
+            // The agent's call: the page is seen while it runs (rAF goes on), hidden again after
+            Assert.Equal("\"false|true\"", await agent.CallAsync("() => new Promise(r => { const rafs = () => Number(document.documentElement.dataset.rafs), n = rafs(); "
+                + "setTimeout(() => r(document.hidden + '|' + (rafs() > n)), 300); })", "[]", CancellationToken.None));
+            Assert.Equal(0, Volatile.Read(ref pane.Acting));
+            hiddenBy = DateTime.UtcNow.AddSeconds(5);
+            while (!(await Probe()).Hidden)
+            {
+                Assert.True(DateTime.UtcNow < hiddenBy, "the page is not hidden again after the agent's call");
+                await Task.Delay(100);
+            }
+
+            annotations.Close();
+            serial.Run(() => runtime.Unregister(token));
+            await Until(() => NightlyProcesses(app!).Count == 0, "no Nightly process left", 15);
+        }
+        finally
+        {
+            annotations?.Close();
             server.Stop();
             serial.Run(runtime.Dispose);
             pane.Frames.Dispose();

@@ -440,6 +440,40 @@ public sealed class PreviewAnnotationTests
         Assert.Equal(2, world.Count(PreviewPanel.AnnotateFunction));
     }
 
+    /// <summary>
+    /// The annotations of a tab Nightly shows are Ombra's own calls, not the agent acting on the page: the script's start,
+    /// the reader waiting on the page (for as long as it lives) and the sync leave the pane as hidden as its tab is, so
+    /// Nightly hides an agent tab behind another one or in a hidden panel. The agent's own call makes the page seen
+    /// (<see cref="NightlyPane.AgentSeen"/> after it). Release gate 0.1.1: every right-panel tab counted as acting forever.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task A_Nightly_tabs_annotations_are_not_the_agent_acting_on_it()
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        var vm = Opened();
+        var pane = new NightlyPane(); // no window, no runtime: every call fails at once, after it was counted or not
+        try
+        {
+            var page = PreviewPanel.NightlyAnnotations(pane.Agent, vm, () => true);
+            await page.OnLoadedAsync("http://localhost:5173/");
+            await page.SyncAsync();
+            await Settle();
+            Assert.False(pane.AgentActing);
+
+            try
+            {
+                await pane.Agent.CallAsync("() => 1", "[]", CancellationToken.None);
+                Assert.Fail("a pane without a window answered");
+            }
+            catch (IsolatedScriptException) { }
+            Assert.True(pane.AgentActing);
+        }
+        finally
+        {
+            pane.Close();
+        }
+    }
+
     [Fact]
     public void Short_messages_are_not_folded()
     {

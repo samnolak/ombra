@@ -283,7 +283,9 @@ internal static partial class NightlyAcceptance
 
         /// <summary>
         /// Commands, one per line: <c>browser</c> / <c>chats</c> (the rail), <c>preview [URL]</c> (the agent's pane in the
-        /// right panel), <c>size W H</c>, <c>theme dark|light|system</c>, <c>fullscreen on|off</c> (the window's full screen),
+        /// right panel), <c>tab TEXT</c> (the right panel's tab whose address contains TEXT, shown as a click on it does),
+        /// <c>size W H</c>, <c>theme dark|light|system</c>, <c>fullscreen on|off</c> (the window's full screen),
+        /// <c>minimize on|off</c> (the window into the Dock and back, never activating the app; logs when Avalonia has it),
         /// <c>click X Y</c>, <c>rclick X Y</c>, <c>dclick X Y</c>, <c>hover X Y</c> (points from the browser window pane's
         /// top-left), <c>key MODS CODE CHARS</c> (MODS: <c>-</c> or a <c>+</c>-joined list of cmd, shift, ctrl, alt; CODE the
         /// macOS key code in hex), <c>type TEXT</c>, <c>open URL</c> (a new tab of the window), <c>shot NAME</c> (the screen
@@ -394,6 +396,16 @@ internal static partial class NightlyAcceptance
                     if ((parts[1] == "on") != (window.WindowState == WindowState.FullScreen))
                         MacObjC.SendVoid(NsWindow, "toggleFullScreen:", 0);
                     await Task.Delay(2500);
+                    break;
+                case "tab" when vm.Preview.Tabs.FirstOrDefault(t => t.Url?.AbsoluteUri.Contains(parts[1], StringComparison.Ordinal) == true) is { } tab:
+                    vm.Preview.SelectTabCommand.Execute(tab);
+                    break;
+                case "minimize":
+                    var minimize = parts[1] == "on";
+                    var clock = Stopwatch.StartNew();
+                    MacObjC.SendVoid(NsWindow, minimize ? "miniaturize:" : "deminiaturize:", 0);
+                    var minimized = await Until(() => (window.WindowState == WindowState.Minimized) == minimize, 5);
+                    Log($"window {(minimize ? "minimized" : "restored")} {minimized} after {clock.ElapsedMilliseconds} ms");
                     break;
                 case "click" or "rclick" or "dclick" or "hover" when pane is not null:
                     var at = ClientToWindow(pane.TranslatePoint(new Point(D(1), D(2)), window) ?? default);

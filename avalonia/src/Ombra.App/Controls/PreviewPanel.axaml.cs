@@ -438,7 +438,7 @@ public partial class PreviewPanel : UserControl
         tab.RunScript = pane.Agent.RunPageScriptAsync;
         tab.CaptureScreenshot = pane.Agent.CaptureAsync;
         tab.SetNative(null, pane.Agent, pane.Agent);
-        var annotations = _vm is { } owner ? _nightlyAnnotations[tab] = new IsolatedPageAnnotations(pane.Agent, owner, () => _vm?.ActiveTab == tab) : null;
+        var annotations = _vm is { } owner ? _nightlyAnnotations[tab] = NightlyAnnotations(pane.Agent, owner, () => _vm?.ActiveTab == tab) : null;
         // The device mode: the window at the device's size (Nightly lays the page out at the window's size; the pane
         // scales it down where the panel is smaller), and what the page emulates (pixel ratio, user agent, touch,
         // viewport rules), sent before its first page loads.
@@ -480,6 +480,12 @@ public partial class PreviewPanel : UserControl
         if (uri is not null) pane.Navigate(uri);
         ShowActiveTab();
     }
+
+    /// <summary>The annotations of a tab Nightly shows: Ombra's calls, not the agent's (<see cref="Nightly.NightlyAgent.Background"/>),
+    /// so their reader, waiting on the page while it lives, neither shows a hidden tab to Nightly nor keeps it shown.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("macos")]
+    internal static IsolatedPageAnnotations NightlyAnnotations(Nightly.NightlyAgent agent, PreviewViewModel vm, Func<bool> isShown) =>
+        new(agent.Background, vm, isShown);
 
     private void DropNightly(PreviewTab tab, Control pane)
     {
