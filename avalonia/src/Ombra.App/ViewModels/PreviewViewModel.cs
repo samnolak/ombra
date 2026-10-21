@@ -103,7 +103,9 @@ public sealed partial class PreviewViewModel : ObservableObject
 
     private void OnTabChangedForGroups(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(PreviewTab.Url) or nameof(PreviewTab.ShowsInStrip)) _siteGroups.Regroup(Tabs);
+        if (e.PropertyName is not (nameof(PreviewTab.Url) or nameof(PreviewTab.ShowsInStrip))) return;
+        _siteGroups.Regroup(Tabs);
+        UpdateFirstTab();
     }
 
     /// <summary>The tab the pane shows; the page properties of this model (address, title, loading…) are its.</summary>
@@ -161,6 +163,7 @@ public sealed partial class PreviewViewModel : ObservableObject
             foreach (var gone in e.OldItems?.OfType<PreviewTab>() ?? []) gone.PropertyChanged -= OnTabChangedForGroups;
             foreach (var added in e.NewItems?.OfType<PreviewTab>() ?? []) added.PropertyChanged += OnTabChangedForGroups;
             _siteGroups.Regroup(Tabs);
+            UpdateFirstTab();
         };
         Suggestions.CollectionChanged += (_, _) =>
         {
@@ -460,13 +463,25 @@ public sealed partial class PreviewViewModel : ObservableObject
         return HasMessage ? Message : null;
     }
 
-    /// <summary>The user closes a tab they opened, one of omp's or a pop-up (their first tab stays); omp's requests for it are refused from now on.</summary>
+    /// <summary>
+    /// The user closes a tab: one they opened, one of omp's or a pop-up, or their first while other pages are open
+    /// (an empty first tab takes its place, unseen until the others are closed); omp's requests for a closed tab are
+    /// refused from now on. Closing the first tab never closes the others or the panel.
+    /// </summary>
     [RelayCommand]
     private void CloseTab(PreviewTab? tab)
     {
         if (tab is null || !tab.CanClose) return;
         if (tab == ActiveTab && tab.IsAgentTab) FollowsAgent = true;
+        if (tab == Tabs[0]) Tabs.Insert(0, Configure(new PreviewTab("", isAgentTab: false)));
         RemoveTab(tab);
+    }
+
+    /// <summary>Whether the first tab can be closed: while it shows a page beside another one.</summary>
+    private void UpdateFirstTab()
+    {
+        var first = Tabs[0];
+        first.IsClosableFirst = first.HasContent && Tabs.Skip(1).Any(t => t.HasContent);
     }
 
     /// <summary>omp is done with <paramref name="tab"/>: it leaves the pane, unless the user is looking at it (then it

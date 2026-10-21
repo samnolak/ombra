@@ -51,8 +51,14 @@ public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableO
     /// <summary>A window a page opened (its <see cref="Opener"/>), whichever engine shows it.</summary>
     public bool IsPopup => Opener is not null;
 
-    /// <summary>The user can close it: omp's tabs, pop-ups and the ones they opened (their first tab stays).</summary>
-    public bool CanClose => IsAgentTab || IsPopup || IsOpenedByUser;
+    /// <summary>The user can close it: omp's tabs, pop-ups and the ones they opened; their first tab while it shows a
+    /// page and other pages are open (alone, its × takes the browser out of the panel instead).</summary>
+    public bool CanClose => IsAgentTab || IsPopup || IsOpenedByUser || IsClosableFirst;
+
+    /// <summary>The user's first tab shows a page beside other pages (kept by PreviewViewModel).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanClose))]
+    private bool _isClosableFirst;
 
     /// <summary>It has something to show: a page, or it is omp's or a pop-up (those show while still blank).</summary>
     public bool HasContent => Url is not null || IsAgentTab || IsPopup;
