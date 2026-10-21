@@ -1337,6 +1337,13 @@ public sealed partial class MainWindow : Window
             settingsOpen.CloseSettingsCommand.Execute(null);
             e.Handled = true;
         }
+        else if (e.Key == Key.Escape && Vm is { Selection.IsActive: true } selecting
+            && !(FocusManager?.GetFocusedElement() is Visual inCard && (ReferenceEquals(inCard, SessionCardHost) || SessionCardHost.IsVisualAncestorOf(inCard))))
+        {
+            // Esc leaves the sidebar's selection mode (nothing deleted) before it would stop omp; in the card it closes the card
+            selecting.CancelSessionSelectionCommand.Execute(null);
+            e.Handled = true;
+        }
         else if (e.Key == Key.Escape && EscapeStaysLocal())
         {
             // Esc in a search box, the preview, a terminal or the session card means "leave this", never "stop omp"

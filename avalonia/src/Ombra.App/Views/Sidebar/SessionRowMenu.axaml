@@ -1,7 +1,8 @@
 <!-- A sidebar chat's menu (right-click on the row, or its ⋯ on hover), in the order of ChatGPT's: Rename, Pin / Unpin,
      Archive / Unarchive (the client's list only); Export as HTML and Share (omp's /export, /share: the chat shown only);
-     Copy session ID, Copy session file path; Delete (asks first). DataContext: the row's SessionItemViewModel (its
-     commands are MainViewModel's: a popup cannot reach the window). -->
+     Copy session ID, Copy session file path; Select (selection mode, MainViewModel.SessionSelection.cs); Delete (asks
+     first), and on a selected row Delete N chats (the whole selection, asks once). DataContext: the row's
+     SessionItemViewModel (its commands are MainViewModel's: a popup cannot reach the window). -->
 <UserControl xmlns:loc="using:Ombra.App.Localization"
              xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -91,11 +92,26 @@
       </Grid>
     </Button>
     <Border Classes="menu-separator" />
+    <Button x:Name="SelectItem" Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsVisible="{Binding !IsSelected}"
+            Command="{Binding SelectCommand}" CommandParameter="{Binding}" AutomationProperties.Name="{loc:T 'Select'}">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconChecklist}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="{loc:T 'Select'}" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Border Classes="menu-separator" IsVisible="{Binding !IsSelected}" />
     <Button x:Name="DeleteItem" Classes="menu-item danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
             Command="{Binding DeleteCommand}" CommandParameter="{Binding}" AutomationProperties.Name="{loc:T 'Delete'}">
       <Grid ColumnDefinitions="Auto,*">
         <ctl:Icon Data="{StaticResource IconTrash}" Size="16" Margin="0,0,10,0" />
         <TextBlock Grid.Column="1" Text="{loc:T 'Delete…'}" VerticalAlignment="Center" />
+      </Grid>
+    </Button>
+    <Button x:Name="DeleteSelectedItem" Classes="menu-item danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsVisible="{Binding IsSelected}"
+            Command="{Binding DeleteSelectedCommand}" AutomationProperties.Name="{Binding Selection.DeleteLabel, FallbackValue=''}">
+      <Grid ColumnDefinitions="Auto,*">
+        <ctl:Icon Data="{StaticResource IconTrash}" Size="16" Margin="0,0,10,0" />
+        <TextBlock Grid.Column="1" Text="{Binding Selection.DeleteLabel, FallbackValue=''}" VerticalAlignment="Center" />
       </Grid>
     </Button>
   </StackPanel>
