@@ -25,8 +25,8 @@
       "attestation": "https://registry.npmjs.org/-/npm/v1/attestations/@oh-my-pi%2fpi-coding-agent@18.12.2",
       "verification": "npm tarball integrity verified; SLSA payload decoded, signatures not independently verified"
     },
-    "sha256": "82328ab482d33798ccda7cfc6c145cc09481b620457466101b434a2295edebca",
-    "bytes": 23782117,
+    "sha256": "f05fc145e7283517a2efbf94f8b223c76a5225cc8f82e4e26b1556ac44590c19",
+    "bytes": 23792370,
     "files": [
       {
         "path": "approval-lease.test.ts",
@@ -45,8 +45,8 @@
       },
       {
         "path": "coding-agent/CHANGELOG.md",
-        "size": 268127,
-        "sha256": "d9f53266afc2920eea560338f478f0186ff9ef8e2b6b34d83d78896921f5005c"
+        "size": 268765,
+        "sha256": "2971963562b3f4eb2e49a8c6172756d537cd8436983f0f5defb64c9d16774882"
       },
       {
         "path": "coding-agent/LICENSE",
@@ -2574,9 +2574,14 @@
         "sha256": "aaa4a31e8a8cd578558bfe114cd8754e570918033119baac9f78826d24fe965c"
       },
       {
+        "path": "coding-agent/src/export/html/export-session-cwd.test.ts",
+        "size": 4872,
+        "sha256": "d06fedea948c3e8fbc31a5efe0309bca67c1a1099a1bbf0d488a5226bd17db00"
+      },
+      {
         "path": "coding-agent/src/export/html/index.ts",
-        "size": 11661,
-        "sha256": "436f19efc4e0f133c138a024b03926a80df215f8d218ac56535c77f6397d05d5"
+        "size": 11810,
+        "sha256": "b3ec782bf0ca32668c48b1123a609fc819880be66cfd4c7518bf16c9d9b5564f"
       },
       {
         "path": "coding-agent/src/export/html/share-loader.js",
@@ -4199,6 +4204,11 @@
         "sha256": "044df83c84f7b35c1944a482f78a79c3498be05b4852540612fe8359d6a95c15"
       },
       {
+        "path": "coding-agent/src/modes/rpc/rpc-fresh-admission.test.ts",
+        "size": 4376,
+        "sha256": "57e24af26e4f72b4a52f8dda8b03dbbe1460be89656cff2190f76b30cc73004b"
+      },
+      {
         "path": "coding-agent/src/modes/rpc/rpc-goal.ts",
         "size": 19490,
         "sha256": "38380f19bad8096d07ddae74a423297d3b992aab27380a8478d8b694d702ce73"
@@ -4245,8 +4255,8 @@
       },
       {
         "path": "coding-agent/src/modes/rpc/rpc-mode.ts",
-        "size": 110107,
-        "sha256": "29dd50697318672916897a43407f49ece6cccdc394c51db3bf50c776b90c5bbd"
+        "size": 110325,
+        "sha256": "5c77737354c14695df17f5020c33ed95d9c4cd320c9ac9c6d5b382d463732d77"
       },
       {
         "path": "coding-agent/src/modes/rpc/rpc-navigate-tree.test.ts",

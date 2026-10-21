@@ -1819,9 +1819,11 @@ export async function createRpcSessionRuntime(
 					? { ticket, results: promptResults, onError: onPromptError(command.id, command.type) }
 					: undefined,
 				startInput: async onPromptAdmitted => {
-					const sessionId = session.sessionId;
+					// The transcript id, not `session.sessionId`: `/fresh` gives the provider session a new id in the
+					// same chat, and the prompt that ran it is still the current input.
+					const sessionId = session.sessionManager.getSessionId();
 					const isCurrent = () =>
-						inputGate.isCurrent(command) && !shutdownState.requested && session.sessionId === sessionId;
+						inputGate.isCurrent(command) && !shutdownState.requested && session.sessionManager.getSessionId() === sessionId;
 					if (!isCurrent()) return "cancelled";
 					let text = command.message;
 					let images = command.images;

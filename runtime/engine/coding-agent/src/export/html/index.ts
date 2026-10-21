@@ -239,7 +239,11 @@ export async function exportSessionToHtml(
 
 	const palette = opts.palette ?? (opts.themeName ? "theme" : "web");
 	const html = await generateHtml(sessionData, palette, opts.themeNames, opts.themeName);
-	const outputPath = opts.outputPath || `${APP_NAME}-session-${path.basename(sessionFile, ".jsonl")}.html`;
+	// In the session's folder: one engine process serves sessions of many folders, and its own cwd is none of them.
+	const outputPath = path.resolve(
+		sm.getCwd(),
+		opts.outputPath || `${APP_NAME}-session-${path.basename(sessionFile, ".jsonl")}.html`,
+	);
 
 	await Bun.write(outputPath, html);
 	return outputPath;
