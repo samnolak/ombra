@@ -705,7 +705,8 @@ report on a card above the message box:
 - **Rewind…** — pick one of your messages: this chat goes on from before it and the message comes back into the box
   to change and send. It stays one chat in one session file: what came after is kept in that file as a branch (omp's
   `/tree` in a terminal shows it), and no second chat appears in the list. **Fork** makes a separate copy instead.
-- **Export as HTML** — one page with the whole conversation; **Open** or **Show in folder**.
+- **Export as HTML** — one page with the whole conversation, saved in the chat's project folder; **Open** or
+  **Show in folder**.
 - **Share a link…** — says first what happens: omp uploads an encrypted copy of the whole conversation (tool output
   included) to its share server (or a secret gist, per omp's settings), and anyone with the link can read it. After
   **Upload and copy link** the link is on the clipboard.

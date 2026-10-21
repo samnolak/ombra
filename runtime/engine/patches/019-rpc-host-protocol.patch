@@ -222,8 +222,109 @@ index aacb7e0d3ca756db58a6c1212eb910c9df54cf2a..af65e3a2d294d976f4c822c4d0da1aaa
  		return frames;
  	}
  
+diff --git a/src/modes/rpc/rpc-fresh-admission.test.ts b/src/modes/rpc/rpc-fresh-admission.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..9f8b3783265290b2cb060bd5ba93af863b464e18
+--- /dev/null
++++ b/src/modes/rpc/rpc-fresh-admission.test.ts
+@@ -0,0 +1,95 @@
++import { afterAll, beforeAll, describe, expect, test } from "bun:test";
++import { realpathSync } from "node:fs";
++import { mkdir, mkdtemp, rm } from "node:fs/promises";
++import * as os from "node:os";
++import * as path from "node:path";
++import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock";
++import { isRecord } from "@oh-my-pi/pi-utils";
++import { getAgentDir, setAgentDir } from "@oh-my-pi/pi-utils/dirs";
++import { Settings } from "../../config/settings";
++import { withActiveSettings } from "../../config/settings-context";
++import { AgentRegistry, createAgentSession } from "../../sdk";
++import { SessionManager } from "../../session/session-manager";
++import { createRpcSessionRuntime } from "./rpc-mode";
++
++type Frame = Record<string, unknown>;
++
++/**
++ * `/fresh` starts a new provider session in the same chat: `session.sessionId` (the provider's) changes, the
++ * transcript does not. The prompt that ran it is still the current input, so its ACK is a local command, not a
++ * cancelled one (the GUI's "Fresh provider session" reported "Not refreshed" on every press).
++ */
++describe("RPC /fresh admission", () => {
++	const root = path.join(realpathSync(os.tmpdir()), "ombra-tests", `run-${process.pid}`, "rpc-fresh-admission");
++	const previousAgentDir = getAgentDir();
++	beforeAll(async () => {
++		await mkdir(path.join(root, "agent"), { recursive: true });
++		setAgentDir(path.join(root, "agent"));
++		registerMockApi();
++	});
++	afterAll(async () => {
++		setAgentDir(previousAgentDir);
++		await rm(root, { recursive: true, force: true });
++	});
++
++	test("the prompt that ran /fresh is acknowledged as a local command, and the next prompt is admitted", async () => {
++		const cwd = await mkdtemp(path.join(root, "project-"));
++		const sessionManager = SessionManager.create(cwd, path.join(cwd, ".sessions"));
++		const settings = await Settings.loadIsolated({ cwd, agentDir: getAgentDir(), projectRoot: cwd, inMemory: true });
++		const model = createMockModel({ id: "fresh-mock", handler: () => ({ content: ["Reply."] }) });
++		const registry = new AgentRegistry();
++		const { session } = await AgentRegistry.runWithRegistry(registry, () =>
++			withActiveSettings(settings, () =>
++				createAgentSession({
++					cwd, settings, sessionManager, agentRegistry: registry, model, bindProcessState: false,
++					disableExtensionDiscovery: true, skills: [], rules: [], enableLsp: false,
++				}),
++			),
++		);
++		session.modelRegistry.authStorage.keys.setRuntime(model.provider, "mock-key");
++		const frames: Frame[] = [];
++		const waiters: Array<{ match: (frame: Frame) => boolean; resolve: (frame: Frame) => void }> = [];
++		const runtime = await withActiveSettings(settings, () =>
++			createRpcSessionRuntime(session, {
++				protocolVersion: 2,
++				output: frame => {
++					if (!isRecord(frame)) return;
++					frames.push(frame);
++					for (const waiter of [...waiters]) {
++						if (!waiter.match(frame)) continue;
++						waiters.splice(waiters.indexOf(waiter), 1);
++						waiter.resolve(frame);
++					}
++				},
++			}),
++		);
++		const next = (match: (frame: Frame) => boolean): Promise<Frame> => {
++			const seen = frames.find(match);
++			if (seen) return Promise.resolve(seen);
++			const waiting = Promise.withResolvers<Frame>();
++			waiters.push({ match, resolve: waiting.resolve });
++			return waiting.promise;
++		};
++		try {
++			const transcript = session.sessionManager.getSessionId();
++			const providerBefore = session.sessionId;
++			runtime.dispatch({ type: "prompt", id: "fresh", message: "/fresh" });
++			expect(await next(frame => frame.type === "response" && frame.id === "fresh")).toMatchObject({
++				success: true,
++				data: { inputDisposition: "local", agentInvoked: false },
++			});
++			expect(frames.some(frame => frame.type === "command_output" && String(frame.text).startsWith("Fresh provider session started"))).toBe(true);
++			expect(session.sessionId).not.toBe(providerBefore);
++			expect(session.sessionManager.getSessionId()).toBe(transcript);
++
++			runtime.dispatch({ type: "prompt", id: "after", message: "hello" });
++			expect(await next(frame => frame.type === "response" && frame.id === "after")).toMatchObject({
++				success: true,
++				data: { inputDisposition: "admitted", agentInvoked: true },
++			});
++			expect(await next(frame => frame.type === "prompt_result" && frame.id === "after")).toMatchObject({ status: "completed" });
++		} finally {
++			await runtime.close();
++		}
++	}, 60_000);
++});
 diff --git a/src/modes/rpc/rpc-mode.ts b/src/modes/rpc/rpc-mode.ts
-index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef37670edbe 100644
+index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..5b5a1fba1b422b947f1494f8b392856e2e2afdc5 100644
 --- a/src/modes/rpc/rpc-mode.ts
 +++ b/src/modes/rpc/rpc-mode.ts
 @@ -19,8 +19,12 @@ import { getOAuthProviders } from "@oh-my-pi/pi-ai/oauth";
@@ -893,7 +994,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  	};
  
  	const getAvailableCommands = async () => buildAvailableSlashCommands(session);
-@@ -1755,107 +1808,101 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1755,107 +1808,103 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  
  	const inputGate = new RpcUserInputGate();
  	type OrderedUserInput = Extract<RpcCommand, { type: "prompt" | "steer" | "follow_up" | "abort_and_prompt" }>;
@@ -977,9 +1078,11 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
 +					? { ticket, results: promptResults, onError: onPromptError(command.id, command.type) }
 +					: undefined,
 +				startInput: async onPromptAdmitted => {
-+					const sessionId = session.sessionId;
++					// The transcript id, not `session.sessionId`: `/fresh` gives the provider session a new id in the
++					// same chat, and the prompt that ran it is still the current input.
++					const sessionId = session.sessionManager.getSessionId();
 +					const isCurrent = () =>
-+						inputGate.isCurrent(command) && !shutdownState.requested && session.sessionId === sessionId;
++						inputGate.isCurrent(command) && !shutdownState.requested && session.sessionManager.getSessionId() === sessionId;
 +					if (!isCurrent()) return "cancelled";
 +					let text = command.message;
 +					let images = command.images;
@@ -1081,7 +1184,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  			case "negotiate_protocol": {
  				if (command.protocolVersion !== 2)
  					return error(id, "negotiate_protocol", `Unsupported RPC protocol version: ${command.protocolVersion}`);
-@@ -1873,17 +1920,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1873,17 +1922,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				try {
  					// Ack after admission, including hooks and skill image preparation, so a
  					// queue edit sent after this response finds the message.
@@ -1100,7 +1203,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  				} catch (promptSetupError) {
  					promptResults.discard(ticket);
  					throw promptSetupError;
-@@ -1892,8 +1929,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1892,8 +1931,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  
  			case "steer":
  			case "follow_up": {
@@ -1110,7 +1213,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  			}
  
  			case "remove_queued_message": {
-@@ -1906,7 +1942,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1906,7 +1944,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				return fitRemoveQueuedMessageResponse(
  					id,
  					session.takeQueuedMessage(command.message, command.queue),
@@ -1119,7 +1222,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  				);
  			}
  
-@@ -1930,36 +1966,39 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1930,36 +1968,39 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				const restored = session.clearQueue({ forInterrupt: true });
  				goalController.stopForHostAbort();
  				await session.abort({ reason: USER_INTERRUPT_LABEL });
@@ -1179,7 +1282,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  				}
  				const requestedModel =
  					command.type === "switch_session" ? await resolveRequestedRpcModel(session, command) : undefined;
-@@ -1974,9 +2013,13 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1974,9 +2015,13 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  					if (err instanceof SessionBusyError) return error(id, command.type, err.message, "session_busy");
  					throw err;
  				} finally {
@@ -1195,7 +1298,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  					});
  					// Respond only once this change's reattach (and any queued ahead of it) has run.
  					await goalController.settled();
-@@ -1984,9 +2027,11 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -1984,9 +2029,11 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				if (!result.data.cancelled) {
  					inputGate.commitSessionChange(command);
  					// `branch` leaves a live run streaming to its normal yield; new/switch detach it.
@@ -1208,7 +1311,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  					await emitAvailableCommandsUpdate();
  				}
  				return success(id, result.type, result.data);
-@@ -2013,6 +2058,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2013,6 +2060,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  					// reopens a transcript with the same id.
  					if (session.sessionFile !== fileBeforeOpen) promptResults.abortOpen();
  					void settleWatcher.check();
@@ -1216,7 +1319,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  					await emitAvailableCommandsUpdate();
  				}
  				return success(id, "open_session", result);
-@@ -2023,8 +2069,10 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2023,8 +2071,10 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  			// =================================================================
  
  			case "get_state": {
@@ -1228,7 +1331,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  				const queuedMessages = session.getQueuedMessages();
  				const state: RpcSessionState = {
  					model: session.model,
-@@ -2065,6 +2113,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2065,6 +2115,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  					})),
  					contextUsage: session.getContextUsage(),
  					goal: session.getGoalModeState() ?? null,
@@ -1237,7 +1340,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  				};
  				return success(id, "get_state", state);
  			}
-@@ -2100,6 +2150,15 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2100,6 +2152,15 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				}
  			}
  
@@ -1253,7 +1356,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  			case "set_ask_dialog": {
  				rpcUiContext.askDialogEnabled = command.enabled === true;
  				return success(id, "set_ask_dialog", { enabled: rpcUiContext.askDialogEnabled });
-@@ -2263,6 +2322,40 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2263,6 +2324,40 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				return failure ? error(id, "steer_subagent", failure) : success(id, "steer_subagent");
  			}
  
@@ -1294,7 +1397,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  			// =================================================================
  			// Model
  			// =================================================================
-@@ -2446,6 +2539,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2446,6 +2541,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  			}
  
  			case "get_messages_page": {
@@ -1303,7 +1406,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  				if (session.isStreaming || session.isCompacting)
  					return error(id, "get_messages_page", RPC_MESSAGES_PAGE_BUSY_ERROR, "session_busy");
  				const messages = session.messages;
-@@ -2453,7 +2548,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2453,7 +2550,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  					return success(
  						id,
  						"get_messages_page",
@@ -1312,7 +1415,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  							messages,
  							{
  								sessionId: session.sessionId,
-@@ -2501,6 +2596,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2501,6 +2598,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				let authEmitted = false;
  				try {
  					await session.modelRegistry.authStorage.oauth.login(command.providerId, {
@@ -1320,7 +1423,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  						onAuth: info => {
  							authEmitted = true;
  							output({
-@@ -2577,6 +2673,37 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2577,6 +2675,37 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  				return success(id, "logout", { remainingSource });
  			}
  
@@ -1358,7 +1461,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  			// =================================================================
  			// Side questions (/btw)
  			// =================================================================
-@@ -2638,25 +2765,21 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2638,25 +2767,21 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  		}
  	};
  
@@ -1393,7 +1496,7 @@ index b10ae11923d59a4db3d5a637cfc0bda10ce114ee..93a7e4b0a36e636c3a46419396fa4ef3
  		errorResponse: error,
  		trackBackgroundTask: task => shutdownCoordinator.track(task),
  		pendingExtensionRequests,
-@@ -2670,33 +2793,103 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+@@ -2670,33 +2795,103 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
  		afterSerialCommand: () => shutdownCoordinator.checkShutdownRequested(),
  		acceptInput: command => inputGate.accept(command),
  	});
