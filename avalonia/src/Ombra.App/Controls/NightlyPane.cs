@@ -393,7 +393,8 @@ internal sealed class NightlyPane : Panel, INightlyView, NightlyScrollMonitor.IT
         && (AgentActing || (IsEffectivelyVisible && (top is not Window w || (w.IsVisible && w.WindowState != WindowState.Minimized))
             && (_occlusion is null || _occlusion.Visible || Platform.TestFocus.NoActivate)));
 
-    private bool AgentActing => Volatile.Read(ref _agentActions) > 0
+    /// <summary>The agent acts on the pane (<see cref="NightlyAgent.ITarget.AgentActsAsync"/>), or did within <see cref="AgentSeen"/>.</summary>
+    internal bool AgentActing => Volatile.Read(ref _agentActions) > 0
         || (Interlocked.Read(ref _agentActed) is var at and not 0 && Environment.TickCount64 - at < (long)AgentSeen.TotalMilliseconds);
 
     /// <summary>

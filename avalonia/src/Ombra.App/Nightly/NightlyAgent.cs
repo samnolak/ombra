@@ -62,6 +62,22 @@ internal sealed class NightlyAgent(NightlyAgent.ITarget target, NightlyFrames fr
 
     public bool CanHover => true;
 
+    /// <summary>
+    /// Ombra's own calls in the page's isolated world (the tab's annotations, <see cref="Controls.IsolatedPageAnnotations"/>),
+    /// not the agent acting: the page stays as seen or hidden as its pane is, also while a call waits on it (the
+    /// annotations reader waits until the page has a message, often for as long as the page lives).
+    /// </summary>
+    public IIsolatedScripts Background => _background ??= new BackgroundScripts(this);
+
+    private BackgroundScripts? _background;
+
+    private sealed class BackgroundScripts(NightlyAgent agent) : IIsolatedScripts
+    {
+        public string? Unsupported => null;
+
+        public Task<string?> CallAsync(string functionSource, string argsJson, CancellationToken ct) => agent.IsolatedAsync(functionSource, argsJson, ct);
+    }
+
     // ── scripts ──
 
     /// <summary>A script in the page's own world: its value as text (a string as it is, else JSON), null for undefined.</summary>
@@ -82,6 +98,11 @@ internal sealed class NightlyAgent(NightlyAgent.ITarget target, NightlyFrames fr
     public async Task<string?> CallAsync(string functionSource, string argsJson, CancellationToken ct)
     {
         using var acting = await target.AgentActsAsync().ConfigureAwait(false);
+        return await IsolatedAsync(functionSource, argsJson, ct).ConfigureAwait(false);
+    }
+
+    private async Task<string?> IsolatedAsync(string functionSource, string argsJson, CancellationToken ct)
+    {
         NightlyProtocol.ScriptResultInfo result;
         try
         {
