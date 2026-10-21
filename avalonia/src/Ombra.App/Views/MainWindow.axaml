@@ -361,7 +361,7 @@
                             <sidebar:SessionRowMenu />
                           </Flyout>
                         </Panel.ContextFlyout>
-                        <Button AutomationProperties.Name="{Binding Title}" AutomationProperties.HelpText="{Binding SnippetText}" Classes="session" Classes.current="{Binding IsCurrent}"
+                        <Button AutomationProperties.Name="{Binding AccessibleName}" AutomationProperties.HelpText="{Binding SnippetText}" Classes="session" Classes.current="{Binding IsCurrent}"
                                 Command="{Binding OpenCommand}"
                                 CommandParameter="{Binding}"
                                 HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
@@ -377,25 +377,28 @@
                               <TextBlock Classes="session-tip-meta" Text="{Binding WhenFull}" />
                             </StackPanel>
                           </ToolTip.Tip>
-                          <!-- The title takes the row; on the right its age, or what omp is doing there (a dot: working,
-                               needs input, new reply, stopped by an error), in the chat shown or in the background -->
-                          <Grid ColumnDefinitions="Auto,*,Auto">
+                          <!-- The title takes the row, after a pin and a pencil (unsent input waits in that chat's composer);
+                               on the right its age, or what omp is doing there (a dot: working, needs input in the attention
+                               yellow, stopped by an error; a check: finished, not seen yet), in the chat shown or in the background -->
+                          <Grid ColumnDefinitions="Auto,Auto,*,Auto">
                             <ctl:Icon Data="{StaticResource IconPin}" Size="14" Margin="0,0,5,0" VerticalAlignment="Center" Opacity="0.6"
                                       IsVisible="{Binding IsPinned}" />
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <ctl:Icon Grid.Column="1" Classes="session-draft" Data="{StaticResource IconPencil}" Size="13" Margin="0,0,6,0"
+                                      IsVisible="{Binding HasDraft}" ToolTip.Tip="{Binding DraftText}" AutomationProperties.Name="{Binding DraftText}" />
+                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
                               <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
                               <!-- Found in its messages: the words around the match, the match emphasized -->
                               <TextBlock x:Name="SessionSnippet" IsVisible="{Binding HasSnippet}" TextTrimming="CharacterEllipsis" FontSize="12" Margin="0,1,0,2"
                                          Foreground="{DynamicResource GuiTextSecondary}"><Run Text="{Binding SnippetBefore}" /><Run Text="{Binding SnippetMatch}" FontWeight="SemiBold" Foreground="{DynamicResource GuiTextPrimary}" /><Run Text="{Binding SnippetAfter}" /></TextBlock>
                             </StackPanel>
-                            <Panel Grid.Column="2" Classes="session-meta" Margin="10,0,0,0">
+                            <Panel Grid.Column="3" Classes="session-meta" Margin="10,0,0,0">
                               <TextBlock Classes="session-age" Text="{Binding When}" IsVisible="{Binding !HasStatus}" HorizontalAlignment="Right" VerticalAlignment="Center" />
-                              <Ellipse Classes="session-dot" Classes.running="{Binding IsActive}" Classes.waiting="{Binding IsWaiting}" Classes.unread="{Binding IsUnread}"
+                              <Ellipse Classes="session-dot" Classes.running="{Binding IsActive}" Classes.waiting="{Binding IsWaiting}"
                                        Classes.error="{Binding IsFailed}"
                                        IsVisible="{Binding HasDot}" HorizontalAlignment="Right" Margin="0,0,4,0"
                                        ToolTip.Tip="{Binding StatusText}" AutomationProperties.Name="{Binding StatusText}" />
-                              <ctl:Icon Classes="session-hand" Data="{StaticResource IconHand}" Size="16" IsVisible="{Binding IsWaiting}"
-                                        HorizontalAlignment="Right" VerticalAlignment="Center"
+                              <ctl:Icon Classes="session-done" Data="{StaticResource IconCheck}" Size="14" IsVisible="{Binding IsUnread}"
+                                        HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,1,0"
                                         ToolTip.Tip="{Binding StatusText}" AutomationProperties.Name="{Binding StatusText}" />
                             </Panel>
                           </Grid>

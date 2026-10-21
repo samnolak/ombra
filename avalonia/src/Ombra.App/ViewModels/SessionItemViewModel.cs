@@ -5,15 +5,16 @@ using Ombra.ClientCore;
 
 namespace Ombra.App.ViewModels;
 
-/// <summary>What the sidebar's dot before a session says. Every chat with an omp open has one, shown or in the background.</summary>
+/// <summary>What the sidebar's mark after a session says. Every chat with an omp open has one, shown or in the background.</summary>
 public enum SessionStatus
 {
     None,
     /// <summary>omp is working in it.</summary>
     Running,
-    /// <summary>omp waits for an approval or an answer.</summary>
+    /// <summary>omp waits for an approval or an answer: the yellow attention dot.</summary>
     Waiting,
-    /// <summary>A run ended while the chat was not shown (or the window was in the background); cleared when it is.</summary>
+    /// <summary>A run ended while the chat was not shown (or the window was in the background), or the user marked it
+    /// unread: a check (finished, not seen yet); cleared when it is shown.</summary>
     Unread,
     /// <summary>Its omp stopped with an error (crashed, or did not start); opening the chat offers to start it again.</summary>
     Error,
@@ -24,10 +25,10 @@ public enum SessionStatus
 public sealed partial class SessionItemViewModel(SessionSummary model) : ObservableObject
 {
     /// <summary>What omp's file says now; replaced (record equality decides) by each catalog scan.</summary>
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(Title), nameof(Project), nameof(Cwd), nameof(When), nameof(WhenFull), nameof(Tooltip), nameof(HasId))]
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(Title), nameof(Project), nameof(Cwd), nameof(When), nameof(WhenFull), nameof(Tooltip), nameof(HasId), nameof(AccessibleName))]
     private SessionSummary _model = model;
     /// <summary>The header's title for the open session while the saved list still has the old one (a first run, a rename).</summary>
-    [ObservableProperty] [NotifyPropertyChangedFor(nameof(Title), nameof(Tooltip))] private string? _liveTitle;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(Title), nameof(Tooltip), nameof(AccessibleName))] private string? _liveTitle;
     public string Title => LiveTitle ?? Model.Title;
     public string Project => ProjectName(Model.Cwd);
     public string Cwd => Model.Cwd;
@@ -83,7 +84,7 @@ public sealed partial class SessionItemViewModel(SessionSummary model) : Observa
     public string ArchiveLabel => IsArchived ? Loc.T("Unarchive") : Loc.T("Archive");
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsActive), nameof(IsWaiting), nameof(IsUnread), nameof(IsFailed), nameof(HasStatus), nameof(HasDot), nameof(StatusText))]
+    [NotifyPropertyChangedFor(nameof(IsActive), nameof(IsWaiting), nameof(IsUnread), nameof(IsFailed), nameof(HasStatus), nameof(HasDot), nameof(StatusText), nameof(AccessibleName))]
     private SessionStatus _status;
 
     /// <summary>omp is working in this session right now.</summary>
@@ -92,16 +93,33 @@ public sealed partial class SessionItemViewModel(SessionSummary model) : Observa
     public bool IsUnread => Status == SessionStatus.Unread;
     public bool IsFailed => Status == SessionStatus.Error;
     public bool HasStatus => Status != SessionStatus.None;
-    /// <summary>A dot for every status but waiting on the user, which shows a raised hand.</summary>
-    public bool HasDot => HasStatus && !IsWaiting;
+    /// <summary>A dot while omp works, waits on the user (yellow: it needs attention) or stopped by an error; a finished
+    /// run not seen yet shows a check instead.</summary>
+    public bool HasDot => HasStatus && !IsUnread;
     public string StatusText => Status switch
     {
         SessionStatus.Running => Loc.T("omp is working"),
         SessionStatus.Waiting => Loc.T("Needs your input"),
-        SessionStatus.Unread => Loc.T("New reply"),
+        SessionStatus.Unread => Loc.T("omp finished · new reply"),
         SessionStatus.Error => Loc.T("omp stopped with an error"),
         _ => "",
     };
+
+    /// <summary>The composer of this chat holds unsent input (text, pasted chips, images or marks) while another chat is
+    /// shown: a pencil before the title, so the user can come back and finish it.</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(AccessibleName))] private bool _hasDraft;
+    public string DraftText => Loc.T("Unsent draft");
+
+    /// <summary>What a screen reader says for the row: the title, then the draft and the status the row's marks show.</summary>
+    public string AccessibleName
+    {
+        get
+        {
+            var name = Title;
+            if (HasDraft) name += ", " + DraftText;
+            return HasStatus ? name + ", " + StatusText : name;
+        }
+    }
 
     public void RefreshWhen() => OnPropertyChanged(nameof(When));
 

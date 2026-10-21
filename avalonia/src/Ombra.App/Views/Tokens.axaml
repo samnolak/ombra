@@ -108,8 +108,8 @@
           <SolidColorBrush x:Key="GuiDiffMovedText" Color="#FF2563EB" />
           <SolidColorBrush x:Key="GuiStatusRunning" Color="#FF2E8B47" />
           <SolidColorBrush x:Key="GuiStatusWaiting" Color="#FFB5661B" />
-          <SolidColorBrush x:Key="GuiStatusUnread" Color="#FFE0A100" />
-          <SolidColorBrush x:Key="GuiStatusUnreadRing" Color="#00000000" />
+          <SolidColorBrush x:Key="GuiStatusAttention" Color="#FFE0A100" />
+          <SolidColorBrush x:Key="GuiStatusAttentionRing" Color="#00000000" />
           <SolidColorBrush x:Key="GuiInlineCodeBg" Color="#0F000000" />
           <SolidColorBrush x:Key="GuiCodeBlockBg" Color="#FFF7F7F7" />
           <!-- A code block's header row (language, Copy) -->
@@ -381,8 +381,8 @@
           <SolidColorBrush x:Key="GuiDiffMovedText" Color="#FF8CC2FF" />
           <SolidColorBrush x:Key="GuiStatusRunning" Color="#FF6BC47E" />
           <SolidColorBrush x:Key="GuiStatusWaiting" Color="#FFE0A04F" />
-          <SolidColorBrush x:Key="GuiStatusUnread" Color="#FFF5C02A" />
-          <SolidColorBrush x:Key="GuiStatusUnreadRing" Color="#00000000" />
+          <SolidColorBrush x:Key="GuiStatusAttention" Color="#FFF5C02A" />
+          <SolidColorBrush x:Key="GuiStatusAttentionRing" Color="#00000000" />
           <SolidColorBrush x:Key="GuiInlineCodeBg" Color="#FF303030" />
           <SolidColorBrush x:Key="GuiCodeBlockBg" Color="#FF2A2A2A" />
           <!-- A code block's header row (language, Copy): the block's own fill, no rule under it (Codex) -->
