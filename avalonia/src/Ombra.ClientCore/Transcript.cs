@@ -36,6 +36,12 @@ public sealed record QueuedMessage(long Seq, QueueKind Kind, string Text, IReadO
 {
     public string? SubmissionId { get; init; }
     public bool Recovered { get; init; }
+    /// <summary>The thinking level chosen for this message while omp was busy (null: whatever the session runs at). Ombra
+    /// keeps such a message in its own FIFO and sets the level right before omp starts it, never during an earlier run.</summary>
+    public string? ThinkingLevel { get; init; }
+    /// <summary><see cref="ThinkingLevel"/> is set in omp; the message itself goes next.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ThinkingApplied { get; init; }
     /// <summary>Already sent into the provider's streaming response; remains visible until its transcript echo.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool LiveSteered { get; init; }
@@ -283,6 +289,9 @@ public sealed record SessionSnapshot(
     public string? SessionTitleHint { get; init; }
     public string? Cwd { get; init; }
     public string? ThinkingLevel { get; init; }
+    /// <summary>The level picked while omp was busy, for the next message (null: <see cref="ThinkingLevel"/>). Queued
+    /// messages take it; once nothing waits, it becomes the session's level.</summary>
+    public string? NextThinkingLevel { get; init; }
     /// <summary>The <c>--approval-mode</c> omp runs with (null: omp's configured default).</summary>
     public string? ApprovalMode { get; init; }
     /// <summary>Subagents of this session, running and ended, in the order they started (ConversationState.Subagents.cs).</summary>

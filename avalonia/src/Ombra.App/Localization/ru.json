@@ -1563,6 +1563,7 @@
     "Send with Enter": "Отправлять по Enter",
     "Sends one request without a key, with the same runtime and settings as omp, and says whether HTTPS gets through.": "Отправляет один запрос без ключа, с той же средой и настройками, что и omp, и сообщает, проходит ли HTTPS.",
     "Sent by you: form from connector “{0}” — {1}": "Отправлено вами: форма коннектора «{0}» — {1}",
+    "Sent when omp finishes its current work, thinking effort: {0}. ↑ in the empty message box edits it.": "Отправится, когда omp закончит текущую работу, глубина размышлений: {0}. ↑ в пустом поле сообщения — изменить.",
     "Sent when omp finishes its current work. ↑ in the empty message box edits it.": "Отправится, когда omp закончит текущую работу. ↑ в пустом поле сообщения — изменить.",
     "Sent!": "Отправлено!",
     "Sep": "сент.",

@@ -1573,7 +1573,17 @@
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:QueuedItemViewModel">
               <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" Margin="2,1" Background="Transparent" ToolTip.Tip="{Binding Tooltip}" ctl:ConversationMenus.Kind="Queue">
-                <Border Classes="tag" VerticalAlignment="Center"><TextBlock Text="{Binding Kind}" FontSize="11" FontWeight="Medium" /></Border>
+                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                  <Border Classes="tag" VerticalAlignment="Center"><TextBlock Text="{Binding Kind}" FontSize="11" FontWeight="Medium" /></Border>
+                  <!-- The thinking level picked for this message while omp worked: set right before omp starts it -->
+                  <Border x:Name="QueuedThinkingTag" Classes="tag" VerticalAlignment="Center" IsVisible="{Binding HasThinking}"
+                          AutomationProperties.Name="{Binding ThinkingLabel, StringFormat={loc:T 'Thinking effort: {0}'}}">
+                    <StackPanel Orientation="Horizontal" Spacing="3">
+                      <ctl:Icon Data="{StaticResource IconBrain}" Size="12" VerticalAlignment="Center" />
+                      <TextBlock Text="{Binding ThinkingLabel}" FontSize="11" FontWeight="Medium" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Border>
+                </StackPanel>
                 <!-- Its images, small; each opens the viewer -->
                 <ItemsControl Grid.Column="1" ItemsSource="{Binding Previews}" IsVisible="{Binding HasImages}" Margin="8,0,0,0" VerticalAlignment="Center">
                   <ItemsControl.ItemsPanel>

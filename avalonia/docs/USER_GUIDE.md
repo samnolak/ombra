@@ -156,7 +156,12 @@ project yet), so the OS warns on first start:
   *Minimal*, *Low*, *Medium*, *High*, *Extra high*, *Max* — each with a line on what it does; only the levels the
   model accepts; hidden for models that don't reason). A new chat or session — and omp's terminal UI in the terminal
   panel — starts at *Medium* (omp's own default is *High*); the chip changes it for that chat, and a session you open
-  again keeps the level it had. `"defaultThinkingLevel"` in the client's settings file (`ombra.local.json`; any of
+  again keeps the level it had. While omp is working, a level you choose leaves the current run as it is and applies
+  to your next message: a message queued then shows the level as a small tag on its chip (*Queued* · *High*), waits
+  in Ombra's queue, and Ombra sets the level right before omp starts it. With nothing queued, the level becomes the
+  chat's once omp is idle. Editing a queued message (↑) or **Stop** brings its text back to the box and its level
+  back to the *Thinking effort* chip.
+  `"defaultThinkingLevel"` in the client's settings file (`ombra.local.json`; any of
   `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `auto`) sets another starting level. The model chip lists the models omp can use, one row per
   family (*Claude Sonnet*, *Claude Haiku*…) that opens to its versions, newest first (→ opens, ← or Esc goes back);
   two entries under one name show their ids. With models from more than one provider they fold under the provider's

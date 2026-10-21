@@ -271,7 +271,7 @@ extension commands that omp lists itself keep going to omp.
 | `get_jobs`, `cancel_job`, `get_job_output` (Ombra engine) | **Done** — Background tasks pane: each job's status (incl. «Waiting for input»), **Stop**, **Show output** (byte-cursor tail, last 64 K characters kept) |
 | `set_model`, `get_available_models` | **Done** — model picker |
 | `cycle_model`, `cycle_thinking_level` | **Not applicable** (TUI key cycling; the pickers choose directly) |
-| `set_thinking_level` | **Done** — thinking chip |
+| `set_thinking_level` | **Done** — thinking chip; a level picked mid-run is kept and set right before the next queued message (omp's `prompt`/`follow_up` take no level) |
 | `set_steering_mode`, `set_follow_up_mode`, `set_interrupt_mode` | **Missing** (omp's defaults: one-at-a-time, immediate). Plan: Settings › General "Queued messages: one at a time / all" |
 | `compact` | **Not used on purpose**: it blocks omp's command queue (no `abort` meanwhile); the GUI uses `/compact`, which omp runs in the background |
 | `set_auto_compaction` | **Done** — Model menu › Auto-compact (state: `get_state.autoCompactionEnabled`) |

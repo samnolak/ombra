@@ -322,9 +322,15 @@ public sealed partial class MainViewModel
         if (theme is not null && Themes.Contains(theme)) SettingsTheme = theme;
     }
 
+    /// <summary>
+    /// At idle the level is set at once. While omp works the controller keeps it for the next message instead
+    /// (SessionSnapshot.NextThinkingLevel), so the current run keeps its level and a queued message takes the new one.
+    /// </summary>
     partial void OnSelectedThinkingChanged(string? value)
     {
-        if (_applyingThinking || value is null || value == _open.Last?.ThinkingLevel || Phase != SessionPhase.Ready) return;
+        var shown = _open.Last;
+        if (_applyingThinking || value is null || value == (shown?.NextThinkingLevel ?? shown?.ThinkingLevel)
+            || Phase is not (SessionPhase.Ready or SessionPhase.Running)) return;
         var open = _open;
         _ = open.Controller.SetThinkingLevelAsync(value, _cts.Token).ContinueWith(_ => PostToUi(() => ApplyIfShown(open)), TaskScheduler.Default);
     }
@@ -993,7 +999,7 @@ public sealed partial class MainViewModel
         CurrentModel = s.Model ?? Loc.T("no model");
         ApprovalMode = s.ApprovalMode;
         _applyingThinking = true;
-        SelectedThinking = s.ThinkingLevel is { } t && ThinkingOptions.Contains(t) ? t : null;
+        SelectedThinking = (s.NextThinkingLevel ?? s.ThinkingLevel) is { } t && ThinkingOptions.Contains(t) ? t : null;
         _applyingThinking = false;
         var current = _allModels.FirstOrDefault(m => m.Key == s.Model);
         // omp's own answer wins: a model it knows to reason has more than "off" (omp 18.8.0 knows newer models than
