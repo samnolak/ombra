@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.VisualTree;
 using CommunityToolkit.Mvvm.Input;
+using Ombra.App.Controls;
 using Ombra.App.ViewModels;
 using Ombra.App.Localization;
 
@@ -102,7 +103,8 @@ public sealed partial class MainWindow
     }
 
     /// <summary>An Edit menu item on the focused text: a text box (the message box, a search box…) or selectable text
-    /// (Copy and Select All in a message). Nothing when the keyboard is elsewhere.</summary>
+    /// (Copy and Select All in a message: a reply's whole selection, through its blocks; Controls/MessageSelection).
+    /// Nothing when the keyboard is elsewhere.</summary>
     internal void RunEdit(EditAction action)
     {
         switch (FocusManager?.GetFocusedElement())
@@ -120,10 +122,12 @@ public sealed partial class MainWindow
                 }
                 break;
             case SelectableTextBlock text when action == EditAction.Copy:
-                text.Copy();
+                if (MessageSelection.Of(text) is { } message) message.Copy(text);
+                else text.Copy();
                 break;
             case SelectableTextBlock text when action == EditAction.SelectAll:
-                text.SelectAll();
+                if (MessageSelection.Of(text) is { } whole) whole.SelectAll(text);
+                else text.SelectAll();
                 break;
         }
     }

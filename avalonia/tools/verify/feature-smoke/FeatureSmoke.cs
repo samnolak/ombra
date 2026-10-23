@@ -124,6 +124,7 @@ internal static partial class FeatureSmoke
                 .. BtwGoalSections(), .. AskPlanSections(), .. QueueRowsSections(), .. ForkHostToolsSections(), .. MarksSections(), .. SidebarNavSections(),
                 .. MicroUxSections(), .. SharedMarksSections(), .. ShareSections(), .. TeamSections(), .. NightlyShareSections(),
                 .. ProgressSections(), .. GitBellSections(), .. TitleBarSections(), .. PluginsHubSections(), .. ChatLinksSections(), .. SignInSections(), .. AgentBrowserSections(),
+                .. MessageSelectionSections(),
             ];
             var only = Environment.GetEnvironmentVariable("OMBRA_FEATURE_SMOKE_ONLY") is { Length: > 0 } o ? o.Split(',') : null;
             foreach (var (name, section) in sections)

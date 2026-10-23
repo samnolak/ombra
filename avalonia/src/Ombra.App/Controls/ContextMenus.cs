@@ -343,12 +343,23 @@ public static class ContextMenus
             && ConversationMenus.Owner(selection) is { } vm
             && selection.GetSelfAndVisualAncestors().OfType<Control>().Any(c => c is MarkdownView || c.DataContext is UserRowViewModel))
         {
-            // Keep Avalonia's native selection/copy/select-all menu; only add the message action.
-            if (selection.ContextFlyout is MenuFlyout menu && !menu.Items.OfType<MenuItem>().Any(i => i.Tag is "quote-selection"))
+            // Keep Avalonia's native selection/copy/select-all menu; only add the message action. The menu is one for all
+            // selectable text (Fluent's): its item quotes the selection of the text it opened on, a reply's whole
+            // selection through its blocks (MessageSelection).
+            if (selection.ContextFlyout is MenuFlyout menu)
             {
-                var quote = new MenuItem { Header = Loc.T("Quote in message"), Tag = "quote-selection", IsEnabled = !vm.IsReadOnly };
-                quote.Click += (_, _) => vm.InsertMessageText("> " + (selection.SelectedText ?? "").ReplaceLineEndings("\n").Replace("\n", "\n> ") + "\n");
-                menu.Items.Add(quote);
+                if (menu.Items.OfType<MenuItem>().FirstOrDefault(i => i.Tag is "quote-selection") is not { } quote)
+                {
+                    quote = new MenuItem { Header = Loc.T("Quote in message"), Tag = "quote-selection" };
+                    quote.Click += (_, _) =>
+                    {
+                        if (menu.Target is not SelectableTextBlock text || ConversationMenus.Owner(text) is not { IsReadOnly: false } owner) return;
+                        var quoted = MessageSelection.Of(text)?.SelectedText(text) ?? text.SelectedText ?? "";
+                        owner.InsertMessageText("> " + quoted.ReplaceLineEndings("\n").Replace("\n", "\n> ") + "\n");
+                    };
+                    menu.Items.Add(quote);
+                }
+                quote.IsEnabled = !vm.IsReadOnly;
             }
             return;
         }

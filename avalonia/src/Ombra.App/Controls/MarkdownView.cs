@@ -19,9 +19,9 @@ using MdInline = Markdig.Syntax.Inlines.Inline;
 namespace Ombra.App.Controls;
 
 /// <summary>
-/// Renders the agent's Markdown (CommonMark + pipe tables via Markdig) into native, selectable Avalonia text.
-/// Only http/https links are clickable (the platform opens them); code blocks get a Copy button; both have a context menu
-/// (<see cref="ContextMenus"/>).
+/// Renders the agent's Markdown (CommonMark + pipe tables via Markdig) into native, selectable Avalonia text: a selection
+/// runs through its blocks (<see cref="MessageSelection"/>). Only http/https links are clickable (the platform opens
+/// them); code blocks get a Copy button; both have a context menu (<see cref="ContextMenus"/>).
 /// A streaming reply is rendered at most once a frame, and incrementally: text appended to a Markdown document can only
 /// change its last top-level block, so only that block is parsed again and the blocks above keep their controls — their
 /// height, and a selection made in them, never change while the reply grows. The last block is updated in place where it
@@ -75,7 +75,14 @@ public sealed class MarkdownView : ContentControl
     /// <summary>The views with blocks registered as anchors: a transcript row hidden takes its views' anchors away.</summary>
     private static readonly HashSet<MarkdownView> Anchoring = [];
 
-    public MarkdownView() => EffectiveViewportChanged += OnEffectiveViewportChanged;
+    public MarkdownView()
+    {
+        EffectiveViewportChanged += OnEffectiveViewportChanged;
+        Selection = new MessageSelection(this, () => ReferenceEquals(Content, _root) ? _root : null, BuildAll);
+    }
+
+    /// <summary>The selection through the reply's blocks (a drag across paragraphs, ⌘A, ⌘C).</summary>
+    internal MessageSelection Selection { get; }
 
     public string? Markdown { get => GetValue(MarkdownProperty); set => SetValue(MarkdownProperty, value); }
     public bool IsStreaming { get => GetValue(IsStreamingProperty); set => SetValue(IsStreamingProperty, value); }
@@ -294,15 +301,29 @@ public sealed class MarkdownView : ContentControl
         {
             var block = _blocks[i];
             var height = block.Control is Unbuilt unbuilt ? unbuilt.Estimate(width) : block.Control.DesiredSize.Height;
-            if (block.Pending is { } pending && y + height >= from)
-            {
-                var (control, update) = TopBlock(pending.Block, pending.Text, pending.From, pending.End);
-                if (i == 0 && pending.Block is HeadingBlock) control.Margin = default; // a heading at the top drops its extra space above
-                (block.Control, block.Update, block.Pending) = (control, update, null);
-                _root.Children[i] = control;
-            }
+            if (block.Pending is not null && y + height >= from) Build(i);
             y += height + _root.Spacing;
         }
+    }
+
+    /// <summary>A placeholder's block built (<see cref="_root"/> holds it).</summary>
+    private void Build(int i)
+    {
+        var block = _blocks[i];
+        if (block.Pending is not { } pending) return;
+        var (control, update) = TopBlock(pending.Block, pending.Text, pending.From, pending.End);
+        if (i == 0 && pending.Block is HeadingBlock) control.Margin = default; // a heading at the top drops its extra space above
+        (block.Control, block.Update, block.Pending) = (control, update, null);
+        _root!.Children[i] = control;
+    }
+
+    /// <summary>Every block built and laid out, those far off screen too: ⌘A selects the whole reply.</summary>
+    private void BuildAll()
+    {
+        if (_root is null || !ReferenceEquals(Content, _root) || !_blocks.Any(b => b.Pending is not null)) return;
+        for (var i = 0; i < _blocks.Count; i++) Build(i);
+        UpdateLayout(); // a code block's text and a table's cells join the visual tree as their scrollers are templated
+        UpdateAnchors();
     }
 
     private void OnEffectiveViewportChanged(object? sender, EffectiveViewportChangedEventArgs e)
@@ -733,6 +754,9 @@ public sealed class MarkdownView : ContentControl
         }
     }
 
+    /// <summary>The narrow no-break space on each side of an inline code's chip: drawn, not copied (<see cref="MessageSelection"/>).</summary>
+    internal sealed class ChipPadding() : Run("\u202F");
+
     /// <summary>Text that names a path (inline code, a local link's label); <see cref="Path"/> is what is looked up.</summary>
     private sealed class PathRun(string text, string path) : Run(text)
     {
@@ -774,7 +798,7 @@ public sealed class MarkdownView : ContentControl
                 var run = PathLinks.LooksLikePath(code.Content) ? new PathRun(code.Content, code.Content) : new Run(code.Content);
                 run.FontFamily = Mono;
                 run.FontSize = codeSize;
-                return new Span { Inlines = { new Run("\u202F"), run, new Run("\u202F") } };
+                return new Span { Inlines = { new ChipPadding(), run, new ChipPadding() } };
             }
             case LineBreakInline br:
                 return br.IsHard ? new LineBreak() : new Run(" ");
