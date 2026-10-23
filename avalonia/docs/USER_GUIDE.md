@@ -641,6 +641,11 @@ project yet), so the OS warns on first start:
   image's thumbnail, a folder's first entries, with the size. A click opens it — an image in the image viewer, a
   file in the Files pane at its line, a folder in the Files tree; dragging over it selects the text as usual. Code
   that names nothing on disk stays plain.
+- **Selecting text in a message** — a drag selects through your message's lines and, in a reply, on through its
+  paragraphs, headings, list items, code and table cells, up to where the pointer is (it stays within that reply).
+  Ctrl/⌘+C (the *Edit* menu, the selection's **Copy**) copies it as it reads: a blank line between paragraphs, a line
+  break between a list's items, a tab between a table row's cells, a link as its label. Ctrl/⌘+A with the keyboard in a
+  reply selects the whole reply. A click elsewhere clears the selection.
 - **Right-click menus** — right-click (two-finger click, or Control+click on macOS) acts on what is under the
   pointer, not on what is selected: one of your messages offers **Copy** and **Rewind to here**; a reply **Copy**
   (the text as it reads), **Copy as Markdown** and, when it failed, **Retry**; a code block **Copy code** and

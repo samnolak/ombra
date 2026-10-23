@@ -27,6 +27,7 @@
 //   TODOCALL            one `todo` init call writing a three-task plan (phase "Smoke"), then a final answer
 //   BTWQ <word> [SLOW]  a /btw side question (omp's <btw> prompt): "BTW-ANSWER <word>: …" streamed, without tools;
 //                       with SLOW, ~40 s of streaming (to cancel). Checked first: the side turn carries the conversation.
+//   MDREPLY             a Markdown reply: two paragraphs (the first wraps), a list, a code block and a last paragraph
 //   anything else       a short streamed reply
 //
 // Env: MOCK_TOKEN_DELAY_MS (default 15), MOCK_LOG=1 to log requests to stderr.
@@ -174,6 +175,12 @@ function plan(body) {
 			out += l + "\n";
 		}
 		return { text: out, chunkChars: 16384, delay: 1 };
+	}
+	if (/MDREPLY/.test(lastUser)) {
+		return {
+			text: "First paragraph of the reply, long enough to wrap onto a second line in the conversation column, so a drag goes down through it.\n\n"
+				+ "Second paragraph with `inline code` and more words.\n\n- item one\n- item two\n\n```python\ndef f():\n    return 1\n```\n\nLast paragraph.",
+		};
 	}
 	if (/SLOWSHORT/.test(lastUser)) {
 		return { text: Array.from({ length: 150 }, (_, i) => `word${i} `).join(""), delay: 30 };
