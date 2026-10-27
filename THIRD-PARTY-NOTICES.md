@@ -11,7 +11,9 @@ upstream copyright and license notices and identify their upstream base and Ombr
   downloads on first use (omp, Bun, the dictation model) and what it uses from the system (the web engine of the
   preview panel). Every package ships that file next to the app.
 - **Harness profile template:** [`harness/NOTICE.md`](harness/NOTICE.md) covers the adapted skills (obra/superpowers,
-  Astro-Han/karpathy-llm-wiki) and the codebase-memory-mcp release the profile uses.
+  Astro-Han/karpathy-llm-wiki, Leonxlnx/taste-skill, emilkowalski/skills, nextlevelbuilder/ui-ux-pro-max-skill,
+  Dammyjay93/interface-design, motiondivision/ai-kit), the codebase-memory-mcp release and the on-demand MCP servers
+  the profile uses.
 - **Owned agent engine sources:** [`runtime/engine/`](runtime/engine/) contains the shared Ombra host and
   the complete coding-agent source tree derived from omp 18.12.2, upstream base
   `1d5aff90b057ce7dbfe32ea557a527c1b3144b72`. The retained upstream MIT license is

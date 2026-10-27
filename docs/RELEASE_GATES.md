@@ -214,7 +214,9 @@ and it sets `--disable-tests`, which would leave the package without the mochite
 1. Sources in the engine: every `src/` file is linked into `engine/` and every changed `src/**/*.patch` must already
    be applied (`cd engine && git apply -R --check ../<patch>`); then `npm run ffprefs` regenerates
    `zen-static-prefs.inc` / `zen.js` from `prefs/`. (`npm run import` on an already patched engine fails on the
-   upstream PiP patches; it is not needed when the checks above hold.)
+   upstream PiP patches; it is not needed when the checks above hold.) `bash scripts/mar_sign.sh -i` puts the Nightly
+   MAR certificate (`build/signing/public_key.der`) in place of Mozilla's in the updater: a build without it cannot
+   verify, so cannot install, the updates step 5 signs.
 2. `cd engine && nice -n 10 ./mach build` — 48 min for the full build over the existing objdir (18 cores), 4.5 min
    incremental.
 3. `MOZ_PKG_DIR=ombra-release ./mach package` (14 s). `MOZ_PKG_DIR` keeps the staging app out of
@@ -235,10 +237,24 @@ and it sets `--disable-tests`, which would leave the package without the mochite
    **Image gate** (run by `pack`, and before any upload: `python3 runtime/nightly/pack-nightly.py --check-dmg <image>`):
    the one `Nightly.app` mounted from the image passes `codesign --verify --deep --strict`, is signed
    `flags=0x10002(adhoc,runtime)` and has bundle id `io.github.samnolak.nightly`.
+   From the same signed copy `pack` makes the installed browser's update: `Nightly-<version>-<build>-macos-arm64.mar`
+   (complete MAR, channel `release`, signed with the MAR key in `~/Developer/arclike/keys`, verified with `signmar -v`)
+   and `Nightly-<version>-<build>-update.xml`, the manifest naming that MAR as an asset of release `v<version>-<build>`.
 6. Publish the asset the pin's `url` names (`nightly-<version>-<build>` / `nightly-runtime-<version>-<build>.zip`):
    `gh release create nightly-<version>-<build> -R samnolak/nightly-browser --target next --prerelease <omp>/.temp/nightly-runtime/<archive>`;
    check `curl -sIL <url>` ends `200` with the pin's `size`. A standalone image is uploaded only as the
    `Nightly-<version>-<build>-macos-arm64.dmg` from step 5 after the image gate passed, never the `mach package` one.
+   **Update feed.** The standalone release `v<version>-<build>` carries the image and the MAR (`gh release create
+   v<version>-<build> -R samnolak/nightly-browser --target next --latest <dmg> <mar>`); then
+   `python3 runtime/nightly/pack-nightly.py --publish-feed .temp/nightly-runtime/Nightly-<version>-<build>-update.xml`
+   downloads the MAR from the release, checks its size and SHA-512 against the manifest, commits the manifest to
+   gh-pages as `updates/browser/Darwin_aarch64-gcc3/release/update.xml` and waits until
+   `https://samnolak.github.io/nightly-browser/…/update.xml` serves it. Installed browsers (standalone, from step 1's
+   updater certificate on) find it within their 12-hour check or at once from Nightly → Check for Updates… (the About
+   window), download and stage it in the background and swap it in at the next restart. Without a published feed every
+   check is an error, and after 10 (`app.update.backgroundMaxErrors`) Firefox offers "download a fresh copy" from
+   GitHub: that was the false "update" prompt of 1.23.2b. The runtime Ombra starts never updates itself
+   (`NIGHTLY_EMBED_SERVICE` disables the update service); Ombra installs the version its pin names.
    Then `rm -rf engine/obj-aarch64-apple-darwin/dist/ombra-release` (`dist/Nightly.app` stays).
 7. Embed trust with the ad-hoc (self-signed) signatures: a Release Ombra launcher (`package.sh`, signed by
    `sign.sh`, no `OMBRA_NIGHTLY_ALLOW_UNSIGNED`) installs the pinned package from the `url` into a fresh `.temp`

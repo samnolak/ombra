@@ -28,9 +28,25 @@ the app as the build signed it, a seal that no longer matches the bundle. The
 image is gated as a user gets it: the app mounted from it must pass
 ``codesign --verify --deep --strict``.
 
+From that same signed standalone copy it makes the installed browser's update:
+``Nightly-<version>-<build>-macos-arm64.mar``, a complete MAR (the engine's
+``make_full_update.sh``, channel ``release``) signed with the Nightly MAR key
+(``mar_private_key.pem`` and ``mar_cert.pem`` in ``NIGHTLY_MAR_KEYS``, default
+``~/Developer/arclike/keys``; the certificate must be the desktop repo's
+``build/signing/public_key.der``, which ``scripts/mar_sign.sh -i`` builds into
+the updater), and ``Nightly-<version>-<build>-update.xml``, the update manifest
+naming that MAR as an asset of the standalone release ``v<version>-<build>``.
+Nightly asks ``https://samnolak.github.io/nightly-browser/updates/browser/
+Darwin_aarch64-gcc3/release/update.xml``, downloads the MAR in the background,
+verifies it against the built-in certificate and swaps it in at the next
+restart. ``--publish-feed`` puts a manifest there (gh-pages) once its MAR is
+published: it first downloads the MAR from the manifest's URL and checks its
+size and SHA-512.
+
     pack-nightly.py --app <Nightly.app | package.dmg> [--out DIR] [--stage]
     pack-nightly.py --check [--package FILE]
     pack-nightly.py --check-dmg FILE
+    pack-nightly.py --publish-feed FILE
 
 ``--stage`` copies the archive where this machine's Ombra looks for it
 (``<runtimes>/nightly/packages``, ``OMBRA_RUNTIME_DIR`` honoured). ``--check``
@@ -39,15 +55,19 @@ verifies the manifest against an archive (default: the staged one);
 """
 
 import argparse
+import base64
 import hashlib
 import json
 import os
 import plistlib
 import re
+import secrets
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -57,8 +77,20 @@ RUNTIME_BUNDLE_ID = "io.github.samnolak.ombra.nightly-runtime"
 STANDALONE_BUNDLE_ID = "io.github.samnolak.nightly"
 # What would make macOS choose the runtime to open links and files.
 HANDLER_KEYS = ("CFBundleURLTypes", "CFBundleDocumentTypes")
-DESKTOP = Path(os.environ.get("NIGHTLY_DESKTOP", Path.home() / "Documents" / "ArcLike Browser" / "desktop"))
-DEFAULT_APP = DESKTOP / "engine" / "obj-aarch64-apple-darwin" / "dist" / "Nightly.app"
+# Resolved: the default is a link to ~/Developer/arclike/desktop, and the engine's shell tools break on its space.
+DESKTOP = Path(os.environ.get("NIGHTLY_DESKTOP", Path.home() / "Documents" / "ArcLike Browser" / "desktop")).resolve()
+OBJ_DIST = DESKTOP / "engine" / "obj-aarch64-apple-darwin" / "dist"
+DEFAULT_APP = OBJ_DIST / "Nightly.app"
+MAR_KEYS = Path(os.environ.get("NIGHTLY_MAR_KEYS", Path.home() / "Developer" / "arclike" / "keys"))
+# The certificate the updater is built with (scripts/mar_sign.sh -i); a MAR signed by any other key is refused.
+MAR_CERTIFICATE = DESKTOP / "build" / "signing" / "public_key.der"
+# ACCEPTED_MAR_CHANNEL_IDS / MAR_CHANNEL_ID in the desktop mozconfig; also the update channel in the feed's path.
+UPDATE_CHANNEL = "release"
+# %BUILD_TARGET% of the arm64 macOS build.
+UPDATE_TARGET = "Darwin_aarch64-gcc3"
+RELEASE_REPO = "samnolak/nightly-browser"
+FEED_PATH = f"updates/browser/{UPDATE_TARGET}/{UPDATE_CHANNEL}/update.xml"
+FEED_URL = f"https://samnolak.github.io/nightly-browser/{FEED_PATH}"
 
 
 def runtimes_root() -> Path:
@@ -193,21 +225,136 @@ def sign(app: Path) -> str:
     return check_signature(app)
 
 
-def make_dmg(app: Path, scratch: Path, dmg: Path) -> str:
-    """The standalone browser's image: a signed copy of ``app`` with its own identity next to an Applications link,
-    compressed (UDZO), then gated from its mount. Returns the app's cdhash."""
-    root = scratch / "dmg"
-    standalone = root / "Nightly.app"
-    root.mkdir()
+def standalone_copy(app: Path, scratch: Path) -> Path:
+    """The standalone browser: a signed copy of ``app`` keeping its own identity, alone in a folder of ``scratch``.
+    The image and the update are both made from it, so an update installs exactly the app the image holds."""
+    standalone = scratch / "dmg" / "Nightly.app"
+    standalone.parent.mkdir()
     subprocess.run(["ditto", str(app), str(standalone)], check=True)
     materialize(standalone)
     if (found := bundle_id(standalone)) != STANDALONE_BUNDLE_ID:
         sys.exit(f"{app}: bundle identifier {found}, expected {STANDALONE_BUNDLE_ID} for the standalone browser")
     sign(standalone)
+    return standalone
+
+
+def make_dmg(standalone: Path, dmg: Path) -> str:
+    """The standalone browser's image: ``standalone`` next to an Applications link, compressed (UDZO), then gated
+    from its mount. Returns the app's cdhash."""
+    root = standalone.parent
     (root / "Applications").symlink_to("/Applications")
     subprocess.run(["hdiutil", "create", "-quiet", "-ov", "-volname", "Nightly", "-format", "UDZO", "-srcfolder", str(root),
                     str(dmg)], check=True)
+    (root / "Applications").unlink()
     return check_dmg(dmg)
+
+
+def mar_tool(name: str) -> Path:
+    path = OBJ_DIST / ("host/bin" if name == "mar" else "bin") / name
+    if not path.exists():
+        sys.exit(f"{path}: missing (build the desktop engine first)")
+    return path
+
+
+def sign_mar(unsigned: Path, signed: Path) -> None:
+    """Signs ``unsigned`` into ``signed`` with the Nightly MAR key (NSS signmar: RSA PKCS#1 v1.5, SHA-384) and
+    verifies the result against the certificate the updater is built with. The key goes into a throwaway NSS database
+    only for the duration of the call."""
+    key, cert = MAR_KEYS / "mar_private_key.pem", MAR_KEYS / "mar_cert.pem"
+    for path in (key, cert, MAR_CERTIFICATE):
+        if not path.exists():
+            sys.exit(f"{path}: missing (NIGHTLY_MAR_KEYS names the folder holding mar_private_key.pem and mar_cert.pem)")
+    der = subprocess.run(["openssl", "x509", "-in", str(cert), "-outform", "DER"], check=True, capture_output=True).stdout
+    if der != MAR_CERTIFICATE.read_bytes():
+        sys.exit(f"{cert} is not {MAR_CERTIFICATE}: the updater would refuse MARs signed with this key")
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Path(tmp)
+        password = db / "password.txt"
+        password.write_text(secrets.token_hex(16) + "\n")
+        quiet = {"check": True, "stdout": subprocess.DEVNULL}
+        subprocess.run([str(mar_tool("certutil")), "-N", "-d", str(db), "-f", str(password)], **quiet)
+        subprocess.run(["openssl", "pkcs12", "-export", "-inkey", str(key), "-in", str(cert), "-name", "mar_sig",
+                        "-passout", f"file:{password}", "-out", str(db / "key.p12")], check=True)
+        subprocess.run([str(mar_tool("pk12util")), "-i", str(db / "key.p12"), "-d", str(db), "-w", str(password),
+                        "-k", str(password)], **quiet)
+        with password.open() as stdin:  # signmar reads the database password from stdin when it is not a tty
+            subprocess.run([str(mar_tool("signmar")), "-d", str(db), "-n", "mar_sig", "-s", str(unsigned), str(signed)],
+                           stdin=stdin, **quiet)
+    # On macOS signmar verifies only against a DER file (-D), here the very certificate the updater embeds.
+    subprocess.run([str(mar_tool("signmar")), "-D", str(MAR_CERTIFICATE), "-v", str(signed)], **quiet)
+
+
+def make_mar(standalone: Path, mar: Path, version: str) -> None:
+    """A complete update of ``standalone`` (the engine's make_full_update.sh), signed."""
+    unsigned = mar.with_name(mar.stem + ".unsigned.mar")
+    env = os.environ | {"MAR": str(mar_tool("mar")), "MOZ_PRODUCT_VERSION": version, "MAR_CHANNEL_ID": UPDATE_CHANNEL}
+    script = DESKTOP / "engine" / "tools" / "update-packaging" / "make_full_update.sh"
+    subprocess.run(["bash", str(script), "-q", str(unsigned), str(standalone)], check=True, env=env)
+    if mar.exists():
+        mar.unlink()
+    try:
+        sign_mar(unsigned, mar)
+    finally:
+        unsigned.unlink()
+
+
+def sha512(path: Path) -> str:
+    digest = hashlib.sha512()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_update_xml(standalone: Path, mar: Path, xml: Path, version: str, build: str) -> None:
+    """The update manifest Nightly reads: this build, its MAR as an asset of the standalone release."""
+    milestone = None
+    for line in (standalone / "Contents" / "Resources" / "platform.ini").read_text().splitlines():
+        if line.startswith("Milestone="):
+            milestone = line[len("Milestone="):].strip()
+    if not milestone:
+        sys.exit(f"{standalone}: no Milestone in platform.ini")
+    tag = f"v{version}-{build}"
+    updates = ET.Element("updates")
+    update = ET.SubElement(updates, "update", type="minor", displayVersion=version, appVersion=version,
+                           platformVersion=milestone, buildID=build,
+                           detailsURL=f"https://github.com/{RELEASE_REPO}/releases/tag/{tag}")
+    ET.SubElement(update, "patch", type="complete", URL=f"https://github.com/{RELEASE_REPO}/releases/download/{tag}/{mar.name}",
+                  hashFunction="sha512", hashValue=sha512(mar), size=str(mar.stat().st_size))
+    ET.indent(updates)
+    xml.write_bytes(ET.tostring(updates, encoding="UTF-8", xml_declaration=True) + b"\n")
+
+
+def publish_feed(xml: Path) -> None:
+    """Makes ``xml`` the feed installed browsers read (gh-pages ``FEED_PATH``), after checking that the MAR it names
+    is published with the size and SHA-512 it states; then waits until GitHub Pages serves it."""
+    patch = ET.parse(xml).getroot().find("update/patch")
+    if patch is None:
+        sys.exit(f"{xml}: no update/patch")
+    url, size, digest = patch.get("URL"), int(patch.get("size")), patch.get("hashValue")
+    with tempfile.TemporaryDirectory() as tmp:
+        download = Path(tmp) / "update.mar"
+        subprocess.run(["curl", "-fsSL", "--retry", "3", "-o", str(download), url], check=True)
+        if download.stat().st_size != size or sha512(download) != digest:
+            sys.exit(f"{url}: {download.stat().st_size} bytes, sha512 {sha512(download)}; the manifest says {size}, {digest}")
+    print(f"ok: {url} is the manifest's MAR ({size} bytes, sha512 matches)")
+    body = xml.read_bytes()
+    api = f"repos/{RELEASE_REPO}/contents/{FEED_PATH}"
+    current = subprocess.run(["gh", "api", f"{api}?ref=gh-pages", "--jq", ".sha"], capture_output=True, text=True)
+    build = ET.parse(xml).getroot().find("update").get("buildID")
+    command = ["gh", "api", "-X", "PUT", api, "-f", f"message=Nightly update feed: build {build}", "-f", "branch=gh-pages",
+               "-f", f"content={base64.b64encode(body).decode()}"]
+    if current.returncode == 0 and current.stdout.strip():
+        command += ["-f", f"sha={current.stdout.strip()}"]
+    subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
+    deadline = time.monotonic() + 600
+    while time.monotonic() < deadline:
+        served = subprocess.run(["curl", "-fsSL", "-H", "Cache-Control: no-cache", FEED_URL], capture_output=True)
+        if served.returncode == 0 and served.stdout == body:
+            print(f"ok: {FEED_URL} serves build {build}")
+            return
+        time.sleep(15)
+    sys.exit(f"{FEED_URL} does not serve the new manifest after 10 minutes (GitHub Pages build?)")
 
 
 def check_dmg(dmg: Path) -> str:
@@ -253,8 +400,13 @@ def pack(args) -> None:
         if archive.exists():
             archive.unlink()
         subprocess.run(["ditto", "-c", "-k", "--keepParent", str(staged), str(archive)], check=True)
+        standalone = standalone_copy(app, scratch)
         dmg = out / f"Nightly-{version}-{build}-macos-arm64.dmg"
-        make_dmg(app, scratch, dmg)
+        make_dmg(standalone, dmg)
+        mar = out / f"Nightly-{version}-{build}-macos-arm64.mar"
+        make_mar(standalone, mar, version)
+        feed = out / f"Nightly-{version}-{build}-update.xml"
+        write_update_xml(standalone, mar, feed, version, build)
     manifest = {
         "version": version,
         "buildId": build,
@@ -267,6 +419,8 @@ def pack(args) -> None:
     MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"{archive}\n{json.dumps(manifest, indent=2)}")
     print(f"{dmg}\nsha256 {sha256(dmg)}, {dmg.stat().st_size} bytes")
+    print(f"{mar}\nsigned MAR, {mar.stat().st_size} bytes; upload it to release v{version}-{build}, then"
+          f" pack-nightly.py --publish-feed {feed}")
     if args.stage:
         target = runtimes_root() / "nightly" / "packages"
         target.mkdir(parents=True, exist_ok=True)
@@ -299,13 +453,16 @@ def check(args) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--app", default=str(DEFAULT_APP), help="Nightly.app or ./mach package .dmg")
-    parser.add_argument("--out", help="where to write the archive and the image (default .temp/nightly-runtime)")
+    parser.add_argument("--out", help="where to write the archive, the image and the update (default .temp/nightly-runtime)")
     parser.add_argument("--stage", action="store_true", help="copy the archive where Ombra looks for it")
     parser.add_argument("--check", action="store_true", help="verify the manifest against an archive")
     parser.add_argument("--package", help="archive for --check")
     parser.add_argument("--check-dmg", metavar="FILE", help="gate a standalone disk image (the app mounted from it)")
+    parser.add_argument("--publish-feed", metavar="FILE", help="make an update manifest the installed browsers' feed")
     args = parser.parse_args()
-    if args.check_dmg:
+    if args.publish_feed:
+        publish_feed(Path(args.publish_feed).resolve())
+    elif args.check_dmg:
         check_dmg(Path(args.check_dmg).resolve())
     elif args.check:
         check(args)
