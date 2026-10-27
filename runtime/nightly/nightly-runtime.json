@@ -1,10 +1,10 @@
 {
-  "version": "0.1.0b1",
-  "buildId": "20261027152326",
+  "version": "0.1.0b2",
+  "buildId": "20261027221032",
   "protocol": 5,
-  "sha256": "ec06d70c3da9a2d55999d300ed9325d2d4b010bb5533cb7e1fec9cba456c636d",
-  "size": 136646841,
-  "archive": "nightly-runtime-0.1.0-beta.1.zip",
-  "url": "https://github.com/samnolak/nightly-browser/releases/download/v0.1.0-beta.1/nightly-runtime-0.1.0-beta.1.zip",
-  "cdhash": "19bbe86de6137aa266f9ed938079273b85323cf7"
+  "sha256": "4272e6bbcfe164e2fd4a1e5de896b41bef53d565168e6804cd30e4741f06eb6e",
+  "size": 136649761,
+  "archive": "nightly-runtime-0.1.0-beta.2.zip",
+  "url": "https://github.com/samnolak/nightly-browser/releases/download/v0.1.0-beta.2/nightly-runtime-0.1.0-beta.2.zip",
+  "cdhash": "fac2232f576614db657cd0912fc950cabd25b350"
 }
