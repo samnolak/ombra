@@ -145,7 +145,6 @@ public sealed class ComposerUiTests
         w.KeyTextInput("queue me");
         Dispatcher.UIThread.RunJobs();
         Assert.True(w.FindControl<Button>("QueueButton")!.IsEffectivelyVisible);
-        Assert.True(w.FindControl<Button>("SteerButton")!.IsEffectivelyVisible);
         Assert.True(w.FindControl<Button>("StopButton")!.IsEffectivelyVisible);
         w.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
         w.KeyTextInput("steer me");
@@ -154,6 +153,35 @@ public sealed class ComposerUiTests
         Shot(w, "ui-composer-queued");
         await Until(() => vm.Phase == SessionPhase.Ready && vm.QueuedMessages.Count == 0, "delivered");
         Assert.Equal(["long task", "queue me", "steer me"], vm.Rows.OfType<UserRowViewModel>().Select(u => u.Text));
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
+    public async Task While_working_with_text_the_mode_thinking_and_model_keep_their_labels()
+    {
+        // Regression: the three mid-run buttons (Steer, Stop and send, Queue) pushed the toolbar into density 2–4, which
+        // hid the permission mode's and thinking's words and then the model's, while "By the way" kept its label
+        var (w, vm, _) = await OpenAsync("queue-stream-2");
+        vm.ComposerText = "long task";
+        vm.SendCommand.Execute(null);
+        await Until(() => vm.Phase == SessionPhase.Running, "running");
+        var composer = w.FindControl<TextBox>("Composer")!;
+        composer.Focus();
+        w.KeyTextInput("queue me");
+        await Until(() => vm.CanQueue, "queue offered");
+        await Task.Delay(100);
+        Dispatcher.UIThread.RunJobs();
+        var toolbar = w.FindControl<Grid>("ComposerToolbar")!;
+        TextBlock Label(string cls) => toolbar.GetVisualDescendants().OfType<TextBlock>().Single(t => t.Classes.Contains(cls));
+        Assert.True(Label("approval-label").IsEffectivelyVisible, "permission mode label");
+        Assert.True(Label("thinking-label").IsEffectivelyVisible, "thinking label");
+        Assert.True(Label("model-label").IsEffectivelyVisible || Label("model-short-label").IsEffectivelyVisible, "model label");
+        var stop = w.FindControl<Button>("StopButton")!;
+        var box = w.FindControl<Border>("ComposerBox")!;
+        var right = stop.TranslatePoint(new Point(stop.Bounds.Width, 0), box)!.Value.X;
+        Assert.True(right <= box.Bounds.Width, $"Stop inside the box: {right} <= {box.Bounds.Width}");
+        Shot(w, "ui-composer-running-with-text");
         await vm.DisposeAsync();
         w.Close();
     }

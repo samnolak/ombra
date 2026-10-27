@@ -24,25 +24,37 @@
   </Style>
 
   <!-- Density. The composer's toolbar and the row under it each step down only as far as their content needs to fit
-       (MainWindow.FitComposer), so voice and send always stay on screen.
-       In the box: 1 a shorter model; 2 the thinking and permission pills as their icons (the level / mode in their
-       tooltips); 3 a still shorter model; 4 the model as its icon (its tooltip names it); 5 no thinking pill (the
-       narrowest box).
+       (MainWindow.FitComposer), so voice and send always stay on screen. What says how the session runs (the
+       permission mode, thinking, the model) keeps its words longest; a side action gives way first.
+       In the box: 1 "By the way" as its icon; 2 the model without its provider (the full name in its tooltip); 3 the
+       thinking pill as its icon (the level in its tooltip); 4 the permission pill as its icon (the mode in its tooltip
+       and colour); 5 the model as its icon; 6 no thinking pill (the narrowest box). The model is never cut short: a
+       truncated "claude-opus-…" hides the part that tells models apart.
        Under it: 1 a shorter project; 2 the context without its percentage; 3 a still shorter project; 4 the project as
        its icon. -->
-  <Style Selector="Border#ComposerBox.density1 TextBlock.model-label">
-    <Setter Property="MaxWidth" Value="130" />
+  <Style Selector="Border#ComposerBox TextBlock.model-short-label">
+    <Setter Property="IsVisible" Value="False" />
+    <Setter Property="MaxWidth" Value="160" />
   </Style>
-  <Style Selector="Border#ComposerBox.density2 TextBlock.thinking-label, Border#ComposerBox.density2 TextBlock.approval-label">
+  <Style Selector="Border#ComposerBox.density1 TextBlock.btw-label">
     <Setter Property="IsVisible" Value="False" />
   </Style>
-  <Style Selector="Border#ComposerBox.density3 TextBlock.model-label">
-    <Setter Property="MaxWidth" Value="90" />
-  </Style>
-  <Style Selector="Border#ComposerBox.density4 TextBlock.model-label">
+  <Style Selector="Border#ComposerBox.density2 TextBlock.model-label">
     <Setter Property="IsVisible" Value="False" />
   </Style>
-  <Style Selector="Border#ComposerBox.density5 Panel#ThinkingSlot">
+  <Style Selector="Border#ComposerBox.density2 TextBlock.model-short-label">
+    <Setter Property="IsVisible" Value="True" />
+  </Style>
+  <Style Selector="Border#ComposerBox.density3 TextBlock.thinking-label">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <Style Selector="Border#ComposerBox.density4 TextBlock.approval-label">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <Style Selector="Border#ComposerBox.density5 TextBlock.model-short-label">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+  <Style Selector="Border#ComposerBox.density6 Panel#ThinkingSlot">
     <Setter Property="IsVisible" Value="False" />
   </Style>
   <Style Selector="Grid#ComposerFooter.density1 TextBlock.project-label">
@@ -117,6 +129,20 @@
   <Style Selector="Button.send.accent:disabled /template/ ContentPresenter#PART_ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource GuiAccentDisabled}" />
     <Setter Property="Foreground" Value="{DynamicResource GuiTextOnAccent}" />
+  </Style>
+  <!-- Stop beside the queue button: a neutral filled circle, so the forward action (queue) and the interrupting one
+       read apart at a glance, not only by their glyphs -->
+  <Style Selector="Button.send.stop">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="Button.send.stop:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill2Hover}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="Button.send.stop:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill3}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
   </Style>
 
   <!-- ─────────────── Permission mode ─────────────── -->

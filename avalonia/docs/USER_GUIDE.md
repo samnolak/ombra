@@ -248,8 +248,11 @@ project yet), so the OS warns on first start:
   choice, and the app's own omp commands that load extensions (usage, sign-in) run outside an untrusted folder.
   Trusted folders are listed in *Settings → Permissions*.
 - **Message box** — Enter sends; Shift+Enter adds a line (*Settings → General → Send messages with* switches to
-  Ctrl/⌘+Enter to send, Enter then adds a line). While omp is working, **Queue** (or Enter) adds a
-  follow-up and **Steer** (or Alt/⌥+Enter) hands a message to the current run at its next step. Queued messages are
+  Ctrl/⌘+Enter to send, Enter then adds a line). While omp is working and the box has text, the round blue button
+  (or Enter) queues it as a follow-up, Alt/⌥+Enter steers it — hands it to the current run at its next step — and the
+  stop-and-send shortcut stops omp and sends it; the button's tooltip lists the three. A queued follow-up's ↑ steers it
+  later. The toolbar keeps the permission mode, thinking and model readable; with little room "By the way" and the
+  model's provider go first. Queued messages are
   listed in grey above the box until omp takes them: **×** takes one back, and ↑ in the empty box brings the last
   one back to edit (with its images). A long paste (over 800 characters or 3 lines) becomes a *Pasted text +N lines*
   chip instead of filling the box (hover it to see the start, × removes it); it is sent in full after what you typed.
@@ -283,7 +286,7 @@ project yet), so the OS warns on first start:
   also pick the project (a new session in another project, or **Open folder…**).
 - **Commands while working** — RPC-capable builtins such as `/rename` wait locally until the run is idle, then run
   as commands, not model messages. Later queued follow-ups and skills wait behind that command in submission order.
-  Explicit **Steer** still interrupts the current run; a builtin submitted with Steer waits for idle instead.
+  Explicit steering (Alt/⌥+Enter) still interrupts the current run; a builtin submitted that way waits for idle instead.
   The same queue chips let you withdraw or edit waiting input. **Stop**, a crash or restart restores it for review
   without automatic replay. An already dispatched command cannot be withdrawn; check its result before resending.
 - **Large conversations** — opening a session loads its latest page (up to 100 messages). Scroll upward near the
@@ -343,7 +346,8 @@ project yet), so the OS warns on first start:
   command, **Output** and what the call read) and folds it again. *Thinking…* counts the seconds while the model
   thinks, then reads *Thought for 4s*; click it for the thoughts. While an open block is longer than the view, its
   header (the bar, a file card's header, the *Explored* line, the *Thought for* line) stays at the top of the
-  conversation until the block ends, so it can be folded from anywhere in it.
+  conversation until the block ends, so it can be folded from anywhere in it. Held there, a card's bar is square with a
+  shadow under it: the card goes on above it. Folded from there, the folded line takes the bar's place at the top.
   Live durations use a monotonic clock, so changing the system date does not make them jump; message dates
   still use the wall clock. Status, extension widgets and command/task output show hidden control characters
   as visible markers, not terminal styling, while preserving ordinary Unicode, line breaks, tabs and raw data.
@@ -969,7 +973,11 @@ their own below:
   and **Set up engine**, **Update engine** or **Repair engine**. These fields apply only after Save and restart
   engine, once all chats and sign-ins are idle. Until then the page says *Unsaved changes* (with **Discard**),
   and the edits stay when you leave
-  Settings and come back. *Network*: corporate network certificates and a connection check (next section); *Network
+  Settings and come back. The managed engine also carries the Ombra harness — working rules, the `reviewer` and
+  `task` agents, skills, on-demand MCP servers and settings defaults — for every chat and the terminal's omp, updated
+  with the app (`docs/harness.md`). Your own rules, agents, skills and extensions in `~/.omp/agent` replace a harness
+  item of the same name, and a key in your `config.yml` wins over its default. *Network*: corporate network
+  certificates and a connection check (next section); *Network
   privacy*: which providers omp may contact, and strict network privacy (see [Network privacy](#network-privacy)).
 
 ## Corporate network certificates

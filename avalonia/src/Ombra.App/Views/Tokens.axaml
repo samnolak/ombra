@@ -278,6 +278,9 @@
           <BoxShadows x:Key="GuiShadowPopup">0 2 6 0 #0F000000, 0 10 32 0 #1F000000</BoxShadows>
           <!-- The message box: lifted off the chat in light, flat (fill + hairline) in dark -->
           <BoxShadows x:Key="GuiShadowComposer">0 1 2 0 #0A000000, 0 4 16 0 #0D000000</BoxShadows>
+          <!-- A card's header held at the top of the view (Controls/StickyHeader): a hairline under it and a short shadow
+               on the lines scrolling under it, so it reads as pinned over the card, not as the card's top -->
+          <BoxShadows x:Key="GuiShadowStuck">0 1 0 0 #14000000, 0 6 8 -4 #1A000000</BoxShadows>
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
           <!-- the client's tokens -->
@@ -551,6 +554,7 @@
           <BoxShadows x:Key="GuiShadowPopup">0 10 32 0 #66000000, 0 0 0 1 #0DFFFFFF</BoxShadows>
           <!-- The message box: lifted off the chat in light, flat (fill + hairline) in dark -->
           <BoxShadows x:Key="GuiShadowComposer">0 0 0 0 #00000000</BoxShadows>
+          <BoxShadows x:Key="GuiShadowStuck">0 1 0 0 #14FFFFFF, 0 6 8 -4 #80000000</BoxShadows>
         </ResourceDictionary>
   </ResourceDictionary.ThemeDictionaries>
   <!-- A focused field keeps its 1 px border (only the colour changes): 2 px had shifted its text by a pixel -->

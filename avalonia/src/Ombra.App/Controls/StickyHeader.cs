@@ -84,12 +84,15 @@ public static class StickyHeader
     /// <summary>
     /// Places the headers of a row for the top of the view at <paramref name="line"/> (the row's coordinates; a header
     /// stuck above the row's own, an exploration group's line, already moved it down): a header whose block crosses the
-    /// line is moved onto it, pushed up by its block's end; every other header is where it was laid out.
+    /// line is moved onto it, pushed up by its block's end; every other header is where it was laid out. True when one
+    /// was moved: the row's block is held at the top of the view by its header.
     /// </summary>
-    internal static void PlaceIn(Control row, double line)
+    internal static bool PlaceIn(Control row, double line)
     {
-        if (row.GetValue(HeadersProperty) is not { Count: > 0 } headers) return;
-        foreach (var header in headers) Place(header, Offset(header, row, line));
+        if (row.GetValue(HeadersProperty) is not { Count: > 0 } headers) return false;
+        var stuck = false;
+        foreach (var header in headers) stuck |= Place(header, Offset(header, row, line));
+        return stuck;
     }
 
     /// <summary>Puts every header of a row back where it was laid out.</summary>
@@ -116,16 +119,17 @@ public static class StickyHeader
         return Math.Max(0, Math.Min(line - headerTop, blockBottom - headerTop - header.Bounds.Height));
     }
 
-    private static void Place(Control header, double y)
+    private static bool Place(Control header, double y)
     {
         var stuck = y >= 0.5;
         if (header.RenderTransform is not TranslateTransform shift)
         {
-            if (!stuck) return;
+            if (!stuck) return false;
             header.RenderTransform = shift = new TranslateTransform();
         }
         shift.Y = stuck ? y : 0;
         header.ZIndex = stuck ? 1 : 0;
         header.Classes.Set("stuck", stuck);
+        return stuck;
     }
 }

@@ -605,10 +605,11 @@
   </Style>
   <!-- An open output's bar (a Shell card's, an output's): what it is, what it ran on, and a chevron that folds it. On
        the card's own fill with no rule under it (Codex): it stays at the top of the view over the card's lines
-       (Controls/StickyHeader). Its top corners are the card's; held at the top of the view, the window shows around
-       them, so the bar still reads as the top of a rounded card. -->
+       (Controls/StickyHeader). Held there it is a flat bar across the card, square, with a hairline and a short shadow
+       over the lines scrolling under it: the card goes on above (a rounded top there read as a card of a few lines). -->
   <Style Selector="Border.card-head.stuck">
-    <Setter Property="Background" Value="{DynamicResource GuiWindow}" />
+    <Setter Property="Background" Value="{DynamicResource GuiCodeBlockHeader}" />
+    <Setter Property="BoxShadow" Value="{DynamicResource GuiShadowStuck}" />
   </Style>
   <Style Selector="Button.card-header">
     <Setter Property="HorizontalAlignment" Value="Stretch" />
@@ -929,19 +930,23 @@
     <Setter Property="Margin" Value="30,2,8,8" />
   </Style>
   <!-- The header on the card's surface: it stays at the top of the view over the card's lines (Controls/StickyHeader).
-       Its bar lies over the card's top hairline and draws it, rounded like the card, so held at the top of the view it
-       is still a rounded card top; the window shows around its corners there -->
+       Its bar lies over the card's top hairline and draws it, rounded like the card. Held at the top of the view it is
+       square, with a hairline and a short shadow over the lines scrolling under it, as a Shell card's bar: the card goes
+       on above -->
   <Style Selector="Border.diff-head">
     <Setter Property="Margin" Value="-1,-1,-1,0" />
   </Style>
   <Style Selector="Border.diff-head.stuck">
-    <Setter Property="Background" Value="{DynamicResource GuiWindow}" />
+    <Setter Property="BoxShadow" Value="{DynamicResource GuiShadowStuck}" />
   </Style>
   <Style Selector="Border.diff-head-bar">
     <Setter Property="Background" Value="{DynamicResource GuiCodeBlockHeader}" />
     <Setter Property="BorderBrush" Value="{DynamicResource GuiCodeBlockBorder}" />
     <Setter Property="BorderThickness" Value="1,1,1,0" />
     <Setter Property="CornerRadius" Value="12,12,0,0" />
+  </Style>
+  <Style Selector="Border.diff-head.stuck > Border.diff-head-bar">
+    <Setter Property="CornerRadius" Value="0" />
   </Style>
   <!-- Folds the card away (its tool row's line) -->
   <Style Selector="Button.diff-collapse">
@@ -1080,8 +1085,10 @@
     <Setter Property="MinHeight" Value="36" />
     <Setter Property="Padding" Value="14,0,6,0" />
   </Style>
+  <!-- Held at the top of the view (Controls/StickyHeader): as a Shell card's bar, a hairline and a short shadow over the
+       lines scrolling under it -->
   <Style Selector="Border.md-code-head.stuck">
-    <Setter Property="BoxShadow" Value="0 1 0 0 #14000000" />
+    <Setter Property="BoxShadow" Value="{DynamicResource GuiShadowStuck}" />
   </Style>
   <Style Selector="Border.md-code-body">
     <Setter Property="Padding" Value="16,2,16,14" />

@@ -33,7 +33,8 @@ namespace Ombra.App.Controls;
 /// above them changes height. A width change, which it does not follow, holds the row at the top of the view itself
 /// (<see cref="HoldRowAfterWidthChange"/>).</item>
 /// <item>Headers stay at the top of the view while their block is on screen (<see cref="StickyBlock"/>, <see
-/// cref="StickyHeader"/>), placed when the view moves or the rows are laid out, never per frame.</item>
+/// cref="StickyHeader"/>), placed when the view moves or the rows are laid out, never per frame. A block folded by its
+/// held header leaves its head row where the header was, not the view on what came after it (<see cref="FoldedHeldBlockTop"/>).</item>
 /// </list>
 /// </summary>
 public sealed class TranscriptPanel : VirtualizingPanel
@@ -80,6 +81,16 @@ public sealed class TranscriptPanel : VirtualizingPanel
     private readonly TranslateTransform _stuckShift = new();
     /// <summary>The row whose headers were placed last (<see cref="StickyHeader"/>): put back once another row is at the top.</summary>
     private Control? _placedRow;
+    /// <summary>
+    /// The block held at the top of the view by its header, from the last placement (<see cref="UpdateSticky"/>): its head
+    /// row (and that row's item, to tell it is still there), its last row, how far below the head row's top the header
+    /// was moved (where the block crossed the top of the view), and where in the view that line is. Null when no header
+    /// is held. See <see cref="FoldedHeldBlockTop"/>.
+    /// </summary>
+    private (int Row, object? Item, int Last, double IntoRow, double Line)? _held;
+    /// <summary>The view was moved by this layout (<see cref="FoldedHeldBlockTop"/>): the ScrollViewer's anchoring must not
+    /// move it again by what the rows moved.</summary>
+    private bool _dropAnchor;
 
     public TranscriptPanel() => EffectiveViewportChanged += OnEffectiveViewportChanged;
 
@@ -210,6 +221,34 @@ public sealed class TranscriptPanel : VirtualizingPanel
         // viewport is going to be, not where it was. A view going to the end or to a given place has no such row. (A new
         // width moves no row before they are measured again: the estimates stay, see EstimateAt.)
         var (anchor, anchorTop) = _followsEnd || PendingTop is not null ? (-1, 0.0) : AnchorRow();
+        RealizeFor(items, view, constraint, anchor, anchorTop);
+        // A block folded by its header held at the top of the view (a Shell card's bar, a step group's line) now ends above
+        // that header: the view goes to the block's head row, put where the header was, rather than staying where the
+        // block's lines were and showing what came after it. The rows there are realized now; the anchoring is dropped.
+        if (!_followsEnd && PendingTop is null && FoldedHeldBlockTop(items) is { } heldTop && ShiftView is { } shiftView)
+        {
+            _held = null;
+            var moved = shiftView(heldTop - _viewport.Top);
+            if (Math.Abs(moved) >= 0.5)
+            {
+                _dropAnchor = true;
+                RealizeFor(items, new Rect(view.X, _viewport.Top + moved, view.Width, view.Height), constraint, -1, 0);
+            }
+        }
+        var width = 0.0;
+        foreach (var element in _realized.Values) width = Math.Max(width, element.DesiredSize.Width);
+        var height = Tops[^1];
+        SetContentHeight(height);
+        return new Size(double.IsFinite(availableSize.Width) ? Math.Min(width, availableSize.Width) : width, height);
+    }
+
+    /// <summary>
+    /// Realizes and measures the rows for a view, and the rows kept realized outside it. Measuring rows moves the ones
+    /// under them, and the end: each pass realizes the rows where the last one found the view (following the end, or
+    /// <paramref name="anchor"/>, the row the scroll anchoring holds still, from <paramref name="anchorTop"/>).
+    /// </summary>
+    private void RealizeFor(IReadOnlyList<object?> items, Rect view, Size constraint, int anchor, double anchorTop)
+    {
         for (var pass = 0; pass < 4; pass++)
         {
             // The end moves as the last rows are measured: each pass realizes the rows at the end found by the last
@@ -241,11 +280,20 @@ public sealed class TranscriptPanel : VirtualizingPanel
                 anchorTop = top;
             }
         }
-        var width = 0.0;
-        foreach (var element in _realized.Values) width = Math.Max(width, element.DesiredSize.Width);
-        var height = Tops[^1];
-        SetContentHeight(height);
-        return new Size(double.IsFinite(availableSize.Width) ? Math.Min(width, availableSize.Width) : width, height);
+    }
+
+    /// <summary>
+    /// Where the top of the view goes once the block held at the top of the view by its header (<see cref="_held"/>) was
+    /// folded by it: the block now ends above where the header was (its head row would be gone above the view, and the
+    /// view would show what came after it), so its head row is put at the line the header was held at. Null when nothing
+    /// was held or the block still reaches that far (a scroll, a block growing). Measured from the head row's own top, so
+    /// rows above it changing height do not count.
+    /// </summary>
+    private double? FoldedHeldBlockTop(IReadOnlyList<object?> items)
+    {
+        if (_held is not { } held || held.Last >= items.Count || !ReferenceEquals(items[held.Row], held.Item)) return null;
+        var tops = Tops;
+        return tops[held.Last + 1] - tops[held.Row] <= held.IntoRow ? tops[held.Row] - held.Line : null;
     }
 
     protected override Size ArrangeOverride(Size finalSize)
@@ -265,6 +313,18 @@ public sealed class TranscriptPanel : VirtualizingPanel
             if (i != _stuck && element.IsVisible && _hasViewport && (_viewport.Intersects(rect) || _viewport.Intersects(was))) _anchors?.RegisterAnchorCandidate(element);
             else _anchors?.UnregisterAnchorCandidate(element);
         }
+        // The view was moved to a folded block's head row by this layout (FoldedHeldBlockTop): the rows moved under the
+        // anchor the ScrollViewer picked, which it would follow, moving the view again. The anchor is let go (and stays a
+        // candidate for the next layout)
+        if (_dropAnchor)
+        {
+            _dropAnchor = false;
+            if (_anchors?.CurrentAnchor is { } held)
+            {
+                _anchors.UnregisterAnchorCandidate(held);
+                _anchors.RegisterAnchorCandidate(held);
+            }
+        }
         UpdateSticky();
         return finalSize;
     }
@@ -282,12 +342,14 @@ public sealed class TranscriptPanel : VirtualizingPanel
         {
             Unstick();
             Unplace();
+            _held = null;
             return;
         }
         var tops = Tops;
         var line = _viewport.Top;
         var stuck = -1;
         var shift = 0.0;
+        (int Row, object? Item, int Last, double IntoRow, double Line)? hold = null;
         if (_stickyBlock is { } blockOf && blockOf(items, RowAt(tops, line)) is { } block && block.Header >= 0 && block.Header < block.Last && block.Last < items.Count)
         {
             var height = tops[block.Header + 1] - tops[block.Header];
@@ -296,6 +358,7 @@ public sealed class TranscriptPanel : VirtualizingPanel
             {
                 stuck = block.Header;
                 line = tops[block.Header] + shift + height;
+                hold = (stuck, items[stuck], block.Last, shift, 0);
             }
         }
         if (stuck != _stuck)
@@ -326,7 +389,9 @@ public sealed class TranscriptPanel : VirtualizingPanel
             Unplace();
             _placedRow = placed;
         }
-        if (placed is not null) StickyHeader.PlaceIn(placed, line - placed.Bounds.Y);
+        // A row with a header held on the line: its own block is the one held (inside the group held above it, if any)
+        if (placed is not null && StickyHeader.PlaceIn(placed, line - placed.Bounds.Y)) hold = (under, items[under], under, line - placed.Bounds.Y, line - _viewport.Top);
+        _held = hold;
     }
 
     /// <summary>The stuck row back where it is laid out.</summary>

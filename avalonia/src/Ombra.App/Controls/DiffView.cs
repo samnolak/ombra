@@ -323,8 +323,8 @@ public sealed partial class DiffView : ContentControl
             header.Children.Add(fold);
             collapseButton = fold;
         }
-        // The bar draws the card's top (hairline and rounded corners) itself, so held at the top of the view it is still
-        // the top of a rounded card; what it moves in shows the window around those corners (diff-head.stuck)
+        // The bar draws the card's top (hairline and rounded corners) itself; held at the top of the view it is square,
+        // with a hairline and a shadow over the lines under it (diff-head.stuck): the card goes on above
         var bar = new Border { Classes = { "diff-head" }, Child = new Border { Classes = { "diff-head-bar" }, Child = header } };
         if (collapse is not null)
         {

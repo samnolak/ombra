@@ -512,7 +512,7 @@ public sealed partial class MainWindow : Window
         _fittingComposer = true;
         try
         {
-            FitRow(ComposerBox, ComposerToolbar, ComposerLeft, ComposerRight, 5);
+            FitRow(ComposerBox, ComposerToolbar, ComposerLeft, ComposerRight, 6);
             FitRow(ComposerFooter, ComposerFooter, FooterLeft, FooterRight, 4);
         }
         finally { _fittingComposer = false; }

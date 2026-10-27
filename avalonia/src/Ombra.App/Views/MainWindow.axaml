@@ -1918,7 +1918,7 @@
                     AutomationProperties.Name="{loc:T 'Side question'}">
               <StackPanel Orientation="Horizontal" Spacing="6">
                 <ctl:Icon Data="{StaticResource IconComment}" Size="16" />
-                <TextBlock Text="{loc:T 'By the way'}" VerticalAlignment="Center" />
+                <TextBlock Classes="btw-label" Text="{loc:T 'By the way'}" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
           </StackPanel>
@@ -1976,6 +1976,7 @@
                 <StackPanel Orientation="Horizontal" Spacing="6">
                   <ctl:Icon Data="{StaticResource IconSparkle}" Size="16" />
                   <TextBlock Classes="model-label" Text="{Binding CurrentModel}" MaxWidth="220" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                  <TextBlock Classes="model-short-label" Text="{Binding CurrentModelShort}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                   <ctl:Icon Data="{StaticResource IconChevronDown}" Size="16" TextElement.Foreground="{DynamicResource GuiTextSecondary}" />
                 </StackPanel>
               </Button>
@@ -2032,22 +2033,23 @@
                   </DockPanel>
                 </Border>
               </Popup>
-            <Button x:Name="SteerButton" Content="{loc:T 'Steer'}" Command="{Binding SteerCommand}" IsVisible="{Binding CanQueue}"
-                    ToolTip.Tip="{Binding Source={x:Static vm:KeyboardShortcuts.Steer}, StringFormat={loc:T 'Give omp this now, at its next step ({0})'}}" />
-            <Button x:Name="InterruptButton" Content="{loc:T 'Stop and send'}" Command="{Binding InterruptAndSendCommand}" IsVisible="{Binding CanQueue}"
-                    ToolTip.Tip="{Binding Source={x:Static vm:KeyboardShortcuts.InterruptAndSend}, StringFormat={loc:T 'Stop omp and send this instead ({0})'}}" />
-            <Button x:Name="QueueButton" Content="{loc:T 'Queue'}" Command="{Binding SendCommand}" IsVisible="{Binding CanQueue}"
-                    ToolTip.Tip="{Binding SendKeyHint, StringFormat={loc:T 'Send when omp finishes its current work ({0})'}}" />
             <Button x:Name="DictateButton" Classes="icon round" Classes.recording="{Binding IsRecording}" Command="{Binding ToggleDictationCommand}"
                     ToolTip.Tip="{Binding DictationTip}" AutomationProperties.Name="{loc:T 'Dictate'}">
               <ctl:Icon Data="{StaticResource IconMic}" Size="16" />
+            </Button>
+            <!-- While omp works: a round send that queues the box's text (Enter), as Codex and Claude Code do, dimmed while
+                 the box is empty so the toolbar never shifts as typing starts; ⌥Enter steers, the queued row's ↑ steers
+                 one later, Stop (Esc) interrupts. The session's mode, thinking and model keep their labels. -->
+            <Button x:Name="QueueButton" Command="{Binding SendCommand}" IsVisible="{Binding IsRunning}" Classes="accent send"
+                    ToolTip.Tip="{Binding QueueTooltip}" AutomationProperties.Name="{loc:T 'Queue'}">
+              <ctl:Icon Data="{StaticResource IconArrowUp}" Size="18" />
             </Button>
             <Button x:Name="SendButton" Command="{Binding SendCommand}" IsVisible="{Binding IsIdle}"
                     Classes="accent send" ToolTip.Tip="{Binding SendKeyHint, StringFormat={loc:T 'Send ({0})'}}" AutomationProperties.Name="{loc:T 'Send'}">
               <ctl:Icon Data="{StaticResource IconArrowUp}" Size="18" />
             </Button>
             <Button x:Name="StopButton" Command="{Binding AbortCommand}" IsVisible="{Binding IsRunning}"
-                    Classes="inverse send" ToolTip.Tip="{Binding StopLabel, StringFormat={loc:T '{}{0} (Esc). If stopping hangs, press again to restart omp on this session.'}}"
+                    Classes="send stop" ToolTip.Tip="{Binding StopLabel, StringFormat={loc:T '{}{0} (Esc). If stopping hangs, press again to restart omp on this session.'}}"
                     AutomationProperties.Name="{Binding StopLabel}">
               <ctl:Icon Data="{StaticResource IconStop}" Size="16" Filled="True" />
             </Button>

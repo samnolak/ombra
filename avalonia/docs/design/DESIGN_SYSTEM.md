@@ -293,9 +293,12 @@ inside stays bare in every state.
   change card is `Border.change-card` (`GuiCardBorder`, radius 12) with `Grid.change-card-head` (`GuiChangeHead`, a 38 px
   `Border.change-tile`, `TextBlock.change-card-title`, `turn-file-stat` +N −M, `Button.outline turn-file-open`) and
   `Button.turn-file` rows (`Run.file-folder` grey before the name; `more-files` for "Show N more files"). Diff cards
-  (`Border.diff-card`) are code cards too. Notices are `Grid.notice-line` (`Border.notice-rule` either side of the
-  `notice-text`, 12 px secondary, centred, at most 440 wide). Inline code is a `GuiInlineCodeBg` chip (#303030, radius 4)
-  drawn under the text by `MarkdownView` (mono at 0.875 of the text, still selectable with it); list markers are in the
+  (`Border.diff-card`) are code cards too. A code card's bar held at the top of the view (`.stuck`: `card-head`,
+  `diff-head`, `md-code-head`) is square on the header fill with `GuiShadowStuck` (a hairline and a short shadow on the
+  lines under it), so it reads as pinned over a card that goes on above. Notices are `Grid.notice-line`
+  (`Border.notice-rule` either side of the `notice-text`, 12 px secondary, centred, at most 440 wide). Inline code is a
+  `GuiInlineCodeBg` chip (#303030, radius 4) drawn under the text by `MarkdownView` (mono at 0.875 of the text, still
+  selectable with it); list markers are in the
   text's colour in an 18 px column; tables (`md-cell`) have only rules: `GuiCardBorder` under the header, `GuiTableRule`
   between rows. Running dots (`tool-dot running`, `state-dot running`, `session-dot running`) and the live "Thinking…"
   label pulse through `ctl:Pulse` (`Controls/Pulse.cs`: `ctl:Pulse.Low` / `Duration` setters in the style), never a

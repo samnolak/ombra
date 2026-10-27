@@ -69,6 +69,14 @@ public sealed class StickyHeaderTests
         yield return Result("r1", "read", 120, "a = {0}");
         yield return Result("r2", "read", 120, "b = {0}");
         yield return new { role = "assistant", content = new[] { Text("Both modules are read.") }, stopReason = "stop" };
+        yield return new { role = "user", content = new[] { Text("Rename the settings") } };
+        yield return new { role = "assistant", content = new object[] { Call("e1", "edit", new { path = "src/settings.py", oldText = "a", newText = "b" }) }, stopReason = "toolUse" };
+        yield return new
+        {
+            role = "toolResult", toolCallId = "e1", toolName = "edit", content = new[] { Text("Edited.") }, isError = false,
+            details = new { diff = string.Join("\n", Enumerable.Range(1, 60).Select(n => n % 4 == 0 ? $"-{n,4}|old_setting_{n} = {n}" : n % 4 == 1 ? $"+{n,4}|new_setting_{n} = {n}" : $" {n,4}|setting_{n} = {n}")) },
+        };
+        yield return new { role = "assistant", content = new[] { Text("The settings are renamed.") }, stopReason = "stop" };
         foreach (var m in ChatScrollTests.LongConversation(4)) yield return m;
     }
 
@@ -179,6 +187,102 @@ public sealed class StickyHeaderTests
         Assert.False(bar.IsVisible);
         Assert.DoesNotContain("stuck", bar.Classes);
         Assert.Equal(0, Shift(bar));
+        w.Close();
+    }
+
+    /// <summary>
+    /// The owner's report: a card scrolled into shows its bar over its last lines; folded there by that bar, the view
+    /// stayed where the card's lines had been, so the row went off above the view and the view showed whatever came
+    /// after it (the next exchange). Folded by its held bar, the row's line is where the bar was, in the same layout.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task A_card_folded_by_its_held_bar_leaves_its_line_where_the_bar_was()
+    {
+        var (w, vm, list, sv) = await Open();
+        ListBoxItem Item(object row) => list.GetVisualDescendants().OfType<ListBoxItem>().Single(i => ReferenceEquals(i.DataContext, row) && i.IsVisible);
+        void FoldBy(Control bar)
+        {
+            var at = bar.TranslatePoint(new Point(40, bar.Bounds.Height / 2), w)!.Value;
+            w.MouseDown(at, Avalonia.Input.MouseButton.Left);
+            w.MouseUp(at, Avalonia.Input.MouseButton.Left);
+            // One layout and one frame: the view is not drawn anywhere else first
+            Dispatcher.UIThread.RunJobs();
+            using (w.CaptureRenderedFrame()) { }
+        }
+        // With OMBRA_SHOT_DIR set: the window in the dark and the light theme at each stage
+        void Shot(string name)
+        {
+            if (Environment.GetEnvironmentVariable("OMBRA_SHOT_DIR") is not { } dir) return;
+            Directory.CreateDirectory(dir);
+            var app = Application.Current!;
+            var before = app.RequestedThemeVariant;
+            try
+            {
+                foreach (var theme in new[] { Avalonia.Styling.ThemeVariant.Dark, Avalonia.Styling.ThemeVariant.Light })
+                {
+                    app.RequestedThemeVariant = theme;
+                    Frame(w);
+                    using var frame = w.CaptureRenderedFrame()!;
+                    frame.Save(Path.Combine(dir, $"held-bar-{name}-{theme.Key}.png".ToLowerInvariant()), new Avalonia.Media.Imaging.PngBitmapEncoderOptions());
+                }
+            }
+            finally
+            {
+                app.RequestedThemeVariant = before;
+                Frame(w);
+            }
+        }
+
+        // A command's card on its own, 120 px from its end: its bar on top, the card's last lines under it
+        var bash = vm.Rows.OfType<ToolRowViewModel>().Single(t => t.Command == "pytest -q");
+        bash.IsExpanded = true;
+        list.ScrollIntoView(bash);
+        Frame(w);
+        Shot("1-open");
+        var bar = w.GetVisualDescendants().OfType<Border>().Single(b => b.Classes.Contains("card-head") && ReferenceEquals(b.DataContext, bash) && b.IsEffectivelyVisible);
+        var block = (Control)bar.GetVisualParent()!;
+        ScrollTo(w, sv, block, block.Bounds.Height - 120);
+        Assert.Equal(0, TopIn(bar, sv), 1);
+        Assert.Contains("stuck", bar.Classes);
+        Shot("2-held");
+        var answer = vm.Rows.OfType<AssistantRowViewModel>().Single(a => a.Text == "All 200 pass.");
+        FoldBy(bar);
+        Assert.False(bash.IsExpanded);
+        var row = Item(bash);
+        Assert.Equal(0, TopIn(row, sv), 1);
+        Assert.Equal(row.Bounds.Height, TopIn(Item(answer), sv), 1);
+        Shot("3-folded");
+
+        // A step's output under its open group's line: folded by its bar, the step's line is under the group's
+        var group = vm.Rows.OfType<StepGroupRowViewModel>().Single(g => g.Steps.All(st => st.Name == "read"));
+        group.IsExpanded = true;
+        foreach (var step in group.Steps) step.IsExpanded = true;
+        list.ScrollIntoView(group);
+        Frame(w);
+        var second = group.Steps[1];
+        list.ScrollIntoView(second);
+        Frame(w);
+        var output = w.GetVisualDescendants().OfType<Border>().Single(b => b.Classes.Contains("tool-output") && ReferenceEquals(b.DataContext, second) && b.IsEffectivelyVisible);
+        ScrollTo(w, sv, output, 600);
+        var line = Item(group);
+        Assert.Contains("stuck", line.Classes);
+        var outputBar = output.GetVisualDescendants().OfType<Border>().Single(b => b.Classes.Contains("card-head"));
+        Assert.Equal(line.Bounds.Height, TopIn(outputBar, sv), 1);
+        Shot("4-group-held");
+        FoldBy(outputBar);
+        Assert.False(second.IsExpanded);
+        Assert.Equal(line.Bounds.Height, TopIn(Item(second), sv), 1);
+        Assert.Equal(0, TopIn(Item(group), sv), 1);
+
+        // A changed file's card, its header held over its lines (seen with OMBRA_SHOT_DIR)
+        var edit = vm.Rows.OfType<ToolRowViewModel>().Single(t => t.Name == "edit");
+        edit.IsExpanded = true;
+        list.ScrollIntoView(edit);
+        Frame(w);
+        var head = w.GetVisualDescendants().OfType<Border>().Single(b => b.Classes.Contains("diff-head") && b.IsEffectivelyVisible);
+        ScrollTo(w, sv, (Control)head.GetVisualParent()!, 300);
+        Assert.Contains("stuck", head.Classes);
+        Shot("5-diff-held");
         w.Close();
     }
 
