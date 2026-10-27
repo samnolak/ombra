@@ -4,6 +4,7 @@ import type { ImageContent } from "@oh-my-pi/pi-ai";
 import { type PtyRunResult, PtySession } from "@oh-my-pi/pi-natives";
 import { loadXtermTerminal } from "@oh-my-pi/pi-tui/tools/terminal-output";
 import { Settings } from "../config/settings";
+import { type EnvScrubPolicy, scrubbedEnvNames, scrubEnv, scrubShellLine } from "../exec/env-scrub";
 import { OutputSink, type OutputSummary } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import { TerminalGraphicsDecoder } from "../utils/terminal-graphics";
 import { resolveOutputMaxColumns, resolveOutputSinkArtifactMaxBytes, resolveOutputSinkHeadBytes } from "./output-meta";
@@ -24,6 +25,8 @@ export async function runInteractiveBashPty(
 		timeoutMs?: number;
 		signal?: AbortSignal;
 		env?: Record<string, string>;
+		/** Credential scrub (`bash.envScrub.*`); `env` above still applies. */
+		envScrub?: EnvScrubPolicy;
 		artifactPath?: string;
 		artifactId?: string;
 	},
@@ -38,7 +41,17 @@ export async function runInteractiveBashPty(
 	// non-interactive guards (GIT_EDITOR, GPG_TTY, CI; added by procmgr's
 	// `buildSpawnEnv`, and a guard added there belongs here too) and NO_COLOR, a
 	// monochrome marker. A key left out keeps the inherited launch value.
-	const { GIT_EDITOR: _gitEditor, GPG_TTY: _gpgTty, CI: _ci, NO_COLOR: _noColor, ...interactiveShellEnv } = shellEnv;
+	const { GIT_EDITOR: _gitEditor, GPG_TTY: _gpgTty, CI: _ci, NO_COLOR: _noColor, ...launchShellEnv } = shellEnv;
+	const interactiveShellEnv = options.envScrub ? scrubEnv(launchShellEnv, options.envScrub) : launchShellEnv;
+	// The PTY inherits the C environ under that map, so the shell line unsets
+	// the scrubbed names too (cmd.exe/PowerShell get them emptied instead).
+	const scrubbed = options.envScrub
+		? scrubShellLine(
+				resolvedShell,
+				options.command,
+				scrubbedEnvNames(options.envScrub, { base: shellEnv, explicit: options.env }),
+			)
+		: { command: options.command, blankEnv: {} };
 	const graphics = new TerminalGraphicsDecoder();
 	const sink = new OutputSink({
 		artifactPath: options.artifactPath,
@@ -106,12 +119,12 @@ export async function runInteractiveBashPty(
 				void session
 					.start(
 						{
-							command: options.command,
+							command: scrubbed.command,
 							cwd: options.cwd,
 							timeoutMs: options.timeoutMs,
 							// A real TERM so editors, pagers, and TUIs behave like a normal
 							// terminal; direnv's values win over everything.
-							env: { ...interactiveShellEnv, TERM: "xterm-256color", ...options.env },
+							env: { ...interactiveShellEnv, ...scrubbed.blankEnv, TERM: "xterm-256color", ...options.env },
 							signal: options.signal,
 							cols,
 							rows,

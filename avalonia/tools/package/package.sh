@@ -58,6 +58,8 @@ engine() {
   "$exe" --install-engine "$(native "$build")" --engine-platform "$key" > "$STAGE/engine.json"
   pack=$(sed -n 's/.*"pack":"\([^"]*\)".*/\1/p' "$STAGE/engine.json")
   [ -n "$pack" ] && [ -f "$build/$pack/installed.json" ] || { echo "the engine install named no pack:"; cat "$STAGE/engine.json"; exit 1; }
+  # The Ombra harness (harness/profile) every session loads, installed from the owned source artifact
+  [ -f "$build/$pack/omp/harness/agent/AGENTS.md" ] || { echo "the engine pack $pack has no Ombra harness (omp/harness)"; exit 1; }
   mkdir -p "$1"
   cp -a "$build/$pack" "$1/$pack"
   echo "engine: bundled $pack ($key, $(du -sh "$1/$pack" | cut -f1) installed; integrity-checked install, host --self-check passed)" | tee "$ENGINE_REC"

@@ -359,6 +359,22 @@ export const cfgTodoEnabled = register({
 	},
 });
 
+/**
+ * Models without the todo tool: model-selector substrings (case-insensitive, like `edit.modelVariants`).
+ * Config-file only; `todo.enabled: false` still turns the tool off for every model.
+ */
+export const cfgTodoDisableForModels = register({
+	id: "todo.disableForModels",
+	type: "array",
+	default: EMPTY_STRING_ARRAY,
+	validate: raw => {
+		if (raw === undefined) return;
+		if (!Array.isArray(raw) || raw.some(entry => typeof entry !== "string")) {
+			throw new Error("todo.disableForModels must be a list of model-selector substrings");
+		}
+	},
+});
+
 export const cfgTodoReminders = register({
 	id: "todo.reminders",
 	type: "boolean",
@@ -940,6 +956,13 @@ export const cfgAsyncMaxJobs = register({
 	default: 100,
 });
 
+/** `wait` cap without a UI (print/json/headless runs); 0 keeps the built-in 30-minute ceiling. */
+export const cfgWaitMaxHeadlessMs = register({
+	id: "wait.maxHeadlessMs",
+	type: "number",
+	default: 0,
+});
+
 export const cfgToolsXdev = register({
 	id: "tools.xdev",
 	type: "boolean",
@@ -1082,6 +1105,7 @@ export const cfgBuiltinToolGates = combine({
 	security: cfgSecurityEnabled,
 	taskMaxRecursionDepth: cfgTaskMaxRecursionDepth,
 	todo: cfgTodoEnabled,
+	todoDisableForModels: cfgTodoDisableForModels,
 	webSearch: cfgWebSearchEnabled,
 });
 

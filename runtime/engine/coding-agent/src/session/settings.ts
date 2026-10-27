@@ -28,6 +28,7 @@ import { formatKeyHint } from "@oh-my-pi/pi-tui/app-keybindings";
 import { AUTO_THINKING, getConfiguredThinkingLevelMetadata, getThinkingLevelMetadata } from "@oh-my-pi/pi-tui/thinking";
 
 const EMPTY_NUMBER_RECORD: Record<string, number> = {};
+const EMPTY_STRING_RECORD: Record<string, string> = {};
 const EMPTY_STRING_ARRAYS_RECORD: Record<string, string[]> = {};
 const DEFAULT_TOOL_CALL_LOOP_EXEMPT_TOOLS: string[] = ["wait"];
 
@@ -377,6 +378,16 @@ export const cfgIncludeModelInPrompt = register({
 		label: "Include Model in Prompt",
 		description: "Surface the active model identifier in the system prompt so the agent knows which model it is",
 	},
+});
+
+/**
+ * Per-model base system prompt: model-selector substring (case-insensitive) → bundled
+ * `prompts/system/<name>.md` template, first match wins. Empty keeps the default prompt. Config-file only.
+ */
+export const cfgSystemPromptModelVariants = register({
+	id: "systemPrompt.modelVariants",
+	type: "record",
+	default: EMPTY_STRING_RECORD,
 });
 
 export const cfgIncludeWorkspaceTree = register({

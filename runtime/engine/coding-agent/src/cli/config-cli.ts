@@ -321,11 +321,12 @@ function globalValue(setting: AnySetting): unknown {
 	return value;
 }
 
-/** Where the effective value comes from when it is not the global config (or the default), if anywhere. */
+/** Where the effective value comes from when it is not the global config (or a lower default), if anywhere. */
 function shadowingSource(setting: AnySetting): { json: Record<string, string>; message: string } | undefined {
 	const provenance = setting.provenance(settings);
 	switch (provenance) {
 		case "global":
+		case "harness":
 		case "default":
 			return undefined;
 		case "env": {

@@ -1,14 +1,18 @@
-// Compares two run.mjs or two polyglot.mjs outputs (baseline vs working tree).
+// Compares two run.mjs or two polyglot.mjs outputs (baseline vs working tree, or one engine under two edit modes).
 //
-//   bun compare.mjs <baseline-out-dir> <after-out-dir>
+//   bun compare.mjs <baseline-out-dir> <after-out-dir> [by=fault|task]
 //
-// run.mjs: per fault — success, scripted final answer, outside-workspace changes, unrequested edits, requests,
-// input KB, wall time. polyglot.mjs: per exercise and in total — the owner's columns (pass, wall time, code written,
-// unrequested edits, attempts, spend). Values print as baseline → after when they differ.
+// run.mjs: per fault (default) or per task — success (check OK, untouched files byte-identical, clean stdout),
+// check OK alone, scripted final answer, outside-workspace changes, unrequested edits, runs with stray stdout lines,
+// edit calls and edit errors, requests, input KB (scripted model), provider input ktok (real model), wall time; the
+// header names each side's model and edit mode.
+// polyglot.mjs: per exercise and in total — the owner's columns (pass, wall time, code written, unrequested edits,
+// attempts, spend). Values print as baseline → after when they differ.
 import fs from "node:fs";
 import path from "node:path";
 
-const [a, b] = process.argv.slice(2).map(d => JSON.parse(fs.readFileSync(path.join(d, "results.json"), "utf8")));
+const [dirA, dirB, BY = "fault"] = process.argv.slice(2);
+const [a, b] = [dirA, dirB].map(d => JSON.parse(fs.readFileSync(path.join(d, "results.json"), "utf8")));
 const avg = (rows, f) => rows.reduce((n, r) => n + f(r), 0) / rows.length;
 const pair = (x, y, digits = 1) => (x.toFixed(digits) === y.toFixed(digits) ? x.toFixed(digits) : `${x.toFixed(digits)} → ${y.toFixed(digits)}`);
 if (a[0]?.exercise) {
@@ -25,15 +29,19 @@ if (a[0]?.exercise) {
 	console.log(out);
 	process.exit(0);
 }
-const byFault = rows => Map.groupBy(rows, r => r.fault);
-const A = byFault(a), B = byFault(b);
-let out = "| fault | success | final answer | outside touched | unrequested edits | requests | input KB | wall s |\n|---|---|---|---|---|---|---|---|\n";
-for (const [fault, ra] of A) {
-	const rb = B.get(fault);
+const side = rows => [...new Set(rows.map(r => `${r.model ?? "scripted"}, edit.mode ${r.editModeSeen ?? r.editMode ?? "default"}`))].join("; ");
+const groupBy = rows => Map.groupBy(rows, r => (BY === "task" ? r.task : r.fault));
+const A = groupBy(a), B = groupBy(b);
+let out = `baseline: ${side(a)}\nafter: ${side(b)}\n\n| ${BY} | success | check OK | final answer | outside touched | unrequested edits | stray stdout | edit calls | edit errors | requests | input KB | provider input ktok | wall s |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n`;
+for (const [key, ra] of A) {
+	const rb = B.get(key);
 	if (!rb) continue;
-	const count = (rows, k) => `${rows.filter(r => r[k]).length}/${rows.length}`;
+	const count = (rows, f) => `${rows.filter(f).length}/${rows.length}`;
 	const s = (x, y) => (x === y ? x : `${x} → ${y}`);
 	const total = (rows, k) => rows.reduce((n, r) => n + (r[k] ?? 0), 0);
-	out += `| ${fault} | ${s(count(ra, "success"), count(rb, "success"))} | ${s(count(ra, "finalSeen"), count(rb, "finalSeen"))} | ${s(count(ra, "outsideTouched"), count(rb, "outsideTouched"))} | ${s(total(ra, "unrequestedEdits"), total(rb, "unrequestedEdits"))} | ${pair(avg(ra, r => r.requests), avg(rb, r => r.requests))} | ${pair(avg(ra, r => r.inputBytes / 1024), avg(rb, r => r.inputBytes / 1024))} | ${pair(avg(ra, r => r.wallMs / 1000), avg(rb, r => r.wallMs / 1000))} |\n`;
+	// Outputs written before checkOk/strayStdout existed: success then meant the check alone.
+	const checkOk = r => r.checkOk ?? r.success;
+	const stray = r => (r.strayStdout?.length ?? 0) > 0;
+	out += `| ${key} | ${s(count(ra, r => r.success), count(rb, r => r.success))} | ${s(count(ra, checkOk), count(rb, checkOk))} | ${s(count(ra, r => r.finalSeen), count(rb, r => r.finalSeen))} | ${s(count(ra, r => r.outsideTouched), count(rb, r => r.outsideTouched))} | ${s(total(ra, "unrequestedEdits"), total(rb, "unrequestedEdits"))} | ${s(count(ra, stray), count(rb, stray))} | ${pair(avg(ra, r => r.editCalls ?? 0), avg(rb, r => r.editCalls ?? 0))} | ${s(total(ra, "editErrors"), total(rb, "editErrors"))} | ${pair(avg(ra, r => r.requests), avg(rb, r => r.requests))} | ${pair(avg(ra, r => r.inputBytes / 1024), avg(rb, r => r.inputBytes / 1024))} | ${pair(avg(ra, r => (r.providerInputTokens ?? 0) / 1000), avg(rb, r => (r.providerInputTokens ?? 0) / 1000))} | ${pair(avg(ra, r => r.wallMs / 1000), avg(rb, r => r.wallMs / 1000))} |\n`;
 }
 console.log(out);

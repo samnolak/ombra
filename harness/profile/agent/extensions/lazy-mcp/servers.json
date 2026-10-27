@@ -3,13 +3,54 @@
     "description": "Live Blender: run bpy Python, inspect the scene, render previews, import or generate 3D assets. Needs Blender open with the MCP for Blender addon running.",
     "type": "stdio",
     "command": "uvx",
-    "args": ["--python", "3.12", "mcp-for-blender"],
-    "timeout": 180000
+    "args": [
+      "--python",
+      "3.12",
+      "mcp-for-blender"
+    ],
+    "timeout": 180000,
+    "env": {
+      "UV_SYSTEM_CERTS": "1",
+      "UV_NATIVE_TLS": "1"
+    }
   },
   "figma": {
     "description": "Figma Dev Mode: read selected frames and nodes, variables and design tokens, screenshots, code from designs. Needs Figma Desktop with the Dev Mode MCP server enabled.",
     "type": "http",
     "url": "http://127.0.0.1:3845/mcp",
+    "timeout": 120000
+  },
+  "shadcn": {
+    "description": "shadcn component registries, including React Bits (@react-bits, animated React components): browse, search, view and get install commands for components of the project. Starts in the session's project; React Bits needs \"registries\": {\"@react-bits\": \"https://reactbits.dev/r/{name}.json\"} in the project's components.json. Needs Node (npx) and network.",
+    "type": "stdio",
+    "command": "npx",
+    "args": [
+      "-y",
+      "shadcn@4.22.1",
+      "mcp"
+    ],
+    "timeout": 120000
+  },
+  "motion": {
+    "description": "Motion (formerly Framer Motion) free docs server: search-motion-docs for current Motion API, guides and examples. Use together with the `motion` skill. Remote https://mcp.motion.dev, no key.",
+    "type": "http",
+    "url": "https://mcp.motion.dev",
+    "timeout": 60000
+  },
+  "context7": {
+    "description": "Context7: current, version-specific documentation and code examples for libraries and frameworks (resolve-library-id, then get-library-docs / query-docs). Remote https://mcp.context7.com/mcp, no key; needs network.",
+    "type": "http",
+    "url": "https://mcp.context7.com/mcp",
+    "timeout": 30000
+  },
+  "codebase-memory": {
+    "description": "codebase-memory-mcp: a code knowledge graph of the project (index the repository, search symbols, trace callers and callees, architecture overview). Needs the codebase-memory-mcp binary installed and on PATH; without it, use grep/read.",
+    "type": "stdio",
+    "command": "codebase-memory-mcp",
+    "args": [],
+    "env": {
+      "CBM_LOG_LEVEL": "warn"
+    },
     "timeout": 120000
   }
 }

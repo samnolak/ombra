@@ -109,6 +109,7 @@ public sealed class RuntimeBundleTests
     [InlineData("pack")]
     [InlineData("sourceArtifact")]
     [InlineData("host")]
+    [InlineData("harness")]
     public async Task A_bundled_pack_of_another_pin_or_incomplete_is_not_used(string damage)
     {
         var tgz = RuntimeInstallerTests.Tarball();
@@ -125,10 +126,44 @@ public sealed class RuntimeBundleTests
             case "sourceArtifact": marker["sourceArtifact"]!["sha256"] = new string('0', 64); break;
         }
         if (damage == "host") File.Delete(Path.Combine(dir, "omp", RuntimePack.HostEntry));
+        else if (damage == "harness") Directory.Delete(Path.Combine(dir, "omp", "harness"), recursive: true);
         else File.WriteAllText(Path.Combine(dir, "installed.json"), marker.ToJsonString());
 
         Assert.Null(installer.FindBundled());
         Assert.Null(installer.FindInstalled());
+    }
+
+    [Fact]
+    public async Task An_installed_pack_points_engine_and_terminal_launches_at_its_harness_and_is_reinstalled_without_it()
+    {
+        var tgz = RuntimeInstallerTests.Tarball();
+        var root = TestProcesses.TempDir("rt-harness");
+        var installer = Installer(root, tgz, null, new RuntimeInstallerTests.Registry(tgz));
+        var installed = await installer.InstallAsync(null, CancellationToken.None);
+        var rt = installer.FindInstalled()!;
+        Assert.Equal(Path.Combine(installed.Directory, "omp", "harness"), rt.Harness);
+        Assert.Equal(File.ReadAllBytes(RuntimeInstallerTests.RepoFile("harness/profile/agent/AGENTS.md")),
+            File.ReadAllBytes(Path.Combine(rt.Harness, "agent", "AGENTS.md")));
+        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(rt.Harness, "*", SearchOption.AllDirectories),
+            p => p.Contains("__pycache__") || p.EndsWith(".pyc") || p.EndsWith(".seed") || p.EndsWith(".DS_Store"));
+
+        // The chat engine, the terminal omp and CLI management all get the pack's harness
+        var options = installer.ApplyDefaultTo(new OmpRuntimeOptions());
+        Assert.Equal(rt.Harness, options.ToLaunchSpec().Environment[InstalledRuntime.HarnessVariable]);
+        Assert.Equal(rt.Harness, options.ToTuiLaunchSpec(root).Environment[InstalledRuntime.HarnessVariable]);
+        Assert.Equal(rt.Harness, options.ToCliLaunchSpec(["--version"]).Environment[InstalledRuntime.HarnessVariable]);
+        // A harness the user set in the runtime environment (a developer's harness/profile) wins
+        var dev = installer.ApplyDefaultTo(new OmpRuntimeOptions { Environment = new() { [InstalledRuntime.HarnessVariable] = "/repo/harness/profile" } });
+        Assert.Equal("/repo/harness/profile", dev.ToLaunchSpec().Environment[InstalledRuntime.HarnessVariable]);
+        Assert.Equal("/repo/harness/profile", dev.ToTuiLaunchSpec(root).Environment[InstalledRuntime.HarnessVariable]);
+
+        // Without its harness the pack is not run; the install path replaces it
+        Directory.Delete(rt.Harness, recursive: true);
+        Assert.Null(installer.FindInstalled());
+        Assert.Equal(Path.Combine(installer.TargetDirectory, "install-required"), installer.ApplyDefaultTo(new OmpRuntimeOptions()).Command);
+        var repaired = await installer.InstallAsync(null, CancellationToken.None);
+        Assert.True(File.Exists(Path.Combine(repaired.Harness, "agent", "AGENTS.md")));
+        Assert.Equal(repaired, installer.FindInstalled());
     }
 
     [Fact]

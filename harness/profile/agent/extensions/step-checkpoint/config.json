@@ -1,0 +1,4 @@
+{
+  "threshold": 40,
+  "exempt": ["ask", "todo", "wait", "vibe_wait", "yield"]
+}

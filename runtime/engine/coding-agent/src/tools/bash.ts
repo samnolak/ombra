@@ -23,6 +23,7 @@ import { isPosixShell } from "@oh-my-pi/pi-utils/procmgr";
 import { raceJobSettlement, resolveAutoBackgroundWaitMs } from "../async";
 import type { Settings } from "../config/settings";
 import { applyDirenvPreflight, type BashResult, executeBash } from "../exec/bash-executor";
+import { resolveEnvScrubPolicy, scrubbedEnvNames, scrubShellLine } from "../exec/env-scrub";
 import { InternalUrlRouter } from "../internal-urls";
 import { sessionResolveContext } from "../internal-urls/context";
 import { InternalUrlFilesystem, UrlFsError } from "../internal-urls/url-filesystem";
@@ -922,6 +923,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 						timeout: options.timeoutMs ?? 0,
 						signal: runSignal,
 						gitGuard: cfgBashGitGuard.get(this.session.settings),
+						envScrub: resolveEnvScrubPolicy(this.session.settings),
 						// Bound to the job's own signal: the job outlives the call that started it.
 						filesystem: this.#urlFilesystem(runSignal, options.approvalTier).shellFilesystem(),
 						artifactPath,
@@ -1309,6 +1311,8 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 						direnvSetting: cfgBashDirenv.get(this.session.settings),
 					})
 				: undefined;
+		// Credential scrub (`bash.envScrub.*`) for the backends below.
+		const envScrub = resolveEnvScrubPolicy(this.session.settings);
 
 		// Route through the client terminal when the client advertises the terminal capability.
 		// Skip when pty=true (PTY needs the local terminal UI) or the cwd is a URL
@@ -1376,8 +1380,23 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 				// direnv-transformed command (carries any `unset -v` prefix) + direnv
 				// env; falls back to the raw command when direnv is off/absent.
 				const bridgeCommand = backendPreflight?.command ?? command;
-				const bridgeEnv = backendPreflight?.env;
-				const shellSpawn = wrapShellLineForClientTerminal(bridgeCommand, this.session.settings.getShellConfig());
+				let bridgeEnv = backendPreflight?.env;
+				const bridgeShell = this.session.settings.getShellConfig();
+				const shellSpawn = wrapShellLineForClientTerminal(bridgeCommand, bridgeShell);
+				if (envScrub) {
+					// The client spawns the terminal from its own environment, which
+					// normally is the one it launched this agent with; scrub the names
+					// this process inherited. Applied to the wrapped line so the shell
+					// prefix (profiler/strace) still wraps the command, not the unset.
+					const lineIndex = shellSpawn.args.length - 1;
+					const scrubbed = scrubShellLine(
+						bridgeShell.shell,
+						shellSpawn.args[lineIndex] ?? "",
+						scrubbedEnvNames(envScrub, { base: bridgeShell.env, explicit: bridgeEnv }),
+					);
+					shellSpawn.args[lineIndex] = scrubbed.command;
+					if (Object.keys(scrubbed.blankEnv).length > 0) bridgeEnv = { ...scrubbed.blankEnv, ...bridgeEnv };
+				}
 				const createP = clientBridge.createTerminal({
 					command: shellSpawn.command,
 					args: shellSpawn.args,
@@ -1603,6 +1622,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 					timeoutMs,
 					signal,
 					env: backendPreflight?.env,
+					envScrub,
 					artifactPath,
 					artifactId,
 				})
@@ -1615,6 +1635,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
 					timeout: timeoutMs ?? 0,
 					signal,
 					gitGuard: cfgBashGitGuard.get(this.session.settings),
+					envScrub,
 					filesystem: this.#urlFilesystem(signal, approvalTier).shellFilesystem(),
 					artifactPath,
 					artifactId,

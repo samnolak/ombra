@@ -4069,6 +4069,7 @@ export class AgentSession implements SettingsScope {
 		// This must happen before event fan-out awaits: streamed tool-call deltas
 		// can otherwise queue validation that a delayed turn-start reset erases.
 		if (event.type === "turn_start") this.#streamingEditGuard.reset();
+		else if (event.type === "message_update") this.#streamingEditGuard.checkInputSize(event);
 		// Step the mid-run todo counter synchronously, BEFORE any await in this
 		// handler. The agent loop's next-turn `getAsideMessages` poll can run
 		// before queued microtasks drain, so `#takeMidRunTodoNudge` MUST see the
@@ -6600,9 +6601,9 @@ export class AgentSession implements SettingsScope {
 	 * image/speech generation, `tools.xdev`) against live settings and refreshes the
 	 * prompt once (`refreshPrompt: false` refreshes only if the tool set changed). The
 	 * SDK runs it whenever a gating setting changes; other runtime owners may call it
-	 * after changing an input the gate reads.
+	 * after changing an input the gate reads. Resolves to whether the prompt was rebuilt.
 	 */
-	reconcileBuiltinTools(options?: { refreshPrompt?: boolean }): Promise<void> {
+	reconcileBuiltinTools(options?: { refreshPrompt?: boolean }): Promise<boolean> {
 		return this.#tools.reconcileBuiltinTools(options);
 	}
 

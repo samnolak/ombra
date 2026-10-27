@@ -5,9 +5,11 @@
 //
 // Policy (step = number of tool results after the last user message):
 //   0 → `read` of the task's source file
-//   1 → `write` of the fixed file (content from tasks.mjs)
-//   2 → `bash` running the task's check command
-//   3+ → final answer "DONE"
+//   1 → `write` of the fixed file (content from tasks.mjs); a task with `edits` instead changes those lines through
+//       `edit` in the variant the engine offers (recognized from the tool schema): one call for hashline, patch,
+//       apply_patch and sloppy, one call per site for replace
+//   next → `bash` running the task's check command
+//   then → final answer "DONE"
 // The task is recognized by the token TASK:<id> in the first user message.
 //
 // Faults (by request index within the run, 1-based):
@@ -22,8 +24,8 @@
 //   small-context    every request above BENCH_SMALL_CONTEXT (default 12000) estimated tokens → 400
 //                    context_length_exceeded naming that limit (the server's real window < the configured one)
 //
-// Each request appends one JSON line to <metrics.jsonl>:
-//   { i, t, status, fault, bytes, systemBytes, toolsBytes, messages, toolResultBytes, step, roles }
+// Each request appends one JSON line to <metrics.jsonl> (`tool`: the tool this reply calls, null for a final answer):
+//   { i, t, status, fault, bytes, systemBytes, toolsBytes, messages, toolResultBytes, step, tool, editMode, roles }
 // BENCH_DUMP=1 also writes each request body to <metrics.jsonl>.<i>.json.
 import http from "node:http";
 import fs from "node:fs";
@@ -43,6 +45,39 @@ function textOf(c) {
 	return "";
 }
 
+// The engine's edit variant, recognized from the `edit` tool schema it sends (the world, not the bench's setting).
+function editModeOf(tools) {
+	const fn = (tools ?? []).find(t => t.function?.name === "edit")?.function;
+	if (!fn) return null;
+	const props = fn.parameters?.properties ?? {};
+	if ("old_string" in props) return "replace";
+	if ("edits" in props) return "patch";
+	const d = fn.description ?? "";
+	if (d.startsWith("Hashline")) return "hashline";
+	if (d.includes("*** Begin Patch")) return "apply_patch";
+	if (d.includes("*** Edit File:")) return "sloppy";
+	return "unknown";
+}
+
+// Edit-task steps in the given variant's own syntax. Every site is one whole, unique line of the original file.
+function editSteps(task, mode, msgs) {
+	const { file, edits } = task;
+	const lines = task.files[file].split("\n");
+	if (mode === "replace") return edits.map(([o, n]) => ({ tool: "edit", args: { i: "Editing", path: file, old_string: o, new_string: n } }));
+	if (mode === "patch") return [{ tool: "edit", args: { i: "Editing", path: file, edits: [{ op: "update", diff: edits.map(([o, n]) => `@@\n-${o}\n+${n}\n`).join("") }] } }];
+	if (mode === "apply_patch") return [{ tool: "edit", args: { i: "Editing", input: `*** Begin Patch\n*** Update File: ${file}\n${edits.map(([o, n]) => `@@\n-${o}\n+${n}\n`).join("")}*** End Patch\n` } }];
+	if (mode === "sloppy") return [{ tool: "edit", args: { i: "Editing", input: `*** Edit File: ${file}\n${edits.map(([o, n]) => `*** Find\n${o}\n*** Replace\n${n}\n`).join("")}` } }];
+	if (mode === "hashline") {
+		// Snapshot tag from the latest read/write result header `[file#TAG]`.
+		const results = msgs.filter(m => m.role === "tool").map(m => textOf(m.content)).join("\n");
+		const at = results.lastIndexOf(`[${file}#`);
+		const tag = at < 0 ? "0000" : results.slice(at + file.length + 2, at + file.length + 6);
+		const ops = edits.map(([o, n]) => { const k = lines.indexOf(o) + 1; return `PUT ${k}.=${k}:\n+${n}`; });
+		return [{ tool: "edit", args: { i: "Editing", input: `[${file}#${tag}]\n${ops.join("\n")}\n` } }];
+	}
+	return [{ tool: "write", args: { path: file, content: task.fixed } }];
+}
+
 function decide(body) {
 	const msgs = body.messages ?? [];
 	const users = msgs.filter(m => m.role === "user");
@@ -60,7 +95,7 @@ function decide(body) {
 	const outside = /rm -rf (\S+)\/\*/.exec(allText)?.[1] ?? "/nonexistent-outside";
 	const steps = task.script?.(task, outside) ?? [
 		{ tool: "read", args: { path: task.read ?? task.file } },
-		{ tool: "write", args: { path: task.file, content: task.fixed } },
+		...(task.edits ? editSteps(task, editModeOf(body.tools), msgs) : [{ tool: "write", args: { path: task.file, content: task.fixed } }]),
 		{ tool: "bash", args: { command: task.check } },
 	];
 	if (step < steps.length) return { step, text: `Step ${step + 1}.`, tool: { name: steps[step].tool, args: steps[step].args } };
@@ -85,7 +120,7 @@ http.createServer((req, res) => {
 		const d = decide(body);
 		let applied = null;
 		const roles = (body.messages ?? []).map(m => m.role[0] + (m.role === "user" ? `:${textOf(m.content).slice(0, 60)}` : "")).join(" | ");
-		const rec = status => fs.appendFileSync(metricsPath, JSON.stringify({ i, t: Date.now(), status, fault: applied, bytes: raw.length, systemBytes: sys.length, toolsBytes: JSON.stringify(body.tools ?? []).length, messages: (body.messages ?? []).length, toolResultBytes, step: d.step, roles }) + "\n");
+		const rec = status => fs.appendFileSync(metricsPath, JSON.stringify({ i, t: Date.now(), status, fault: applied, bytes: raw.length, systemBytes: sys.length, toolsBytes: JSON.stringify(body.tools ?? []).length, messages: (body.messages ?? []).length, toolResultBytes, step: d.step, tool: d.tool?.name ?? null, editMode: editModeOf(body.tools), roles }) + "\n");
 		if (process.env.BENCH_DUMP) fs.writeFileSync(`${metricsPath}.${i}.json`, raw);
 		const est = Math.round(raw.length / 4);
 		if (fault === "small-context" && est > SMALL_CONTEXT) {

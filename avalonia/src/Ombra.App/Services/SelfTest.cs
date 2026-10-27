@@ -90,6 +90,15 @@ public static class SelfTest
             }).ConfigureAwait(false);
         checks.Add(new Check("runtime", runtime is not null || !args.InstallRuntime, args.InstallRuntime,
             runtime is not null ? $"{RuntimePack.Name} ({runtime.Platform}) {(runtime.Bundled ? "bundled with the app" : "installed")} at {runtime.Directory}" : $"not installed (platform {platform ?? "unsupported"}; {description})"));
+        // Every launch from the pack carries the Ombra harness (rules, agents, skills, extensions, settings defaults).
+        if (runtime is not null)
+            Try(checks, "harness", true, () =>
+            {
+                var dir = runtime.ApplyTo(new OmpRuntimeOptions()).Environment.GetValueOrDefault(InstalledRuntime.HarnessVariable);
+                if (dir is null || !File.Exists(Path.Combine(dir, "agent", "AGENTS.md")))
+                    throw new DirectoryNotFoundException($"{InstalledRuntime.HarnessVariable} is {dir ?? "unset"}, without agent/AGENTS.md");
+                return dir;
+            });
 
         await TryAsync(checks, "omp", true, async () =>
         {

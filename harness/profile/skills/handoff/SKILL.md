@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Use when work on a task spans sessions or runs long - at the start to restore where the work stopped, and at meaningful checkpoints of an unfinished task to record it. Not for one-off questions or already finished work
+description: Restore or record progress on long or multi-session tasks; not one-off questions.
 ---
 
 # Handoff (one file per project)

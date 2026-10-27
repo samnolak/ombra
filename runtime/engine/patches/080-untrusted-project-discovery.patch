@@ -428,7 +428,7 @@ index 05a5d3793eb70f5c8ed2397d710ba0c793d261b8..aa8ae1f05f4c5956005dca01766fe386
   * Record the owning session's effective `extensions` setting (and its
   * `Settings`-resolved provenance) on the active invocation scope so
 diff --git a/src/extensibility/skills.ts b/src/extensibility/skills.ts
-index dd8deeb3fe4dfe832e8b9f29da84d9dab37355cc..78fd9905d6c3cc750f6027cd63a394fbabfd06d8 100644
+index dd8deeb3fe4dfe832e8b9f29da84d9dab37355cc..6e877ab081f265c33c58e8d4d4007caddd64be0e 100644
 --- a/src/extensibility/skills.ts
 +++ b/src/extensibility/skills.ts
 @@ -8,6 +8,7 @@ import {
@@ -439,7 +439,15 @@ index dd8deeb3fe4dfe832e8b9f29da84d9dab37355cc..78fd9905d6c3cc750f6027cd63a394fb
  import type { SkillsSettings } from "./settings";
  import {
  	type Skill as CapabilitySkill,
-@@ -198,24 +199,25 @@ function resolveCollision(
+@@ -20,6 +21,7 @@ import { allowsSkillTokens, SKILL_TOKEN_RE } from "@oh-my-pi/pi-tui/prompt/skill
+ import autoloadTemplate from "../prompts/skills/autoload.md" with { type: "text" };
+ import userInvocationTemplate from "../prompts/skills/user-invocation.md" with { type: "text" };
+ import { SKILLSHARE_PROVIDER_ID } from "../discovery/skillshare";
++import { HARNESS_PROVIDER_ID } from "../harness-layer";
+ import type { SkillPromptDetails } from "../session/messages";
+ import { expandTilde } from "../tools/path-utils";
+ 
+@@ -198,24 +200,25 @@ function resolveCollision(
  	};
  }
  
@@ -470,6 +478,59 @@ index dd8deeb3fe4dfe832e8b9f29da84d9dab37355cc..78fd9905d6c3cc750f6027cd63a394fb
  }
  
  /**
+@@ -369,6 +372,7 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
+ 	// patterns are matched against the final name the user actually sees.
+ 	const filteredSkills = result.all.filter(capSkill => {
+ 		if (capSkill._source.provider === MANAGED_SKILLS_PROVIDER_ID) return false;
++		if (capSkill._source.provider === HARNESS_PROVIDER_ID) return false;
+ 		if (disabledSkillNames.has(capSkill.name)) return false;
+ 		if (!isSourceEnabled(capSkill._source)) return false;
+ 		return !matchesIgnorePatterns(capSkill.name);
+@@ -532,6 +536,44 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
+ 		if (admit(skill, body, frontmatter, namespace) !== undefined) realPathSet.add(resolvedPath);
+ 	}
+ 
++	// Ombra harness skills (`OMBRA_HARNESS_DIR`) rank below every authored source: a same-name
++	// project, user or custom-directory skill replaces the harness copy outright (no namespaced
++	// alias). Taken from result.all, after the custom directories, for the same reason as the
++	// managed skills below: capability dedup must not let a disabled source hide them.
++	const harnessCandidates = result.all.filter(
++		capSkill =>
++			capSkill._source.provider === HARNESS_PROVIDER_ID &&
++			!disabledSkillNames.has(capSkill.name) &&
++			isSourceEnabled(capSkill._source) &&
++			!matchesIgnorePatterns(capSkill.name),
++	);
++	const harnessRealPaths = await Promise.all(
++		harnessCandidates.map(async capSkill => {
++			try {
++				return await fs.realpath(capSkill.path);
++			} catch {
++				return capSkill.path;
++			}
++		}),
++	);
++	for (let i = 0; i < harnessCandidates.length; i++) {
++		const capSkill = harnessCandidates[i];
++		const resolvedPath = harnessRealPaths[i];
++		if (realPathSet.has(resolvedPath) || skillMap.has(capSkill.name)) continue;
++		const skill: Skill = {
++			name: capSkill.name,
++			description: typeof capSkill.frontmatter?.description === "string" ? capSkill.frontmatter.description : "",
++			filePath: capSkill.path,
++			baseDir: capSkill.path.replace(/[\\/]SKILL\.md$/, ""),
++			source: `${capSkill._source.provider}:${capSkill.level}`,
++			...(capSkill.containRoot !== undefined && { containRoot: capSkill.containRoot }),
++			hide: capSkill.frontmatter?.hide === true || capSkill.frontmatter?.disableModelInvocation === true,
++			_source: capSkill._source,
++		};
++		if (admit(skill, capSkill.content, capSkill.frontmatter, skillNamespace(capSkill)) !== undefined)
++			realPathSet.add(resolvedPath);
++	}
++
+ 	// Managed (auto-learn) skills resolve dead-last with first-wins. Source from
+ 	// result.all (pre-dedup): capability-level dedup runs BEFORE isSourceEnabled,
+ 	// so a managed skill can be shadowed by a higher-priority authored skill that
 diff --git a/src/session/untrusted-project-report.ts b/src/session/untrusted-project-report.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..9825608bc7ba8e9b9f8fa048048defe0a9ad68c2
@@ -508,10 +569,10 @@ index 0000000000000000000000000000000000000000..9825608bc7ba8e9b9f8fa048048defe0
 +	return reports.get(session) ?? null;
 +}
 diff --git a/src/task/discovery.ts b/src/task/discovery.ts
-index f433e225d5a6a4245496af0c3f31355cca617c6c..585bc97d0efe62bdcc054955b275f6cef83fa6c0 100644
+index f433e225d5a6a4245496af0c3f31355cca617c6c..2eee1e6a19565ee7e61b249f77264986fd438448 100644
 --- a/src/task/discovery.ts
 +++ b/src/task/discovery.ts
-@@ -3,7 +3,7 @@
+@@ -3,12 +3,14 @@
   *
   * Discovers agent definitions from OMP-native task-agent roots:
   *   - ~/.omp/agent/agents/*.md (user-level)
@@ -520,7 +581,14 @@ index f433e225d5a6a4245496af0c3f31355cca617c6c..585bc97d0efe62bdcc054955b275f6ce
   *   - <ext>/agents/*.md for every OMP extension package wired through
   *     `listOmpExtensionRoots` (CLI `--extension` roots, `extensions:` in
   *     settings, and enabled npm/link plugins under `<plugins>/node_modules/`).
-@@ -24,6 +24,7 @@ import { logger } from "@oh-my-pi/pi-utils";
+  *     Mirrors the same sub-discovery convention applied to `skills/`,
+  *     `hooks/`, `tools/`, etc. by `discovery/omp-plugins.ts`.
++ *   - <harness>/agent/agents/*.md (the Ombra harness, `OMBRA_HARNESS_DIR`;
++ *     app-owned, so it loads in untrusted folders too).
+  *
+  * Claude Code marketplace plugin agents are discovered separately via the
+  * claude-plugins provider. Direct cross-harness roots such as .claude/agents
+@@ -24,9 +26,11 @@ import { logger } from "@oh-my-pi/pi-utils";
  import { isProviderEnabled, isUserSourceEnabled } from "../capability";
  import type { EffectiveExtensionRoots } from "../capability/types";
  import { findAllNearestProjectConfigDirs, getConfigDirs } from "../config";
@@ -528,10 +596,28 @@ index f433e225d5a6a4245496af0c3f31355cca617c6c..585bc97d0efe62bdcc054955b275f6ce
  import { pluginUsesClaudeModelDialect } from "../discovery/agent-plugin-format";
  import { listClaudePluginRoots } from "../discovery/helpers";
  import { listOmpExtensionRoots } from "../discovery/omp-extension-roots";
-@@ -154,8 +155,11 @@ export async function discoverAgents(
++import { getHarnessAgentsDir } from "../harness-layer";
+ import { loadBundledAgents, parseAgent } from "./agents";
+ import type { AgentSource } from "@oh-my-pi/pi-tui/tools/task";
+ import type { AgentDefinition } from "./types";
+@@ -78,7 +82,7 @@ async function loadAgentsFromDir({ dir, source, ignoreModel }: AgentDirectory):
+  * Precedence (highest wins): project `.omp/agents`, user `.omp/agents`,
+  * OMP extension-package agents from the effective `extensions` setting,
+  * installed npm/link plugins, Claude marketplace plugin agents (project scope
+- * before user), then bundled.
++ * before user), the Ombra harness agents, then bundled.
+  * @param cwd - Current working directory for project agent discovery
+  * @param home - Home directory for user and marketplace discovery
+  * @param extensionRoots - Session-local extension roots (explicit + mode + configured)
+@@ -154,8 +158,16 @@ export async function discoverAgents(
  		});
  	});
  
++	// The Ombra harness ranks just above bundled: its agents replace bundled ones of the same
++	// name, and every user or project agent of the same name replaces the harness one.
++	const harnessAgentsDir = getHarnessAgentsDir();
++	if (harnessAgentsDir) orderedDirs.push({ dir: harnessAgentsDir, source: "user" });
++
 +	// An untrusted folder's agent definitions (its `.omp/agents`, project-scope extension and plugin
 +	// agents) are neither offered nor spawnable, and never shadow the user's own of the same name.
 +	const trustedDirs = isUntrustedProjectScope() ? orderedDirs.filter(entry => entry.source !== "project") : orderedDirs;
@@ -541,7 +627,7 @@ index f433e225d5a6a4245496af0c3f31355cca617c6c..585bc97d0efe62bdcc054955b275f6ce
  		if (seen.has(agent.name)) return false;
  		seen.add(agent.name);
  		return true;
-@@ -172,7 +176,7 @@ export async function discoverAgents(
+@@ -172,7 +184,7 @@ export async function discoverAgents(
  	return {
  		agents: [...loadedAgents, ...bundledAgents],
  		projectAgentsDir,

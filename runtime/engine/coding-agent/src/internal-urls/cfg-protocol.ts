@@ -69,6 +69,7 @@ const PROVENANCE_LABELS: Record<SettingProvenance, string> = {
 	overlay: "--config overlay",
 	project: "project config",
 	global: "global config",
+	harness: "Ombra harness defaults",
 	default: "default",
 };
 

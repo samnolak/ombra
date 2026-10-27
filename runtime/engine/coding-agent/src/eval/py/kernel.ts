@@ -11,6 +11,7 @@ import * as path from "node:path";
 import { $flag, isBunTestRuntime, logger, Snowflake } from "@oh-my-pi/pi-utils";
 import { Settings } from "../../config/settings";
 import { isUntrustedProjectScope } from "../../config/settings-context";
+import { resolveEnvScrubPolicy, scrubEnv } from "../../exec/env-scrub";
 import {
 	BaseKernel,
 	getRemainingTimeMs,
@@ -287,15 +288,19 @@ export class PythonKernel extends BaseKernel<PythonKernelExecuteOptions> {
 			throw new Error(availability.reason ?? "Python kernel unavailable");
 		}
 
+		const sessionSettings = await Settings.forSession();
 		let runtime = availability.runtime;
 		if (!runtime) {
-			const { env: shellEnv } = (await Settings.forSession()).getShellConfig();
+			const { env: shellEnv } = sessionSettings.getShellConfig();
 			runtime = options.interpreter
 				? resolveExplicitPythonRuntime(options.interpreter, options.cwd, filterEnv(shellEnv))
 				: resolvePythonRuntime(options.cwd, filterEnv(shellEnv));
 		}
+		// The allowlist above already drops most credentials; the scrub also
+		// covers allowed prefixes (`PI_*`, `XDG_*`, `LC_*`). Per-call env follows.
+		const envScrub = resolveEnvScrubPolicy(sessionSettings);
 		const spawnEnv: Record<string, string> = {};
-		for (const [key, value] of Object.entries(runtime.env)) {
+		for (const [key, value] of Object.entries(envScrub ? scrubEnv(runtime.env, envScrub) : runtime.env)) {
 			if (typeof value === "string") spawnEnv[key] = value;
 		}
 		for (const [key, value] of Object.entries(options.env ?? {})) {

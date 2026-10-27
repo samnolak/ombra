@@ -127,6 +127,11 @@ function validCompression(text: string): string | null {
 	return line;
 }
 
+/** A description already within the compressed bounds is its own hint: shown whole, never sent to a model. */
+export function verbatimSkillDescription(description: string): string | null {
+	return validCompression(description.replace(/\s+/g, " "));
+}
+
 function pendingForStore(store: SkillDescriptionStore): Promise<void>[] {
 	const prefix = `${store.path}:`;
 	return [...inFlight].filter(([key]) => key.startsWith(prefix)).map(([, pending]) => pending);
@@ -335,7 +340,10 @@ export class SkillDescriptionCatalog {
 	snapshot(skills: readonly Skill[]): Array<Skill & { description: string }> {
 		return skills.map(skill => ({
 			...skill,
-			description: this.#snapshot.get(keyFor(skill)) ?? previewSkillDescription(skill.description),
+			description:
+				this.#snapshot.get(keyFor(skill)) ??
+				verbatimSkillDescription(skill.description) ??
+				previewSkillDescription(skill.description),
 		}));
 	}
 
@@ -344,7 +352,7 @@ export class SkillDescriptionCatalog {
 		const store = this.#store;
 		return skills.map(skill => {
 			const key = keyFor(skill);
-			let description = this.#snapshot.get(key);
+			let description = this.#snapshot.get(key) ?? verbatimSkillDescription(skill.description) ?? undefined;
 			if (description === undefined) {
 				try {
 					description = store?.get(key);

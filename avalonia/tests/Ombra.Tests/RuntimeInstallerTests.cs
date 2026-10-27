@@ -142,6 +142,7 @@ public sealed class RuntimeInstallerTests
         Assert.Equal("work", filled.Profile);
         // Bun's transpiler cache stays in the pack, not the user's ~/.bun; the user's own settings are kept.
         Assert.Equal(Path.Combine("/r", "transpiler-cache"), filled.Environment[InstalledRuntime.TranspilerCacheVariable]);
+        Assert.Equal(Path.Combine("/r", "omp", "harness"), filled.Environment[InstalledRuntime.HarnessVariable]);
         var withEnv = rt.ApplyTo(new OmpRuntimeOptions { Environment = new() { ["HOME"] = "/h", [InstalledRuntime.TranspilerCacheVariable] = "/mine" } });
         Assert.Equal("/h", withEnv.Environment["HOME"]);
         Assert.Equal("/mine", withEnv.Environment[InstalledRuntime.TranspilerCacheVariable]);

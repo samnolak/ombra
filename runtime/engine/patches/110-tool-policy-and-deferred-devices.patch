@@ -8,10 +8,18 @@ Why: Ombra embeds multiple concurrent sessions and renders native host features.
 Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
 
 diff --git a/src/autoresearch/tools/run-experiment.ts b/src/autoresearch/tools/run-experiment.ts
-index 787de13009f6d1b0207652d2bf8644883f95d11e..fb80ece241dab655566cdf0e5fb2c938240b232d 100644
+index 787de13009f6d1b0207652d2bf8644883f95d11e..ed51134d5c532dbb8d0e0da8cd042368edb26cb3 100644
 --- a/src/autoresearch/tools/run-experiment.ts
 +++ b/src/autoresearch/tools/run-experiment.ts
-@@ -254,7 +254,7 @@ export function createRunExperimentTool(
+@@ -7,6 +7,7 @@ import * as vcs from "@oh-my-pi/pi-natives/vcs";
+ import { formatBytes, procmgr } from "@oh-my-pi/pi-utils";
+ import { Settings } from "../../config/settings";
+ import { executeBash } from "../../exec/bash-executor";
++import { resolveEnvScrubPolicy } from "../../exec/env-scrub";
+ import type { ToolDefinition } from "../../extensibility/extensions";
+ 
+ import {
+@@ -254,7 +255,7 @@ export function createRunExperimentTool(
   */
  async function resolveHarnessExecLine(): Promise<string> {
  	if (process.platform !== "win32") return DEFAULT_HARNESS_COMMAND;
@@ -20,6 +28,15 @@ index 787de13009f6d1b0207652d2bf8644883f95d11e..fb80ece241dab655566cdf0e5fb2c938
  	if (!procmgr.isPosixShell(shell)) return DEFAULT_HARNESS_COMMAND;
  	return `${quotePosixArgument(shell)} ${HARNESS_FILENAME}`;
  }
+@@ -307,6 +308,8 @@ async function executeProcess(opts: {
+ 			sessionKey: `autoresearch:${opts.cwd}`,
+ 			timeout: opts.timeoutMs > 0 ? opts.timeoutMs : 2_147_000_000,
+ 			signal: opts.signal,
++			// The harness script is model-written: scrub like a bash tool call.
++			envScrub: resolveEnvScrubPolicy(await Settings.forSession()),
+ 			chunkThrottleMs: 0,
+ 			onChunk: chunk => {
+ 				tailBuffer.append(chunk);
 diff --git a/src/tools/ask.ts b/src/tools/ask.ts
 index 396af4b808ea8a527d47e01f47fcb283174699e8..a06b579e4b91be90473f82307b621f046c580528 100644
 --- a/src/tools/ask.ts
@@ -114,10 +131,24 @@ index 121040b3c324abeed8dcb8c088eaba4aacf21ffb..6d7234a5d73f4cd3f9af65e217bbe59a
  						return toolResult(appliedDetails).text(text).done();
  					},
 diff --git a/src/tools/bash-interactive.ts b/src/tools/bash-interactive.ts
-index ecbe68a246c1fa5df205d60a190b4ace277697e1..3eac9effe0dfb9807483acf701c126e4fc73c2d9 100644
+index ecbe68a246c1fa5df205d60a190b4ace277697e1..5189c60427583d7cdf95a5ccb0a3a9424a790a9e 100644
 --- a/src/tools/bash-interactive.ts
 +++ b/src/tools/bash-interactive.ts
-@@ -28,7 +28,7 @@ export async function runInteractiveBashPty(
+@@ -4,6 +4,7 @@ import type { ImageContent } from "@oh-my-pi/pi-ai";
+ import { type PtyRunResult, PtySession } from "@oh-my-pi/pi-natives";
+ import { loadXtermTerminal } from "@oh-my-pi/pi-tui/tools/terminal-output";
+ import { Settings } from "../config/settings";
++import { type EnvScrubPolicy, scrubbedEnvNames, scrubEnv, scrubShellLine } from "../exec/env-scrub";
+ import { OutputSink, type OutputSummary } from "@oh-my-pi/pi-tui/tools/streaming-output";
+ import { TerminalGraphicsDecoder } from "../utils/terminal-graphics";
+ import { resolveOutputMaxColumns, resolveOutputSinkArtifactMaxBytes, resolveOutputSinkHeadBytes } from "./output-meta";
+@@ -24,11 +25,13 @@ export async function runInteractiveBashPty(
+ 		timeoutMs?: number;
+ 		signal?: AbortSignal;
+ 		env?: Record<string, string>;
++		/** Credential scrub (`bash.envScrub.*`); `env` above still applies. */
++		envScrub?: EnvScrubPolicy;
+ 		artifactPath?: string;
  		artifactId?: string;
  	},
  ): Promise<BashInteractiveResult> {
@@ -126,8 +157,42 @@ index ecbe68a246c1fa5df205d60a190b4ace277697e1..3eac9effe0dfb9807483acf701c126e4
  	// Load the xterm Terminal ctor here (async boundary) — the ui.custom factory below is sync.
  	const XtermTerminal = await loadXtermTerminal();
  	const { shell: resolvedShell, env: shellEnv } = settings.getShellConfig();
+@@ -38,7 +41,17 @@ export async function runInteractiveBashPty(
+ 	// non-interactive guards (GIT_EDITOR, GPG_TTY, CI; added by procmgr's
+ 	// `buildSpawnEnv`, and a guard added there belongs here too) and NO_COLOR, a
+ 	// monochrome marker. A key left out keeps the inherited launch value.
+-	const { GIT_EDITOR: _gitEditor, GPG_TTY: _gpgTty, CI: _ci, NO_COLOR: _noColor, ...interactiveShellEnv } = shellEnv;
++	const { GIT_EDITOR: _gitEditor, GPG_TTY: _gpgTty, CI: _ci, NO_COLOR: _noColor, ...launchShellEnv } = shellEnv;
++	const interactiveShellEnv = options.envScrub ? scrubEnv(launchShellEnv, options.envScrub) : launchShellEnv;
++	// The PTY inherits the C environ under that map, so the shell line unsets
++	// the scrubbed names too (cmd.exe/PowerShell get them emptied instead).
++	const scrubbed = options.envScrub
++		? scrubShellLine(
++				resolvedShell,
++				options.command,
++				scrubbedEnvNames(options.envScrub, { base: shellEnv, explicit: options.env }),
++			)
++		: { command: options.command, blankEnv: {} };
+ 	const graphics = new TerminalGraphicsDecoder();
+ 	const sink = new OutputSink({
+ 		artifactPath: options.artifactPath,
+@@ -106,12 +119,12 @@ export async function runInteractiveBashPty(
+ 				void session
+ 					.start(
+ 						{
+-							command: options.command,
++							command: scrubbed.command,
+ 							cwd: options.cwd,
+ 							timeoutMs: options.timeoutMs,
+ 							// A real TERM so editors, pagers, and TUIs behave like a normal
+ 							// terminal; direnv's values win over everything.
+-							env: { ...interactiveShellEnv, TERM: "xterm-256color", ...options.env },
++							env: { ...interactiveShellEnv, ...scrubbed.blankEnv, TERM: "xterm-256color", ...options.env },
+ 							signal: options.signal,
+ 							cols,
+ 							rows,
 diff --git a/src/tools/bash.ts b/src/tools/bash.ts
-index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014cc2e868a 100644
+index 0949714ef075cc59e20f8266b1633754c52396ee..4aff2fe375918fd30946f2917c598bbc674b430c 100644
 --- a/src/tools/bash.ts
 +++ b/src/tools/bash.ts
 @@ -6,6 +6,8 @@ import {
@@ -139,7 +204,7 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  import { type } from "@oh-my-pi/omptype";
  import type {
  	AgentTool,
-@@ -16,7 +18,7 @@ import type {
+@@ -16,11 +18,12 @@ import type {
  	ToolTier,
  } from "@oh-my-pi/pi-agent-core";
  import type { ImageContent } from "@oh-my-pi/pi-ai";
@@ -148,7 +213,12 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  import { isPosixShell } from "@oh-my-pi/pi-utils/procmgr";
  import { raceJobSettlement, resolveAutoBackgroundWaitMs } from "../async";
  import type { Settings } from "../config/settings";
-@@ -177,25 +179,10 @@ function shellBuiltinsDisabled(settings: Settings): boolean {
+ import { applyDirenvPreflight, type BashResult, executeBash } from "../exec/bash-executor";
++import { resolveEnvScrubPolicy, scrubbedEnvNames, scrubShellLine } from "../exec/env-scrub";
+ import { InternalUrlRouter } from "../internal-urls";
+ import { sessionResolveContext } from "../internal-urls/context";
+ import { InternalUrlFilesystem, UrlFsError } from "../internal-urls/url-filesystem";
+@@ -177,25 +180,10 @@ function shellBuiltinsDisabled(settings: Settings): boolean {
  
  /**
   * Bash patterns flagged as safety critical for approval policy.
@@ -176,7 +246,7 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  	// Fork bomb (a few common spacings).
  	/:\(\)\s*\{\s*:\s*\|\s*:/i,
  
-@@ -211,7 +198,7 @@ export const CRITICAL_BASH_PATTERNS = [
+@@ -211,7 +199,7 @@ export const CRITICAL_BASH_PATTERNS = [
  	/\btee\s+(?:-a\s+)?\/etc\/(?:passwd|shadow|sudoers)\b/i, // `tee /etc/passwd`, `tee -a /etc/sudoers`.
  
  	// Remote-fetch-then-execute (curl/wget piped to a shell or process-subbed).
@@ -185,7 +255,7 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  	// Process-sub variants — `bash <(curl …)`, `source <(curl …)`, `. <(curl …)`. `.` and `source` are
  	// anchored to a command boundary so `find . -name` and similar don't false-positive.
  	/(?:^|[\s;&|(])(?:bash|sh|zsh|source|\.)\s+<\(\s*(?:curl|wget|fetch)\b/i,
-@@ -229,6 +216,48 @@ export const CRITICAL_BASH_PATTERNS = [
+@@ -229,6 +217,48 @@ export const CRITICAL_BASH_PATTERNS = [
  	/\bnc\b[^|;]*\s-[a-zA-Z]*[ec][a-zA-Z]*\s/i, // `nc -e` / `nc -c`.
  ] as const;
  
@@ -234,7 +304,7 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  type BashPatternApproval = "allow" | "deny" | "prompt";
  
  interface BashApprovalPatternRule {
-@@ -544,9 +573,12 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+@@ -544,9 +574,12 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
  				reason: `Blocked by bash pattern: ${patternRule.match}`,
  			};
  		}
@@ -249,7 +319,7 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  		}
  		if (compoundSegments) {
  			let promptRule: BashApprovalPatternRule | undefined = patternRule;
-@@ -574,8 +606,8 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+@@ -574,8 +607,8 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
  			}
  			for (const segment of compoundSegments) {
  				const literalCommand = segment.argv.join(" ");
@@ -260,7 +330,7 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  				}
  			}
  			// Unmatched segments retain the standalone tool-policy and mode fallback.
-@@ -593,9 +625,12 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+@@ -593,9 +626,12 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
  		return "exec";
  	};
  	readonly formatApprovalDetails = (args: unknown): string[] => {
@@ -276,7 +346,7 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  	};
  	readonly label = "Bash";
  	readonly loadMode = "essential";
-@@ -838,6 +873,8 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+@@ -838,6 +874,8 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
  		approvalTier: ToolTier;
  		/** Session the call started in; its shell, even if the session changes before the job runs. */
  		sessionId: string | undefined;
@@ -285,7 +355,7 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  	}): ManagedBashJobHandle {
  		const manager = this.session.asyncJobManager;
  		if (!manager) {
-@@ -857,7 +894,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+@@ -857,7 +895,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
  		const jobId = manager.register(
  			"bash",
  			label,
@@ -294,7 +364,7 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  				// Records the job's progress and shows it on the call's card: plain output
  				// while the call still waits on it, the job frame (`details.async`) once
  				// backgrounded, so the card keeps filling and settles with the job.
-@@ -877,12 +914,10 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+@@ -877,20 +915,20 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
  				try {
  					const result = await executeBash(options.command, {
  						cwd: options.commandCwd,
@@ -311,7 +381,9 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  						isSessionCurrent: () => (this.session.getSessionId?.() ?? undefined) === options.sessionId,
  						timeout: options.timeoutMs ?? 0,
  						signal: runSignal,
-@@ -891,6 +926,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 						gitGuard: cfgBashGitGuard.get(this.session.settings),
++						envScrub: resolveEnvScrubPolicy(this.session.settings),
+ 						// Bound to the job's own signal: the job outlives the call that started it.
  						filesystem: this.#urlFilesystem(runSignal, options.approvalTier).shellFilesystem(),
  						artifactPath,
  						artifactId,
@@ -319,7 +391,7 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  						onPreview: text => {
  							void report(text, { output: text, async: { state: "running", jobId, type: "bash" } });
  						},
-@@ -979,6 +1015,9 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+@@ -979,6 +1017,9 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
  		// The session this call belongs to, captured before any await: a session
  		// change while the call waits must not move it into the new session's shell.
  		const sessionId = this.session.getSessionId?.() ?? undefined;
@@ -329,7 +401,7 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  
  		// Extract a leading `cd <path> && ...` into cwd when the model ignores the
  		// cwd parameter. The scanner captures only a single path token and defers
-@@ -1164,6 +1203,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+@@ -1164,6 +1205,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
  				foreground: false,
  				approvalTier,
  				sessionId,
@@ -337,7 +409,7 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  			});
  			return this.#buildBackgroundStartResult(job.jobId, "", timeoutSec, {
  				requestedTimeoutSec,
-@@ -1205,6 +1245,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+@@ -1205,6 +1247,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
  				foreground: !startBackgrounded,
  				approvalTier,
  				sessionId,
@@ -345,7 +417,50 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  			});
  			if (startBackgrounded) {
  				return this.#buildBackgroundStartResult(job.jobId, "", timeoutSec, {
-@@ -1569,7 +1610,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+@@ -1268,6 +1311,8 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 						direnvSetting: cfgBashDirenv.get(this.session.settings),
+ 					})
+ 				: undefined;
++		// Credential scrub (`bash.envScrub.*`) for the backends below.
++		const envScrub = resolveEnvScrubPolicy(this.session.settings);
+ 
+ 		// Route through the client terminal when the client advertises the terminal capability.
+ 		// Skip when pty=true (PTY needs the local terminal UI) or the cwd is a URL
+@@ -1335,8 +1380,23 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 				// direnv-transformed command (carries any `unset -v` prefix) + direnv
+ 				// env; falls back to the raw command when direnv is off/absent.
+ 				const bridgeCommand = backendPreflight?.command ?? command;
+-				const bridgeEnv = backendPreflight?.env;
+-				const shellSpawn = wrapShellLineForClientTerminal(bridgeCommand, this.session.settings.getShellConfig());
++				let bridgeEnv = backendPreflight?.env;
++				const bridgeShell = this.session.settings.getShellConfig();
++				const shellSpawn = wrapShellLineForClientTerminal(bridgeCommand, bridgeShell);
++				if (envScrub) {
++					// The client spawns the terminal from its own environment, which
++					// normally is the one it launched this agent with; scrub the names
++					// this process inherited. Applied to the wrapped line so the shell
++					// prefix (profiler/strace) still wraps the command, not the unset.
++					const lineIndex = shellSpawn.args.length - 1;
++					const scrubbed = scrubShellLine(
++						bridgeShell.shell,
++						shellSpawn.args[lineIndex] ?? "",
++						scrubbedEnvNames(envScrub, { base: bridgeShell.env, explicit: bridgeEnv }),
++					);
++					shellSpawn.args[lineIndex] = scrubbed.command;
++					if (Object.keys(scrubbed.blankEnv).length > 0) bridgeEnv = { ...scrubbed.blankEnv, ...bridgeEnv };
++				}
+ 				const createP = clientBridge.createTerminal({
+ 					command: shellSpawn.command,
+ 					args: shellSpawn.args,
+@@ -1562,6 +1622,7 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
+ 					timeoutMs,
+ 					signal,
+ 					env: backendPreflight?.env,
++					envScrub,
+ 					artifactPath,
+ 					artifactId,
+ 				})
+@@ -1569,11 +1630,12 @@ export class BashTool implements AgentTool<BashToolSchema, BashToolDetails> {
  				// command here so the unset prefix is not applied twice.
  				await executeBash(command, {
  					cwd: commandCwd,
@@ -354,6 +469,11 @@ index 0949714ef075cc59e20f8266b1633754c52396ee..72fa1e95851c2b39a93c0cf332725014
  					isSessionCurrent: () => (this.session.getSessionId?.() ?? undefined) === sessionId,
  					timeout: timeoutMs ?? 0,
  					signal,
+ 					gitGuard: cfgBashGitGuard.get(this.session.settings),
++					envScrub,
+ 					filesystem: this.#urlFilesystem(signal, approvalTier).shellFilesystem(),
+ 					artifactPath,
+ 					artifactId,
 diff --git a/src/tools/file-write-fallback.ts b/src/tools/file-write-fallback.ts
 index 3e270325b6e0892606132e70ccab0c0c64757c0f..b8e77290680bb4c63819d9218e24ed714e14f0d1 100644
 --- a/src/tools/file-write-fallback.ts
@@ -413,18 +533,67 @@ index 3e270325b6e0892606132e70ccab0c0c64757c0f..b8e77290680bb4c63819d9218e24ed71
  	// first failure turned out to be a parent-directory race this call repaired,
  	// which bounds the loop at two writes.
 diff --git a/src/tools/index.ts b/src/tools/index.ts
-index abbcb46cb13fe09e7c193b5cdfd3cdfb28f56b68..c61d1f94136ddc1c0deda9df8a9c554aa1d386a8 100644
+index abbcb46cb13fe09e7c193b5cdfd3cdfb28f56b68..7dc3c4e2a071cc11813fc611f90518c17a6e6da2 100644
 --- a/src/tools/index.ts
 +++ b/src/tools/index.ts
-@@ -91,6 +91,7 @@ import {
+@@ -53,7 +53,7 @@ import { ContextNotesTool, NewContextTool } from "./context-notes";
+ import { DebugTool } from "./debug";
+ import { cfgIdaAvailable } from "../ida/install";
+ import { EvalTool } from "./eval";
+-import { resolveEvalBackends } from "./eval-backends";
++import { probeEvalPython, resolveEvalBackends } from "./eval-backends";
+ import { GithubTool } from "./gh";
+ import { GlobTool } from "./glob";
+ import { GrepTool } from "./grep";
+@@ -90,10 +90,11 @@ import {
+ 	cfgGrepEnabled,
  	cfgLaunchEnabled,
  	cfgSecurityEnabled,
- 	cfgTodoEnabled,
+-	cfgTodoEnabled,
 +	cfgToolsDeferred,
  	cfgToolsXdev,
  	cfgWebSearchEnabled,
  } from "./settings";
-@@ -820,6 +821,7 @@ export function createXdevState(
++import { isTodoEnabledForModel } from "./todo-models";
+ import { cfgAutolearnEnabled } from "../autolearn/settings";
+ import { cfgBashEnabled } from "../exec/settings";
+ import { cfgCompactionExperimentalContextManagement } from "../session/context-settings";
+@@ -634,15 +635,20 @@ export async function resolveBuiltinToolPlan(session: ToolSession, toolNames?: s
+ 	if (goalModeActive && requestedTools && !requestedTools.includes("goal")) {
+ 		requestedTools.push("goal");
+ 	}
++	const skipEvalPreflight = session.skipPythonPreflight === true;
++	const evalRequested = requestedTools === undefined || requestedTools.includes("eval");
++	// `eval.probePython`: drop an unstartable Python backend from the advertised
++	// schema up front (cached per cwd + interpreter) instead of failing at call time.
++	if (!skipEvalPreflight && evalRequested) {
++		await logger.time("createTools:pythonProbe", probeEvalPython, session);
++	}
+ 	const backends = resolveEvalBackends(session);
+ 	const allowPython = backends.python;
+ 	const allowJs = backends.js;
+-	const skipEvalPreflight = session.skipPythonPreflight === true;
+ 	// Eval tool is enabled if ANY backend is reachable. JS needs no preflight, so
+ 	// we only probe Python when JS is disabled — otherwise allowEval is
+ 	// already true and per-backend availability is checked at first invocation.
+ 	let pythonAvailable = true;
+-	const evalRequested = requestedTools === undefined || requestedTools.includes("eval");
+ 	if (!skipEvalPreflight && !allowJs && evalRequested) {
+ 		if (allowPython) {
+ 			const availability = await logger.time(
+@@ -747,7 +753,10 @@ export async function resolveBuiltinToolPlan(session: ToolSession, toolNames?: s
+ 		if (name === "debug") return cfgDebugEnabled.get(session.settings);
+ 		if (name === "ida") return cfgIdaAvailable.get(session.settings);
+ 		if (name === "todo")
+-			return (!includeYield || session.prewalkArmed === true) && cfgTodoEnabled.get(session.settings);
++			return (
++				(!includeYield || session.prewalkArmed === true) &&
++				isTodoEnabledForModel(session.settings, session.getActiveModelString?.())
++			);
+ 		if (name === "glob") return cfgGlobEnabled.get(session.settings);
+ 		if (name === "grep") return cfgGrepEnabled.get(session.settings);
+ 		if (name === "find") return isFindEnabled(session);
+@@ -820,6 +829,7 @@ export function createXdevState(
  		mountedNames,
  		builtInNames,
  		isActive: name => session.isToolActive?.(name) === true,
@@ -432,7 +601,7 @@ index abbcb46cb13fe09e7c193b5cdfd3cdfb28f56b68..c61d1f94136ddc1c0deda9df8a9c554a
  		// Card rendering reads the same predicate as execution: mounted devices
  		// plus active top-level tools, which the `write` transport also accepts.
  		resolve: name => resolveXdevTool(state, name),
-@@ -899,13 +901,14 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
+@@ -899,13 +909,14 @@ export async function createTools(session: ToolSession, toolNames?: string[]): P
  	const mountBuiltinTools = requestedTools === undefined;
  	if (xdevEnabled) {
  		const mountedNames = new Set<string>();
@@ -463,7 +632,7 @@ index e799d201fc779f2104eea557ef148d903b656307..c43fa6d6d46ad725f953b83cf4af9bdd
  		);
  		await releaseBrowser(acquiredBrowser, { kill: false });
 diff --git a/src/tools/settings.ts b/src/tools/settings.ts
-index c2761f4fa6cf63a9f3d8f4d06b91e72f4eb646a3..5974999660d6ad799f7b78aa0b34f1fbf249acd4 100644
+index c2761f4fa6cf63a9f3d8f4d06b91e72f4eb646a3..409e83106fdc4e3aaa039296bac0858773445d42 100644
 --- a/src/tools/settings.ts
 +++ b/src/tools/settings.ts
 @@ -236,10 +236,13 @@ export const cfgReadSummarizeMinCommentLines = register({
@@ -481,7 +650,44 @@ index c2761f4fa6cf63a9f3d8f4d06b91e72f4eb646a3..5974999660d6ad799f7b78aa0b34f1fb
  	ui: {
  		tab: "files",
  		group: "Read Summaries",
-@@ -986,6 +989,23 @@ export const cfgToolsXdevInlineDevices = register({
+@@ -356,6 +359,22 @@ export const cfgTodoEnabled = register({
+ 	},
+ });
+ 
++/**
++ * Models without the todo tool: model-selector substrings (case-insensitive, like `edit.modelVariants`).
++ * Config-file only; `todo.enabled: false` still turns the tool off for every model.
++ */
++export const cfgTodoDisableForModels = register({
++	id: "todo.disableForModels",
++	type: "array",
++	default: EMPTY_STRING_ARRAY,
++	validate: raw => {
++		if (raw === undefined) return;
++		if (!Array.isArray(raw) || raw.some(entry => typeof entry !== "string")) {
++			throw new Error("todo.disableForModels must be a list of model-selector substrings");
++		}
++	},
++});
++
+ export const cfgTodoReminders = register({
+ 	id: "todo.reminders",
+ 	type: "boolean",
+@@ -937,6 +956,13 @@ export const cfgAsyncMaxJobs = register({
+ 	default: 100,
+ });
+ 
++/** `wait` cap without a UI (print/json/headless runs); 0 keeps the built-in 30-minute ceiling. */
++export const cfgWaitMaxHeadlessMs = register({
++	id: "wait.maxHeadlessMs",
++	type: "number",
++	default: 0,
++});
++
+ export const cfgToolsXdev = register({
+ 	id: "tools.xdev",
+ 	type: "boolean",
+@@ -986,6 +1012,23 @@ export const cfgToolsXdevInlineDevices = register({
  	},
  });
  
@@ -505,6 +711,14 @@ index c2761f4fa6cf63a9f3d8f4d06b91e72f4eb646a3..5974999660d6ad799f7b78aa0b34f1fb
  export const cfgDevAutoqa = register({
  	id: "dev.autoqa",
  	type: "boolean",
+@@ -1062,6 +1105,7 @@ export const cfgBuiltinToolGates = combine({
+ 	security: cfgSecurityEnabled,
+ 	taskMaxRecursionDepth: cfgTaskMaxRecursionDepth,
+ 	todo: cfgTodoEnabled,
++	todoDisableForModels: cfgTodoDisableForModels,
+ 	webSearch: cfgWebSearchEnabled,
+ });
+ 
 diff --git a/src/tools/write.ts b/src/tools/write.ts
 index 1ebada028f6846ff4960e3004f96ffa81584a5b5..ee0ee4b7c65c1989a156ba5748a1670acd183d06 100644
 --- a/src/tools/write.ts

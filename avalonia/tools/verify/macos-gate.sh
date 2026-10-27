@@ -70,7 +70,7 @@ chmod +x "$WORK/shim/osascript"
 cat > "$WORK/pkg.json" <<EOF
 { "command": "$RT/bun/bun", "prefixArgs": ["--config=$RT/omp/bunfig.toml", "--no-env-file", "--no-install", "$RT/omp/engine/host.ts"],
   "managementPrefixArgs": ["--config=$RT/omp/bunfig.toml", "--no-env-file", "--no-install", "$RT/omp/engine/coding-agent/src/cli.ts"],
-  "profile": "harness", "workingDirectory": "$WORK/pkg-work",
+  "workingDirectory": "$WORK/pkg-work",
   "environment": { "HOME": "$H", "QWEN_LOCAL_API_KEY": "dummy-not-a-secret" } }
 EOF
 PATH="$WORK/shim:$PATH" "$APP" --config "$WORK/pkg.json" --timeline "$WORK/timeline.csv" \

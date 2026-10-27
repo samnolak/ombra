@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ombra engine maintainers <engine@ombra.local>
+Date: Sat, 1 Jan 2000 00:00:00 +0000
+Subject: [PATCH] Show short skill descriptions verbatim without model
+ compression
+
+What: Show short skill descriptions verbatim without model compression
+Why: Every skill description was sent to a smol model for compression; with one local model that fails or spends calls. Descriptions already within the compressed limits are used as is.
+Upstream-Status: Ombra-specific; idea from DeepSeek Harness; not submitted
+
+diff --git a/src/extensibility/skill-descriptions.ts b/src/extensibility/skill-descriptions.ts
+index a5a5eb1935a541a47b9815e3c755b55addfd63cd..0c89b2d9245d0cef04b82e82f9b5bf0d6f772f95 100644
+--- a/src/extensibility/skill-descriptions.ts
++++ b/src/extensibility/skill-descriptions.ts
+@@ -127,6 +127,11 @@ function validCompression(text: string): string | null {
+ 	return line;
+ }
+ 
++/** A description already within the compressed bounds is its own hint: shown whole, never sent to a model. */
++export function verbatimSkillDescription(description: string): string | null {
++	return validCompression(description.replace(/\s+/g, " "));
++}
++
+ function pendingForStore(store: SkillDescriptionStore): Promise<void>[] {
+ 	const prefix = `${store.path}:`;
+ 	return [...inFlight].filter(([key]) => key.startsWith(prefix)).map(([, pending]) => pending);
+@@ -335,7 +340,10 @@ export class SkillDescriptionCatalog {
+ 	snapshot(skills: readonly Skill[]): Array<Skill & { description: string }> {
+ 		return skills.map(skill => ({
+ 			...skill,
+-			description: this.#snapshot.get(keyFor(skill)) ?? previewSkillDescription(skill.description),
++			description:
++				this.#snapshot.get(keyFor(skill)) ??
++				verbatimSkillDescription(skill.description) ??
++				previewSkillDescription(skill.description),
+ 		}));
+ 	}
+ 
+@@ -344,7 +352,7 @@ export class SkillDescriptionCatalog {
+ 		const store = this.#store;
+ 		return skills.map(skill => {
+ 			const key = keyFor(skill);
+-			let description = this.#snapshot.get(key);
++			let description = this.#snapshot.get(key) ?? verbatimSkillDescription(skill.description) ?? undefined;
+ 			if (description === undefined) {
+ 				try {
+ 					description = store?.get(key);

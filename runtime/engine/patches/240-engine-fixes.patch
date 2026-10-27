@@ -1,0 +1,249 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ombra engine maintainers <engine@ombra.local>
+Date: Sat, 1 Jan 2000 00:00:00 +0000
+Subject: [PATCH] eval.probePython, plain-string arguments for eval
+ tool.<name>(), wait.maxHeadlessMs
+
+What: eval.probePython, plain-string arguments for eval tool.<name>(), wait.maxHeadlessMs
+Why: Benchmark runs wasted turns on Python eval cells that could not start, on tool.edit/tool.read calls rejected for a string argument, and on headless wait calls blocking up to 30 minutes.
+Upstream-Status: Ombra-specific; not submitted
+
+diff --git a/src/eval/js/tool-bridge.ts b/src/eval/js/tool-bridge.ts
+index d62dedf878fe868e8fb3e85f976657399185c3ac..728b939a8489732567a378c335f70bdfb1baea88 100644
+--- a/src/eval/js/tool-bridge.ts
++++ b/src/eval/js/tool-bridge.ts
+@@ -267,12 +267,22 @@ export async function callSessionTool(name: string, args: unknown, options: Tool
+ 	}
+ 	const tool = getTool(options.session, name);
+ 	const toolCallId = `js-${name}-${crypto.randomUUID()}`;
++	const wireSchema = toolWireSchema(tool);
+ 	// A schema-owned name stays tool data across alternatives. Deleting an
+ 	// invalid value to make another branch match could select a different operation.
+ 	// Harness `i` is dropped here exactly as `extractIntent` drops it on the direct
+ 	// path, so tools see identical args from both entry points.
+-	const intentIsDeclared = schemaDeclaresIntentField(toolWireSchema(tool));
+-	const validationArgs = isRecord(args) ? { ...args } : args;
++	const intentIsDeclared = schemaDeclaresIntentField(wireSchema);
++	// A bare string is the input of a single-input tool: `tool.edit("*** Begin Patch…")`,
++	// `tool.read("a.js;b.js")` mean the tool's one required string field.
++	let callArgs = args;
++	if (typeof args === "string") {
++		const required = Array.isArray(wireSchema.required) ? wireSchema.required.filter(key => key !== INTENT_FIELD) : [];
++		const property =
++			required.length === 1 && isRecord(wireSchema.properties) ? wireSchema.properties[required[0]] : undefined;
++		if (isRecord(property) && property.type === "string") callArgs = { [required[0]]: args };
++	}
++	const validationArgs = isRecord(callArgs) ? { ...callArgs } : callArgs;
+ 	if (isRecord(validationArgs) && !intentIsDeclared) delete validationArgs[INTENT_FIELD];
+ 	let validatedArgs: unknown;
+ 	try {
+diff --git a/src/eval/settings.ts b/src/eval/settings.ts
+index fff45de685591c1c83ec05f1e6c17048d3e927f7..2bb2191b3e89c76e1e988b18e3532b95e2a1a0d6 100644
+--- a/src/eval/settings.ts
++++ b/src/eval/settings.ts
+@@ -31,6 +31,19 @@ export const cfgEvalJs = register({
+ 	},
+ });
+ 
++export const cfgEvalProbePython = register({
++	id: "eval.probePython",
++	type: "boolean",
++	default: false,
++	ui: {
++		tab: "shell",
++		group: "Eval & Runtimes",
++		label: "Probe Python at Session Start",
++		description:
++			"Check once at session start whether the Python eval backend can start; when it cannot, the eval tool offers only JavaScript and says why",
++	},
++});
++
+ export const cfgEvalAutoProvision = register({
+ 	id: "eval.autoProvision",
+ 	type: "boolean",
+diff --git a/src/prompts/tools/eval.md b/src/prompts/tools/eval.md
+index b26902b2ecb20b49bf0478ef3970f0db118656ce..b603495006706c212377c3148696fcb95089205d 100644
+--- a/src/prompts/tools/eval.md
++++ b/src/prompts/tools/eval.md
+@@ -1,6 +1,7 @@
+ One cell per call; top-level state persists, including across compaction.{{#if spawns}} Subagents have separate kernels.{{/if}}
+ {{#if spawns}}{{#if eagerDelegation}}For 2+ independent items, use a named `workpool()`; results auto-deliver.{{#if waitTool}} If blocked, leave `eval` and call `wait`.{{/if}}{{/if}}{{/if}}
+ {{#if py}}Python: plain Python subprocess, not IPython (no `get_ipython()`, `obj?`, or `%matplotlib`). Magics like `%pip`, `%load`, `%time` and `!cmd` are rewritten to Python. Top-level `await` works; `asyncio.run(…)` fails.{{/if}}
++{{#if pythonUnavailable}}Python eval cannot start in this session ({{pythonUnavailable}}); only `js` runs.{{/if}}
+ {{#if js}}JS: Bun (`Bun.file`, `Bun.write`, `Bun.$`); top-level `await`/`return` work.{{/if}}
+ On error, retry only the failed step; earlier steps may have taken effect.
+ Printing an image{{#if py}} or figure{{/if}} attaches it.
+diff --git a/src/tools/eval-backends.ts b/src/tools/eval-backends.ts
+index 4c2df9f3cb1247e95978b42bb7350616c56f6f15..dfe425095b83be1889b52222f180207f4fdc0892 100644
+--- a/src/tools/eval-backends.ts
++++ b/src/tools/eval-backends.ts
+@@ -1,16 +1,70 @@
++import * as path from "node:path";
++import { $flag } from "@oh-my-pi/pi-utils";
+ import type { ToolSession } from ".";
+-
+-import { cfgEvalJs, cfgEvalPy } from "../eval/settings";
++import { sanitizeDisplayWarnings } from "@oh-my-pi/pi-tui/render/render-utils";
++import { isUntrustedProjectScope } from "../config/settings-context";
++import { checkPythonKernelAvailability } from "../eval/py/kernel";
++import { cfgEvalJs, cfgEvalProbePython, cfgEvalPy, cfgPythonInterpreter } from "../eval/settings";
+ 
+ export interface EvalBackendsAllowance {
+ 	python: boolean;
+ 	js: boolean;
++	/** Why the session-start probe (`eval.probePython`) dropped Python; undefined when it did not. */
++	pythonUnavailable?: string;
++}
++
++/**
++ * Settled session-start probe outcomes (`eval.probePython`): `null` = Python
++ * starts, a string = why it does not. Failures are cached as well as successes,
++ * so the advertised schema stays stable for the process.
++ */
++const pythonProbeOutcomes = new Map<string, string | null>();
++
++function pythonProbeKey(session: Pick<ToolSession, "cwd" | "settings">): string | undefined {
++	if (!session.cwd) return undefined;
++	const interpreter = cfgPythonInterpreter.get(session.settings)?.trim() ?? "";
++	return `${path.resolve(session.cwd)}\0${interpreter}\0${isUntrustedProjectScope() ? "untrusted" : "trusted"}`;
++}
++
++/**
++ * With `eval.probePython` on, check once (per cwd + interpreter, cached) whether
++ * the Python backend can start, so {@link resolveEvalBackends} advertises only
++ * runtimes that work. `PI_PYTHON_SKIP_CHECK` keeps Python advertised unprobed.
++ */
++export async function probeEvalPython(session: ToolSession, signal?: AbortSignal): Promise<void> {
++	if (!cfgEvalProbePython.get(session.settings) || !cfgEvalPy.get(session.settings)) return;
++	if ($flag("PI_PYTHON_SKIP_CHECK")) return;
++	const key = pythonProbeKey(session);
++	if (key === undefined || pythonProbeOutcomes.has(key)) return;
++	const interpreter = cfgPythonInterpreter.get(session.settings)?.trim() || undefined;
++	const availability = await checkPythonKernelAvailability(session.cwd, interpreter, { forceProbe: true, signal });
++	// A cancelled probe proves nothing; the next session start probes again.
++	if (signal?.aborted) return;
++	if (availability.ok) {
++		pythonProbeOutcomes.set(key, null);
++		return;
++	}
++	// The reason embeds interpreter paths and spawn errors: shorten home, strip controls, bound length.
++	const [reason] = sanitizeDisplayWarnings([availability.reason ?? "no working Python interpreter"]);
++	pythonProbeOutcomes.set(key, reason);
++}
++
++/** Test hook: forget cached session-start probe outcomes. */
++export function resetEvalPythonProbes(): void {
++	pythonProbeOutcomes.clear();
+ }
+ 
+-/** Active eval backend allowance (`eval.py` / `eval.js`; `PI_PY` / `PI_JS` override). */
++/**
++ * Active eval backend allowance (`eval.py` / `eval.js`; `PI_PY` / `PI_JS` override).
++ * A failed {@link probeEvalPython} outcome (only recorded with `eval.probePython`) turns Python off.
++ */
+ export function resolveEvalBackends(session: ToolSession): EvalBackendsAllowance {
+-	return {
+-		python: cfgEvalPy.get(session.settings),
+-		js: cfgEvalJs.get(session.settings),
+-	};
++	const python = cfgEvalPy.get(session.settings);
++	const js = cfgEvalJs.get(session.settings);
++	if (python && cfgEvalProbePython.get(session.settings)) {
++		const key = pythonProbeKey(session);
++		const reason = key === undefined ? undefined : pythonProbeOutcomes.get(key);
++		if (typeof reason === "string") return { python: false, js, pythonUnavailable: reason };
++	}
++	return { python, js };
+ }
+diff --git a/src/tools/eval.ts b/src/tools/eval.ts
+index e0f9519dd84b436bc2e51f77e1851c3c6a448558..2894e2f9cd86def224f1550794b226d1e6cd0121 100644
+--- a/src/tools/eval.ts
++++ b/src/tools/eval.ts
+@@ -173,6 +173,8 @@ export interface EvalToolDescriptionOptions {
+ 	inlineTopics?: boolean;
+ 	/** Whether missing runtimes and environments may be provisioned automatically. */
+ 	autoProvision?: boolean;
++	/** Why the session-start probe (`eval.probePython`) dropped Python; shown as one line. */
++	pythonUnavailable?: string;
+ }
+ 
+ function evalTemplateContext(options: EvalToolDescriptionOptions) {
+@@ -188,6 +190,7 @@ function evalTemplateContext(options: EvalToolDescriptionOptions) {
+ 		spawnDefaultAgent: spawnPolicy.defaultAgent,
+ 		spawnAllowedAgentsText: spawnPolicy.allowedPromptText,
+ 		autoProvision: options.autoProvision ?? true,
++		pythonUnavailable: options.pythonUnavailable,
+ 	};
+ }
+ 
+@@ -273,7 +276,13 @@ async function resolveBackend(
+ 	const allowJs = backends.js;
+ 
+ 	if (language === "python") {
+-		if (!allowPy) throw new ToolError("Python backend is disabled (PI_PY=0 or eval.py = false).");
++		if (!allowPy) {
++			throw new ToolError(
++				backends.pythonUnavailable
++					? `Python backend cannot start in this session (${backends.pythonUnavailable}). Pass language: "js".`
++					: "Python backend is disabled (PI_PY=0 or eval.py = false).",
++			);
++		}
+ 		const available = await pythonBackend.isAvailable(session, probeOpts);
+ 		throwIfAborted(probeOpts?.signal);
+ 		if (!available) {
+@@ -349,6 +358,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
+ 			preludes: this.#advertisedPreludes(session),
+ 			inlineTopics: session.isToolActive?.("read") === false,
+ 			autoProvision: cfgEvalAutoProvision.get(session.settings),
++			pythonUnavailable: backends.pythonUnavailable,
+ 		};
+ 	}
+ 
+diff --git a/src/tools/wait.ts b/src/tools/wait.ts
+index f1f158fa3943a0a026be509d2a243ae550b160c9..14ea1b635914746ea689f91e481b0694e3726298 100644
+--- a/src/tools/wait.ts
++++ b/src/tools/wait.ts
+@@ -19,7 +19,7 @@ import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
+ import type { CoordinationDetails } from "@oh-my-pi/pi-tui/tools/wait";
+ import { throwIfAborted } from "./tool-errors";
+ 
+-import { cfgLaunchEnabled } from "./settings";
++import { cfgLaunchEnabled, cfgWaitMaxHeadlessMs } from "./settings";
+ 
+ const waitSchema = type({});
+ const WAIT_MAX_MS = 30 * 60_000;
+@@ -107,6 +107,9 @@ export class WaitTool implements AgentTool<typeof waitSchema, CoordinationDetail
+ 		onUpdate: AgentToolUpdateCallback<CoordinationDetails> | undefined;
+ 	}): Promise<AgentToolResult<CoordinationDetails>> {
+ 		const { jobs, manager, messaging, serviceRunning, signal, onUpdate } = args;
++		// Without a UI nobody can interrupt a stuck wait, so `wait.maxHeadlessMs` bounds it.
++		const headlessCapMs = this.session.hasUI ? 0 : cfgWaitMaxHeadlessMs.get(this.session.settings);
++		const limitMs = headlessCapMs > 0 ? Math.min(headlessCapMs, WAIT_MAX_MS) : WAIT_MAX_MS;
+ 		const watchedIds = jobs.map(job => job.id);
+ 		manager?.watchJobs(watchedIds);
+ 		const serviceAbort = new AbortController();
+@@ -119,7 +122,7 @@ export class WaitTool implements AgentTool<typeof waitSchema, CoordinationDetail
+ 					.catch(() => null)
+ 			: undefined;
+ 		const { promise: timeout, resolve: timedOut } = Promise.withResolvers<void>();
+-		const timer = setTimeout(timedOut, WAIT_MAX_MS);
++		const timer = setTimeout(timedOut, limitMs);
+ 		const abort = Promise.withResolvers<void>();
+ 		const onAbort = () => abort.resolve();
+ 		if (signal) {
+@@ -170,7 +173,14 @@ export class WaitTool implements AgentTool<typeof waitSchema, CoordinationDetail
+ 				}
+ 				throwIfAborted(signal);
+ 			}
+-			if (manager && jobs.length > 0) return buildJobResult(this.session, manager, "wait", jobs, []);
++			if (manager && jobs.length > 0) {
++				const result = buildJobResult(this.session, manager, "wait", jobs, []);
++				if (wake !== "timeout" || headlessCapMs <= 0) return result;
++				const running = jobs.filter(job => job.status === "running").map(job => `\`${job.id}\``);
++				if (running.length === 0) return result;
++				const notice = `Still running after ${Math.round(limitMs / 1000)} s (headless wait limit): ${running.join(", ")}. Waiting again will not help a hung command: cancel it with \`write proc://<id>/kill\`, or rerun it in the foreground with a timeout.`;
++				return { ...result, content: [{ type: "text", text: notice }, ...result.content], useless: false };
++			}
+ 			return {
+ 				content: [
+ 					{

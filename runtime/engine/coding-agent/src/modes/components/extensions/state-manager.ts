@@ -23,6 +23,7 @@ import {
 	isUserSourceEnabled,
 	loadCapability,
 } from "../../../discovery";
+import { HARNESS_PROVIDER_ID } from "../../../harness-layer";
 import { readDisabledServers, readEnabledServers } from "../../../mcp/config-writer";
 import { commandPreview } from "@oh-my-pi/pi-tui/overlays/extensions/inspector-model";
 import { inferMcpTransport } from "@oh-my-pi/pi-tui/overlays/extensions/mcp-runtime";
@@ -145,7 +146,10 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[]): P
 	// Load extension modules
 	try {
 		const modules = await loadCapability<ExtensionModule>("extension-modules", loadOpts);
-		const nativeModules = modules.all.filter(module => module._source.provider === "native");
+		// The modules the extension loader runs: native (.omp) and the Ombra harness.
+		const nativeModules = modules.all.filter(
+			module => module._source.provider === "native" || module._source.provider === HARNESS_PROVIDER_ID,
+		);
 		addItems(nativeModules, "extension-module");
 	} catch (error) {
 		logger.warn("Failed to load extension-modules capability", { error: String(error) });

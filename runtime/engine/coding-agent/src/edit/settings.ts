@@ -151,6 +151,44 @@ export const cfgEditEnforceSeenLines = register({
 	},
 });
 
+export const cfgEditSeenFromEditResults = register({
+	id: "edit.seenFromEditResults",
+	type: "boolean",
+	default: false,
+	ui: {
+		tab: "files",
+		group: "Editing",
+		label: "Count Edited Lines as Seen",
+		description:
+			"Lines a hashline edit wrote count as displayed for the new tag, even where the edit result elides them, so a follow-up edit needs no re-read",
+	},
+});
+
+/** Streamed `edit` input ceiling in bytes; 0 = unlimited. Over it the call is aborted and the model told why. */
+export const cfgEditMaxInputBytes = register({
+	id: "edit.maxInputBytes",
+	type: "number",
+	default: 0,
+});
+
+/**
+ * Optional `run` on `edit`: a shell command run through the session's `bash` tool (same approval,
+ * permission and truncation path) after a clean apply; its output is appended to the edit result.
+ * Freeform patch grammars take it as a final `*** Run: <command>` line after `*** End Patch`.
+ */
+export const cfgEditRun = register({
+	id: "edit.run",
+	type: "boolean",
+	default: false,
+	ui: {
+		tab: "files",
+		group: "Editing",
+		label: "Run a Check After Edits",
+		description:
+			"The edit tool takes an optional shell command (e.g. the test) that runs like bash after the edit applies cleanly, with its output appended to the edit result",
+	},
+});
+
 export const cfgEditBlackboxEnabled = register({
 	id: "edit.blackbox.enabled",
 	type: "boolean",
@@ -173,5 +211,44 @@ export const cfgEditAutoRepairEnabled = register({
 		label: "Auto-Repair Parse Regressions",
 		description:
 			"When an edit breaks a file's AST parse, ask the smol model to fix the broken region (validated by re-parse; falls back to a warning)",
+	},
+});
+
+export const cfgEditGuardsReportDeletions = register({
+	id: "edit.guards.reportDeletions",
+	type: "boolean",
+	default: false,
+	ui: {
+		tab: "files",
+		group: "Editing",
+		label: "Report Dropped Lines",
+		description:
+			"After a hashline/replace edit, list replaced original lines that appear nowhere in the replacement (CUT/REM deletions excluded)",
+	},
+});
+
+export const cfgEditGuardsRejectionContext = register({
+	id: "edit.guards.rejectionContext",
+	type: "boolean",
+	default: false,
+	ui: {
+		tab: "files",
+		group: "Editing",
+		label: "Context on Anchor Rejections",
+		description:
+			"When a hashline edit is rejected for undisplayed or stale anchors, show the current lines around the range (±3) with a fresh tag",
+	},
+});
+
+export const cfgEditGuardsSyntaxCheck = register({
+	id: "edit.guards.syntaxCheck",
+	type: "boolean",
+	default: false,
+	ui: {
+		tab: "files",
+		group: "Editing",
+		label: "Locate New Syntax Errors",
+		description:
+			"After an edit, compare syntax before/after (tree-sitter, plus Python indentation) and warn with the lines of newly introduced errors",
 	},
 });

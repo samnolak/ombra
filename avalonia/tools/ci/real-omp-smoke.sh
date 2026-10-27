@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Real owned Ombra engine smoke for CI (Linux, macOS, Windows via Git Bash).
 # Installs the complete owned engine and pinned Bun/npm dependencies with the client's installer, builds a
-# throwaway harness profile, starts the stand-in model server and runs the gated RealOmp tests against it.
+# throwaway agent dir (harness read in place via OMBRA_HARNESS_DIR), starts the stand-in model server and runs the gated RealOmp tests against it.
 # Model: STAND-IN (tools/mock-model), not a real model. Engine, RPC, provider path and tools are real.
 #
 #   tools/ci/real-omp-smoke.sh <work-dir>
@@ -55,11 +55,11 @@ cat > "$WORK/ombra.local.json" <<EOF
   "command": "$(native "$BUN")",
   "prefixArgs": ["--config=$(native "$RT/omp/bunfig.toml")", "--no-env-file", "--no-install", "$(native "$HOST")"],
   "managementPrefixArgs": ["--config=$(native "$RT/omp/bunfig.toml")", "--no-env-file", "--no-install", "$(native "$CLI")"],
-  "profile": "harness",
   "workingDirectory": "$(native "$WORK/work")",
   "environment": {
     "HOME": "$(native "$WORK/home")",
     "USERPROFILE": "$(native "$WORK/home")",
+    "OMBRA_HARNESS_DIR": "$(native "$HERE/../harness/profile")",
     "QWEN_LOCAL_API_KEY": "dummy-not-a-secret",
     "AWS_ACCESS_KEY_ID": null, "AWS_SECRET_ACCESS_KEY": null, "AWS_SESSION_TOKEN": null
   }

@@ -1,6 +1,6 @@
 /**
- * Layered settings store (global config, project, `--config` overlay, runtime overrides) with
- * background persistence. Values are typed and read through registry handles
+ * Layered settings store (harness defaults, global config, project, `--config` overlay, runtime
+ * overrides) with background persistence. Values are typed and read through registry handles
  * (see `./registry`), declared next to their domain and collected by `./all-settings`:
  *
  *   cfgCompactionEnabled.get(settings);         // sync read
@@ -34,6 +34,7 @@ import { withFileLock } from "@oh-my-pi/pi-utils/file-lock";
 import { isLightTheme } from "@oh-my-pi/pi-tui/theme/theme";
 import { JSONC, YAML } from "bun";
 import { invalidate as invalidateCapabilityFsCache } from "../capability/fs";
+import { getHarnessConfigFile } from "../harness-layer";
 import { type Settings as SettingsCapabilityItem, settingsCapability } from "../capability/settings";
 import type { ModelRole } from "../config/model-roles";
 import { loadCapability } from "../discovery";
@@ -62,8 +63,11 @@ import { cfgShellPath } from "../exec/settings";
 // Types
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Settings layer that supplies an effective value; see {@link Settings.getProvenance}. */
-export type SettingProvenance = "env" | "runtime" | "overlay" | "project" | "global" | "default";
+/**
+ * Settings layer that supplies an effective value; see {@link Settings.getProvenance}. `harness` is
+ * the read-only Ombra harness defaults (`OMBRA_HARNESS_DIR`), between `global` and `default`.
+ */
+export type SettingProvenance = "env" | "runtime" | "overlay" | "project" | "global" | "harness" | "default";
 
 /** Raw settings object as stored in YAML */
 export interface RawSettings {
@@ -591,6 +595,11 @@ export class Settings {
 	#storage: AgentStorage | null = null;
 
 	#configFiles: string[] = [];
+	/**
+	 * Ombra harness defaults from `<OMBRA_HARNESS_DIR>/agent/config.yml`: read-only, below the global
+	 * config. Root instances only; an {@link overlay} reads them through its parent.
+	 */
+	#harness: RawSettings = {};
 	/** Global settings from config.yml/config.yaml */
 	#global: RawSettings = {};
 	/** Project settings from .claude/settings.yml etc */
@@ -907,8 +916,8 @@ export class Settings {
 
 	/**
 	 * Layer supplying the effective value of `setting`, in merge precedence order:
-	 * runtime override → config overlay → project → global → (overlay parent) → schema default.
-	 * A value that merges to `null` is unset and reports `"default"`.
+	 * runtime override → config overlay → project → global → harness defaults → (overlay parent) →
+	 * schema default. A value that merges to `null` is unset and reports `"default"`.
 	 */
 	getProvenance(setting: AnySetting): SettingProvenance {
 		if (!this.isConfigured(setting)) return "default";
@@ -917,6 +926,7 @@ export class Settings {
 		if (getByPath(this.#configOverlay, segments) !== undefined) return "overlay";
 		if (getByPath(projectLayerForMerge(this.#project), segments) !== undefined) return "project";
 		if (getByPath(this.#global, segments) !== undefined) return "global";
+		if (getByPath(this.#harness, segments) !== undefined) return "harness";
 		return this.#parent?.getProvenance(setting) ?? "default";
 	}
 
@@ -1005,7 +1015,13 @@ export class Settings {
 	writeMember(setting: AnySetting, item: string, { member }: { member: boolean }): void {
 		if (setting.type !== "array") throw new Error(`Setting ${setting.id} is not a list`);
 		const list = getByPath(this.#global, setting.segments);
-		const base: readonly unknown[] = Array.isArray(list) ? list : (setting.default as readonly unknown[]);
+		// Without a global list, the next layer down seeds it: the harness defaults, else the default.
+		const lower = getByPath(this.#harness, setting.segments);
+		const base: readonly unknown[] = Array.isArray(list)
+			? list
+			: Array.isArray(lower)
+				? lower
+				: (setting.default as readonly unknown[]);
 		const present = base.includes(item);
 		if (present === member && !this.#softPins.has(setting)) return;
 		let next = [...base];
@@ -1036,7 +1052,8 @@ export class Settings {
 	 * Registry plumbing behind `Setting.pinDefault`: overrides `setting` with its default unless a
 	 * layer configures it, keeping the override soft — a global write or unset of the setting, or a
 	 * disk reload or re-scope that makes a persisted layer configure it, drops it, and an explicit
-	 * override/clear ends it.
+	 * override/clear ends it. The harness defaults count as configuring it: their value applies, not
+	 * the registry default, unless the user or project sets the key.
 	 */
 	pinDefaultValue(setting: AnySetting): void {
 		const value = setting.default;
@@ -1328,6 +1345,7 @@ export class Settings {
 			});
 			cloned.#storage = this.#storage;
 			cloned.#configPath = this.#configPath;
+			cloned.#harness = this.#harness;
 			// An in-memory clone copies the layer it has, unless that layer belongs to another folder.
 			const readProject = this.#persist || cloned.#projectLayerPinnedAway(cwd);
 			cloned.#project = readProject ? await cloned.#loadProjectSettings() : structuredClone(this.#project);
@@ -1649,6 +1667,9 @@ export class Settings {
 			return this.#projectShellPathSource ?? "the active project configuration";
 		}
 		if (this.#parent && !Object.hasOwn(this.#global, "shellPath")) return this.#parent.#shellPathSource();
+		if (!Object.hasOwn(this.#global, "shellPath") && Object.hasOwn(this.#harness, "shellPath")) {
+			return getHarnessConfigFile() ?? "the harness defaults";
+		}
 		return this.#configPath ?? path.join(this.#agentDir, MAIN_CONFIG_FILENAMES[0]);
 	}
 
@@ -1884,6 +1905,7 @@ export class Settings {
 		if (this.#modelRoleLayerOwns(this.#configOverlay, role)) return "overlay";
 		if (this.#modelRoleLayerOwns(projectLayerForMerge(this.#project), role)) return "project";
 		if (this.#modelRoleLayerOwns(this.#global, role)) return "global";
+		if (this.#modelRoleLayerOwns(this.#harness, role)) return "harness";
 		return this.#parent?.getModelRoleProvenance(role) ?? "default";
 	}
 
@@ -1898,20 +1920,21 @@ export class Settings {
 
 	/**
 	 * Raw `modelPresets` entry for `name` from the highest-precedence layer that
-	 * defines it (runtime override → config overlay → project → global), whole —
-	 * same-name entries are NOT deep-merged across layers. A `null` entry on a
-	 * tombstoning layer (runtime, overlay) hides the preset; a `null` anywhere
-	 * else counts as unset. Falls back to the parent chain like the model-role
-	 * layer helpers.
+	 * defines it (runtime override → config overlay → project → global → harness
+	 * defaults), whole — same-name entries are NOT deep-merged across layers. A
+	 * `null` entry on a tombstoning layer (runtime, overlay) hides the preset; a
+	 * `null` anywhere else counts as unset. Falls back to the parent chain like the
+	 * model-role layer helpers.
 	 */
 	getOwnedModelPreset(
 		name: string,
-	): { entry: unknown; source: "runtime" | "overlay" | "project" | "global" } | undefined {
+	): { entry: unknown; source: "runtime" | "overlay" | "project" | "global" | "harness" } | undefined {
 		const layers = [
 			{ layer: this.#overrides, source: "runtime", tombstone: true },
 			{ layer: this.#configOverlay, source: "overlay", tombstone: true },
 			{ layer: projectLayerForMerge(this.#project), source: "project", tombstone: false },
 			{ layer: this.#global, source: "global", tombstone: false },
+			{ layer: this.#harness, source: "harness", tombstone: false },
 		] as const;
 		for (const { layer, source, tombstone } of layers) {
 			const presets = getByPath(layer, ["modelPresets"]);
@@ -1976,8 +1999,9 @@ export class Settings {
 
 		this.#project = projectResult.value;
 		this.#configOverlay = await this.#loadConfigOverlays();
+		this.#harness = await this.#loadHarnessDefaults();
 
-		// Build merged view (global → project → overrides; project wins over global)
+		// Build merged view (harness → global → project → overrides; project wins over global)
 		this.#rebuildMerged();
 		this.#validateAll();
 		return this;
@@ -2007,6 +2031,7 @@ export class Settings {
 
 		this.#project = projectResult.value;
 		this.#configOverlay = await this.#loadConfigOverlays();
+		this.#harness = await this.#loadHarnessDefaults();
 		this.#rebuildMerged();
 		this.#validateAll();
 		return this;
@@ -2577,6 +2602,29 @@ export class Settings {
 			throw new Error(`Config overlay must be a YAML mapping: ${filePath}`);
 		}
 		return this.#migrateRawSettings(parsed as RawSettings, captureLegacyChangelogVersion);
+	}
+
+	/**
+	 * Ombra harness defaults (`<OMBRA_HARNESS_DIR>/agent/config.yml`), `{}` when the variable is unset
+	 * or the file is absent. App-owned and read-only: no layer write ever targets it. A file that
+	 * cannot be read or parsed is skipped with a warning rather than failing the user's session.
+	 */
+	async #loadHarnessDefaults(): Promise<RawSettings> {
+		const filePath = getHarnessConfigFile();
+		if (!filePath) return {};
+		let parsed: unknown;
+		try {
+			parsed = YAML.parse(await fs.promises.readFile(filePath, "utf8"));
+		} catch (error) {
+			if (!isEnoent(error)) logger.warn("Settings: ignoring unreadable harness defaults", { filePath, error });
+			return {};
+		}
+		if (parsed === null || parsed === undefined) return {};
+		if (typeof parsed !== "object" || Array.isArray(parsed)) {
+			logger.warn("Settings: ignoring harness defaults that are not a YAML mapping", { filePath });
+			return {};
+		}
+		return this.#migrateRawSettings(parsed as RawSettings, false);
 	}
 
 	async #migrateFromLegacy(): Promise<void> {
@@ -3957,9 +4005,10 @@ export class Settings {
 		};
 	}
 
-	/** `layers` (global, project, `--config` overlay, runtime) merged in precedence order. */
+	/** Harness defaults (root instances), then `layers` (global, project, `--config` overlay, runtime), in precedence order. */
 	#mergeOwnLayers(layers: OwnLayers): RawSettings {
-		let merged = this.#deepMerge(this.#deepMerge({}, layers.global), projectLayerForMerge(layers.project));
+		let merged = this.#deepMerge(this.#deepMerge({}, this.#harness), layers.global);
+		merged = this.#deepMerge(merged, projectLayerForMerge(layers.project));
 		merged = this.#deepMerge(merged, layers.configOverlay);
 		return this.#deepMerge(merged, layers.overrides);
 	}

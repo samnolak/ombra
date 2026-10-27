@@ -6,6 +6,7 @@ import {
 	resolveWorkerSpawnCmd,
 	workerEnvFromParent,
 } from "../../subprocess/worker-client";
+import { type EnvScrubPolicy, resolveEnvScrubPolicy, scrubEnv } from "../../exec/env-scrub";
 import type { ToolSession } from "../../tools";
 import { ToolAbortError } from "../../tools/tool-errors";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
@@ -53,7 +54,8 @@ export interface JsEvalWorkerHandle {
 
 /** Startup dependencies overridden by tests to exercise process-to-Worker recovery. */
 export interface JsEvalWorkerFactories {
-	spawnProcess(): JsEvalWorkerHandle;
+	/** `envScrub`: credential scrub for the subprocess env (`bash.envScrub.*`). */
+	spawnProcess(envScrub?: EnvScrubPolicy): JsEvalWorkerHandle;
 	spawnWorker(): JsEvalWorkerHandle;
 }
 
@@ -617,7 +619,8 @@ async function acquireSession(
 	const startup = (async (): Promise<JsSession> => {
 		// Attach the message listener before sending init. Both Bun Worker messages
 		// and subprocess IPC can arrive immediately after the evaluator loads.
-		const worker = spawnJsWorker();
+		const envScrub = resolveEnvScrubPolicy(toolSession.settings);
+		const worker = spawnJsWorker(envScrub);
 		const session: JsSession = {
 			sessionKey,
 			sessionId: snapshot.sessionId,
@@ -649,7 +652,9 @@ async function acquireSession(
 				// would make synchronous user code impossible to cancel.
 				const failed = session.worker;
 				await failed.terminate().catch(() => undefined);
-				if (failed.mode === "worker") {
+				// A Bun Worker shares this process's environment, so it cannot honor
+				// the credential scrub (`bash.envScrub.*`): fail closed instead.
+				if (failed.mode === "worker" || envScrub) {
 					throw new Error(
 						`Failed to initialize isolated JS eval worker: ${error instanceof Error ? error.message : String(error)}`,
 						{ cause: error },
@@ -964,10 +969,18 @@ async function raceWithTimeout<T>(promise: Promise<T>, timeoutMs: number, reason
 	}
 }
 
-function spawnJsWorker(): JsEvalWorkerHandle {
+function spawnJsWorker(envScrub?: EnvScrubPolicy): JsEvalWorkerHandle {
 	try {
-		return workerFactories.spawnProcess();
+		return workerFactories.spawnProcess(envScrub);
 	} catch (error) {
+		// The Worker fallback shares this process's environment, which would
+		// bypass the credential scrub (`bash.envScrub.*`): surface the failure.
+		if (envScrub) {
+			throw new Error(
+				`Failed to start isolated JS eval subprocess: ${error instanceof Error ? error.message : String(error)}`,
+				{ cause: error },
+			);
+		}
 		// A worker thread remains isolated and can interrupt synchronous user code
 		// via terminate(), so it is the only safe recovery from subprocess spawn.
 		logger.warn("JS eval subprocess spawn failed; falling back to a Bun Worker", {
@@ -992,10 +1005,12 @@ function spawnBunWorker(): JsEvalWorkerHandle {
 	}
 }
 
-function spawnJsProcess(): JsEvalWorkerHandle {
+function spawnJsProcess(envScrub?: EnvScrubPolicy): JsEvalWorkerHandle {
+	const env = workerEnvFromParent();
 	const spawned = createWorkerSubprocess<WorkerOutbound>({
 		spawnCommand: resolveWorkerSpawnCmd(JS_EVAL_PROCESS_ARG),
-		env: workerEnvFromParent(),
+		// `Bun.spawn` replaces the environment, so the filtered map is all the cell sees.
+		env: envScrub ? scrubEnv(env, envScrub) : env,
 		exitLabel: "JS eval worker",
 		detached: shouldDetachKernel(process.platform),
 		reportCleanExit: true,

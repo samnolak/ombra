@@ -89,12 +89,19 @@ public sealed record InstalledRuntime(string Directory, string Bun, string Cli, 
     public string BunConfig => Path.Combine(Directory, "omp", "bunfig.toml");
     public string Host => Path.Combine(Directory, "omp", RuntimePack.HostEntry.Replace('/', Path.DirectorySeparatorChar));
 
+    /// <summary>Points omp at the pack's Ombra harness (rules, agents, extensions, skills, settings defaults), a layer
+    /// below the user's profile and the project.</summary>
+    public const string HarnessVariable = "OMBRA_HARNESS_DIR";
+    /// <summary>The Ombra harness the pack carries (<c>harness/profile</c> in the repository).</summary>
+    public string Harness => Path.Combine(Directory, "omp", "harness");
+
     /// <summary>The settings with this runtime filled in where the user left the command empty.</summary>
     public OmpRuntimeOptions ApplyTo(OmpRuntimeOptions o)
     {
         if (o.Command is not null || o.PrefixArgs.Length > 0) return o;
         var env = new Dictionary<string, string?>(o.Environment, o.Environment.Comparer);
         env.TryAdd(TranspilerCacheVariable, TranspilerCache); // a value the user set wins
+        env.TryAdd(HarnessVariable, Harness); // so does a harness the user points at (e.g. the repository's harness/profile)
         // Bun reads bunfig.toml (preload scripts) and .env from its working directory, which is the opened project:
         // a folder could run code in omp or redirect its provider traffic. Bun gets the pack's config and no env file;
         // omp still loads its own .env from the profile.
@@ -207,7 +214,7 @@ public sealed class RuntimeInstaller
             overridesBundled = doc.RootElement.TryGetProperty("overridesBundled", out var o) && o.ValueKind == JsonValueKind.True;
             var platform = doc.RootElement.GetProperty("platform").GetString() ?? "";
             var rt = Layout(directory, platform);
-            return rt is not null && File.Exists(rt.Bun) && File.Exists(rt.Cli) && File.Exists(rt.Host) ? rt : null;
+            return rt is not null && File.Exists(rt.Bun) && File.Exists(rt.Cli) && File.Exists(rt.Host) && Directory.Exists(rt.Harness) ? rt : null;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException)
         {

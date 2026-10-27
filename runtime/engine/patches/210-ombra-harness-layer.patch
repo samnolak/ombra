@@ -1,0 +1,370 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ombra engine maintainers <engine@ombra.local>
+Date: Sat, 1 Jan 2000 00:00:00 +0000
+Subject: [PATCH] Ombra harness layer from OMBRA_HARNESS_DIR
+
+What: Ombra harness layer from OMBRA_HARNESS_DIR
+Why: Ombra ships its harness (rules, agents, skills, extensions, settings defaults) in the runtime pack and must apply it to every chat and terminal session without copying into or overriding the user's agent dir; user and project items and settings keep precedence.
+Upstream-Status: Ombra-specific; not submitted
+
+diff --git a/src/cli/config-cli.ts b/src/cli/config-cli.ts
+index 096688408b35be0b4a10eb10ee6e7b1c025dd1a8..2e2fee844499d2aa05db8a48ba2575d8f5d37547 100644
+--- a/src/cli/config-cli.ts
++++ b/src/cli/config-cli.ts
+@@ -321,11 +321,12 @@ function globalValue(setting: AnySetting): unknown {
+ 	return value;
+ }
+ 
+-/** Where the effective value comes from when it is not the global config (or the default), if anywhere. */
++/** Where the effective value comes from when it is not the global config (or a lower default), if anywhere. */
+ function shadowingSource(setting: AnySetting): { json: Record<string, string>; message: string } | undefined {
+ 	const provenance = setting.provenance(settings);
+ 	switch (provenance) {
+ 		case "global":
++		case "harness":
+ 		case "default":
+ 			return undefined;
+ 		case "env": {
+diff --git a/src/config/model-presets.ts b/src/config/model-presets.ts
+index e7efe3938d7fa470ed5b5a03ecd8941335e72594..4a6dfd610b89dede5660bdc5f8e489bb1b15dec5 100644
+--- a/src/config/model-presets.ts
++++ b/src/config/model-presets.ts
+@@ -141,7 +141,8 @@ export function modelPresetShadowOwner(
+ 	name: string,
+ ): "runtime" | "overlay" | "project" | undefined {
+ 	const owned = settings.getOwnedModelPreset(name);
+-	return owned && owned.source !== "global" ? owned.source : undefined;
++	// The harness defaults sit below the global config: a global save always outranks them.
++	return owned && owned.source !== "global" && owned.source !== "harness" ? owned.source : undefined;
+ }
+ 
+ const SOURCE_LABELS: Record<SettingProvenance, string> = {
+@@ -150,6 +151,7 @@ const SOURCE_LABELS: Record<SettingProvenance, string> = {
+ 	overlay: "--config file",
+ 	project: "project config",
+ 	global: "global config",
++	harness: "Ombra harness defaults",
+ 	default: "default",
+ };
+ 
+diff --git a/src/config/registry.ts b/src/config/registry.ts
+index c3c6548f982d9908c33437214c9827512d915050..b5732d634da15c9769da6ca1ceeb5a55244890c3 100644
+--- a/src/config/registry.ts
++++ b/src/config/registry.ts
+@@ -452,7 +452,8 @@ export function combine<R extends Record<string, Derived<unknown>>, T>(
+ 
+ /**
+  * Handle for one registered setting. Reads resolve, in precedence order: the definition's
+- * environment variable, runtime override, `--config` overlay, project, global, then the default.
++ * environment variable, runtime override, `--config` overlay, project, global, the Ombra harness
++ * defaults (`OMBRA_HARNESS_DIR`), then the default.
+  */
+ export class Setting<T, Id extends string = string> extends Derived<T> {
+ 	readonly id: Id;
+@@ -524,16 +525,19 @@ export class Setting<T, Id extends string = string> extends Derived<T> {
+ 		return this.#envParsed;
+ 	}
+ 
+-	/** Env value that currently takes effect in `scope`: a fallback env yields to a configured layer. */
++	/**
++	 * Env value that currently takes effect in `scope`: a fallback env yields to a configured layer.
++	 * The harness defaults are not such a layer — they rank below the environment.
++	 */
+ 	#effectiveEnv(scope: ScopeLike): T | undefined {
+ 		const value = this.envValue();
+ 		if (value === undefined || !this.envFallback) return value;
+ 		const settings = settingsOf(scope);
+-		if (this.envFallback === true) return settings.isConfigured(this) ? undefined : value;
+-		const configured = settings.rawValue(this);
+-		return configured === undefined || (typeof configured === "string" && configured.trim() === "")
+-			? value
+-			: undefined;
++		const source = settings.getProvenance(this);
++		const configured = source !== "default" && source !== "harness";
++		if (this.envFallback === true) return configured ? undefined : value;
++		const raw = configured ? settings.rawValue(this) : undefined;
++		return raw === undefined || (typeof raw === "string" && raw.trim() === "") ? value : undefined;
+ 	}
+ 
+ 	override get(scope: ScopeLike): T {
+diff --git a/src/discovery/harness.ts b/src/discovery/harness.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b792dc70ef9c762778ec0f7d58dfc130c83833cd
+--- /dev/null
++++ b/src/discovery/harness.ts
+@@ -0,0 +1,111 @@
++/**
++ * Ombra harness provider (`OMBRA_HARNESS_DIR`, see `harness-layer.ts`).
++ *
++ * Harness items are user-level (app-owned, trusted in any folder) and rank below every other
++ * source, so a same-name project or user item always wins the first-wins dedup:
++ *   - skills, extension modules and rules register just above the managed (auto-learn) skills
++ *     and the bundled default rules, so bundled rules of the same name lose to the harness ones;
++ *   - the AGENTS.md is an additive user-global context file registered above the native provider,
++ *     so it is listed, and rendered, before the user's own `~/.omp/agent/AGENTS.md`: the user's
++ *     rules come later and win. It shares the user-global `contextFiles.maxBytes` chain.
++ * Task agents are read by `task/discovery.ts`; settings defaults by `config/settings.ts`.
++ */
++import { registerProvider } from "../capability";
++import { type ContextFile, contextFileCapability } from "../capability/context-file";
++import { type ExtensionModule, extensionModuleCapability } from "../capability/extension-module";
++import { readFile } from "../capability/fs";
++import { type Rule, ruleCapability } from "../capability/rule";
++import { type Skill, skillCapability } from "../capability/skill";
++import type { LoadContext, LoadResult } from "../capability/types";
++import {
++	getHarnessContextFile,
++	getHarnessExtensionsDir,
++	getHarnessRulesDir,
++	getHarnessSkillsDir,
++	HARNESS_PROVIDER_ID,
++} from "../harness-layer";
++import {
++	createSourceMeta,
++	discoverExtensionModulePaths,
++	discoverRuleFromMarkdown,
++	getExtensionNameFromPath,
++	loadFilesFromDir,
++	scanSkillsFromDir,
++} from "./helpers";
++
++const DISPLAY_NAME = "Ombra harness";
++const DESCRIPTION = "App-owned harness shipped with Ombra (OMBRA_HARNESS_DIR)";
++/** Below every authored source; above managed skills (5) and bundled rules (1). */
++const PRIORITY = 6;
++/** Above the native provider (100): the harness rules render before the user's own AGENTS.md. */
++const CONTEXT_FILE_PRIORITY = 101;
++
++registerProvider<Skill>(skillCapability.id, {
++	id: HARNESS_PROVIDER_ID,
++	displayName: DISPLAY_NAME,
++	description: DESCRIPTION,
++	priority: PRIORITY,
++	load: async (ctx: LoadContext): Promise<LoadResult<Skill>> => {
++		const dir = getHarnessSkillsDir();
++		if (!dir) return { items: [] };
++		return scanSkillsFromDir(ctx, { dir, providerId: HARNESS_PROVIDER_ID, level: "user", requireDescription: true });
++	},
++});
++
++registerProvider<Rule>(ruleCapability.id, {
++	id: HARNESS_PROVIDER_ID,
++	displayName: DISPLAY_NAME,
++	description: DESCRIPTION,
++	priority: PRIORITY,
++	load: async (ctx: LoadContext): Promise<LoadResult<Rule>> => {
++		const dir = getHarnessRulesDir();
++		if (!dir) return { items: [] };
++		return loadFilesFromDir<Rule>(ctx, dir, HARNESS_PROVIDER_ID, "user", {
++			extensions: ["md", "mdc"],
++			transform: (name, content, filePath, source) =>
++				discoverRuleFromMarkdown(name, content, filePath, source, { stripNamePattern: /\.(md|mdc)$/ }),
++		});
++	},
++});
++
++registerProvider<ExtensionModule>(extensionModuleCapability.id, {
++	id: HARNESS_PROVIDER_ID,
++	displayName: DISPLAY_NAME,
++	description: DESCRIPTION,
++	priority: PRIORITY,
++	load: async (ctx: LoadContext): Promise<LoadResult<ExtensionModule>> => {
++		const dir = getHarnessExtensionsDir();
++		if (!dir) return { items: [] };
++		const items = (await discoverExtensionModulePaths(ctx, dir)).map(extPath => ({
++			name: getExtensionNameFromPath(extPath),
++			path: extPath,
++			level: "user" as const,
++			_source: createSourceMeta(HARNESS_PROVIDER_ID, extPath, "user"),
++		}));
++		return { items };
++	},
++});
++
++registerProvider<ContextFile>(contextFileCapability.id, {
++	id: HARNESS_PROVIDER_ID,
++	displayName: DISPLAY_NAME,
++	description: "Harness rules (agent/AGENTS.md), rendered before the user's own AGENTS.md",
++	priority: CONTEXT_FILE_PRIORITY,
++	load: async (): Promise<LoadResult<ContextFile>> => {
++		const filePath = getHarnessContextFile();
++		const content = filePath ? await readFile(filePath) : null;
++		if (!filePath || !content) return { items: [] };
++		return {
++			items: [
++				{
++					path: filePath,
++					content,
++					level: "user",
++					// Its own slot: it never takes the place of the user's AGENTS.md.
++					additive: true,
++					_source: createSourceMeta(HARNESS_PROVIDER_ID, filePath, "user"),
++				},
++			],
++		};
++	},
++});
+diff --git a/src/discovery/index.ts b/src/discovery/index.ts
+index 1342867c55599ac4ccc2bdcee4ca1c8faaa94995..0da259f58290092a6a82c66edd27ecc7caf7adee 100644
+--- a/src/discovery/index.ts
++++ b/src/discovery/index.ts
+@@ -29,6 +29,7 @@ import "./builtin-defaults";
+ import "./claude";
+ import "./claude-plugins";
+ import "./cline";
++import "./harness";
+ import "./agents";
+ import "./codex";
+ import "./cursor";
+diff --git a/src/extensibility/extensions/loader.ts b/src/extensibility/extensions/loader.ts
+index e277e6d58c0f5869b1ee96df0b9a17872c463581..b4696ec0454064b13ac413309f2c84db9b71bc6b 100644
+--- a/src/extensibility/extensions/loader.ts
++++ b/src/extensibility/extensions/loader.ts
+@@ -30,6 +30,7 @@ import * as PiCodingAgent from "../../index";
+ import type { SendUserMessageOptions } from "../../session/agent-session";
+ import type { CustomMessagePayload } from "../../session/messages";
+ import type { FileDeleteFallbackHandler, FileWriteFallbackHandler } from "../../tools/file-write-fallback";
++import { HARNESS_PROVIDER_ID } from "../../harness-layer";
+ import { isFilesystemSourcePath } from "../../tools/path-utils";
+ import { EventBus } from "../../utils/event-bus";
+ import * as TypeBox from "../legacy-typebox";
+@@ -599,15 +600,16 @@ export async function discoverExtensionPaths(
+ 
+ 	const ambient = options.ambient !== false;
+ 	if (ambient) {
+-		// 1. Discover extension modules via capability API (native .omp/.pi only).
+-		// Scope the load to the native provider — the extension-module capability
++		// 1. Discover extension modules via capability API (native .omp/.pi and the Ombra harness).
++		// Scope the load to those providers — the extension-module capability
+ 		// also has claude/codex/gemini/opencode providers, and their items were
+ 		// discarded here anyway (see #4198). The provider filter skips the walk
+ 		// entirely instead of running four foreign directory scans and dropping
+-		// the results.
++		// the results. A native (user or project) extension shadows a same-name
++		// harness one: the harness provider ranks below native.
+ 		const discovered = await loadCapability<ExtensionModule>(extensionModuleCapability.id, {
+ 			...loadOptions,
+-			providers: ["native"],
++			providers: ["native", HARNESS_PROVIDER_ID],
+ 		});
+ 		for (const ext of discovered.items) {
+ 			addPath(ext.path);
+diff --git a/src/harness-layer.ts b/src/harness-layer.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..2b19c2552ff26253db59069f690ec94089fa43e5
+--- /dev/null
++++ b/src/harness-layer.ts
+@@ -0,0 +1,77 @@
++/**
++ * Ombra harness layer: an app-owned set of rules, agents, extensions, skills and settings defaults
++ * that Ombra ships with its runtime and names through `OMBRA_HARNESS_DIR` for every engine, TUI
++ * and CLI launch. The layer sits below the user's own `~/.omp/agent` (or active profile) and the
++ * project, and above omp's bundled items and registry defaults; nothing is ever written into it.
++ *
++ * Layout of the root (it mirrors `harness/profile`):
++ *   - `agent/AGENTS.md`           user-global context file, rendered before the user's own AGENTS.md
++ *   - `agent/agents/*.md`         task agents, after user/project/plugin agents and before bundled ones
++ *   - `agent/rules/*.md`          rules; a same-name project or user rule wins, bundled rules lose
++ *   - `agent/extensions/<name>/`  extension modules; a same-name user or project extension wins
++ *   - `agent/config.yml`          settings defaults, just above registry defaults and below `config.yml`
++ *   - `skills/<name>/SKILL.md`    skills; any same-name authored skill wins
++ *
++ * With the variable unset or empty every helper returns `undefined` and omp behaves as stock.
++ * The harness is trusted regardless of the folder: an untrusted project drops only project items.
++ */
++import * as path from "node:path";
++import { logger } from "@oh-my-pi/pi-utils";
++
++/** Environment variable naming the absolute harness root. */
++export const HARNESS_DIR_ENV = "OMBRA_HARNESS_DIR";
++
++/** Capability provider id of harness items (skills, extension modules, context files). */
++export const HARNESS_PROVIDER_ID = "ombra-harness";
++
++/** Last relative value reported, so a misconfigured launch warns once instead of on every lookup. */
++let warnedRelativeRoot: string | undefined;
++
++/** Absolute harness root from `OMBRA_HARNESS_DIR`, or `undefined` when unset, empty or relative. */
++export function getHarnessRoot(): string | undefined {
++	const raw = process.env[HARNESS_DIR_ENV];
++	if (!raw) return undefined;
++	if (!path.isAbsolute(raw)) {
++		if (warnedRelativeRoot !== raw) {
++			warnedRelativeRoot = raw;
++			logger.warn(`${HARNESS_DIR_ENV} must be an absolute path; ignoring the harness layer`, { value: raw });
++		}
++		return undefined;
++	}
++	return path.normalize(raw);
++}
++
++function harnessPath(...segments: string[]): string | undefined {
++	const root = getHarnessRoot();
++	return root === undefined ? undefined : path.join(root, ...segments);
++}
++
++/** `<root>/skills`: one `<name>/SKILL.md` per skill. */
++export function getHarnessSkillsDir(): string | undefined {
++	return harnessPath("skills");
++}
++
++/** `<root>/agent/agents`: task agent definitions (`*.md`). */
++export function getHarnessAgentsDir(): string | undefined {
++	return harnessPath("agent", "agents");
++}
++
++/** `<root>/agent/extensions`: one extension module per entry. */
++export function getHarnessExtensionsDir(): string | undefined {
++	return harnessPath("agent", "extensions");
++}
++
++/** `<root>/agent/rules`: rule files (`*.md`, frontmatter `description`, `alwaysApply`, `condition`). */
++export function getHarnessRulesDir(): string | undefined {
++	return harnessPath("agent", "rules");
++}
++
++/** `<root>/agent/AGENTS.md`: the harness rules, a user-global context file. */
++export function getHarnessContextFile(): string | undefined {
++	return harnessPath("agent", "AGENTS.md");
++}
++
++/** `<root>/agent/config.yml`: read-only settings defaults. */
++export function getHarnessConfigFile(): string | undefined {
++	return harnessPath("agent", "config.yml");
++}
+diff --git a/src/internal-urls/cfg-protocol.ts b/src/internal-urls/cfg-protocol.ts
+index 0da87d3c64714099a05ca91cf7d319e4ff112343..a6d98b3b6d274c60208602975974d2dca64c5c8a 100644
+--- a/src/internal-urls/cfg-protocol.ts
++++ b/src/internal-urls/cfg-protocol.ts
+@@ -69,6 +69,7 @@ const PROVENANCE_LABELS: Record<SettingProvenance, string> = {
+ 	overlay: "--config overlay",
+ 	project: "project config",
+ 	global: "global config",
++	harness: "Ombra harness defaults",
+ 	default: "default",
+ };
+ 
+diff --git a/src/modes/components/extensions/state-manager.ts b/src/modes/components/extensions/state-manager.ts
+index c577c479e2cac490a38a9c75b143d7284495e05d..e1f71d410722456023f2c8d4a5952a1e59fc2c9b 100644
+--- a/src/modes/components/extensions/state-manager.ts
++++ b/src/modes/components/extensions/state-manager.ts
+@@ -23,6 +23,7 @@ import {
+ 	isUserSourceEnabled,
+ 	loadCapability,
+ } from "../../../discovery";
++import { HARNESS_PROVIDER_ID } from "../../../harness-layer";
+ import { readDisabledServers, readEnabledServers } from "../../../mcp/config-writer";
+ import { commandPreview } from "@oh-my-pi/pi-tui/overlays/extensions/inspector-model";
+ import { inferMcpTransport } from "@oh-my-pi/pi-tui/overlays/extensions/mcp-runtime";
+@@ -145,7 +146,10 @@ export async function loadAllExtensions(cwd?: string, disabledIds?: string[]): P
+ 	// Load extension modules
+ 	try {
+ 		const modules = await loadCapability<ExtensionModule>("extension-modules", loadOpts);
+-		const nativeModules = modules.all.filter(module => module._source.provider === "native");
++		// The modules the extension loader runs: native (.omp) and the Ombra harness.
++		const nativeModules = modules.all.filter(
++			module => module._source.provider === "native" || module._source.provider === HARNESS_PROVIDER_ID,
++		);
+ 		addItems(nativeModules, "extension-module");
+ 	} catch (error) {
+ 		logger.warn("Failed to load extension-modules capability", { error: String(error) });

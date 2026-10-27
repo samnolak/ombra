@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Builds a throwaway HOME with a "harness" omp profile instantiated from the repository's harness
-# template (../../../harness/profile) plus a models.yml that registers the stand-in model under
-# the real route name qwen-local/flash-next-w4a16. For CI/cloud machines only: on the real
-# Windows machine the existing %USERPROFILE%\.omp\profiles\harness is used as-is.
+# Builds a throwaway HOME whose default omp agent dir (~/.omp/agent) holds only a models.yml that registers the
+# stand-in model under the real route name qwen-local/flash-next-w4a16, plus a config.yml with that default model
+# role. For CI/cloud machines only. The harness itself is not copied: omp reads it in place from
+# OMBRA_HARNESS_DIR (the repository's harness/profile here; the runtime pack's omp/harness in the app), which the
+# callers set and this script prints for direct engine runs.
 #
 #   tools/stand-in-env/setup.sh <home-dir> [mock-port] [work-dir]
 set -euo pipefail
@@ -10,15 +11,11 @@ HOME_DIR=${1:?home dir}
 PORT=${2:-18080}
 WORK=${3:-}
 REPO=$(cd "$(dirname "$0")/../../.." && pwd)
-P="$HOME_DIR/.omp/profiles/harness"
-mkdir -p "$P/agent"
-cp -r "$REPO/harness/profile/skills" "$P/"
-cp "$REPO/harness/profile/agent/AGENTS.md" "$P/agent/"
-cp -r "$REPO/harness/profile/agent/agents" "$P/agent/"
-# config.yml = shipped seed + the default model role (on the real machine the user set this in the GUI)
-{ cat "$REPO/harness/profile/agent/config.yml.seed"; printf '\nmodelRoles:\n  default: qwen-local/flash-next-w4a16\n'; } > "$P/agent/config.yml"
-# mcp.json is omitted: codebase-memory-mcp is a Windows binary and context7 needs the network.
-cat > "$P/agent/models.yml" <<EOF
+A="$HOME_DIR/.omp/agent"
+mkdir -p "$A"
+# The default model role (on a real machine the user picks it in the GUI); harness settings come from its layer.
+printf 'modelRoles:\n  default: qwen-local/flash-next-w4a16\n' > "$A/config.yml"
+cat > "$A/models.yml" <<EOF
 providers:
   qwen-local:
     baseUrl: http://127.0.0.1:$PORT/v1
@@ -38,4 +35,5 @@ if [ -n "$WORK" ]; then
   for i in $(seq 0 9); do printf 'note %s\nline two of note %s\n' "$i" "$i" > "$WORK/notes-$i.md"; done
   echo "work dir ready: $WORK"
 fi
-echo "profile ready: $P"
+echo "agent dir ready: $A"
+echo "OMBRA_HARNESS_DIR=$REPO/harness/profile"

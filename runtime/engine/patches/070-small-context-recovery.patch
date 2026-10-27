@@ -79,10 +79,22 @@ index 0000000000000000000000000000000000000000..442ce23590c9f40aadb9cd85d164ffef
 +	return undefined;
 +}
 diff --git a/src/session/session-maintenance.ts b/src/session/session-maintenance.ts
-index b8c28f21e776c7a56c6213f399efb1e1fbc84b14..6776c84bb6d64627e54fad506b4205c04fab088d 100644
+index b8c28f21e776c7a56c6213f399efb1e1fbc84b14..cf6df55677e107ed476c4cec31628126a365d5ad 100644
 --- a/src/session/session-maintenance.ts
 +++ b/src/session/session-maintenance.ts
-@@ -126,6 +126,7 @@ import {
+@@ -85,6 +85,11 @@ import type { ConfiguredThinkingLevel } from "@oh-my-pi/pi-tui/thinking";
+ import type { AgentSessionEvent } from "./agent-session-events";
+ import type { ContextUsageBreakdown, HandoffResult, SessionHandoffOptions } from "./agent-session-types";
+ import { findCompactMode } from "./compact-modes";
++import {
++	assertCompactionSummaryShrinks,
++	CHECKPOINT_SUMMARY_PROMPT,
++	CompactionSummaryNotSmallerError,
++} from "./compaction-checkpoint";
+ import {
+ 	type CompactionMethod,
+ 	canUseRemoteCompaction,
+@@ -126,6 +131,7 @@ import {
  } from "./context-settings";
  import { resolveModelCompactionSettings } from "./model-compaction-threshold";
  import { cfgRetry } from "./settings";
@@ -90,7 +102,7 @@ index b8c28f21e776c7a56c6213f399efb1e1fbc84b14..6776c84bb6d64627e54fad506b4205c0
  
  export type CompactionCheckResult = Readonly<{
  	continuationScheduled: boolean;
-@@ -421,6 +422,11 @@ export interface SessionMaintenanceHost {
+@@ -421,6 +427,11 @@ export interface SessionMaintenanceHost {
  	/** Live `providers.openaiWebsockets` hint for provider calls. */
  	preferWebsockets(): boolean | undefined;
  	model(): Model | undefined;
@@ -102,7 +114,29 @@ index b8c28f21e776c7a56c6213f399efb1e1fbc84b14..6776c84bb6d64627e54fad506b4205c0
  	thinkingLevel(): ThinkingLevel | undefined;
  	isDisposed(): boolean;
  	isStreaming(): boolean;
-@@ -3005,6 +3011,17 @@ export class SessionMaintenance {
+@@ -1507,7 +1518,9 @@ export class SessionMaintenance {
+ 						options?.internalGuidance ?? customInstructions,
+ 						compactionAbortController.signal,
+ 						{
+-							promptOverride: this.#host.obfuscateTextForProvider(compactionPrep.hookPrompt),
++							promptOverride: this.#host.obfuscateTextForProvider(
++								compactionPrep.hookPrompt ?? CHECKPOINT_SUMMARY_PROMPT,
++							),
+ 							extraContext: compactionPrep.hookContext,
+ 							// The prompt the live turn actually sent — a per-turn
+ 							// `before_agent_start` override included — so a provider-native
+@@ -2326,7 +2339,9 @@ export class SessionMaintenance {
+ 				undefined,
+ 				signal,
+ 				{
+-					promptOverride: this.#host.obfuscateTextForProvider(compactionPrep.hookPrompt),
++					promptOverride: this.#host.obfuscateTextForProvider(
++						compactionPrep.hookPrompt ?? CHECKPOINT_SUMMARY_PROMPT,
++					),
+ 					extraContext: compactionPrep.hookContext,
+ 					remoteSystemPrompt: this.#host.agent.state.systemPrompt,
+ 					codexCompaction,
+@@ -3005,6 +3020,17 @@ export class SessionMaintenance {
  		if (overflowEvidence || reclaimablePayloadHistory || (payloadRejection && !trustedPayloadRejection)) {
  			this.#host.removeAssistantMessageFromActiveContext(assistantMessage);
  
@@ -120,7 +154,48 @@ index b8c28f21e776c7a56c6213f399efb1e1fbc84b14..6776c84bb6d64627e54fad506b4205c0
  			// A larger token window cannot raise a trusted byte-size limit.
  			const promoted = !trustedPayloadRejection && (await this.#tryContextPromotion(assistantMessage));
  			if (promoted) {
-@@ -4806,11 +4823,14 @@ export class SessionMaintenance {
+@@ -3545,6 +3571,9 @@ export class SessionMaintenance {
+ 			precomputedCandidates ?? this.#getCompactionModelCandidates(this.#host.modelRegistry.getAvailable());
+ 		const telemetry = resolveTelemetry(this.#host.agent.telemetry, this.#host.sessionId());
+ 		let nativeCompactionFailure: { error: NativeCompactionError; provider: string } | undefined;
++		// A candidate whose summary does not shrink its source is unusable, not fatal:
++		// the next candidate may summarize tighter. Reported only if none succeeds.
++		let notSmallerFailure: CompactionSummaryNotSmallerError | undefined;
+ 
+ 		for (const candidate of candidates) {
+ 			const apiKey = await this.#host.modelRegistry.getApiKey(candidate, this.#host.sessionId());
+@@ -3558,7 +3587,7 @@ export class SessionMaintenance {
+ 			}
+ 
+ 			try {
+-				return await compact(
++				const result = await compact(
+ 					this.#host.obfuscatePreparationForProvider(preparation),
+ 					candidate,
+ 					this.#host.modelRegistry.resolver(candidate, this.#host.sessionId()),
+@@ -3596,7 +3625,13 @@ export class SessionMaintenance {
+ 						},
+ 					},
+ 				);
++				assertCompactionSummaryShrinks(preparation, result.summary, this.#tokenizer);
++				return result;
+ 			} catch (error) {
++				if (error instanceof CompactionSummaryNotSmallerError) {
++					notSmallerFailure ??= error;
++					continue;
++				}
+ 				const id = AIError.classify(error instanceof NativeCompactionError ? error.cause : error, candidate.api);
+ 				if (AIError.is(id, AIError.Flag.AuthFailed)) continue;
+ 				if (error instanceof NativeCompactionError) {
+@@ -3608,6 +3643,7 @@ export class SessionMaintenance {
+ 		}
+ 
+ 		if (nativeCompactionFailure) throw nativeCompactionFailure.error;
++		if (notSmallerFailure) throw notSmallerFailure;
+ 		throw this.#buildCompactionAuthError();
+ 	}
+ 
+@@ -4806,11 +4842,14 @@ export class SessionMaintenance {
  				suppressContinuation,
  				options.detachPostCommit === true,
  			);
@@ -137,7 +212,7 @@ index b8c28f21e776c7a56c6213f399efb1e1fbc84b14..6776c84bb6d64627e54fad506b4205c0
  			});
  		}
  
-@@ -4946,6 +4966,9 @@ export class SessionMaintenance {
+@@ -4946,6 +4985,9 @@ export class SessionMaintenance {
  				// warning the user should see.
  				let frameRescueResult: snapcompact.CompactionResult | undefined;
  				let frameRescueCreatedHeadroom = false;
@@ -147,7 +222,7 @@ index b8c28f21e776c7a56c6213f399efb1e1fbc84b14..6776c84bb6d64627e54fad506b4205c0
  				if (reason !== "idle") {
  					frameRescueResult = await this.#rescueSnapcompactFrameOverflow(
  						pathEntriesForCompaction,
-@@ -4971,13 +4994,15 @@ export class SessionMaintenance {
+@@ -4971,13 +5013,15 @@ export class SessionMaintenance {
  									this.#model,
  									this.#tokenizer,
  								);
@@ -165,7 +240,7 @@ index b8c28f21e776c7a56c6213f399efb1e1fbc84b14..6776c84bb6d64627e54fad506b4205c0
  					const implicatedFrames =
  						frameRescueResult && !frameRescueCreatedHeadroom
  							? (snapcompact.getPreservedArchive(frameRescueResult.preserveData)?.frames.length ?? 0)
-@@ -5021,7 +5046,7 @@ export class SessionMaintenance {
+@@ -5021,7 +5065,7 @@ export class SessionMaintenance {
  						options.detachPostCommit === true,
  					);
  					let continuationScheduled = false;
@@ -174,7 +249,37 @@ index b8c28f21e776c7a56c6213f399efb1e1fbc84b14..6776c84bb6d64627e54fad506b4205c0
  						continuationScheduled = this.#host.scheduleCompactionContinuation({
  							generation,
  							autoContinue: shouldAutoContinue,
-@@ -5827,7 +5852,7 @@ export class SessionMaintenance {
+@@ -5376,14 +5420,16 @@ export class SessionMaintenance {
+ 					let attempt = 0;
+ 					while (true) {
+ 						try {
+-							compactResult = await compact(
++							const candidateResult = await compact(
+ 								this.#host.obfuscatePreparationForProvider(preparation),
+ 								candidate,
+ 								this.#host.modelRegistry.resolver(candidate, this.#host.sessionId()),
+ 								undefined,
+ 								autoCompactionSignal,
+ 								{
+-									promptOverride: this.#host.obfuscateTextForProvider(compactionPrep.hookPrompt),
++									promptOverride: this.#host.obfuscateTextForProvider(
++										compactionPrep.hookPrompt ?? CHECKPOINT_SUMMARY_PROMPT,
++									),
+ 									extraContext: compactionPrep.hookContext,
+ 									remoteSystemPrompt: this.#host.agent.state.systemPrompt,
+ 									metadata: this.#host.agent.metadataForProvider(candidate.provider),
+@@ -5411,6 +5457,10 @@ export class SessionMaintenance {
+ 									oneshotRetry: false,
+ 								},
+ 							);
++							// A summary that does not shrink its source fails this candidate
++							// before it is accepted, so the fallback chain moves on.
++							assertCompactionSummaryShrinks(preparation, candidateResult.summary, this.#tokenizer);
++							compactResult = candidateResult;
+ 							break;
+ 						} catch (error) {
+ 							if (autoCompactionSignal.aborted) {
+@@ -5827,7 +5877,7 @@ export class SessionMaintenance {
  	 * runs {@link shake} inline against the protect-window config, and schedules
  	 * continuation exactly like the context-full tail.
  	 *
@@ -183,7 +288,7 @@ index b8c28f21e776c7a56c6213f399efb1e1fbc84b14..6776c84bb6d64627e54fad506b4205c0
  	 * method; returns a check result when shake handled the maintenance itself.
  	 */
  	async #runAutoShake(
-@@ -5839,7 +5864,7 @@ export class SessionMaintenance {
+@@ -5839,7 +5889,7 @@ export class SessionMaintenance {
  		triggerContextTokens?: number,
  		suppressContinuation = false,
  		detachPostCommit = false,
@@ -192,7 +297,7 @@ index b8c28f21e776c7a56c6213f399efb1e1fbc84b14..6776c84bb6d64627e54fad506b4205c0
  		const action = "shake";
  		this.#autoCompactionAbortController?.abort();
  		const controller = new AbortController();
-@@ -5913,7 +5938,7 @@ export class SessionMaintenance {
+@@ -5913,7 +5963,7 @@ export class SessionMaintenance {
  					},
  					detachPostCommit,
  				);
@@ -201,7 +306,7 @@ index b8c28f21e776c7a56c6213f399efb1e1fbc84b14..6776c84bb6d64627e54fad506b4205c0
  			}
  			await this.#emitLifecycleEvent(
  				{
-@@ -5994,7 +6019,7 @@ export class SessionMaintenance {
+@@ -5994,7 +6044,7 @@ export class SessionMaintenance {
  				detachPostCommit,
  			);
  			// Overflow still needs recovery even if shake threw.

@@ -1,0 +1,147 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ombra engine maintainers <engine@ombra.local>
+Date: Sat, 1 Jan 2000 00:00:00 +0000
+Subject: [PATCH] Structured compaction checkpoint and non-shrink guard
+
+What: Structured compaction checkpoint and non-shrink guard
+Why: Summaries lost the current work and next step, and a summary not smaller than its source was committed; the checkpoint template adds those sections and the guard rejects bloated summaries.
+Upstream-Status: Ombra-specific; idea from DeepSeek Harness; not submitted
+
+diff --git a/src/prompts/system/compaction-checkpoint-summary.md b/src/prompts/system/compaction-checkpoint-summary.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..a66bae051f756b4e9fb26622000c1d1e2cefae6b
+--- /dev/null
++++ b/src/prompts/system/compaction-checkpoint-summary.md
+@@ -0,0 +1,53 @@
++You MUST summarize the conversation above into a structured handoff summary for another LLM to resume the task.
++
++IMPORTANT: If the conversation ends with an unanswered question or a request awaiting user response (e.g., "Please run command and paste output"), you MUST preserve that exact question/request.
++
++If a <previous-summary> block is present, it summarizes earlier history: you MUST preserve its information, merge the new messages into it, move finished "In Progress" items to "Done", and drop blockers or pending questions that were resolved.
++
++You MUST use this format (sections can be omitted if not applicable):
++
++## Goal
++[User goals; list multiple if session covers different tasks.]
++
++## Constraints & Preferences
++- [Constraints or requirements mentioned]
++
++## Progress
++
++### Done
++- [x] [Completed tasks/changes]
++
++### In Progress
++- [ ] [Current work]
++
++### Blocked
++- [Issues preventing progress]
++
++## Files and Code
++- [Exact path: why it matters, key changes or snippets]
++
++## Errors and Fixes
++- [Exact error: how it was resolved, plus related user feedback]
++
++## Pending Jobs
++- [Background jobs or subagents still running, with their ids; requested work not yet started]
++
++## Current Work
++[Precisely what was being worked on immediately before this summary: file, function, command, last result]
++
++## Key Decisions
++- **[Decision]**: [Brief rationale]
++
++## Next Steps
++1. [Immediate next action, directly in line with the most recent user request]
++2. [Further ordered actions]
++
++## Critical Context
++- [Important data, pending questions, references]
++
++## Additional Notes
++[Anything else important not covered above]
++
++You MUST output only the structured summary; you NEVER include extra text. You NEVER call tools.
++
++Sections MUST be kept concise. You MUST preserve exact file paths, function names, error messages, and relevant tool outputs or command results. You MUST include repository state changes (branch, uncommitted changes) if mentioned.
+diff --git a/src/session/compaction-checkpoint.ts b/src/session/compaction-checkpoint.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..0a593bee00f113c9fc0c59c8e0ff9b73213c5833
+--- /dev/null
++++ b/src/session/compaction-checkpoint.ts
+@@ -0,0 +1,73 @@
++/**
++ * Ombra's LLM compaction summary contract: the checkpoint prompt sent in place
++ * of the upstream summary template, and the guard that rejects a summary which
++ * does not shrink the history it replaces.
++ */
++import type { Tokenizer } from "@oh-my-pi/pi-agent-core";
++import type { CompactionPreparation } from "@oh-my-pi/pi-agent-core/compaction";
++import { prompt } from "@oh-my-pi/pi-utils";
++import * as snapcompact from "@oh-my-pi/snapcompact";
++import checkpointSummaryTemplate from "../prompts/system/compaction-checkpoint-summary.md" with { type: "text" };
++
++/**
++ * Summary prompt for LLM compaction. Used for first and iterative summaries
++ * alike: it carries its own `<previous-summary>` merge rules, because a
++ * prompt override also covers the folded windows of an oversized span.
++ */
++export const CHECKPOINT_SUMMARY_PROMPT = prompt.render(checkpointSummaryTemplate);
++
++/** A generated summary that would not lower the next request's token cost. */
++export class CompactionSummaryNotSmallerError extends Error {
++	readonly summaryTokens: number;
++	readonly sourceTokens: number;
++
++	constructor(summaryTokens: number, sourceTokens: number) {
++		super(
++			`Compaction summary is not smaller than the history it replaces (${summaryTokens} >= ${sourceTokens} estimated tokens)`,
++		);
++		this.name = "CompactionSummaryNotSmallerError";
++		this.summaryTokens = summaryTokens;
++		this.sourceTokens = sourceTokens;
++	}
++}
++
++/**
++ * Estimated tokens of what a summary replaces: the previous summary (and the
++ * text of a previous snapcompact archive it migrates), the summarized
++ * messages and a split turn's prefix.
++ */
++export function compactionSourceTokens(preparation: CompactionPreparation, tokenizer: Tokenizer): number {
++	const opts = { excludeEncryptedReasoning: true } as const;
++	let tokens = tokenizer.countMessages(preparation.messagesToSummarize, opts);
++	tokens += tokenizer.countMessages(preparation.turnPrefixMessages, opts);
++	if (preparation.previousSummary) tokens += tokenizer.countTokens(preparation.previousSummary);
++	const archive = snapcompact.getPreservedArchive(preparation.previousPreserveData);
++	const archiveText = archive ? snapcompact.archiveSourceText(archive) : undefined;
++	if (archiveText) tokens += tokenizer.countTokens(archiveText);
++	return tokens;
++}
++
++/**
++ * Summaries at or below this size are never rejected. They cannot meaningfully
++ * grow the context, and a tiny span (a split turn's short prefix, a cut that
++ * only moves past one small turn) legitimately yields a summary larger than
++ * its source: that commit is what lets the post-commit progress guard rescue an
++ * oversized kept tail.
++ */
++export const UNJUDGED_SUMMARY_TOKENS = 512;
++
++/**
++ * Throw {@link CompactionSummaryNotSmallerError} when `summary` is not smaller
++ * than the history it replaces, unless it is within
++ * {@link UNJUDGED_SUMMARY_TOKENS}.
++ */
++export function assertCompactionSummaryShrinks(
++	preparation: CompactionPreparation,
++	summary: string,
++	tokenizer: Tokenizer,
++): void {
++	const summaryTokens = tokenizer.countTokens(summary);
++	if (summaryTokens <= UNJUDGED_SUMMARY_TOKENS) return;
++	const sourceTokens = compactionSourceTokens(preparation, tokenizer);
++	if (summaryTokens >= sourceTokens) throw new CompactionSummaryNotSmallerError(summaryTokens, sourceTokens);
++}

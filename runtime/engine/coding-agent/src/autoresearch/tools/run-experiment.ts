@@ -7,6 +7,7 @@ import * as vcs from "@oh-my-pi/pi-natives/vcs";
 import { formatBytes, procmgr } from "@oh-my-pi/pi-utils";
 import { Settings } from "../../config/settings";
 import { executeBash } from "../../exec/bash-executor";
+import { resolveEnvScrubPolicy } from "../../exec/env-scrub";
 import type { ToolDefinition } from "../../extensibility/extensions";
 
 import {
@@ -307,6 +308,8 @@ async function executeProcess(opts: {
 			sessionKey: `autoresearch:${opts.cwd}`,
 			timeout: opts.timeoutMs > 0 ? opts.timeoutMs : 2_147_000_000,
 			signal: opts.signal,
+			// The harness script is model-written: scrub like a bash tool call.
+			envScrub: resolveEnvScrubPolicy(await Settings.forSession()),
 			chunkThrottleMs: 0,
 			onChunk: chunk => {
 				tailBuffer.append(chunk);

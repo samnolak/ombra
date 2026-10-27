@@ -141,7 +141,8 @@ export function modelPresetShadowOwner(
 	name: string,
 ): "runtime" | "overlay" | "project" | undefined {
 	const owned = settings.getOwnedModelPreset(name);
-	return owned && owned.source !== "global" ? owned.source : undefined;
+	// The harness defaults sit below the global config: a global save always outranks them.
+	return owned && owned.source !== "global" && owned.source !== "harness" ? owned.source : undefined;
 }
 
 const SOURCE_LABELS: Record<SettingProvenance, string> = {
@@ -150,6 +151,7 @@ const SOURCE_LABELS: Record<SettingProvenance, string> = {
 	overlay: "--config file",
 	project: "project config",
 	global: "global config",
+	harness: "Ombra harness defaults",
 	default: "default",
 };
 

@@ -4,7 +4,7 @@
  * registers, and the byte-identical no-op loop guard. One store per
  * {@link ToolSession}; every {@link EditSession} the edit tool opens shares it.
  */
-import { EditStore } from "@oh-my-pi/pi-natives";
+import { diffLineRuns, EditStore } from "@oh-my-pi/pi-natives";
 
 /** Owner of the lazily created per-session store. */
 export interface EditStoreOwner {
@@ -47,4 +47,24 @@ export function recordFullySeenRows(
 		})
 		.join("\n");
 	store.recordSeenLinesFromBody(path, tag, completeRows);
+}
+
+/**
+ * `edit.seenFromEditResults`: count the lines an applied edit wrote (added or
+ * replaced, 1-based in `next`) as displayed for the file's current tag. The
+ * edit result elides the middle of long inserted runs, but the model authored
+ * that text, so anchoring a follow-up edit on it needs no re-read. Skipped when
+ * the store's head snapshot is not exactly `next` (e.g. a later rewrite).
+ */
+export function recordAuthoredLines(store: EditStore, path: string, prev: string, next: string): void {
+	const tag = store.headHash(path);
+	if (!tag || store.byHashText(path, tag) !== next) return;
+	const authored: number[] = [];
+	let line = 1;
+	for (const run of diffLineRuns(prev, next)) {
+		if (run.removed) continue;
+		if (run.added) for (let k = 0; k < run.count; k++) authored.push(line + k);
+		line += run.count;
+	}
+	if (authored.length > 0) store.recordSeenLines(path, tag, authored);
 }

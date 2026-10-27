@@ -9,6 +9,8 @@
  *     settings, and enabled npm/link plugins under `<plugins>/node_modules/`).
  *     Mirrors the same sub-discovery convention applied to `skills/`,
  *     `hooks/`, `tools/`, etc. by `discovery/omp-plugins.ts`.
+ *   - <harness>/agent/agents/*.md (the Ombra harness, `OMBRA_HARNESS_DIR`;
+ *     app-owned, so it loads in untrusted folders too).
  *
  * Claude Code marketplace plugin agents are discovered separately via the
  * claude-plugins provider. Direct cross-harness roots such as .claude/agents
@@ -28,6 +30,7 @@ import { isUntrustedProjectScope } from "../config/settings-context";
 import { pluginUsesClaudeModelDialect } from "../discovery/agent-plugin-format";
 import { listClaudePluginRoots } from "../discovery/helpers";
 import { listOmpExtensionRoots } from "../discovery/omp-extension-roots";
+import { getHarnessAgentsDir } from "../harness-layer";
 import { loadBundledAgents, parseAgent } from "./agents";
 import type { AgentSource } from "@oh-my-pi/pi-tui/tools/task";
 import type { AgentDefinition } from "./types";
@@ -79,7 +82,7 @@ async function loadAgentsFromDir({ dir, source, ignoreModel }: AgentDirectory): 
  * Precedence (highest wins): project `.omp/agents`, user `.omp/agents`,
  * OMP extension-package agents from the effective `extensions` setting,
  * installed npm/link plugins, Claude marketplace plugin agents (project scope
- * before user), then bundled.
+ * before user), the Ombra harness agents, then bundled.
  * @param cwd - Current working directory for project agent discovery
  * @param home - Home directory for user and marketplace discovery
  * @param extensionRoots - Session-local extension roots (explicit + mode + configured)
@@ -154,6 +157,11 @@ export async function discoverAgents(
 			ignoreModel: pluginModelDrops[index],
 		});
 	});
+
+	// The Ombra harness ranks just above bundled: its agents replace bundled ones of the same
+	// name, and every user or project agent of the same name replaces the harness one.
+	const harnessAgentsDir = getHarnessAgentsDir();
+	if (harnessAgentsDir) orderedDirs.push({ dir: harnessAgentsDir, source: "user" });
 
 	// An untrusted folder's agent definitions (its `.omp/agents`, project-scope extension and plugin
 	// agents) are neither offered nor spawnable, and never shadow the user's own of the same name.

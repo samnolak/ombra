@@ -181,7 +181,12 @@ public sealed partial class MainViewModel
     [ObservableProperty] private bool _modelsLoading;
     /// <summary>Why the model menu lists nothing yet (omp is still starting); null otherwise.</summary>
     [ObservableProperty] private string? _modelsNotice;
-    [ObservableProperty] private string _currentModel = Loc.T("no model");
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentModelShort))]
+    private string _currentModel = Loc.T("no model");
+    /// <summary>The model without its provider ("claude-opus-5-5" for "anthropic/claude-opus-5-5"): the model chip's
+    /// label once the toolbar is short of room, the full name staying in its tooltip.</summary>
+    public string CurrentModelShort => CurrentModel[(CurrentModel.LastIndexOf('/') + 1)..];
     [ObservableProperty] private string? _selectedThinking;
     [ObservableProperty] private bool _showThinking = true;
 
@@ -421,13 +426,17 @@ public sealed partial class MainViewModel
     /// Enter adds a line). Saved when chosen.
     /// </summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(SendWithModifier), nameof(SendKeyHint), nameof(ComposerHint))]
+    [NotifyPropertyChangedFor(nameof(SendWithModifier), nameof(SendKeyHint), nameof(ComposerHint), nameof(QueueTooltip))]
     private string _sendKey = "enter";
 
     public bool SendWithModifier => SendKey == "mod-enter";
 
     /// <summary>The key that sends, as the platform writes it.</summary>
     public string SendKeyHint => !SendWithModifier ? "Enter" : OperatingSystem.IsMacOS() ? "⌘Enter" : "Ctrl+Enter";
+
+    /// <summary>The round queue button's tooltip while omp works: what it does and the two other ways to send.</summary>
+    public string QueueTooltip => Loc.F("Queue: send when omp finishes its current work ({0}). {1} steers it now, {2} stops omp and sends it.",
+        SendKeyHint, KeyboardShortcuts.Steer, KeyboardShortcuts.InterruptAndSend);
 
     /// <summary>The ⌘/Ctrl modifier's label for the send-key choice.</summary>
     public static string ModEnterLabel => OperatingSystem.IsMacOS() ? "⌘ Enter" : "Ctrl+Enter";

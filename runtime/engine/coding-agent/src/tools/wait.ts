@@ -19,7 +19,7 @@ import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import type { CoordinationDetails } from "@oh-my-pi/pi-tui/tools/wait";
 import { throwIfAborted } from "./tool-errors";
 
-import { cfgLaunchEnabled } from "./settings";
+import { cfgLaunchEnabled, cfgWaitMaxHeadlessMs } from "./settings";
 
 const waitSchema = type({});
 const WAIT_MAX_MS = 30 * 60_000;
@@ -107,6 +107,9 @@ export class WaitTool implements AgentTool<typeof waitSchema, CoordinationDetail
 		onUpdate: AgentToolUpdateCallback<CoordinationDetails> | undefined;
 	}): Promise<AgentToolResult<CoordinationDetails>> {
 		const { jobs, manager, messaging, serviceRunning, signal, onUpdate } = args;
+		// Without a UI nobody can interrupt a stuck wait, so `wait.maxHeadlessMs` bounds it.
+		const headlessCapMs = this.session.hasUI ? 0 : cfgWaitMaxHeadlessMs.get(this.session.settings);
+		const limitMs = headlessCapMs > 0 ? Math.min(headlessCapMs, WAIT_MAX_MS) : WAIT_MAX_MS;
 		const watchedIds = jobs.map(job => job.id);
 		manager?.watchJobs(watchedIds);
 		const serviceAbort = new AbortController();
@@ -119,7 +122,7 @@ export class WaitTool implements AgentTool<typeof waitSchema, CoordinationDetail
 					.catch(() => null)
 			: undefined;
 		const { promise: timeout, resolve: timedOut } = Promise.withResolvers<void>();
-		const timer = setTimeout(timedOut, WAIT_MAX_MS);
+		const timer = setTimeout(timedOut, limitMs);
 		const abort = Promise.withResolvers<void>();
 		const onAbort = () => abort.resolve();
 		if (signal) {
@@ -170,7 +173,14 @@ export class WaitTool implements AgentTool<typeof waitSchema, CoordinationDetail
 				}
 				throwIfAborted(signal);
 			}
-			if (manager && jobs.length > 0) return buildJobResult(this.session, manager, "wait", jobs, []);
+			if (manager && jobs.length > 0) {
+				const result = buildJobResult(this.session, manager, "wait", jobs, []);
+				if (wake !== "timeout" || headlessCapMs <= 0) return result;
+				const running = jobs.filter(job => job.status === "running").map(job => `\`${job.id}\``);
+				if (running.length === 0) return result;
+				const notice = `Still running after ${Math.round(limitMs / 1000)} s (headless wait limit): ${running.join(", ")}. Waiting again will not help a hung command: cancel it with \`write proc://<id>/kill\`, or rerun it in the foreground with a timeout.`;
+				return { ...result, content: [{ type: "text", text: notice }, ...result.content], useless: false };
+			}
 			return {
 				content: [
 					{

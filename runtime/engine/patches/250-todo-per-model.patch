@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ombra engine maintainers <engine@ombra.local>
+Date: Sat, 1 Jan 2000 00:00:00 +0000
+Subject: [PATCH] todo.disableForModels: no todo tool for matching models,
+ following model switches
+
+What: todo.disableForModels: no todo tool for matching models, following model switches
+Why: GPT models did better without the todo tool in Ombra's benchmarks, while Ombra's plan panel relies on todo for the other, unbenchmarked models; the switch therefore has to be per model.
+Upstream-Status: Ombra-specific; not submitted
+
+diff --git a/src/tools/todo-models.ts b/src/tools/todo-models.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..15f790c098aa7e888b9f1b2256136540e29e8f6d
+--- /dev/null
++++ b/src/tools/todo-models.ts
+@@ -0,0 +1,25 @@
++/**
++ * `todo.disableForModels`: the todo tool per model. A model whose selector contains one of the
++ * entries (case-insensitive, like `edit.modelVariants`) gets no `todo` tool, and with it no todo
++ * reminders or eager prelude, which require the tool to be active.
++ */
++import { combine } from "../config/registry";
++import type { Settings } from "../config/settings";
++import { cfgTodoDisableForModels, cfgTodoEnabled } from "./settings";
++
++const todoModelGate = combine(
++	{ enabled: cfgTodoEnabled, disableForModels: cfgTodoDisableForModels },
++	({ enabled, disableForModels }) => ({
++		enabled,
++		patternsLower: disableForModels.filter(pattern => pattern !== "").map(pattern => pattern.toLowerCase()),
++	}),
++);
++
++/** Whether the todo tool is available to `model` (a selector such as `openai-codex/gpt-6-luna`). */
++export function isTodoEnabledForModel(settings: Settings, model: string | undefined): boolean {
++	const { enabled, patternsLower } = todoModelGate.get(settings);
++	if (!enabled) return false;
++	if (!model || patternsLower.length === 0) return true;
++	const modelLower = model.toLowerCase();
++	return !patternsLower.some(pattern => modelLower.includes(pattern));
++}

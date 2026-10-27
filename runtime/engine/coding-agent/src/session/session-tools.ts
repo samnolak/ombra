@@ -52,7 +52,7 @@ import {
 	PERMISSION_REQUIRED_TOOLS,
 } from "./acp-permission-gate";
 import type { ClientBridge, ClientBridgePermissionOutcome } from "./client-bridge";
-import { toolReadsSkillUris } from "../system-prompt";
+import { systemPromptVariantForModel, toolReadsSkillUris } from "../system-prompt";
 
 import type { CustomMessage } from "./messages";
 import type { SessionEntry } from "./session-entries";
@@ -61,7 +61,13 @@ import type { SessionManager } from "./session-manager";
 import { cfgDisabledExtensions, cfgSkills, type SkillsSettings } from "../extensibility/settings";
 import { cfgExternalThinking, cfgIncludeModelInPrompt, cfgInlineToolDescriptors, cfgSkillful } from "./settings";
 import { cfgStartupQuiet } from "../modes/settings";
-import { cfgToolsApproval, cfgToolsApprovalMode, cfgToolsXdevDocs, cfgToolsXdevInlineDevices } from "../tools/settings";
+import {
+	cfgTodoDisableForModels,
+	cfgToolsApproval,
+	cfgToolsApprovalMode,
+	cfgToolsXdevDocs,
+	cfgToolsXdevInlineDevices,
+} from "../tools/settings";
 
 /** Capabilities borrowed from the owning AgentSession. */
 export interface SessionToolsHost {
@@ -849,18 +855,28 @@ export class SessionTools {
 	#currentPromptModelKey(): string | undefined {
 		const activeModel = this.#host.model();
 		if (!activeModel) return undefined;
-		if (cfgIncludeModelInPrompt.get(this.#host.settings)) return formatModelString(activeModel);
+		const modelString = formatModelString(activeModel);
+		if (cfgIncludeModelInPrompt.get(this.#host.settings)) return modelString;
 		// The inline-descriptor decision is per model and selects both the prompt's
 		// tool catalog and provider-side description pruning (see `sdk.ts`).
 		const inlineDescriptors = shouldInlineToolDescriptors(
 			cfgInlineToolDescriptors.get(this.#host.settings),
 			activeModel.id,
 		);
-		return `delegation-bias:${resolveDelegationBias(activeModel)}|inline-descriptors:${inlineDescriptors}`;
+		// `systemPrompt.modelVariants` picks the base template and Responses Lite its batching guidance.
+		const variant = systemPromptVariantForModel(this.#host.settings, modelString) ?? "";
+		return `delegation-bias:${resolveDelegationBias(activeModel)}|inline-descriptors:${inlineDescriptors}|prompt-variant:${variant}|lite:${activeModel.useResponsesLite === true}`;
 	}
 
-	/** Rebuilds model-dependent tool prompts after a model change. */
+	/** Rebuilds model-dependent tools and prompts after a model change. */
 	async syncAfterModelChange(previousEditMode: EditMode): Promise<void> {
+		// `todo.disableForModels`: the todo tool follows the model; a changed tool set rebuilds the prompt.
+		if (
+			cfgTodoDisableForModels.get(this.#host.settings).length > 0 &&
+			(await this.reconcileBuiltinTools({ refreshPrompt: false }))
+		) {
+			return;
+		}
 		const currentEditMode = this.resolveActiveEditMode();
 		const editModeChanged = previousEditMode !== currentEditMode && this.getActiveToolNames().includes("edit");
 		// The system prompt selects model-specific policy even when it does not display the model id.
@@ -1966,12 +1982,12 @@ export class SessionTools {
 	 * unregisters disallowed ones, and reapplies the enabled set with one forced
 	 * prompt rebuild — unconditionally unless `refreshPrompt` is false, then only
 	 * when the tool set changed. Unrelated selections and MCP/extension tools are
-	 * preserved.
+	 * preserved. Resolves to whether the prompt was rebuilt.
 	 */
-	reconcileBuiltinTools({ refreshPrompt = true }: { refreshPrompt?: boolean } = {}): Promise<void> {
+	reconcileBuiltinTools({ refreshPrompt = true }: { refreshPrompt?: boolean } = {}): Promise<boolean> {
 		return this.runToolRegistryMutation(async () => {
 			const reconcile = this.#reconcileSettingsGatedTools;
-			if (!reconcile || this.#host.isDisposed()) return;
+			if (!reconcile || this.#host.isDisposed()) return false;
 			// Sampled before the delta: it still carries names mounted under the
 			// `xd://` state the reconcile may release.
 			const enabled = new Set(this.getEnabledToolNames());
@@ -1989,8 +2005,9 @@ export class SessionTools {
 				this.#xdev = delta.xdev;
 				if (delta.xdev) delta.xdev.decorateExecution = tool => this.#wrapToolForAcpPermission(tool);
 			}
-			if (!refreshPrompt && !xdevChanged && delta.added.length === 0 && delta.removed.length === 0) return;
+			if (!refreshPrompt && !xdevChanged && delta.added.length === 0 && delta.removed.length === 0) return false;
 			await this.#applyActiveToolsByName([...enabled], true);
+			return true;
 		});
 	}
 

@@ -12,9 +12,11 @@ import { $env, getAgentDir, getProjectDir, hasFsCode, isEnoent, logger, prompt }
 import { contextFileCapability } from "./capability/context-file";
 import { systemPromptCapability } from "./capability/system-prompt";
 import { findConfigFile } from "./config";
+import type { Settings } from "./config/settings";
 import type { SkillsSettings } from "./extensibility/settings";
 import type { Personality } from "./session/settings";
 import { type ContextFile, loadCapability, type SystemPrompt as SystemPromptFile } from "./discovery";
+import { applyContextFileBudget, formatContextFileBudgetNotice } from "./context-file-budget";
 import { expandAtImports } from "./discovery/at-imports";
 import type { EvalPreludeDefinition } from "./eval/preludes";
 import { SkillDescriptionCatalog } from "./extensibility/skill-descriptions";
@@ -28,6 +30,7 @@ import friendlyPersonality from "./prompts/system/personalities/friendly.md" wit
 import pragmaticPersonality from "./prompts/system/personalities/pragmatic.md" with { type: "text" };
 import projectPromptTemplate from "./prompts/system/project-prompt.md" with { type: "text" };
 import systemPromptTemplate from "./prompts/system/system-prompt.md" with { type: "text" };
+import systemPromptGptTemplate from "./prompts/system/system-prompt-gpt.md" with { type: "text" };
 import userAppendPromptTemplate from "./prompts/system/user-append.md" with { type: "text" };
 import { normalizeConcurrencyLimit } from "./task/parallel";
 import type { ActiveRepoContext } from "@oh-my-pi/pi-tui/status-line/host";
@@ -37,16 +40,18 @@ import { normalizePromptPath } from "./utils/prompt-path";
 import { AGENTS_MD_LIMIT, buildWorkspaceTree, type WorkspaceTree } from "./workspace-tree";
 import { combine } from "./config/registry";
 import { cfgBashAutoBackgroundEnabled } from "./exec/settings";
+import { cfgEditRun } from "./edit/settings";
 import { cfgEvalAutoBackgroundEnabled } from "./eval/settings";
 import { cfgTtsrBuiltinRules, cfgTtsrDisabledRules, cfgTtsrEnabled } from "./export/ttsr-settings";
 import { cfgTuiAutoGraph, cfgTuiReactions, cfgTuiRenderMermaid, cfgTuiRenderSvg } from "./modes/settings";
 import { cfgSecretsEnabled } from "./secrets/settings";
-import { cfgToolsFormat } from "./session/context-settings";
+import { cfgContextFilesMaxBytes, cfgToolsFormat } from "./session/context-settings";
 import {
 	cfgIncludeModelInPrompt,
 	cfgIncludeWorkspaceTree,
 	cfgInlineToolDescriptors,
 	cfgPersonality,
+	cfgSystemPromptModelVariants,
 } from "./session/settings";
 import { cfgTaskBatch, cfgTaskEager } from "./task/settings";
 import {
@@ -68,8 +73,10 @@ export const cfgSystemPromptInputs = combine({
 	includeModelInPrompt: cfgIncludeModelInPrompt,
 	includeWorkspaceTree: cfgIncludeWorkspaceTree,
 	inlineToolDescriptors: cfgInlineToolDescriptors,
+	modelVariants: cfgSystemPromptModelVariants,
 	toolsFormat: cfgToolsFormat,
 	intentTracing: cfgToolsIntentTracing,
+	contextFilesMaxBytes: cfgContextFilesMaxBytes,
 	xdevDocs: cfgToolsXdevDocs,
 	xdevInlineDevices: cfgToolsXdevInlineDevices,
 	vaultEnabled: cfgVaultEnabled,
@@ -89,6 +96,8 @@ export const cfgSystemPromptInputs = combine({
 	ttsrBuiltinRules: cfgTtsrBuiltinRules,
 	ttsrDisabledRules: cfgTtsrDisabledRules,
 	secretsEnabled: cfgSecretsEnabled,
+	// The GPT template points edit checks at the `edit` tool's `run` field.
+	editRun: cfgEditRun,
 });
 
 /** Bundled personality specs, keyed by the `personality` setting value. */
@@ -97,6 +106,29 @@ const PERSONALITY_SPECS: Record<Exclude<Personality, "none">, string> = {
 	friendly: friendlyPersonality,
 	pragmatic: pragmaticPersonality,
 };
+
+/** Bundled base-prompt templates selectable through `systemPrompt.modelVariants`, keyed by file name. */
+const SYSTEM_PROMPT_VARIANTS: Record<string, string> = {
+	"system-prompt-gpt": systemPromptGptTemplate,
+};
+
+/** {@link cfgSystemPromptModelVariants} with lowercased patterns; entries naming an unknown template are dropped. */
+const systemPromptModelVariants = cfgSystemPromptModelVariants.map(variants => {
+	const entries: { patternLower: string; name: string }[] = [];
+	for (const pattern in variants) {
+		const name = variants[pattern];
+		if (Object.hasOwn(SYSTEM_PROMPT_VARIANTS, name)) entries.push({ patternLower: pattern.toLowerCase(), name });
+		else logger.warn("Ignoring unknown systemPrompt.modelVariants template", { pattern, name });
+	}
+	return entries;
+});
+
+/** First `systemPrompt.modelVariants` entry whose pattern occurs in `model` (case-insensitive): its template name. */
+export function systemPromptVariantForModel(settings: Settings, model: string | undefined): string | undefined {
+	if (!model) return undefined;
+	const modelLower = model.toLowerCase();
+	return systemPromptModelVariants.get(settings).find(variant => modelLower.includes(variant.patternLower))?.name;
+}
 
 /**
  * Load the user-level PERSONALITY.md override for the system prompt's
@@ -498,6 +530,12 @@ export interface BuildSystemPromptOptions {
 	resolvedCustomPrompt?: string;
 	/** Raw Handlebars template rendered with the default prompt's live context. */
 	systemPromptTemplate?: string;
+	/**
+	 * Bundled base-template name chosen by `systemPrompt.modelVariants` for the active model
+	 * (see {@link systemPromptVariantForModel}). Replaces only the bundled default: a literal
+	 * custom prompt or a supplied/discovered template still wins. Unknown names use the default.
+	 */
+	modelVariant?: string;
 	/** Tools to include in prompt. */
 	tools?: Map<string, SystemPromptToolMetadata>;
 	/** Tool names to include in prompt. */
@@ -523,6 +561,8 @@ export interface BuildSystemPromptOptions {
 	additionalWorkspaceRoots?: string[];
 	/** Pre-loaded context files (skips discovery if provided). */
 	contextFiles?: Array<{ path: string; content: string; depth?: number }>;
+	/** Byte budget per context-file chain (user-global, project); 0 = unlimited. Default: 0 */
+	contextFilesMaxBytes?: number;
 	/** Skills provided directly to system prompt construction. */
 	skills?: readonly Skill[];
 	/** Session-scoped description snapshot; background cache writes apply only to the next session. */
@@ -595,6 +635,10 @@ export interface BuildSystemPromptOptions {
 	 * the main agent verifies once after all subagents land, so parallel children don't storm the CPU.
 	 */
 	subagent?: boolean;
+	/** Whether the active model runs on Responses Lite (`parallel_tool_calls: false`). Default: false */
+	responsesLite?: boolean;
+	/** Whether `edit` takes a post-apply `run` command (`edit.run`). Default: false */
+	editRun?: boolean;
 }
 
 /** Result of building provider-facing system prompt messages. */
@@ -649,6 +693,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		cwd,
 		additionalWorkspaceRoots = [],
 		contextFiles: providedContextFiles,
+		contextFilesMaxBytes = 0,
 		skills: providedSkills,
 		rules,
 		alwaysApplyRules,
@@ -679,6 +724,9 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		autoQaEnabled = false,
 		writeTransportOnly = false,
 		subagent = false,
+		modelVariant,
+		responsesLite = false,
+		editRun = false,
 		activeRepoContext: providedActiveRepoContext,
 	} = options;
 	const inlineToolDescriptors = providedInlineToolDescriptors ?? false;
@@ -821,7 +869,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		resolvedCustomPrompt,
 		resolvedAppendPrompt,
 		systemPromptCustomization,
-		contextFiles,
+		loadedContextFiles,
 		skills,
 		workspaceTree,
 		activeRepoContext,
@@ -851,6 +899,11 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		withDeadline("loadPersonalityOverride", personalityPromise, bundledPersonality),
 	]);
 	clearTimeout(deadlineTimer);
+	// Budget after dedupe so contained duplicates never spend bytes; every later
+	// consumer (always-apply dedupe, templates) sees exactly what the model sees.
+	const contextFileBudget = applyContextFileBudget(loadedContextFiles, contextFilesMaxBytes);
+	const contextFiles = contextFileBudget.files;
+	const contextFilesBudgetNotice = formatContextFileBudgetNotice(contextFilesMaxBytes, contextFileBudget) ?? "";
 	const agentsMdFiles = Array.from(new Set(workspaceTree.agentsMdFiles)).sort().slice(0, AGENTS_MD_LIMIT);
 
 	if (timedOut.length > 0) {
@@ -968,6 +1021,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		toolRefs,
 		environment,
 		contextFiles,
+		contextFilesBudgetNotice,
 		agentsMdSearch: { files: agentsMdFiles },
 		workspaceTree,
 		hasSkillUriAccess,
@@ -1004,10 +1058,16 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 		autoQaEnabled,
 		writeTransportOnly,
 		subagent,
+		responsesLite,
+		editRun,
 	};
+	const bundledTemplate =
+		modelVariant !== undefined && Object.hasOwn(SYSTEM_PROMPT_VARIANTS, modelVariant)
+			? SYSTEM_PROMPT_VARIANTS[modelVariant]
+			: systemPromptTemplate;
 	const selectedTemplate = resolvedCustomPrompt
 		? customSystemPromptTemplate
-		: (resolvedSystemPromptTemplate ?? systemPromptTemplate);
+		: (resolvedSystemPromptTemplate ?? bundledTemplate);
 	let rendered: string;
 	try {
 		rendered = prompt.render(selectedTemplate, data);
@@ -1020,7 +1080,7 @@ export async function buildSystemPrompt(options: BuildSystemPromptOptions = {}):
 			error: String(error),
 		});
 		resolvedSystemPromptTemplate = undefined;
-		rendered = prompt.render(systemPromptTemplate, data);
+		rendered = prompt.render(bundledTemplate, data);
 	}
 	const systemPrompt = [rendered];
 	for (const prelude of evalPreludes) {

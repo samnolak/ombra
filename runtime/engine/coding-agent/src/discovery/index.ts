@@ -29,6 +29,7 @@ import "./builtin-defaults";
 import "./claude";
 import "./claude-plugins";
 import "./cline";
+import "./harness";
 import "./agents";
 import "./codex";
 import "./cursor";

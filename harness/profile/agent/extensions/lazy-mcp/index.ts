@@ -2,8 +2,9 @@
 // Servers listed in servers.json (next to this file) are not in mcp.json, so omp never connects them at startup.
 // Dependency-free MCP client: stdio (newline-delimited JSON-RPC) and Streamable HTTP (JSON or SSE responses).
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
 
 type ServerConfig =
 	| { description: string; type?: "stdio"; command: string; args?: string[]; env?: Record<string, string>; cwd?: string; timeout?: number }
@@ -29,6 +30,54 @@ function loadServers(): Record<string, ServerConfig> {
 	return JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
 }
 
+/**
+ * PATH for stdio servers. An app started from the Dock or Finder gets launchd's minimal PATH
+ * (/usr/bin:/bin:/usr/sbin:/sbin), so a bare `uvx` or `npx` would not be found. Puts the usual per-user and
+ * package-manager bin directories that exist and are not on PATH yet in front of the inherited PATH:
+ * ~/.local/bin, Homebrew, /usr/local/bin, Bun, Volta, Cargo and the newest nvm Node.
+ */
+export function serverPath(env: NodeJS.ProcessEnv = process.env, home = homedir()): string {
+	const inherited = (env.PATH ?? "").split(delimiter).filter(Boolean);
+	if (process.platform === "win32") return inherited.join(delimiter);
+	const extra = [
+		join(home, ".local/bin"),
+		"/opt/homebrew/bin",
+		"/usr/local/bin",
+		join(home, ".bun/bin"),
+		join(env.VOLTA_HOME ?? join(home, ".volta"), "bin"),
+		join(home, ".cargo/bin"),
+	];
+	const nvm = join(env.NVM_DIR ?? join(home, ".nvm"), "versions/node");
+	try {
+		const newest = readdirSync(nvm)
+			.filter(v => /^v\d/.test(v))
+			.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0];
+		if (newest) extra.push(join(nvm, newest, "bin"));
+	} catch {}
+	const dirs = [...inherited];
+	for (const d of extra.reverse()) if (!dirs.includes(d) && existsSync(d)) dirs.unshift(d);
+	return dirs.join(delimiter);
+}
+
+/**
+ * Resolves a server `command` the way the user's shell would: absolute paths stay as they are, bare names are
+ * looked up on {@link serverPath}. Returns the command and the PATH for the child; the directory the command
+ * really lives in (after symlinks, e.g. ~/.local/bin/npx → ~/.local/node/bin/npx) comes first, so a
+ * `#!/usr/bin/env node` script finds its own runtime.
+ */
+export function resolveCommand(command: string, env: NodeJS.ProcessEnv = process.env): { command: string; path: string } {
+	const path = serverPath(env);
+	if (isAbsolute(command)) return { command, path };
+	const found = Bun.which(command, { PATH: path });
+	if (!found) throw new Error(`"${command}" was not found on PATH (${path}); install it or give its absolute path in servers.json`);
+	let real = found;
+	try {
+		real = realpathSync(found);
+	} catch {}
+	const dir = dirname(real);
+	return { command: found, path: path.split(delimiter).includes(dir) ? path : `${dir}${delimiter}${path}` };
+}
+
 function text(t: string, isError = false) {
 	return { content: [{ type: "text" as const, text: t }], isError, details: {} };
 }
@@ -46,10 +95,11 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
 	return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-function stdioTransport(cfg: Extract<ServerConfig, { command: string }>, onClose: () => void) {
-	const proc = Bun.spawn([cfg.command, ...(cfg.args ?? [])], {
-		cwd: cfg.cwd,
-		env: { ...process.env, ...cfg.env },
+function stdioTransport(cfg: Extract<ServerConfig, { command: string }>, cwd: string, onClose: () => void) {
+	const resolved = resolveCommand(cfg.command);
+	const proc = Bun.spawn([resolved.command, ...(cfg.args ?? [])], {
+		cwd: cfg.cwd ?? cwd,
+		env: { ...process.env, PATH: resolved.path, ...cfg.env },
 		stdin: "pipe",
 		stdout: "pipe",
 		stderr: "ignore",
@@ -174,14 +224,14 @@ export default function (pi: ExtensionAPI) {
 		.map(([name, s]) => `- ${name}: ${s.description}`)
 		.join("\n");
 
-	async function connect(name: string): Promise<Connection> {
+	async function connect(name: string, cwd: string): Promise<Connection> {
 		const existing = connections.get(name);
 		if (existing) return existing;
 		const servers = loadServers();
 		const cfg = servers[name];
 		if (!cfg) throw new Error(`unknown server "${name}"; known: ${Object.keys(servers).join(", ")}`);
 		const timeout = cfg.timeout ?? DEFAULT_TIMEOUT;
-		const transport = cfg.type === "http" ? httpTransport(cfg) : stdioTransport(cfg, () => connections.delete(name));
+		const transport = cfg.type === "http" ? httpTransport(cfg) : stdioTransport(cfg, cwd, () => connections.delete(name));
 		try {
 			const init = (await withTimeout(
 				transport.request("initialize", {
@@ -228,7 +278,7 @@ export default function (pi: ExtensionAPI) {
 			tool: z.string().optional().describe("Tool name for action=call"),
 			args: z.record(z.string(), z.unknown()).optional().describe("Tool arguments for action=call"),
 		}),
-		async execute(_id, params, signal) {
+		async execute(_id, params, signal, _onUpdate, ctx) {
 			const { action, server, tool, args } = params;
 			try {
 				if (action === "status") {
@@ -244,7 +294,7 @@ export default function (pi: ExtensionAPI) {
 					await disconnect(server);
 					return text(was ? `${server} disabled` : `${server} was not enabled`);
 				}
-				const conn = await connect(server);
+				const conn = await connect(server, ctx.cwd);
 				if (action === "enable") {
 					const { tools } = (await conn.request("tools/list", {}, signal)) as { tools: McpTool[] };
 					conn.toolCount = tools.length;

@@ -189,6 +189,32 @@ export const cfgBashDirenvLoadTimeoutMs = register({
 	},
 });
 
+export const cfgBashEnvScrubEnabled = register({
+	id: "bash.envScrub.enabled",
+	type: "boolean",
+	default: false,
+	ui: {
+		tab: "shell",
+		group: "Bash",
+		label: "Scrub Credential Env",
+		description:
+			"Drop inherited environment variables whose names contain KEY, PASSWORD, SECRET or TOKEN before a model-run command starts (bash, pty, background jobs, services, eval kernels). Names in bash.envScrub.forward are kept; env passed for one call still applies",
+	},
+});
+
+/** Names kept by the credential scrub even though they match its pattern (e.g. `GH_TOKEN`). */
+export const cfgBashEnvScrubForward = register({
+	id: "bash.envScrub.forward",
+	type: "array",
+	default: EMPTY_STRING_ARRAY,
+	validate: raw => {
+		if (raw === undefined) return;
+		if (!Array.isArray(raw) || raw.some(entry => typeof entry !== "string")) {
+			throw new Error("bash.envScrub.forward must be a list of environment variable names");
+		}
+	},
+});
+
 // Shell output minimizer
 export const cfgShellMinimizerEnabled = register({
 	id: "shellMinimizer.enabled",

@@ -243,6 +243,7 @@ import {
 	composeAppendPrompt,
 	loadProjectContextFiles as loadContextFilesInternal,
 	projectSystemPromptToolMetadata,
+	systemPromptVariantForModel,
 } from "./system-prompt";
 import type { AgentDefinition } from "./task/types";
 import { AgentOutputManager } from "./task/output-manager";
@@ -328,6 +329,7 @@ import {
 	cfgGenerateImageEnabled,
 	cfgSecurityEnabled,
 	cfgSpeechgenEnabled,
+	cfgTodoDisableForModels,
 	cfgToolsAbortOnFabricatedResult,
 	cfgToolsIntentTracing,
 	cfgToolsMaxTimeout,
@@ -336,7 +338,7 @@ import {
 	cfgToolsXdevInlineDevices,
 	cfgSessionToolGates,
 } from "./tools/settings";
-import { cfgToolsFormat } from "./session/context-settings";
+import { cfgContextFilesMaxBytes, cfgToolsFormat } from "./session/context-settings";
 import { cfgAutolearnEnabled } from "./autolearn/settings";
 import { cfgBrowserEnabled } from "./tools/browser/settings";
 import {
@@ -376,7 +378,7 @@ import {
 } from "./extensibility/settings";
 import { cfgTtsr } from "./export/ttsr-settings";
 import { cfgDisabledProviders, cfgEnabledModels, cfgEnabledProviders, cfgModelRoles } from "./config/model-settings";
-import { cfgEditRecoverInlineEdits } from "./edit/settings";
+import { cfgEditRecoverInlineEdits, cfgEditRun } from "./edit/settings";
 import { cfgGoalEnabled } from "./goals/settings";
 import {
 	cfgImagesBlockImages,
@@ -4090,6 +4092,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				skills: cfgSkillful.get(settings) ? (session?.skills ?? skills) : [],
 				skillDescriptions,
 				contextFiles,
+				contextFilesMaxBytes: cfgContextFilesMaxBytes.get(settings),
 				tools: promptTools,
 				toolNames,
 				rules: rulebookRules,
@@ -4117,6 +4120,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 				settingsApproval: toolSession.settingsApproval === true,
 				evalPreludes: toolSession.getAdvertisedEvalPreludes?.(),
 				model: getActiveModelString(),
+				modelVariant: systemPromptVariantForModel(settings, getActiveModelString()),
+				responsesLite: (agent?.state.model ?? model)?.useResponsesLite === true,
+				editRun: cfgEditRun.get(settings),
 				includeModelInPrompt: cfgIncludeModelInPrompt.get(settings),
 				personality: agentKind === "sub" ? "none" : cfgPersonality.get(settings),
 				subagent: agentKind === "sub",
@@ -4921,6 +4927,9 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			// `find.enabled: auto` follows the judge role; a role change only touches
 			// the prompt when it actually adds or removes `find`.
 			cfgModelRoles.listen(session, () => reconcileGatedTools({ refreshPrompt: false }));
+			// `todo.disableForModels` follows the model, and a `--model` pattern served by an extension
+			// provider resolves only after `createTools` ran: settle the tools for the final model.
+			if (cfgTodoDisableForModels.get(settings).length > 0) await reconcileGatedTools({ refreshPrompt: false });
 		}
 		// Backfill the resumed advisor spend without blocking startup: the scan
 		// runs after the session is live, so `--resume` no longer scales with the

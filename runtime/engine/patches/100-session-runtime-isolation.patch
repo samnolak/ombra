@@ -202,18 +202,19 @@ index ed96dfb8b2bb53c0bf7ff152f41220fdc85cc39f..50a6d284994cf3efaa26970817bca26a
  
  /**
 diff --git a/src/eval/py/kernel.ts b/src/eval/py/kernel.ts
-index ac7ef56a7f1bbc19f401c4d5c2f88d94cddeaa11..1f5d6a798a0460993f6d701c06900d501983c056 100644
+index ac7ef56a7f1bbc19f401c4d5c2f88d94cddeaa11..4004d386b0d427ed757019ac7a0fa48ea8793b9c 100644
 --- a/src/eval/py/kernel.ts
 +++ b/src/eval/py/kernel.ts
-@@ -10,6 +10,7 @@
+@@ -10,6 +10,8 @@
  import * as path from "node:path";
  import { $flag, isBunTestRuntime, logger, Snowflake } from "@oh-my-pi/pi-utils";
  import { Settings } from "../../config/settings";
 +import { isUntrustedProjectScope } from "../../config/settings-context";
++import { resolveEnvScrubPolicy, scrubEnv } from "../../exec/env-scrub";
  import {
  	BaseKernel,
  	getRemainingTimeMs,
-@@ -120,7 +121,8 @@ export async function checkPythonKernelAvailability(
+@@ -120,7 +122,8 @@ export async function checkPythonKernelAvailability(
  		return { ok: true };
  	}
  	const resolvedCwd = path.resolve(cwd);
@@ -223,7 +224,7 @@ index ac7ef56a7f1bbc19f401c4d5c2f88d94cddeaa11..1f5d6a798a0460993f6d701c06900d50
  	const cached = availabilityCache.get(key);
  	if (cached) return await cached;
  	// Probe controls belong to one caller. Do not share an in-flight promise:
-@@ -136,7 +138,7 @@ async function probePythonKernelAvailability(
+@@ -136,7 +139,7 @@ async function probePythonKernelAvailability(
  	probeOpts?: BackendProbeOptions,
  ): Promise<PythonKernelAvailability> {
  	try {
@@ -232,15 +233,28 @@ index ac7ef56a7f1bbc19f401c4d5c2f88d94cddeaa11..1f5d6a798a0460993f6d701c06900d50
  		const { env } = settings.getShellConfig();
  		const baseEnv = filterEnv(env);
  		const runtimes = interpreter
-@@ -287,7 +289,7 @@ export class PythonKernel extends BaseKernel<PythonKernelExecuteOptions> {
+@@ -285,15 +288,19 @@ export class PythonKernel extends BaseKernel<PythonKernelExecuteOptions> {
+ 			throw new Error(availability.reason ?? "Python kernel unavailable");
+ 		}
  
++		const sessionSettings = await Settings.forSession();
  		let runtime = availability.runtime;
  		if (!runtime) {
 -			const { env: shellEnv } = (await Settings.init()).getShellConfig();
-+			const { env: shellEnv } = (await Settings.forSession()).getShellConfig();
++			const { env: shellEnv } = sessionSettings.getShellConfig();
  			runtime = options.interpreter
  				? resolveExplicitPythonRuntime(options.interpreter, options.cwd, filterEnv(shellEnv))
  				: resolvePythonRuntime(options.cwd, filterEnv(shellEnv));
+ 		}
++		// The allowlist above already drops most credentials; the scrub also
++		// covers allowed prefixes (`PI_*`, `XDG_*`, `LC_*`). Per-call env follows.
++		const envScrub = resolveEnvScrubPolicy(sessionSettings);
+ 		const spawnEnv: Record<string, string> = {};
+-		for (const [key, value] of Object.entries(runtime.env)) {
++		for (const [key, value] of Object.entries(envScrub ? scrubEnv(runtime.env, envScrub) : runtime.env)) {
+ 			if (typeof value === "string") spawnEnv[key] = value;
+ 		}
+ 		for (const [key, value] of Object.entries(options.env ?? {})) {
 diff --git a/src/eval/py/runtime.ts b/src/eval/py/runtime.ts
 index 2309bf0bf414d87ae0483db158ce9ed0762815e2..8457e9e18e66e0bcea8ac084f2ed79d0b5def018 100644
 --- a/src/eval/py/runtime.ts
@@ -297,10 +311,32 @@ index fda656d243d9ce7d540d2a99db00ad21edd41bd2..7b0d7f5f6cf6913ad80c24d66f18f838
  	// An explicit --tools list wins over --no-tools, matching session tool selection.
  	const evalExposed = args.tools ? args.tools.includes("eval") : !args.noTools;
 diff --git a/src/exec/bash-executor.ts b/src/exec/bash-executor.ts
-index eb7246d21fb4b8a66a66ad9e656372e72705665c..5fb7773214401f6c155fded2d32244ded473583b 100644
+index eb7246d21fb4b8a66a66ad9e656372e72705665c..0f9c396f17515f9c062c9168eabc816d60401a0b 100644
 --- a/src/exec/bash-executor.ts
 +++ b/src/exec/bash-executor.ts
-@@ -533,7 +533,7 @@ async function executeUserShellPty(run: {
+@@ -26,6 +26,7 @@ import { getOrCreateSnapshot } from "../utils/shell-snapshot";
+ import { TerminalGraphicsDecoder } from "../utils/terminal-graphics";
+ import { loadDirenvEnv } from "./direnv";
+ import { buildNonInteractiveEnv } from "./non-interactive-env";
++import { type EnvScrubPolicy, scrubbedEnvNames, scrubEnv, scrubShellLine } from "./env-scrub";
+ 
+ import {
+ 	cfgBashDirenv,
+@@ -61,6 +62,13 @@ export interface BashExecutorOptions {
+ 	 * enforced by the embedded shell's `git` builtin.
+ 	 */
+ 	gitGuard?: boolean;
++	/**
++	 * Credential scrub for a command the model runs
++	 * (`resolveEnvScrubPolicy(settings)`; `bash.envScrub.*`). Matching inherited
++	 * names are removed; `env` above still applies. A scrubbed run never takes
++	 * the user-shell PTY path.
++	 */
++	envScrub?: EnvScrubPolicy;
+ 	/**
+ 	 * Filesystem for `scheme://` paths in this run of the embedded shell (a URL
+ 	 * `cwd` included). External shells and processes never see it.
+@@ -533,11 +541,16 @@ async function executeUserShellPty(run: {
  }
  
  export async function executeBash(command: string, options?: BashExecutorOptions): Promise<BashResult> {
@@ -309,6 +345,55 @@ index eb7246d21fb4b8a66a66ad9e656372e72705665c..5fb7773214401f6c155fded2d32244de
  	const baseShellConfig = settings.getShellConfig();
  	const shellConfig =
  		options?.useUserShell === true ? resolveUserShellConfig(settings, baseShellConfig) : baseShellConfig;
+-	const { shell, args, env: shellEnv, prefix } = shellConfig;
++	const { shell, args, env: inheritedShellEnv, prefix } = shellConfig;
++	const envScrub = options?.envScrub;
++	// Leaving names out of the session env only stops re-adding them; the
++	// embedded shell inherits the process environ, so the command line also
++	// unsets them (below, once the per-call env is known).
++	const shellEnv = envScrub ? scrubEnv(inheritedShellEnv, envScrub) : inheritedShellEnv;
+ 	const bashShell = isBashShell(shell);
+ 	// `!` hotkey commands on zsh/fish run in a real PTY: interactive shell
+ 	// startup (zle, job control, gitstatus) needs a TTY, and tools only emit
+@@ -550,7 +563,8 @@ export async function executeBash(command: string, options?: BashExecutorOptions
+ 		!bashShell &&
+ 		supportsAutoUserShell(shell) &&
+ 		$env.PI_NO_PTY !== "1" &&
+-		!isPersistentShellCdCommand(command);
++		!isPersistentShellCdCommand(command) &&
++		envScrub === undefined;
+ 	const minimizer = buildMinimizerOptions(cfgShellMinimizer.get(settings));
+ 
+ 	const commandCwd = resolveShellCwd(options?.cwd);
+@@ -566,7 +580,7 @@ export async function executeBash(command: string, options?: BashExecutorOptions
+ 	// has no `.envrc` on the host. The rc snapshot is independent, so both load
+ 	// concurrently.
+ 	const [snapshotPath, preflight] = await Promise.all([
+-		bashShell ? getOrCreateSnapshot(shell, shellEnv) : null,
++		bashShell ? getOrCreateSnapshot(shell, inheritedShellEnv) : null,
+ 		applyDirenvPreflight(command, commandCwd ?? process.cwd(), {
+ 			callerEnv: options?.env,
+ 			signal: options?.signal,
+@@ -580,10 +594,18 @@ export async function executeBash(command: string, options?: BashExecutorOptions
+ 	const runCdInPersistentShell = options?.useUserShell === true && !prefix && isPersistentShellCdCommand(command);
+ 	// Never wrap in cmd.exe: it is only the Windows no-bash fallback for spawn
+ 	// paths, and the embedded brush shell runs the POSIX line better directly.
+-	const finalCommand =
++	const shellLine =
+ 		options?.useUserShell === true && !bashShell && !isCmdShell(shell) && !runCdInPersistentShell
+ 			? buildUserShellCommand(shell, args, preflight.command)
+ 			: preflight.command;
++	// The embedded shell runs this line, so the POSIX unset applies regardless of `shell`.
++	const finalCommand = envScrub
++		? scrubShellLine(
++				undefined,
++				shellLine,
++				scrubbedEnvNames(envScrub, { base: inheritedShellEnv, explicit: commandEnv }),
++			).command
++		: shellLine;
+ 
+ 	// Create output sink for truncation and artifact handling
+ 	const graphics = new TerminalGraphicsDecoder();
 diff --git a/src/export/html/export-session-cwd.test.ts b/src/export/html/export-session-cwd.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..f1d5af6d0febfda9ce5db8e94afdb7cc30b0b34a

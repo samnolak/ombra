@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Regenerate the embedded owned engine manifest: python3 runtime/generate-engine-artifact.py.
 
-Run after editing runtime/engine. --check compares without writing (release/CI gate).
+Run after editing runtime/engine or harness/profile. --check compares without writing (release/CI gate).
+The source artifact carries the engine (installed at <pack>/omp/engine) and the Ombra harness from harness/profile
+(installed at <pack>/omp/harness, without caches and *.seed templates); file paths are relative to <pack>/omp.
 No network, timestamps, git-derived identity, source transformations, or dependency installs.
 """
 import argparse
@@ -14,38 +16,65 @@ ROOT = Path(__file__).resolve().parent.parent
 NAME = "ombra-engine-18.12.2-bun-1.4.2-v1"
 PACK = ROOT / "runtime" / "packs" / NAME
 ENGINE = ROOT / "runtime" / "engine"
+HARNESS = ROOT / "harness" / "profile"
 MAX_FILES, MAX_FILE_BYTES, MAX_TOTAL_BYTES = 8192, 16 << 20, 128 << 20
 
 
-def render():
-    files = []
-    seen = set()
+def collect(base, prefix, skip, files, seen):
+    """Appends every file under base to files as prefix/<relative path>, with size and sha256; returns the bytes."""
     total = 0
-    for source in sorted(ENGINE.rglob("*"), key=lambda path: path.relative_to(ENGINE).as_posix()):
+    for source in sorted(base.rglob("*"), key=lambda path: path.relative_to(base).as_posix()):
+        relative = source.relative_to(base)
+        if skip(relative):
+            continue
         if source.is_symlink():
-            raise ValueError(f"Engine symlinks are not permitted: {source}")
+            raise ValueError(f"Symlinks are not permitted in the source artifact: {source}")
         if not source.is_file():
             continue
-        path = source.relative_to(ENGINE).as_posix()
-        if path.split("/", 1)[0] in {".temp", "patches", "patcher.py", "upstream.json", "README.md",
-                                    "check-upstream.py", "upstream-fixtures.patch", "upstream-expected-failures.json"}:
-            continue
-        if any(part in {"node_modules", ".git", "__pycache__"} for part in source.relative_to(ENGINE).parts):
-            raise ValueError(f"Non-source directory in engine: {path}")
+        path = f"{prefix}/{relative.as_posix()}"
         if path.casefold() in seen or any(c in path for c in "\\:\n\r\0"):
             raise ValueError(f"Unsafe or duplicate source path: {path}")
         seen.add(path.casefold())
         data = source.read_bytes()
         total += len(data)
-        if len(data) > MAX_FILE_BYTES or total > MAX_TOTAL_BYTES:
-            raise ValueError("Engine exceeds installer size bounds")
+        if len(data) > MAX_FILE_BYTES:
+            raise ValueError("Source artifact exceeds installer size bounds")
         files.append({"path": path, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
-    required = {"host.ts", "session-factory.ts", "coding-agent/package.json", "coding-agent/LICENSE", "coding-agent/THIRD-PARTY-NOTICES.txt", "coding-agent/src/cli.ts", "coding-agent/src/sdk.ts"}
+    return total
+
+
+def skip_engine(relative):
+    if relative.parts[0] in {".temp", "patches", "patcher.py", "upstream.json", "README.md",
+                             "check-upstream.py", "upstream-fixtures.patch", "upstream-expected-failures.json"}:
+        return True
+    if any(part in {"node_modules", ".git", "__pycache__"} for part in relative.parts):
+        raise ValueError(f"Non-source directory in engine: {relative.as_posix()}")
+    return False
+
+
+def skip_harness(relative):
+    """Caches and local templates (*.seed: a user's own config files, seeded by hand) never ship."""
+    return (any(part in {"__pycache__", ".DS_Store", ".git", "node_modules"} for part in relative.parts)
+            or relative.suffix in {".pyc", ".seed"})
+
+
+def render():
+    if not (HARNESS / "agent" / "AGENTS.md").is_file():
+        raise SystemExit(f"Ombra harness missing: {HARNESS} must contain agent/AGENTS.md")
+    files = []
+    seen = set()
+    total = collect(ENGINE, "engine", skip_engine, files, seen)
+    total += collect(HARNESS, "harness", skip_harness, files, seen)
+    if total > MAX_TOTAL_BYTES:
+        raise ValueError("Source artifact exceeds installer size bounds")
+    required = {"engine/host.ts", "engine/session-factory.ts", "engine/coding-agent/package.json", "engine/coding-agent/LICENSE",
+                "engine/coding-agent/THIRD-PARTY-NOTICES.txt", "engine/coding-agent/src/cli.ts", "engine/coding-agent/src/sdk.ts",
+                "harness/agent/AGENTS.md"}
     if not required.issubset({f["path"] for f in files}) or not 1 <= len(files) <= MAX_FILES:
         raise ValueError("Incomplete owned engine source tree")
     digest = hashlib.sha256("".join(f'{f["path"]}\0{f["sha256"]}\n' for f in files).encode()).hexdigest()
     manifest = {
-        "schema": 2,
+        "schema": 3,
         "name": NAME,
         "revision": 1,
         "omp": {"package": "@oh-my-pi/pi-coding-agent", "version": "18.12.2", "integrity": "sha512-1qh9EwuiMBUTVix0ZWZNOMPTW++nWhL6t3EaRhGe05sVIBfDTyVl36iTyDv0TvM+R/EmOL4PvFrmIPgXd3xYQQ==", "entry": "engine/coding-agent/src/cli.ts"},
@@ -61,7 +90,7 @@ def render():
             },
             "sha256": digest, "bytes": total, "files": files,
         },
-        "notes": "Complete repository-owned engine and host, with upstream license and notices. Content hash identifies local source, not a fabricated fork commit. Frozen npm dependencies and Bun are integrity pinned; their installed sources are never rewritten.",
+        "notes": "Complete repository-owned engine and host, with upstream license and notices, and the Ombra harness (harness/profile) every session loads. Paths are relative to the installed omp folder. Content hash identifies local source, not a fabricated fork commit. Frozen npm dependencies and Bun are integrity pinned; their installed sources are never rewritten.",
     }
     manifest_bytes = (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode()
     manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
@@ -71,9 +100,12 @@ def render():
                 f'    public const string SourceSha256 = "{digest}";\n'
                 f'    public const string ManifestSha256 = "{manifest_hash}";\n}}\n')
     resources = ['<!-- Generated by runtime/generate-engine-artifact.py; do not edit. -->', '<Project>', '  <ItemGroup>']
+    roots = {"engine": "../../engine/", "harness": "../../../harness/profile/"}
     for file in files:
+        root, relative = file["path"].split("/", 1)
+        source = escape(roots[root] + relative, {'"': '&quot;'})
         path = escape(file["path"], {'"': '&quot;'})
-        resources.append(f'    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../engine/{path}" LogicalName="runtime-pack/engine/{path}" WithCulture="false" />')
+        resources.append(f'    <EmbeddedResource Include="$(MSBuildThisFileDirectory){source}" LogicalName="runtime-pack/{path}" WithCulture="false" />')
     resources += ['  </ItemGroup>', '</Project>', '']
     return {
         PACK / "pack.json": manifest_bytes,
@@ -84,6 +116,7 @@ def render():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="fail if generated manifest, hashes or resource list are stale")
+    parser.add_argument("--out", type=Path, help="write the artifacts under this folder (same relative layout) instead of the repository")
     args = parser.parse_args()
     stale = []
     for path, data in render().items():
@@ -91,6 +124,8 @@ def main():
             if not path.exists() or path.read_bytes() != data:
                 stale.append(str(path.relative_to(ROOT)))
         else:
+            if args.out is not None:
+                path = args.out / path.relative_to(ROOT)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
     if stale:

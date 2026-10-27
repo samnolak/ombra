@@ -1,0 +1,307 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ombra engine maintainers <engine@ombra.local>
+Date: Sat, 1 Jan 2000 00:00:00 +0000
+Subject: [PATCH] Scrub credential-shaped env from model-run commands
+
+What: Scrub credential-shaped env from model-run commands
+Why: Model-run shells, eval kernels, services and jq filters inherited ambient API keys and tokens; bash.envScrub (off by default) removes names matching KEY|PASSWORD|SECRET|TOKEN except a forward list, as DeepSeek Harness does.
+Upstream-Status: Ombra-specific; idea from DeepSeek Harness; not submitted
+
+diff --git a/src/eval/js/context-manager.ts b/src/eval/js/context-manager.ts
+index 6bf36bf31162689a55f080d1740e98ef2736328a..c30e4546e4c8a5f39aa0be64afa8486151875c74 100644
+--- a/src/eval/js/context-manager.ts
++++ b/src/eval/js/context-manager.ts
+@@ -6,6 +6,7 @@ import {
+ 	resolveWorkerSpawnCmd,
+ 	workerEnvFromParent,
+ } from "../../subprocess/worker-client";
++import { type EnvScrubPolicy, resolveEnvScrubPolicy, scrubEnv } from "../../exec/env-scrub";
+ import type { ToolSession } from "../../tools";
+ import { ToolAbortError } from "../../tools/tool-errors";
+ import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
+@@ -53,7 +54,8 @@ export interface JsEvalWorkerHandle {
+ 
+ /** Startup dependencies overridden by tests to exercise process-to-Worker recovery. */
+ export interface JsEvalWorkerFactories {
+-	spawnProcess(): JsEvalWorkerHandle;
++	/** `envScrub`: credential scrub for the subprocess env (`bash.envScrub.*`). */
++	spawnProcess(envScrub?: EnvScrubPolicy): JsEvalWorkerHandle;
+ 	spawnWorker(): JsEvalWorkerHandle;
+ }
+ 
+@@ -617,7 +619,8 @@ async function acquireSession(
+ 	const startup = (async (): Promise<JsSession> => {
+ 		// Attach the message listener before sending init. Both Bun Worker messages
+ 		// and subprocess IPC can arrive immediately after the evaluator loads.
+-		const worker = spawnJsWorker();
++		const envScrub = resolveEnvScrubPolicy(toolSession.settings);
++		const worker = spawnJsWorker(envScrub);
+ 		const session: JsSession = {
+ 			sessionKey,
+ 			sessionId: snapshot.sessionId,
+@@ -649,7 +652,9 @@ async function acquireSession(
+ 				// would make synchronous user code impossible to cancel.
+ 				const failed = session.worker;
+ 				await failed.terminate().catch(() => undefined);
+-				if (failed.mode === "worker") {
++				// A Bun Worker shares this process's environment, so it cannot honor
++				// the credential scrub (`bash.envScrub.*`): fail closed instead.
++				if (failed.mode === "worker" || envScrub) {
+ 					throw new Error(
+ 						`Failed to initialize isolated JS eval worker: ${error instanceof Error ? error.message : String(error)}`,
+ 						{ cause: error },
+@@ -964,10 +969,18 @@ async function raceWithTimeout<T>(promise: Promise<T>, timeoutMs: number, reason
+ 	}
+ }
+ 
+-function spawnJsWorker(): JsEvalWorkerHandle {
++function spawnJsWorker(envScrub?: EnvScrubPolicy): JsEvalWorkerHandle {
+ 	try {
+-		return workerFactories.spawnProcess();
++		return workerFactories.spawnProcess(envScrub);
+ 	} catch (error) {
++		// The Worker fallback shares this process's environment, which would
++		// bypass the credential scrub (`bash.envScrub.*`): surface the failure.
++		if (envScrub) {
++			throw new Error(
++				`Failed to start isolated JS eval subprocess: ${error instanceof Error ? error.message : String(error)}`,
++				{ cause: error },
++			);
++		}
+ 		// A worker thread remains isolated and can interrupt synchronous user code
+ 		// via terminate(), so it is the only safe recovery from subprocess spawn.
+ 		logger.warn("JS eval subprocess spawn failed; falling back to a Bun Worker", {
+@@ -992,10 +1005,12 @@ function spawnBunWorker(): JsEvalWorkerHandle {
+ 	}
+ }
+ 
+-function spawnJsProcess(): JsEvalWorkerHandle {
++function spawnJsProcess(envScrub?: EnvScrubPolicy): JsEvalWorkerHandle {
++	const env = workerEnvFromParent();
+ 	const spawned = createWorkerSubprocess<WorkerOutbound>({
+ 		spawnCommand: resolveWorkerSpawnCmd(JS_EVAL_PROCESS_ARG),
+-		env: workerEnvFromParent(),
++		// `Bun.spawn` replaces the environment, so the filtered map is all the cell sees.
++		env: envScrub ? scrubEnv(env, envScrub) : env,
+ 		exitLabel: "JS eval worker",
+ 		detached: shouldDetachKernel(process.platform),
+ 		reportCleanExit: true,
+diff --git a/src/exec/env-scrub.ts b/src/exec/env-scrub.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..79b952ea7795f470adde4236d62c6766a86b7a8c
+--- /dev/null
++++ b/src/exec/env-scrub.ts
+@@ -0,0 +1,118 @@
++/**
++ * Credential scrub for processes the model starts (`bash.envScrub.*`), ported
++ * from DeepSeek Harness's `scrubbedParentEnv`: ambient variables whose name
++ * looks like a credential are dropped before the command runs, and env the
++ * caller passes for one call is applied after the scrub.
++ *
++ * The embedded shell and the native PTY start from the process environ and
++ * only overlay the env they are handed, so leaving a name out of that map is
++ * not enough. Shell-line backends also get an `unset -v` prefix
++ * ({@link scrubShellLine}); `Bun.spawn` children receive a filtered map
++ * ({@link scrubEnv}). The match is a name heuristic, not a secret detector.
++ */
++import { isPosixShell } from "@oh-my-pi/pi-utils/procmgr";
++import type { Settings } from "../config/settings";
++import { cfgBashEnvScrubEnabled, cfgBashEnvScrubForward } from "./settings";
++
++/** Credential-shaped variable names, matched case-insensitively. */
++export const SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i;
++
++/**
++ * Common names that match {@link SENSITIVE_ENV_PATTERN} but configure a tool
++ * rather than carry a credential. `SSH_AUTH_SOCK`, `GPG_TTY` and `GIT_ASKPASS`
++ * do not match, so they need no entry.
++ */
++export const ENV_SCRUB_BUILTIN_KEEP: readonly string[] = [
++	// Hugging Face tokenizers thread switch.
++	"TOKENIZERS_PARALLELISM",
++	// Python `keyring` backend selector.
++	"PYTHON_KEYRING_BACKEND",
++	// GNOME keyring daemon control socket directory.
++	"GNOME_KEYRING_CONTROL",
++	// pass(1) store location.
++	"PASSWORD_STORE_DIR",
++];
++
++export interface EnvScrubPolicy {
++	/** Upper-cased names kept even though they match the pattern. */
++	readonly keep: ReadonlySet<string>;
++}
++
++const SHELL_VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
++
++/** Policy keeping the built-in non-secret names plus `forward`. */
++export function createEnvScrubPolicy(forward: readonly string[] = []): EnvScrubPolicy {
++	const keep = new Set<string>();
++	for (const name of [...ENV_SCRUB_BUILTIN_KEEP, ...forward]) {
++		const normalized = name.trim().toUpperCase();
++		if (normalized) keep.add(normalized);
++	}
++	return { keep };
++}
++
++/** The session's scrub policy, or `undefined` when `bash.envScrub.enabled` is off. */
++export function resolveEnvScrubPolicy(settings: Settings): EnvScrubPolicy | undefined {
++	if (!cfgBashEnvScrubEnabled.get(settings)) return undefined;
++	return createEnvScrubPolicy(cfgBashEnvScrubForward.get(settings));
++}
++
++export function isScrubbedEnvName(name: string, policy: EnvScrubPolicy): boolean {
++	return SENSITIVE_ENV_PATTERN.test(name) && !policy.keep.has(name.toUpperCase());
++}
++
++/** Copy of `env` without scrubbed names. Merge per-call env after this. */
++export function scrubEnv<T extends string | undefined>(
++	env: Readonly<Record<string, T>>,
++	policy: EnvScrubPolicy,
++): Record<string, T> {
++	const result: Record<string, T> = {};
++	for (const name in env) {
++		if (!isScrubbedEnvName(name, policy)) result[name] = env[name];
++	}
++	return result;
++}
++
++/**
++ * Scrubbed names a child would inherit from the process environment or from
++ * `base`, minus the names `explicit` sets for this call. Sorted.
++ */
++export function scrubbedEnvNames(
++	policy: EnvScrubPolicy,
++	options: {
++		base?: Readonly<Record<string, string | undefined>>;
++		explicit?: Readonly<Record<string, string>>;
++	} = {},
++): string[] {
++	const names = new Set<string>();
++	const collect = (source: Readonly<Record<string, string | undefined>>): void => {
++		for (const name in source) {
++			if (source[name] === undefined || !isScrubbedEnvName(name, policy)) continue;
++			if (options.explicit && Object.hasOwn(options.explicit, name)) continue;
++			names.add(name);
++		}
++	};
++	collect(Bun.env);
++	if (options.base) collect(options.base);
++	return [...names].sort();
++}
++
++/**
++ * Remove `names` for a command line run by `shell` (`undefined` = the embedded
++ * POSIX shell). POSIX shells get an `unset -v` prefix; names that are not
++ * shell identifiers cannot be unset there. Other shells (cmd.exe, PowerShell)
++ * get `blankEnv`, an overlay that empties each name.
++ */
++export function scrubShellLine(
++	shell: string | undefined,
++	command: string,
++	names: readonly string[],
++): { command: string; blankEnv: Record<string, string> } {
++	if (names.length === 0) return { command, blankEnv: {} };
++	if (shell === undefined || isPosixShell(shell)) {
++		const unset = names.filter(name => SHELL_VARIABLE_NAME.test(name));
++		return { command: unset.length > 0 ? `unset -v ${unset.join(" ")}; ${command}` : command, blankEnv: {} };
++	}
++	const blankEnv: Record<string, string> = {};
++	for (const name of names) blankEnv[name] = "";
++	return { command, blankEnv };
++}
+diff --git a/src/exec/settings.ts b/src/exec/settings.ts
+index 8c464a3f8401f0142b0c1a59c70336be39a3650c..23923dd2ce4a8641dcefec2469b14de32a989512 100644
+--- a/src/exec/settings.ts
++++ b/src/exec/settings.ts
+@@ -189,6 +189,32 @@ export const cfgBashDirenvLoadTimeoutMs = register({
+ 	},
+ });
+ 
++export const cfgBashEnvScrubEnabled = register({
++	id: "bash.envScrub.enabled",
++	type: "boolean",
++	default: false,
++	ui: {
++		tab: "shell",
++		group: "Bash",
++		label: "Scrub Credential Env",
++		description:
++			"Drop inherited environment variables whose names contain KEY, PASSWORD, SECRET or TOKEN before a model-run command starts (bash, pty, background jobs, services, eval kernels). Names in bash.envScrub.forward are kept; env passed for one call still applies",
++	},
++});
++
++/** Names kept by the credential scrub even though they match its pattern (e.g. `GH_TOKEN`). */
++export const cfgBashEnvScrubForward = register({
++	id: "bash.envScrub.forward",
++	type: "array",
++	default: EMPTY_STRING_ARRAY,
++	validate: raw => {
++		if (raw === undefined) return;
++		if (!Array.isArray(raw) || raw.some(entry => typeof entry !== "string")) {
++			throw new Error("bash.envScrub.forward must be a list of environment variable names");
++		}
++	},
++});
++
+ // Shell output minimizer
+ export const cfgShellMinimizerEnabled = register({
+ 	id: "shellMinimizer.enabled",
+diff --git a/src/launch/services.ts b/src/launch/services.ts
+index a37f10807ec487c1b8cc858ee33e8732df714200..f248eb0ff1ba2e80f5756e6d93c3c0527c4e6abb 100644
+--- a/src/launch/services.ts
++++ b/src/launch/services.ts
+@@ -14,6 +14,7 @@ import { resolveToCwd } from "../tools/path-utils";
+ import { isSharedBrowserDaemonName } from "../tools/browser/shared-daemon";
+ 
+ import { cfgLaunchEnabled } from "../tools/settings";
++import { resolveEnvScrubPolicy, scrubbedEnvNames, scrubEnv, scrubShellLine } from "../exec/env-scrub";
+ 
+ export interface ServiceReady {
+ 	log?: string;
+@@ -232,11 +233,18 @@ export async function startService(
+ 		}
+ 	}
+ 	const shell = session.settings.getShellConfig();
++	const line = `${shell.prefix ? `${shell.prefix} ` : ""}${params.command}`;
++	const envScrub = resolveEnvScrubPolicy(session.settings);
++	// The broker spawns from its own environment (a copy of an engine's) and
++	// overlays `spec.env`, so the line unsets the names as well.
++	const scrubbed = envScrub
++		? scrubShellLine(shell.shell, line, scrubbedEnvNames(envScrub, { base: shell.env }))
++		: undefined;
+ 	const spec: DaemonSpec = {
+ 		name: params.name,
+ 		application: shell.shell,
+-		args: [...shell.args, `${shell.prefix ? `${shell.prefix} ` : ""}${params.command}`],
+-		env: shell.env,
++		args: [...shell.args, scrubbed?.command ?? line],
++		env: envScrub ? { ...scrubEnv(shell.env, envScrub), ...scrubbed?.blankEnv } : shell.env,
+ 		cwd: resolveToCwd(params.cwd ?? session.cwd, session.cwd),
+ 		pty: params.pty ?? true,
+ 		ready: ready
+diff --git a/src/tools/read-json.ts b/src/tools/read-json.ts
+index 9919f35ba819ea8a0ab2ae09b357f52456d31d7f..f456470b04626fea5f0d1faaf2d8f45db8b1f32d 100644
+--- a/src/tools/read-json.ts
++++ b/src/tools/read-json.ts
+@@ -7,6 +7,8 @@ import type { ReadToolDetails } from "@oh-my-pi/pi-tui/tools/read";
+ import { DEFAULT_MAX_LINES, truncateHead, truncateTail } from "@oh-my-pi/pi-tui/tools/streaming-output";
+ import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
+ import { isEnoent, sanitizeText } from "@oh-my-pi/pi-utils";
++import { Settings } from "../config/settings";
++import { resolveEnvScrubPolicy, scrubbedEnvNames, scrubShellLine } from "../exec/env-scrub";
+ import type { ToolSession } from "../sdk";
+ import { quotePosixArgument } from "../utils/shell-quote";
+ import { resolveReadPath } from "./path-utils";
+@@ -247,7 +249,10 @@ async function runJq(
+ 	const stderrPath = path.join(os.tmpdir(), `omp-jq-${crypto.randomUUID()}.err`);
+ 	// jaq parses any argument starting with `-` as flags even when shell-quoted;
+ 	// `--` keeps filters such as `-.price` positional.
+-	const command = `jq ${flags.join(" ")} -- ${quotePosixArgument(query)} ${quotePosixArgument(filePath)} 2>${quotePosixArgument(stderrPath)}`;
++	const jqLine = `jq ${flags.join(" ")} -- ${quotePosixArgument(query)} ${quotePosixArgument(filePath)} 2>${quotePosixArgument(stderrPath)}`;
++	// The model writes the filter, and jq's `env`/`$ENV` read the shell's environment.
++	const envScrub = resolveEnvScrubPolicy(await Settings.forSession());
++	const command = envScrub ? scrubShellLine(undefined, jqLine, scrubbedEnvNames(envScrub)).command : jqLine;
+ 
+ 	let output = "";
+ 	let lines = 0;

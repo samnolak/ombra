@@ -452,7 +452,8 @@ export function combine<R extends Record<string, Derived<unknown>>, T>(
 
 /**
  * Handle for one registered setting. Reads resolve, in precedence order: the definition's
- * environment variable, runtime override, `--config` overlay, project, global, then the default.
+ * environment variable, runtime override, `--config` overlay, project, global, the Ombra harness
+ * defaults (`OMBRA_HARNESS_DIR`), then the default.
  */
 export class Setting<T, Id extends string = string> extends Derived<T> {
 	readonly id: Id;
@@ -524,16 +525,19 @@ export class Setting<T, Id extends string = string> extends Derived<T> {
 		return this.#envParsed;
 	}
 
-	/** Env value that currently takes effect in `scope`: a fallback env yields to a configured layer. */
+	/**
+	 * Env value that currently takes effect in `scope`: a fallback env yields to a configured layer.
+	 * The harness defaults are not such a layer — they rank below the environment.
+	 */
 	#effectiveEnv(scope: ScopeLike): T | undefined {
 		const value = this.envValue();
 		if (value === undefined || !this.envFallback) return value;
 		const settings = settingsOf(scope);
-		if (this.envFallback === true) return settings.isConfigured(this) ? undefined : value;
-		const configured = settings.rawValue(this);
-		return configured === undefined || (typeof configured === "string" && configured.trim() === "")
-			? value
-			: undefined;
+		const source = settings.getProvenance(this);
+		const configured = source !== "default" && source !== "harness";
+		if (this.envFallback === true) return configured ? undefined : value;
+		const raw = configured ? settings.rawValue(this) : undefined;
+		return raw === undefined || (typeof raw === "string" && raw.trim() === "") ? value : undefined;
 	}
 
 	override get(scope: ScopeLike): T {

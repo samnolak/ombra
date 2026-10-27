@@ -43,26 +43,38 @@ public sealed class RuntimeSourceArtifactTests
         Assert.Equal(RuntimePack.SourceSha256, artifact.GetProperty("sha256").GetString());
         Assert.Equal("complete-owned-source", artifact.GetProperty("kind").GetString());
         var canonical = Path.GetDirectoryName(RuntimeInstallerTests.RepoFile("runtime/engine/host.ts"))!;
+        var harness = Path.GetDirectoryName(Path.GetDirectoryName(RuntimeInstallerTests.RepoFile("harness/profile/agent/AGENTS.md")))!;
         var paths = artifact.GetProperty("files").EnumerateArray().Select(f => f.GetProperty("path").GetString()!).ToArray();
+        var engine = paths.Where(p => p.StartsWith("engine/", StringComparison.Ordinal)).Select(p => p["engine/".Length..]).ToArray();
+        var harnessPaths = paths.Where(p => p.StartsWith("harness/", StringComparison.Ordinal)).Select(p => p["harness/".Length..]).ToArray();
+        Assert.Equal(paths.Length, engine.Length + harnessPaths.Length);
         Assert.Equal(Directory.EnumerateFiles(canonical, "*", SearchOption.AllDirectories)
             .Select(p => Path.GetRelativePath(canonical, p).Replace('\\', '/'))
             .Where(p => p.Split('/')[0] is not (".temp" or "patches" or "patcher.py" or "upstream.json" or "README.md"
                 or "check-upstream.py" or "upstream-fixtures.patch" or "upstream-expected-failures.json"))
-            .Order(), paths.Order());
-        Assert.Contains("host.ts", paths);
-        Assert.Contains("session-factory.ts", paths);
-        Assert.Contains("coding-agent/LICENSE", paths);
-        Assert.Contains("coding-agent/THIRD-PARTY-NOTICES.txt", paths);
-        Assert.True(paths.Length > 1700);
-        Assert.DoesNotContain(paths, p => p.StartsWith("patches/", StringComparison.Ordinal)
+            .Order(), engine.Order());
+        // The whole harness/profile, without caches and *.seed templates
+        Assert.Equal(Directory.EnumerateFiles(harness, "*", SearchOption.AllDirectories)
+            .Select(p => Path.GetRelativePath(harness, p).Replace('\\', '/'))
+            .Where(p => !p.Split('/').Any(s => s is "__pycache__" or ".DS_Store" or ".git" or "node_modules")
+                && !p.EndsWith(".pyc", StringComparison.Ordinal) && !p.EndsWith(".seed", StringComparison.Ordinal))
+            .Order(), harnessPaths.Order());
+        Assert.Contains("agent/AGENTS.md", harnessPaths);
+        Assert.Contains("host.ts", engine);
+        Assert.Contains("session-factory.ts", engine);
+        Assert.Contains("coding-agent/LICENSE", engine);
+        Assert.Contains("coding-agent/THIRD-PARTY-NOTICES.txt", engine);
+        Assert.True(engine.Length > 1700);
+        Assert.DoesNotContain(engine, p => p.StartsWith("patches/", StringComparison.Ordinal)
             || p is "patcher.py" or "upstream.json" or "README.md"
                 or "check-upstream.py" or "upstream-fixtures.patch" or "upstream-expected-failures.json"
             || p.StartsWith(".temp/", StringComparison.Ordinal));
         foreach (var file in artifact.GetProperty("files").EnumerateArray())
         {
             var relative = file.GetProperty("path").GetString()!;
-            var installed = File.ReadAllBytes(Path.Combine(staging, "omp", "engine", relative));
-            Assert.Equal(File.ReadAllBytes(Path.Combine(canonical, relative)), installed);
+            var installed = File.ReadAllBytes(Path.Combine(staging, "omp", relative));
+            var root = relative.StartsWith("engine/", StringComparison.Ordinal) ? canonical : harness;
+            Assert.Equal(File.ReadAllBytes(Path.Combine(root, relative[(relative.IndexOf('/') + 1)..])), installed);
             Assert.Equal(file.GetProperty("size").GetInt64(), installed.LongLength);
             Assert.Equal(file.GetProperty("sha256").GetString(), Convert.ToHexString(SHA256.HashData(installed)).ToLowerInvariant());
         }
@@ -73,6 +85,7 @@ public sealed class RuntimeSourceArtifactTests
     [InlineData("pack.json")]
     [InlineData("engine/host.ts")]
     [InlineData("engine/coding-agent/src/modes/rpc/rpc-messages-backward.ts")]
+    [InlineData("harness/agent/AGENTS.md")]
     public async Task Corrupt_embedded_manifest_or_source_fails_before_creating_the_engine(string resource)
     {
         var staging = Stage();
@@ -94,6 +107,7 @@ public sealed class RuntimeSourceArtifactTests
         Assert.Contains("SHA256 integrity", error.Message);
         AssertUnchanged(staging, before);
         Assert.False(Directory.Exists(Path.Combine(staging, "omp", "engine")));
+        Assert.False(Directory.Exists(Path.Combine(staging, "omp", "harness")));
     }
 
     [Theory]

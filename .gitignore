@@ -43,3 +43,7 @@ server/**/obj/
 !server/native/ombra-core/src/bin/
 avalonia/vendor/**/bin/
 avalonia/vendor/**/obj/
+
+# Python bytecode (harness skills run Python scripts)
+__pycache__/
+*.pyc

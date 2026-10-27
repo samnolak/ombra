@@ -115,6 +115,15 @@
     "120-embedded-cli-boundary.patch",
     "130-host-runtime-integration.patch",
     "150-ombra-change-notes.patch",
-    "160-mcp-figma-connectors.patch"
+    "160-mcp-figma-connectors.patch",
+    "170-bash-env-scrub.patch",
+    "180-context-file-budget.patch",
+    "190-compaction-checkpoint.patch",
+    "200-verbatim-skill-descriptions.patch",
+    "210-ombra-harness-layer.patch",
+    "220-gpt-system-prompt.patch",
+    "230-edit-guards-and-run.patch",
+    "240-engine-fixes.patch",
+    "250-todo-per-model.patch"
   ]
 }

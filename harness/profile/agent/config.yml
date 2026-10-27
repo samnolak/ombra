@@ -1,0 +1,79 @@
+# Harness settings defaults for omp. Ombra ships this file in its runtime pack and loads it as a defaults layer
+# just above omp's built-in defaults (via OMBRA_HARNESS_DIR). Every key you set in your own ~/.omp/agent/config.yml
+# (or the project's settings) wins over the value here; nothing here is copied into your files.
+# Model roles are not set here: Ombra manages models and logins.
+task:
+  maxConcurrency: 1
+  # Subagents do the work themselves and never spawn their own.
+  maxRecursionDepth: 1
+model:
+  toolCallLoopGuard:
+    # Redirect after 3 identical consecutive tool calls (engine default 5).
+    threshold: 3
+tier:
+  subagent: inherit
+memories:
+  stage1Concurrency: 1
+  enabled: true
+defaultThinkingLevel: low
+images:
+  describeForTextModels: false
+providers:
+  webSearchOrder:
+    - duckduckgo
+  webSearchTimeoutSeconds: 20
+exa:
+  enabled: false
+tools:
+  # Reads and edits run unprompted; shell and other exec-tier calls ask first (engine default: yolo).
+  approvalMode: write
+  xdevInlineDevices:
+    []
+memory:
+  backend: "off"
+contextFiles:
+  # AGENTS.md bytes per chain (user-global, project): the ~6 KB harness AGENTS.md fits whole,
+  # and both chains together stay near 8K tokens of a small local window. Engine default 0 = unlimited.
+  maxBytes: 16384
+bash:
+  envScrub:
+    # Model-run commands (bash, pty, background jobs, services, eval) start without inherited
+    # variables named like *KEY*, *PASSWORD*, *SECRET*, *TOKEN* (engine default: off).
+    enabled: true
+    # Names kept anyway, for tools that need them:
+    # forward:
+    #   - GH_TOKEN
+    #   - GITHUB_TOKEN
+    #   - NPM_TOKEN
+systemPrompt:
+  # GPT models get the prose GPT prompt (persistence, proportional verification, more work per request).
+  # Engine default: the bundled prompt for every model.
+  modelVariants:
+    "gpt-": system-prompt-gpt
+todo:
+  # GPT models run without the todo tool, as benchmarked. Other models keep it: Ombra's plan panel shows it,
+  # and they were not benchmarked. Engine default: todo for every model.
+  disableForModels:
+    - "gpt-"
+eval:
+  # Check once per session that Python eval can start; if not, eval offers only js and says why (engine default: off).
+  probePython: true
+wait:
+  # In headless (print/json) runs, `wait` returns after 60 s instead of blocking (engine default 0 = off).
+  maxHeadlessMs: 60000
+edit:
+  # GPT models edit with apply_patch, the format they are trained on (engine default: hashline for every model).
+  modelVariants:
+    "gpt-": apply_patch
+  # An edit may carry its check (`run`, or `*** Run: <command>` after a patch); both share one request.
+  run: true
+  # Lines an edit wrote count as seen, so the next edit inside them needs no re-read (engine default: off).
+  seenFromEditResults: true
+  # A streamed edit over 16 KiB is cut off with a hint instead of streaming to the output limit (engine default 0).
+  maxInputBytes: 16384
+  # Warn-only guards (engine default: off): lines an edit deleted, current lines around a rejected anchor,
+  # syntax errors it introduced.
+  guards:
+    reportDeletions: true
+    rejectionContext: true
+    syntaxCheck: true

@@ -68,6 +68,36 @@ export const cfgContextFilesExtra = register({
 	},
 });
 
+/**
+ * Byte budget for context-file content in the system prompt, applied separately to the
+ * user-global and project chains; nearest files are kept first. 0 = unlimited.
+ */
+export const cfgContextFilesMaxBytes = register({
+	id: "contextFiles.maxBytes",
+	type: "number",
+	default: 0,
+	ui: {
+		tab: "context",
+		group: "General",
+		label: "Context File Budget",
+		description:
+			"Byte cap on AGENTS.md-style instructions in the system prompt, per chain (user-global, project). Nearest files stay; broader ones are truncated or omitted and listed for the agent to read",
+		options: [
+			{ value: "default", label: "Unlimited", description: "Load every context file in full" },
+			{ value: "8192", label: "8 KB", description: "Tight; very small local context windows" },
+			{ value: "16384", label: "16 KB", description: "Small local context windows" },
+			{ value: "32768", label: "32 KB", description: "Mid-size context windows" },
+			{ value: "65536", label: "64 KB", description: "Large context windows" },
+		],
+	},
+	validate: raw => {
+		if (raw === undefined) return;
+		if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0) {
+			throw new Error("contextFiles.maxBytes must be a non-negative integer (0 = unlimited)");
+		}
+	},
+});
+
 // ────────────────────────────────────────────────────────────────────────
 // Context
 // ────────────────────────────────────────────────────────────────────────

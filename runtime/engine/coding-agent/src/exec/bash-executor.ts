@@ -26,6 +26,7 @@ import { getOrCreateSnapshot } from "../utils/shell-snapshot";
 import { TerminalGraphicsDecoder } from "../utils/terminal-graphics";
 import { loadDirenvEnv } from "./direnv";
 import { buildNonInteractiveEnv } from "./non-interactive-env";
+import { type EnvScrubPolicy, scrubbedEnvNames, scrubEnv, scrubShellLine } from "./env-scrub";
 
 import {
 	cfgBashDirenv,
@@ -61,6 +62,13 @@ export interface BashExecutorOptions {
 	 * enforced by the embedded shell's `git` builtin.
 	 */
 	gitGuard?: boolean;
+	/**
+	 * Credential scrub for a command the model runs
+	 * (`resolveEnvScrubPolicy(settings)`; `bash.envScrub.*`). Matching inherited
+	 * names are removed; `env` above still applies. A scrubbed run never takes
+	 * the user-shell PTY path.
+	 */
+	envScrub?: EnvScrubPolicy;
 	/**
 	 * Filesystem for `scheme://` paths in this run of the embedded shell (a URL
 	 * `cwd` included). External shells and processes never see it.
@@ -537,7 +545,12 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 	const baseShellConfig = settings.getShellConfig();
 	const shellConfig =
 		options?.useUserShell === true ? resolveUserShellConfig(settings, baseShellConfig) : baseShellConfig;
-	const { shell, args, env: shellEnv, prefix } = shellConfig;
+	const { shell, args, env: inheritedShellEnv, prefix } = shellConfig;
+	const envScrub = options?.envScrub;
+	// Leaving names out of the session env only stops re-adding them; the
+	// embedded shell inherits the process environ, so the command line also
+	// unsets them (below, once the per-call env is known).
+	const shellEnv = envScrub ? scrubEnv(inheritedShellEnv, envScrub) : inheritedShellEnv;
 	const bashShell = isBashShell(shell);
 	// `!` hotkey commands on zsh/fish run in a real PTY: interactive shell
 	// startup (zle, job control, gitstatus) needs a TTY, and tools only emit
@@ -550,7 +563,8 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 		!bashShell &&
 		supportsAutoUserShell(shell) &&
 		$env.PI_NO_PTY !== "1" &&
-		!isPersistentShellCdCommand(command);
+		!isPersistentShellCdCommand(command) &&
+		envScrub === undefined;
 	const minimizer = buildMinimizerOptions(cfgShellMinimizer.get(settings));
 
 	const commandCwd = resolveShellCwd(options?.cwd);
@@ -566,7 +580,7 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 	// has no `.envrc` on the host. The rc snapshot is independent, so both load
 	// concurrently.
 	const [snapshotPath, preflight] = await Promise.all([
-		bashShell ? getOrCreateSnapshot(shell, shellEnv) : null,
+		bashShell ? getOrCreateSnapshot(shell, inheritedShellEnv) : null,
 		applyDirenvPreflight(command, commandCwd ?? process.cwd(), {
 			callerEnv: options?.env,
 			signal: options?.signal,
@@ -580,10 +594,18 @@ export async function executeBash(command: string, options?: BashExecutorOptions
 	const runCdInPersistentShell = options?.useUserShell === true && !prefix && isPersistentShellCdCommand(command);
 	// Never wrap in cmd.exe: it is only the Windows no-bash fallback for spawn
 	// paths, and the embedded brush shell runs the POSIX line better directly.
-	const finalCommand =
+	const shellLine =
 		options?.useUserShell === true && !bashShell && !isCmdShell(shell) && !runCdInPersistentShell
 			? buildUserShellCommand(shell, args, preflight.command)
 			: preflight.command;
+	// The embedded shell runs this line, so the POSIX unset applies regardless of `shell`.
+	const finalCommand = envScrub
+		? scrubShellLine(
+				undefined,
+				shellLine,
+				scrubbedEnvNames(envScrub, { base: inheritedShellEnv, explicit: commandEnv }),
+			).command
+		: shellLine;
 
 	// Create output sink for truncation and artifact handling
 	const graphics = new TerminalGraphicsDecoder();

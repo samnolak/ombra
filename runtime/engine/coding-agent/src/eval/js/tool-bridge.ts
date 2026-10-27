@@ -267,12 +267,22 @@ export async function callSessionTool(name: string, args: unknown, options: Tool
 	}
 	const tool = getTool(options.session, name);
 	const toolCallId = `js-${name}-${crypto.randomUUID()}`;
+	const wireSchema = toolWireSchema(tool);
 	// A schema-owned name stays tool data across alternatives. Deleting an
 	// invalid value to make another branch match could select a different operation.
 	// Harness `i` is dropped here exactly as `extractIntent` drops it on the direct
 	// path, so tools see identical args from both entry points.
-	const intentIsDeclared = schemaDeclaresIntentField(toolWireSchema(tool));
-	const validationArgs = isRecord(args) ? { ...args } : args;
+	const intentIsDeclared = schemaDeclaresIntentField(wireSchema);
+	// A bare string is the input of a single-input tool: `tool.edit("*** Begin Patch…")`,
+	// `tool.read("a.js;b.js")` mean the tool's one required string field.
+	let callArgs = args;
+	if (typeof args === "string") {
+		const required = Array.isArray(wireSchema.required) ? wireSchema.required.filter(key => key !== INTENT_FIELD) : [];
+		const property =
+			required.length === 1 && isRecord(wireSchema.properties) ? wireSchema.properties[required[0]] : undefined;
+		if (isRecord(property) && property.type === "string") callArgs = { [required[0]]: args };
+	}
+	const validationArgs = isRecord(callArgs) ? { ...callArgs } : callArgs;
 	if (isRecord(validationArgs) && !intentIsDeclared) delete validationArgs[INTENT_FIELD];
 	let validatedArgs: unknown;
 	try {

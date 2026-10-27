@@ -4,13 +4,15 @@ using System.Text.Json;
 
 namespace Ombra.App.Services.Runtime;
 
-/// <summary>Installs the complete owned engine beside, never over, the pinned npm dependency tree.</summary>
+/// <summary>Installs the complete owned engine (<c>omp/engine</c>) and the Ombra harness (<c>omp/harness</c>) beside,
+/// never over, the pinned npm dependency tree. Manifest paths are relative to <c>omp</c> and start with one of <see cref="Roots"/>.</summary>
 internal static class RuntimeSourceArtifact
 {
     internal const int MaxFiles = 8192;
     internal const long MaxFileBytes = 16L << 20;
     internal const long MaxSourceBytes = 128L << 20;
     private const int MaxManifestBytes = 4 << 20;
+    internal static readonly IReadOnlyList<string> Roots = ["engine", "harness"];
 
     internal static JsonDocument ReadManifest(Func<string, Stream> open)
     {
@@ -45,9 +47,10 @@ internal static class RuntimeSourceArtifact
         open ??= RuntimePack.OpenPackFile;
         using var manifest = ReadManifest(open);
         var artifact = manifest.RootElement.GetProperty("sourceArtifact");
-        var engine = Path.Combine(staging, "omp", "engine");
-        if (Directory.Exists(engine) || File.Exists(engine))
-            throw new InvalidDataException("Unexpected existing owned runtime source directory.");
+        var omp = Path.Combine(staging, "omp");
+        foreach (var root in Roots)
+            if (Directory.Exists(Path.Combine(omp, root)) || File.Exists(Path.Combine(omp, root)))
+                throw new InvalidDataException("Unexpected existing owned runtime source directory.");
         var files = artifact.GetProperty("files");
         if (files.GetArrayLength() is 0 or > MaxFiles) throw new InvalidDataException("Invalid runtime source file count.");
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -60,7 +63,8 @@ internal static class RuntimeSourceArtifact
             ct.ThrowIfCancellationRequested();
             var relative = file.GetProperty("path").GetString()!;
             if (string.IsNullOrEmpty(relative) || relative.Contains('\\') || relative.Contains(':') ||
-                relative.Split('/').Any(p => p is "" or "." or "..") || !paths.Add(relative))
+                relative.Split('/') is var parts && (parts.Length < 2 || !Roots.Contains(parts[0]) || parts.Any(p => p is "" or "." or "..")) ||
+                !paths.Add(relative))
                 throw new InvalidDataException($"Invalid runtime source path: {relative}");
             var size = file.GetProperty("size").GetInt64();
             if (size < 0 || size > MaxFileBytes || (total += size) > MaxSourceBytes)
@@ -69,10 +73,13 @@ internal static class RuntimeSourceArtifact
             digest.Append(relative).Append('\0').Append(file.GetProperty("sha256").GetString()).Append('\n');
         }
         Verify(Encoding.UTF8.GetBytes(digest.ToString()), RuntimePack.SourceSha256, "source artifact");
+        foreach (var root in Roots)
+            if (!paths.Any(p => p.StartsWith(root + "/", StringComparison.Ordinal)))
+                throw new InvalidDataException($"Runtime source artifact has no {root} files.");
         foreach (var file in files.EnumerateArray())
         {
             ct.ThrowIfCancellationRequested();
-            var target = Path.Combine(engine, file.GetProperty("path").GetString()!);
+            var target = Path.Combine(omp, file.GetProperty("path").GetString()!);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             await using var destination = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None);
             await CopySourceAsync(file, open, destination, buffer, ct).ConfigureAwait(false);
@@ -85,7 +92,7 @@ internal static class RuntimeSourceArtifact
     {
         var relative = file.GetProperty("path").GetString()!;
         var size = file.GetProperty("size").GetInt64();
-        await using var source = open("engine/" + relative);
+        await using var source = open(relative);
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         long copied = 0;
         int count;

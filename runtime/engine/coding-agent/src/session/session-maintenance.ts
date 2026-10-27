@@ -86,6 +86,11 @@ import type { AgentSessionEvent } from "./agent-session-events";
 import type { ContextUsageBreakdown, HandoffResult, SessionHandoffOptions } from "./agent-session-types";
 import { findCompactMode } from "./compact-modes";
 import {
+	assertCompactionSummaryShrinks,
+	CHECKPOINT_SUMMARY_PROMPT,
+	CompactionSummaryNotSmallerError,
+} from "./compaction-checkpoint";
+import {
 	type CompactionMethod,
 	canUseRemoteCompaction,
 	DEFAULT_COMPACTION_METHOD_ORDER,
@@ -1513,7 +1518,9 @@ export class SessionMaintenance {
 						options?.internalGuidance ?? customInstructions,
 						compactionAbortController.signal,
 						{
-							promptOverride: this.#host.obfuscateTextForProvider(compactionPrep.hookPrompt),
+							promptOverride: this.#host.obfuscateTextForProvider(
+								compactionPrep.hookPrompt ?? CHECKPOINT_SUMMARY_PROMPT,
+							),
 							extraContext: compactionPrep.hookContext,
 							// The prompt the live turn actually sent — a per-turn
 							// `before_agent_start` override included — so a provider-native
@@ -2332,7 +2339,9 @@ export class SessionMaintenance {
 				undefined,
 				signal,
 				{
-					promptOverride: this.#host.obfuscateTextForProvider(compactionPrep.hookPrompt),
+					promptOverride: this.#host.obfuscateTextForProvider(
+						compactionPrep.hookPrompt ?? CHECKPOINT_SUMMARY_PROMPT,
+					),
 					extraContext: compactionPrep.hookContext,
 					remoteSystemPrompt: this.#host.agent.state.systemPrompt,
 					codexCompaction,
@@ -3562,6 +3571,9 @@ export class SessionMaintenance {
 			precomputedCandidates ?? this.#getCompactionModelCandidates(this.#host.modelRegistry.getAvailable());
 		const telemetry = resolveTelemetry(this.#host.agent.telemetry, this.#host.sessionId());
 		let nativeCompactionFailure: { error: NativeCompactionError; provider: string } | undefined;
+		// A candidate whose summary does not shrink its source is unusable, not fatal:
+		// the next candidate may summarize tighter. Reported only if none succeeds.
+		let notSmallerFailure: CompactionSummaryNotSmallerError | undefined;
 
 		for (const candidate of candidates) {
 			const apiKey = await this.#host.modelRegistry.getApiKey(candidate, this.#host.sessionId());
@@ -3575,7 +3587,7 @@ export class SessionMaintenance {
 			}
 
 			try {
-				return await compact(
+				const result = await compact(
 					this.#host.obfuscatePreparationForProvider(preparation),
 					candidate,
 					this.#host.modelRegistry.resolver(candidate, this.#host.sessionId()),
@@ -3613,7 +3625,13 @@ export class SessionMaintenance {
 						},
 					},
 				);
+				assertCompactionSummaryShrinks(preparation, result.summary, this.#tokenizer);
+				return result;
 			} catch (error) {
+				if (error instanceof CompactionSummaryNotSmallerError) {
+					notSmallerFailure ??= error;
+					continue;
+				}
 				const id = AIError.classify(error instanceof NativeCompactionError ? error.cause : error, candidate.api);
 				if (AIError.is(id, AIError.Flag.AuthFailed)) continue;
 				if (error instanceof NativeCompactionError) {
@@ -3625,6 +3643,7 @@ export class SessionMaintenance {
 		}
 
 		if (nativeCompactionFailure) throw nativeCompactionFailure.error;
+		if (notSmallerFailure) throw notSmallerFailure;
 		throw this.#buildCompactionAuthError();
 	}
 
@@ -5401,14 +5420,16 @@ export class SessionMaintenance {
 					let attempt = 0;
 					while (true) {
 						try {
-							compactResult = await compact(
+							const candidateResult = await compact(
 								this.#host.obfuscatePreparationForProvider(preparation),
 								candidate,
 								this.#host.modelRegistry.resolver(candidate, this.#host.sessionId()),
 								undefined,
 								autoCompactionSignal,
 								{
-									promptOverride: this.#host.obfuscateTextForProvider(compactionPrep.hookPrompt),
+									promptOverride: this.#host.obfuscateTextForProvider(
+										compactionPrep.hookPrompt ?? CHECKPOINT_SUMMARY_PROMPT,
+									),
 									extraContext: compactionPrep.hookContext,
 									remoteSystemPrompt: this.#host.agent.state.systemPrompt,
 									metadata: this.#host.agent.metadataForProvider(candidate.provider),
@@ -5436,6 +5457,10 @@ export class SessionMaintenance {
 									oneshotRetry: false,
 								},
 							);
+							// A summary that does not shrink its source fails this candidate
+							// before it is accepted, so the fallback chain moves on.
+							assertCompactionSummaryShrinks(preparation, candidateResult.summary, this.#tokenizer);
+							compactResult = candidateResult;
 							break;
 						} catch (error) {
 							if (autoCompactionSignal.aborted) {

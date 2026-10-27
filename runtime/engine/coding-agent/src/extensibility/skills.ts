@@ -21,6 +21,7 @@ import { allowsSkillTokens, SKILL_TOKEN_RE } from "@oh-my-pi/pi-tui/prompt/skill
 import autoloadTemplate from "../prompts/skills/autoload.md" with { type: "text" };
 import userInvocationTemplate from "../prompts/skills/user-invocation.md" with { type: "text" };
 import { SKILLSHARE_PROVIDER_ID } from "../discovery/skillshare";
+import { HARNESS_PROVIDER_ID } from "../harness-layer";
 import type { SkillPromptDetails } from "../session/messages";
 import { expandTilde } from "../tools/path-utils";
 
@@ -371,6 +372,7 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 	// patterns are matched against the final name the user actually sees.
 	const filteredSkills = result.all.filter(capSkill => {
 		if (capSkill._source.provider === MANAGED_SKILLS_PROVIDER_ID) return false;
+		if (capSkill._source.provider === HARNESS_PROVIDER_ID) return false;
 		if (disabledSkillNames.has(capSkill.name)) return false;
 		if (!isSourceEnabled(capSkill._source)) return false;
 		return !matchesIgnorePatterns(capSkill.name);
@@ -532,6 +534,44 @@ export async function loadSkills(options: LoadSkillsOptions = {}): Promise<LoadS
 		const resolvedPath = customRealPaths[i];
 		if (realPathSet.has(resolvedPath)) continue;
 		if (admit(skill, body, frontmatter, namespace) !== undefined) realPathSet.add(resolvedPath);
+	}
+
+	// Ombra harness skills (`OMBRA_HARNESS_DIR`) rank below every authored source: a same-name
+	// project, user or custom-directory skill replaces the harness copy outright (no namespaced
+	// alias). Taken from result.all, after the custom directories, for the same reason as the
+	// managed skills below: capability dedup must not let a disabled source hide them.
+	const harnessCandidates = result.all.filter(
+		capSkill =>
+			capSkill._source.provider === HARNESS_PROVIDER_ID &&
+			!disabledSkillNames.has(capSkill.name) &&
+			isSourceEnabled(capSkill._source) &&
+			!matchesIgnorePatterns(capSkill.name),
+	);
+	const harnessRealPaths = await Promise.all(
+		harnessCandidates.map(async capSkill => {
+			try {
+				return await fs.realpath(capSkill.path);
+			} catch {
+				return capSkill.path;
+			}
+		}),
+	);
+	for (let i = 0; i < harnessCandidates.length; i++) {
+		const capSkill = harnessCandidates[i];
+		const resolvedPath = harnessRealPaths[i];
+		if (realPathSet.has(resolvedPath) || skillMap.has(capSkill.name)) continue;
+		const skill: Skill = {
+			name: capSkill.name,
+			description: typeof capSkill.frontmatter?.description === "string" ? capSkill.frontmatter.description : "",
+			filePath: capSkill.path,
+			baseDir: capSkill.path.replace(/[\\/]SKILL\.md$/, ""),
+			source: `${capSkill._source.provider}:${capSkill.level}`,
+			...(capSkill.containRoot !== undefined && { containRoot: capSkill.containRoot }),
+			hide: capSkill.frontmatter?.hide === true || capSkill.frontmatter?.disableModelInvocation === true,
+			_source: capSkill._source,
+		};
+		if (admit(skill, capSkill.content, capSkill.frontmatter, skillNamespace(capSkill)) !== undefined)
+			realPathSet.add(resolvedPath);
 	}
 
 	// Managed (auto-learn) skills resolve dead-last with first-wins. Source from

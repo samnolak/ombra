@@ -195,7 +195,7 @@ public class ConnectorsParsingTests
             {
               "name": "omp-hello",
               "version": "1.2.0",
-              "path": "/home/u/.omp/profiles/harness/plugins/node_modules/omp-hello",
+              "path": "/home/u/.omp/agent/plugins/node_modules/omp-hello",
               "manifest": { "version": "1.2.0", "description": "Greets you from a plugin", "commands": ["commands/hello.md"] },
               "enabledFeatures": null,
               "enabled": true
@@ -208,7 +208,7 @@ public class ConnectorsParsingTests
               "entries": [
                 {
                   "scope": "user",
-                  "installPath": "/home/u/.omp/profiles/harness/plugins/cache/plugins/local-mkt___hello-skill___0.1.0",
+                  "installPath": "/home/u/.omp/agent/plugins/cache/plugins/local-mkt___hello-skill___0.1.0",
                   "version": "0.1.0",
                   "installedAt": "2026-09-25T20:18:01.489Z",
                   "lastUpdated": "2026-09-25T20:18:01.489Z",
@@ -225,9 +225,9 @@ public class ConnectorsParsingTests
     {
         var list = OmpPlugins.ParseList(RealPluginList)!;
         Assert.Equal(new InstalledPluginInfo("omp-hello", "omp-hello", null, "1.2.0", "Greets you from a plugin", true, null, false,
-            "/home/u/.omp/profiles/harness/plugins/node_modules/omp-hello", new PluginManifestParts(false, false, 0, 1)), list[0]);
+            "/home/u/.omp/agent/plugins/node_modules/omp-hello", new PluginManifestParts(false, false, 0, 1)), list[0]);
         Assert.Equal(new InstalledPluginInfo("hello-skill@local-mkt", "hello-skill", "local-mkt", "0.1.0", null, false, "user", false,
-            "/home/u/.omp/profiles/harness/plugins/cache/plugins/local-mkt___hello-skill___0.1.0"), list[1]);
+            "/home/u/.omp/agent/plugins/cache/plugins/local-mkt___hello-skill___0.1.0"), list[1]);
         Assert.Empty(OmpPlugins.ParseList("{\n  \"npm\": [],\n  \"marketplace\": []\n}")!);
         Assert.Null(OmpPlugins.ParseList("error: something"));
         var shadowed = OmpPlugins.ParseList("""{"npm":[],"marketplace":[{"id":"a@m","scope":"user","entries":[{"version":"1"}],"shadowedBy":"project"}]}""")!;
@@ -725,7 +725,7 @@ public class PluginsFlowTests
                 { "disabledExtensions": { "value": ["skill:tdd", "rule:x"], "type": "array", "description": "" },
                   "skills.enabled": { "value": true, "type": "boolean", "description": "" },
                   "skills.enableClaudeUser": { "value": false, "type": "boolean", "description": "" },
-                  "skills.customDirectories": { "value": ["~/.omp/profiles/harness/skills"], "type": "array", "description": "" },
+                  "skills.customDirectories": { "value": ["~/.omp/agent/skills"], "type": "array", "description": "" },
                   "marketplace.autoUpdate": { "value": "notify", "type": "enum", "description": "" } }
                 """,
         },
@@ -765,7 +765,7 @@ public class PluginsFlowTests
         Assert.Equal("notify", p.AutoUpdate);
         Assert.False(p.SkillSources.Single(s => s.Key == "skills.enableClaudeUser").IsOn);
         Assert.True(p.SkillSources.Single(s => s.Key == "skills.enablePiUser").IsOn);
-        Assert.Equal(["~/.omp/profiles/harness/skills"], p.Directories.Select(d => d.Path));
+        Assert.Equal(["~/.omp/agent/skills"], p.Directories.Select(d => d.Path));
         // The fake's catalog has one skill; "tdd" is off in disabledExtensions and still listed, with its switch off
         Assert.Equal(["systematic-debugging", "tdd"], p.Skills.Select(s => s.Name));
         Assert.True(p.Skills[0].IsEnabled);
@@ -911,7 +911,7 @@ public class PluginsFlowTests
         await ConnectorsFlowTests.Until(() => t.Cli.Contains("config set skills.enableClaudeUser true --json"), "source on");
         p.NewDirectory = "~/my-skills";
         await p.AddDirectoryCommand.ExecuteAsync(null);
-        Assert.Contains("config set skills.customDirectories [\"~/.omp/profiles/harness/skills\",\"~/my-skills\"] --json", t.Cli);
+        Assert.Contains("config set skills.customDirectories [\"~/.omp/agent/skills\",\"~/my-skills\"] --json", t.Cli);
         Assert.Equal(2, p.Directories.Count);
         p.SetAutoUpdateCommand.Execute("off");
         await ConnectorsFlowTests.Until(() => t.Cli.Contains("config set marketplace.autoUpdate off --json"), "auto update off");

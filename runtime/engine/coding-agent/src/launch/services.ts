@@ -14,6 +14,7 @@ import { resolveToCwd } from "../tools/path-utils";
 import { isSharedBrowserDaemonName } from "../tools/browser/shared-daemon";
 
 import { cfgLaunchEnabled } from "../tools/settings";
+import { resolveEnvScrubPolicy, scrubbedEnvNames, scrubEnv, scrubShellLine } from "../exec/env-scrub";
 
 export interface ServiceReady {
 	log?: string;
@@ -232,11 +233,18 @@ export async function startService(
 		}
 	}
 	const shell = session.settings.getShellConfig();
+	const line = `${shell.prefix ? `${shell.prefix} ` : ""}${params.command}`;
+	const envScrub = resolveEnvScrubPolicy(session.settings);
+	// The broker spawns from its own environment (a copy of an engine's) and
+	// overlays `spec.env`, so the line unsets the names as well.
+	const scrubbed = envScrub
+		? scrubShellLine(shell.shell, line, scrubbedEnvNames(envScrub, { base: shell.env }))
+		: undefined;
 	const spec: DaemonSpec = {
 		name: params.name,
 		application: shell.shell,
-		args: [...shell.args, `${shell.prefix ? `${shell.prefix} ` : ""}${params.command}`],
-		env: shell.env,
+		args: [...shell.args, scrubbed?.command ?? line],
+		env: envScrub ? { ...scrubEnv(shell.env, envScrub), ...scrubbed?.blankEnv } : shell.env,
 		cwd: resolveToCwd(params.cwd ?? session.cwd, session.cwd),
 		pty: params.pty ?? true,
 		ready: ready

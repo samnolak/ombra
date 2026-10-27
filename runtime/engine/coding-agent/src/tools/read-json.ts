@@ -7,6 +7,8 @@ import type { ReadToolDetails } from "@oh-my-pi/pi-tui/tools/read";
 import { DEFAULT_MAX_LINES, truncateHead, truncateTail } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import { isEnoent, sanitizeText } from "@oh-my-pi/pi-utils";
+import { Settings } from "../config/settings";
+import { resolveEnvScrubPolicy, scrubbedEnvNames, scrubShellLine } from "../exec/env-scrub";
 import type { ToolSession } from "../sdk";
 import { quotePosixArgument } from "../utils/shell-quote";
 import { resolveReadPath } from "./path-utils";
@@ -247,7 +249,10 @@ async function runJq(
 	const stderrPath = path.join(os.tmpdir(), `omp-jq-${crypto.randomUUID()}.err`);
 	// jaq parses any argument starting with `-` as flags even when shell-quoted;
 	// `--` keeps filters such as `-.price` positional.
-	const command = `jq ${flags.join(" ")} -- ${quotePosixArgument(query)} ${quotePosixArgument(filePath)} 2>${quotePosixArgument(stderrPath)}`;
+	const jqLine = `jq ${flags.join(" ")} -- ${quotePosixArgument(query)} ${quotePosixArgument(filePath)} 2>${quotePosixArgument(stderrPath)}`;
+	// The model writes the filter, and jq's `env`/`$ENV` read the shell's environment.
+	const envScrub = resolveEnvScrubPolicy(await Settings.forSession());
+	const command = envScrub ? scrubShellLine(undefined, jqLine, scrubbedEnvNames(envScrub)).command : jqLine;
 
 	let output = "";
 	let lines = 0;

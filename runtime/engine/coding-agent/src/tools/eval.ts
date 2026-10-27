@@ -173,6 +173,8 @@ export interface EvalToolDescriptionOptions {
 	inlineTopics?: boolean;
 	/** Whether missing runtimes and environments may be provisioned automatically. */
 	autoProvision?: boolean;
+	/** Why the session-start probe (`eval.probePython`) dropped Python; shown as one line. */
+	pythonUnavailable?: string;
 }
 
 function evalTemplateContext(options: EvalToolDescriptionOptions) {
@@ -188,6 +190,7 @@ function evalTemplateContext(options: EvalToolDescriptionOptions) {
 		spawnDefaultAgent: spawnPolicy.defaultAgent,
 		spawnAllowedAgentsText: spawnPolicy.allowedPromptText,
 		autoProvision: options.autoProvision ?? true,
+		pythonUnavailable: options.pythonUnavailable,
 	};
 }
 
@@ -273,7 +276,13 @@ async function resolveBackend(
 	const allowJs = backends.js;
 
 	if (language === "python") {
-		if (!allowPy) throw new ToolError("Python backend is disabled (PI_PY=0 or eval.py = false).");
+		if (!allowPy) {
+			throw new ToolError(
+				backends.pythonUnavailable
+					? `Python backend cannot start in this session (${backends.pythonUnavailable}). Pass language: "js".`
+					: "Python backend is disabled (PI_PY=0 or eval.py = false).",
+			);
+		}
 		const available = await pythonBackend.isAvailable(session, probeOpts);
 		throwIfAborted(probeOpts?.signal);
 		if (!available) {
@@ -349,6 +358,7 @@ export class EvalTool implements AgentTool<typeof evalSchema> {
 			preludes: this.#advertisedPreludes(session),
 			inlineTopics: session.isToolActive?.("read") === false,
 			autoProvision: cfgEvalAutoProvision.get(session.settings),
+			pythonUnavailable: backends.pythonUnavailable,
 		};
 	}
 

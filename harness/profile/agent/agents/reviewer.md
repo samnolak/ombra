@@ -8,8 +8,6 @@ tools:
   - lsp
   - ast_grep
   - yield
-spawns: 
-  - scout
 model: 
   - "@slow"
 output: 

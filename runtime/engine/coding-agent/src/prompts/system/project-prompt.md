@@ -4,16 +4,21 @@
 {{#if model}}- Model: {{model}}{{/if}}
 </workstation>
 
-{{#if contextFiles.length}}
+{{#ifAny contextFiles.length contextFilesBudgetNotice}}
 <repo-rules>
-MUST follow these context files for all tasks:
+{{#if contextFiles.length}}
+MUST follow these context files for all tasks. They run broad to specific: nearer files override broader ones; none override system or direct user instructions.
+{{/if}}
 {{#each contextFiles}}
 <file path="{{path}}">
 {{content}}
 </file>
 {{/each}}
-</repo-rules>
+{{#if contextFilesBudgetNotice}}
+{{contextFilesBudgetNotice}}
 {{/if}}
+</repo-rules>
+{{/ifAny}}
 
 {{#if agentsMdSearch.files.length}}
 <dir-context>

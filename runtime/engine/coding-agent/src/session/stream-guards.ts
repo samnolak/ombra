@@ -12,6 +12,7 @@ import { logger, prompt } from "@oh-my-pi/pi-utils";
 import type { Settings } from "../config/settings";
 import geminiToolReminderTemplate from "../prompts/system/gemini-tool-call-reminder.md" with { type: "text" };
 import streamingEditRecoveryTemplate from "../prompts/system/streaming-edit-recovery.md" with { type: "text" };
+import streamingEditOversizeTemplate from "../prompts/system/streaming-edit-oversize.md" with { type: "text" };
 import type { CustomMessage } from "./messages";
 import type { SessionManager } from "./session-manager";
 import {
@@ -20,7 +21,7 @@ import {
 	toolCallLoopRedirectDetails,
 } from "./tool-call-loop-redirect";
 
-import { cfgEditStreamingAbort } from "../edit/settings";
+import { cfgEditMaxInputBytes, cfgEditStreamingAbort } from "../edit/settings";
 import {
 	cfgModelLoopGuardEnabled,
 	cfgModelLoopGuardToolCallReminder,
@@ -33,6 +34,8 @@ const GEMINI_HEADER_INTERRUPT_REASON = "Interrupted: emit a tool call instead of
 const GEMINI_TOOL_REMINDER_TYPE = "gemini-tool-call-reminder";
 /** Abort reason (and aborted-message `errorMessage`) for a failed streamed edit preview. */
 const STREAMING_EDIT_ABORT_REASON = "Streaming edit preview failed";
+/** Abort reason (and aborted-message `errorMessage`) for an edit input over `edit.maxInputBytes`. */
+const STREAMING_EDIT_OVERSIZE_REASON = "Streaming edit input too large";
 const STREAMING_EDIT_RECOVERY_TYPE = "streaming-edit-recovery";
 /**
  * Recovery continuations allowed per user prompt. Each failed preview spends
@@ -64,7 +67,7 @@ export interface StreamGuardsHost {
 	discardAssistantTurn(message: AssistantMessage): void;
 }
 
-/** Guards streamed edit calls against invalid final previews. */
+/** Guards streamed edit calls against invalid final previews and runaway input. */
 export class StreamingEditGuard {
 	readonly #host: StreamGuardsHost;
 	#abortTriggered = false;
@@ -72,6 +75,8 @@ export class StreamingEditGuard {
 	#recoverySequence = -1;
 	/** Recovery continuations already spent for {@link #recoverySequence}. */
 	#recoveryCount = 0;
+	/** Input bytes streamed so far per in-flight `edit` call id (`edit.maxInputBytes`). */
+	readonly #inputBytes = new Map<string, number>();
 
 	constructor(host: StreamGuardsHost) {
 		this.#host = host;
@@ -85,6 +90,37 @@ export class StreamingEditGuard {
 	/** Clears all turn-scoped streaming edit state. */
 	reset(): void {
 		this.#abortTriggered = false;
+		this.#inputBytes.clear();
+	}
+
+	/**
+	 * `edit.maxInputBytes`: aborts an `edit` call whose streamed input passes the
+	 * cap before it completes (a degenerate generation can otherwise stream until
+	 * the run's timeout or the output-token limit), then re-drives the run with
+	 * an error the model can act on.
+	 */
+	checkInputSize(event: AgentEvent): void {
+		if (this.#abortTriggered || event.type !== "message_update") return;
+		const update = event.assistantMessageEvent;
+		if (update.type !== "toolcall_delta") return;
+		const limit = cfgEditMaxInputBytes.get(this.#host.settings);
+		if (!(limit > 0)) return;
+		const block = update.partial.content[update.contentIndex];
+		if (block?.type !== "toolCall" || block.name !== "edit") return;
+		const bytes = (this.#inputBytes.get(block.id) ?? 0) + Buffer.byteLength(update.delta, "utf8");
+		this.#inputBytes.set(block.id, bytes);
+		if (bytes <= limit) return;
+		this.#abortTriggered = true;
+		logger.warn("Streaming edit aborted: input over edit.maxInputBytes", { toolCallId: block.id, bytes, limit });
+		const diagnostic = `${STREAMING_EDIT_OVERSIZE_REASON}: the edit input passed ${limit} bytes before the call completed; it was cut off and nothing was applied.`;
+		this.#host.agent.abort(
+			createToolScopedAbortReason(
+				STREAMING_EDIT_OVERSIZE_REASON,
+				{ [block.id]: diagnostic },
+				STREAMING_EDIT_OVERSIZE_REASON,
+			),
+		);
+		this.#scheduleRecovery(STREAMING_EDIT_OVERSIZE_REASON, prompt.render(streamingEditOversizeTemplate, { limit }));
 	}
 
 	/** Aborts an edit when the native engine's final preview reports an error. */
@@ -135,16 +171,17 @@ export class StreamingEditGuard {
 				STREAMING_EDIT_ABORT_REASON,
 			),
 		);
-		this.#scheduleRecovery({ diagnostic });
+		this.#scheduleRecovery(STREAMING_EDIT_ABORT_REASON, prompt.render(streamingEditRecoveryTemplate, { diagnostic }));
 	}
 
 	/**
-	 * Re-drives the run after a failed streamed edit preview so the model can
-	 * correct the patch instead of losing the turn. One recovery message (with
-	 * the preview diagnostic) is appended per failure; the budget is shared per
-	 * user prompt and a spent budget stops with a warning instead of looping.
+	 * Re-drives the run after a streamed edit was cut off (failed preview or
+	 * oversized input) so the model can correct the call instead of losing the
+	 * turn. One recovery message (`content`) is appended per failure; the budget
+	 * is shared per user prompt and a spent budget stops with a warning instead
+	 * of looping on a patch the model keeps re-emitting. `reason` labels the notices.
 	 */
-	#scheduleRecovery(opts: { diagnostic: string }): void {
+	#scheduleRecovery(reason: string, content: string): void {
 		const sequence = this.#host.promptSequence();
 		if (this.#recoverySequence !== sequence) {
 			this.#recoverySequence = sequence;
@@ -158,12 +195,11 @@ export class StreamingEditGuard {
 			});
 			this.#host.emitNotice(
 				"warning",
-				`Streaming edit preview failed ${this.#recoveryCount} times; stopped auto-recovery for this prompt.`,
+				`${reason} ${this.#recoveryCount} times; stopped auto-recovery for this prompt.`,
 				STREAMING_EDIT_NOTICE_SOURCE,
 			);
 			return;
 		}
-		const diagnostic = opts.diagnostic;
 		const attempt = this.#recoveryCount;
 		const generation = this.#host.promptGeneration();
 		this.#host.schedulePostPromptTask(async signal => {
@@ -172,7 +208,6 @@ export class StreamingEditGuard {
 			await this.#host.agent.waitForIdle();
 			if (signal.aborted || this.#host.isDisposed()) return;
 			if (this.#host.promptGeneration() !== generation || this.#host.promptSequence() !== sequence) return;
-			const content = prompt.render(streamingEditRecoveryTemplate, { diagnostic });
 			this.#host.agent.appendMessage({
 				role: "custom",
 				customType: STREAMING_EDIT_RECOVERY_TYPE,
@@ -184,7 +219,7 @@ export class StreamingEditGuard {
 			this.#host.sessionManager.appendCustomMessageEntry(STREAMING_EDIT_RECOVERY_TYPE, content, false);
 			this.#host.emitNotice(
 				"info",
-				`Streaming edit preview failed; retrying with the error context (attempt ${attempt}/${STREAMING_EDIT_RECOVERY_LIMIT}).`,
+				`${reason}; retrying with the error context (attempt ${attempt}/${STREAMING_EDIT_RECOVERY_LIMIT}).`,
 				STREAMING_EDIT_NOTICE_SOURCE,
 			);
 			try {

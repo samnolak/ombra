@@ -53,7 +53,7 @@ import { ContextNotesTool, NewContextTool } from "./context-notes";
 import { DebugTool } from "./debug";
 import { cfgIdaAvailable } from "../ida/install";
 import { EvalTool } from "./eval";
-import { resolveEvalBackends } from "./eval-backends";
+import { probeEvalPython, resolveEvalBackends } from "./eval-backends";
 import { GithubTool } from "./gh";
 import { GlobTool } from "./glob";
 import { GrepTool } from "./grep";
@@ -90,11 +90,11 @@ import {
 	cfgGrepEnabled,
 	cfgLaunchEnabled,
 	cfgSecurityEnabled,
-	cfgTodoEnabled,
 	cfgToolsDeferred,
 	cfgToolsXdev,
 	cfgWebSearchEnabled,
 } from "./settings";
+import { isTodoEnabledForModel } from "./todo-models";
 import { cfgAutolearnEnabled } from "../autolearn/settings";
 import { cfgBashEnabled } from "../exec/settings";
 import { cfgCompactionExperimentalContextManagement } from "../session/context-settings";
@@ -635,15 +635,20 @@ export async function resolveBuiltinToolPlan(session: ToolSession, toolNames?: s
 	if (goalModeActive && requestedTools && !requestedTools.includes("goal")) {
 		requestedTools.push("goal");
 	}
+	const skipEvalPreflight = session.skipPythonPreflight === true;
+	const evalRequested = requestedTools === undefined || requestedTools.includes("eval");
+	// `eval.probePython`: drop an unstartable Python backend from the advertised
+	// schema up front (cached per cwd + interpreter) instead of failing at call time.
+	if (!skipEvalPreflight && evalRequested) {
+		await logger.time("createTools:pythonProbe", probeEvalPython, session);
+	}
 	const backends = resolveEvalBackends(session);
 	const allowPython = backends.python;
 	const allowJs = backends.js;
-	const skipEvalPreflight = session.skipPythonPreflight === true;
 	// Eval tool is enabled if ANY backend is reachable. JS needs no preflight, so
 	// we only probe Python when JS is disabled — otherwise allowEval is
 	// already true and per-backend availability is checked at first invocation.
 	let pythonAvailable = true;
-	const evalRequested = requestedTools === undefined || requestedTools.includes("eval");
 	if (!skipEvalPreflight && !allowJs && evalRequested) {
 		if (allowPython) {
 			const availability = await logger.time(
@@ -748,7 +753,10 @@ export async function resolveBuiltinToolPlan(session: ToolSession, toolNames?: s
 		if (name === "debug") return cfgDebugEnabled.get(session.settings);
 		if (name === "ida") return cfgIdaAvailable.get(session.settings);
 		if (name === "todo")
-			return (!includeYield || session.prewalkArmed === true) && cfgTodoEnabled.get(session.settings);
+			return (
+				(!includeYield || session.prewalkArmed === true) &&
+				isTodoEnabledForModel(session.settings, session.getActiveModelString?.())
+			);
 		if (name === "glob") return cfgGlobEnabled.get(session.settings);
 		if (name === "grep") return cfgGrepEnabled.get(session.settings);
 		if (name === "find") return isFindEnabled(session);

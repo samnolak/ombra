@@ -583,7 +583,10 @@ public sealed class UpdateInstallTests
         Directory.CreateDirectory(Path.GetDirectoryName(cli)!);
         File.WriteAllText(cli, "");
         if (name == RuntimePack.Name)
+        {
             File.WriteAllText(Path.Combine(dir, "omp", RuntimePack.HostEntry.Replace('/', Path.DirectorySeparatorChar)), "");
+            Directory.CreateDirectory(Path.Combine(dir, "omp", "harness"));
+        }
         File.WriteAllText(Path.Combine(dir, "installed.json"), JsonSerializer.Serialize(new
         {
             pack = name, omp, bun = "1.4.0", platform, installedAt = at ?? DateTimeOffset.UtcNow,

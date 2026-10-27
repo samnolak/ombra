@@ -1,6 +1,6 @@
 ---
 name: requesting-code-review
-description: Use when completing a non-trivial implementation or bugfix, or before merging, to get an independent review. Not for typos, wording or one-line config edits
+description: Independent review after non-trivial implementation or bugfix, before merging; not typos, one-liners.
 ---
 
 # Requesting Code Review

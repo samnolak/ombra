@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Use when implementing a feature or fixing a behavioral bug, before writing implementation code. Not for typos, wording, comments or formatting-only edits
+description: Write tests first for features or behavioral bugfixes; not typos, comments, formatting.
 ---
 
 # Test-Driven Development (TDD)
@@ -23,6 +23,10 @@ Write the test first. Watch it fail. Write minimal code to pass.
 
 **Not in scope (no behavior change — edit directly, then verify):**
 - Typos, wording, comments, formatting
+
+**When the request forbids changing tests** (or the test suite is not yours to edit): the failing test is a scratch
+reproduction script outside the suite — run it, watch it fail, fix the code, watch it pass, then delete it. The
+request's limits come first; this skill never overrides them.
 
 **Exceptions (ask your human partner):**
 - Throwaway prototypes

@@ -10,12 +10,21 @@
 // once runtime/engine is committed; until then `rsync -a --exclude node_modules runtime/engine/ <snapshot>/`), run
 // this script on the snapshot and on runtime/engine with the same runs/faults, then `bun compare.mjs <a> <b>`.
 // Metrics per run (from the model's request log): requests, failed requests, input bytes (sum and per request),
-// tokens ≈ bytes/4 (estimate, not a tokenizer), system prompt and tool schema bytes, tool calls, wall time,
-// success (the task's check prints OK afterwards) and whether the engine exited.
+// tokens ≈ bytes/4 (estimate, not a tokenizer), system prompt and tool schema bytes, tool calls, edit tool calls and
+// errors, wall time, whether the engine exited, and success. Success is checked on the world, not the engine's
+// report: the task's check prints OK afterwards, every workspace file outside the task's `allowedChanges` is
+// byte-identical (SHA-256 before vs after; the differing files go to `untouchedChanged`), and every stdout line of the
+// engine's `--mode json` channel parses as a JSON object (the others go to `strayStdout`).
+//
+// BENCH_EDIT_MODE=<mode> pins the engine's `edit.mode` for this side; run the same tasks once per mode and compare
+// the two outputs (`bun compare.mjs <a> <b> task`). The `prices` and `rename` tasks are multi-site edits through
+// `edit`; the scripted model speaks whatever variant the engine's `edit` schema offers (`editModeSeen`).
 import { spawnSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { userIsolationArgs } from "./isolation.mjs";
 import { TASKS } from "./tasks.mjs";
 
 const [engineArg, rtArg, outArg, runsArg = "3", faultsArg = "all", tasksArg = "all"] = process.argv.slice(2);
@@ -40,33 +49,65 @@ fs.symlinkSync(path.join(RT, "omp/node_modules"), path.join(omp, "node_modules")
 
 // Real model (BENCH_MODEL=<provider/model>): no scripted server; the user's existing agent dir supplies the
 // credentials (read as any second omp process does; nothing here logs or copies them), HOME stays isolated, and
-// extensions/skills/rules/LSP are off so both sides see the same tool set. Only the "none" fault applies.
+// extensions/skills/rules/LSP are off so both sides see the same tool set. The user's own MCP servers, extensions,
+// rules, skills and agents in that dir stay off in every mode (isolation.mjs: a `--config` overlay written to
+// <out>/isolation.yml, after BENCH_CONFIG). BENCH_AS_SHIPPED=1 keeps extensions, skills and rules on, so the harness
+// layer runs as Ombra ships it. BENCH_HARNESS_DIR=<dir> is that harness layer (OMBRA_HARNESS_DIR; default the
+// repository's harness/profile; a variant: .temp/lab/variants/<name>).
+// BENCH_THINKING=<level> passes `--thinking`. Only the "none" fault applies.
 const REAL_MODEL = process.env.BENCH_MODEL;
 const REAL_AGENT_DIR = process.env.BENCH_AGENT_DIR ?? path.join(os.homedir(), ".omp/agent");
+const AS_SHIPPED = process.env.BENCH_AS_SHIPPED === "1";
 // BENCH_TOOLS: an explicit tool list (also keeps every listed tool top-level); unset = the engine's default set, as
 // Ombra runs it. BENCH_CONFIG: a settings overlay file passed as `--config`.
 const TOOLS = process.env.BENCH_TOOLS;
 const APPROVAL = process.env.BENCH_APPROVAL ?? "yolo";
+// BENCH_EDIT_MODE: pins the engine's `edit.mode` (hashline | replace | patch | apply_patch | sloppy) through
+// PI_EDIT_VARIANT, which also skips the per-model fallback; unset = the engine's own choice.
+const EDIT_MODE = process.env.BENCH_EDIT_MODE;
 const PORT = Number(process.env.BENCH_PORT ?? 18391);
 const HOME = path.join(OUT, "home");
+// The harness layer is read in place (BENCH_HARNESS_DIR, default the repository's), as Ombra reads it from its runtime pack.
+const HARNESS_DIR = path.resolve(process.env.BENCH_HARNESS_DIR ?? path.join(REPO, "harness/profile"));
+if (!fs.existsSync(HARNESS_DIR)) throw new Error(`BENCH_HARNESS_DIR ${HARNESS_DIR} does not exist`);
 if (!REAL_MODEL) spawnSync(path.join(REPO, "avalonia/tools/stand-in-env/setup.sh"), [HOME, String(PORT)], { stdio: "ignore" });
 else fs.mkdirSync(HOME, { recursive: true });
+// The scripted-model side's agent dir is HOME/.omp/agent (fresh); the real-model side reads the user's, minus its items.
+const ISOLATION_ARGS = REAL_MODEL
+	? userIsolationArgs({ agentDir: REAL_AGENT_DIR, harnessDir: HARNESS_DIR, configs: process.env.BENCH_CONFIG ? [path.resolve(process.env.BENCH_CONFIG)] : [], outFile: path.join(OUT, "isolation.yml") })
+	: [];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function waitPort() {
 	for (let k = 0; k < 100; k++) { try { await fetch(`http://127.0.0.1:${PORT}/v1/models`); return; } catch { await sleep(50); } }
 	throw new Error("model did not start");
 }
-// Every file under `root` with its content, for the before/after diff.
+// Every file under `root` with the SHA-256 of its bytes (symlinks: of their target path), for the before/after diff.
 function snapshot(root) {
 	const out = new Map();
-	const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else out.set(path.relative(root, p), fs.readFileSync(p, "utf8")); } };
+	const hash = b => createHash("sha256").update(b).digest("hex");
+	const walk = d => {
+		for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+			const p = path.join(d, e.name);
+			if (e.isDirectory()) walk(p);
+			else out.set(path.relative(root, p), e.isSymbolicLink() ? `link:${fs.readlinkSync(p)}` : hash(fs.readFileSync(p)));
+		}
+	};
 	if (fs.existsSync(root)) walk(root);
 	return out;
 }
 function changed(before, after) {
 	const names = new Set([...before.keys(), ...after.keys()]);
 	return [...names].filter(n => before.get(n) !== after.get(n)).sort();
+}
+// Stdout of `--mode json` is the engine's protocol channel: every line must be one JSON object. Returns the lines that
+// are not (a stray console.log, a progress bar, a banner). The unterminated tail of a timed-out run is cut mid-write
+// by the kill and is not counted.
+function strayLines(stdout, timedOut) {
+	const lines = stdout.split("\n");
+	const tail = lines.pop();
+	if (tail && !timedOut) lines.push(tail);
+	return lines.filter(l => { try { const v = JSON.parse(l); return v === null || typeof v !== "object" || Array.isArray(v); } catch { return true; } });
 }
 
 // Work folders live outside any repository: under <out-dir> inside this repo the engine would also load the repo's
@@ -90,11 +131,14 @@ for (const fault of REAL_MODEL ? ["none"] : FAULTS) for (const id of TASK_IDS) f
 	const model = REAL_MODEL ? undefined : spawn(BUN, [path.join(HERE, "model.mjs"), String(PORT), metrics, fault], { stdio: ["ignore", "ignore", "ignore"] });
 	if (model) await waitPort();
 	const t0 = Date.now();
-	const realArgs = REAL_MODEL ? ["--model", REAL_MODEL, "--no-extensions", "--no-skills", "--no-rules", "--no-lsp", "--no-prewalk", "--no-title", ...(TOOLS ? ["--no-tools", "--tools", TOOLS] : [])] : [];
+	const realArgs = REAL_MODEL ? ["--model", REAL_MODEL, ...(process.env.BENCH_THINKING ? ["--thinking", process.env.BENCH_THINKING] : []), ...(AS_SHIPPED ? [] : ["--no-extensions", "--no-skills", "--no-rules"]), "--no-lsp", "--no-prewalk", "--no-title", ...(TOOLS ? ["--no-tools", "--tools", TOOLS] : [])] : [];
 	if (process.env.BENCH_CONFIG) realArgs.push("--config", path.resolve(process.env.BENCH_CONFIG));
+	realArgs.push(...ISOLATION_ARGS);
 	const env = REAL_MODEL
-		? { PATH: `${path.dirname(BUN)}:${process.env.PATH}`, HOME, PI_CODING_AGENT_DIR: REAL_AGENT_DIR, TERM: "dumb" }
-		: { PATH: `${path.dirname(BUN)}:${process.env.PATH}`, HOME, OMP_PROFILE: "harness", QWEN_LOCAL_API_KEY: "dummy-not-a-secret", TERM: "dumb" };
+		// NODE_EXTRA_CA_CERTS: behind a TLS-intercepting proxy provider requests fail certificate checks without it.
+		? { PATH: `${path.dirname(BUN)}:${process.env.PATH}`, HOME, PI_CODING_AGENT_DIR: REAL_AGENT_DIR, OMBRA_HARNESS_DIR: HARNESS_DIR, TERM: "dumb", ...(process.env.NODE_EXTRA_CA_CERTS ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS } : {}) }
+		: { PATH: `${path.dirname(BUN)}:${process.env.PATH}`, HOME, OMBRA_HARNESS_DIR: HARNESS_DIR, QWEN_LOCAL_API_KEY: "dummy-not-a-secret", TERM: "dumb" };
+	if (EDIT_MODE) env.PI_EDIT_VARIANT = EDIT_MODE;
 	const p = spawnSync(BUN, ["--config=" + path.join(omp, "bunfig.toml"), "--no-env-file", "--no-install", path.join(omp, "engine/coding-agent/src/cli.ts"),
 		"-p", "--mode", "json", "--approval-mode", APPROVAL, "--no-session", ...realArgs, task.prompt.replace("{outside}", outside)], {
 		cwd: work, timeout: TIMEOUT_MS, encoding: "utf8", maxBuffer: 64 << 20, env,
@@ -104,22 +148,34 @@ for (const fault of REAL_MODEL ? ["none"] : FAULTS) for (const id of TASK_IDS) f
 	fs.writeFileSync(path.join(dir, "stdout.jsonl"), p.stdout ?? "");
 	fs.writeFileSync(path.join(dir, "stderr.txt"), p.stderr ?? "");
 	const changedFiles = changed(before, snapshot(work));
+	// Verify the world: every file the task does not allow to change must hash the same as before the run.
+	const untouchedChanged = changedFiles.filter(f => !task.allowedChanges.includes(f));
+	const strayStdout = strayLines(p.stdout ?? "", p.error?.code === "ETIMEDOUT");
 	const check = spawnSync(BUN, ["check.mjs"], { cwd: work, encoding: "utf8" });
 	const reqs = fs.readFileSync(metrics, "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l));
 	const ok = reqs.filter(q => q.status === 200);
 	// Provider-reported usage and tool calls from the engine's own event stream (real and scripted runs alike).
 	const events = (p.stdout ?? "").split("\n").filter(l => l.startsWith("{")).map(l => { try { return JSON.parse(l); } catch { return undefined; } }).filter(Boolean);
+	const editEnds = events.filter(e => e.type === "tool_execution_end" && e.toolName === "edit");
 	const assistantEnds = events.filter(e => e.type === "message_end" && e.message?.role === "assistant");
 	const usage = assistantEnds.reduce((u, e) => { const x = e.message.usage ?? {}; return { input: u.input + (x.input ?? 0) + (x.cacheRead ?? 0) + (x.cacheWrite ?? 0), output: u.output + (x.output ?? 0) }; }, { input: 0, output: 0 });
 	const finalText = (assistantEnds.at(-1)?.message?.content ?? []).map(c => c.text ?? "").join("");
+	const checkOk = (check.stdout ?? "").trim() === "OK";
 	const row = {
 		fault, task: id, run: r, model: REAL_MODEL ?? "scripted",
-		success: (check.stdout ?? "").trim() === "OK",
+		success: checkOk && untouchedChanged.length === 0 && strayStdout.length === 0,
+		checkOk,
 		exitCode: p.status, timedOut: p.error?.code === "ETIMEDOUT",
 		finalSeen: REAL_MODEL ? finalText.trim().length > 0 : /DONE: fixed and checked/.test(p.stdout ?? ""),
 		changedFiles,
-		unrequestedEdits: changedFiles.filter(f => !task.allowedChanges.includes(f)).length,
+		untouchedChanged,
+		unrequestedEdits: untouchedChanged.length,
+		strayStdout,
 		outsideTouched: changed(outsideBefore, snapshot(outside)).length,
+		editMode: EDIT_MODE ?? null,
+		editModeSeen: reqs.find(q => q.editMode)?.editMode ?? null,
+		editCalls: editEnds.length,
+		editErrors: editEnds.filter(e => e.isError).length,
 		turns: assistantEnds.length,
 		toolCallsSeen: events.filter(e => e.type === "tool_execution_start").length,
 		providerInputTokens: usage.input,
@@ -130,20 +186,22 @@ for (const fault of REAL_MODEL ? ["none"] : FAULTS) for (const id of TASK_IDS) f
 		maxRequestBytes: Math.max(0, ...reqs.map(q => q.bytes)),
 		systemBytes: reqs[0]?.systemBytes ?? 0,
 		toolsBytes: reqs[0]?.toolsBytes ?? 0,
-		toolCalls: ok.filter(q => q.step < 3).length,
+		toolCalls: ok.filter(q => q.tool).length,
 		wallMs: wall,
 		firstRetryGapMs: reqs.length > 1 && reqs[0].status !== 200 ? reqs[1].t - reqs[0].t : null,
 	};
 	row.inputTokensEst = Math.round(row.inputBytes / 4);
 	results.push(row);
 	console.log(JSON.stringify(row));
+	if (untouchedChanged.length) console.error(`FAIL ${dir}: files outside allowedChanges changed: ${untouchedChanged.join(", ")}`);
+	if (strayStdout.length) console.error(`FAIL ${dir}: ${strayStdout.length} stdout line(s) are not JSON frames, first: ${JSON.stringify(strayStdout[0])}`);
 }
 fs.writeFileSync(path.join(OUT, "results.json"), JSON.stringify(results, null, 2));
 
 // Scripted runs group by fault (the harness under each failure); real-model runs by task (the model's behaviour).
 const groups = Map.groupBy(results, r => (REAL_MODEL ? r.task : r.fault));
 const avg = (a, k) => Math.round(a.reduce((n, r) => n + (r[k] ?? 0), 0) / a.length);
-let table = `| ${REAL_MODEL ? "task" : "fault"} | runs | success | final answer | unrequested edits | outside touched | requests (avg) | input KB (avg) | provider input tok (avg) | max request KB | system KB | tools KB | wall s (avg) |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n`;
-for (const [f, a] of groups) table += `| ${f} | ${a.length} | ${a.filter(r => r.success).length}/${a.length} | ${a.filter(r => r.finalSeen).length}/${a.length} | ${a.reduce((n, r) => n + r.unrequestedEdits, 0)} | ${a.filter(r => r.outsideTouched > 0).length}/${a.length} | ${(a.reduce((n, r) => n + r.requests, 0) / a.length).toFixed(1)} | ${(avg(a, "inputBytes") / 1024).toFixed(1)} | ${avg(a, "providerInputTokens")} | ${(avg(a, "maxRequestBytes") / 1024).toFixed(1)} | ${(avg(a, "systemBytes") / 1024).toFixed(1)} | ${(avg(a, "toolsBytes") / 1024).toFixed(1)} | ${(avg(a, "wallMs") / 1000).toFixed(1)} |\n`;
+let table = `| ${REAL_MODEL ? "task" : "fault"} | runs | success | check OK | final answer | unrequested edits | stray stdout | outside touched | edit calls (avg) | edit errors | requests (avg) | input KB (avg) | provider input tok (avg) | max request KB | system KB | tools KB | wall s (avg) |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n`;
+for (const [f, a] of groups) table += `| ${f} | ${a.length} | ${a.filter(r => r.success).length}/${a.length} | ${a.filter(r => r.checkOk).length}/${a.length} | ${a.filter(r => r.finalSeen).length}/${a.length} | ${a.reduce((n, r) => n + r.unrequestedEdits, 0)} | ${a.filter(r => r.strayStdout.length > 0).length}/${a.length} | ${a.filter(r => r.outsideTouched > 0).length}/${a.length} | ${(a.reduce((n, r) => n + r.editCalls, 0) / a.length).toFixed(1)} | ${a.reduce((n, r) => n + r.editErrors, 0)} | ${(a.reduce((n, r) => n + r.requests, 0) / a.length).toFixed(1)} | ${(avg(a, "inputBytes") / 1024).toFixed(1)} | ${avg(a, "providerInputTokens")} | ${(avg(a, "maxRequestBytes") / 1024).toFixed(1)} | ${(avg(a, "systemBytes") / 1024).toFixed(1)} | ${(avg(a, "toolsBytes") / 1024).toFixed(1)} | ${(avg(a, "wallMs") / 1000).toFixed(1)} |\n`;
 fs.writeFileSync(path.join(OUT, "summary.md"), table);
 console.log(table);

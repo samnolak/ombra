@@ -30,6 +30,7 @@ import * as PiCodingAgent from "../../index";
 import type { SendUserMessageOptions } from "../../session/agent-session";
 import type { CustomMessagePayload } from "../../session/messages";
 import type { FileDeleteFallbackHandler, FileWriteFallbackHandler } from "../../tools/file-write-fallback";
+import { HARNESS_PROVIDER_ID } from "../../harness-layer";
 import { isFilesystemSourcePath } from "../../tools/path-utils";
 import { EventBus } from "../../utils/event-bus";
 import * as TypeBox from "../legacy-typebox";
@@ -599,15 +600,16 @@ export async function discoverExtensionPaths(
 
 	const ambient = options.ambient !== false;
 	if (ambient) {
-		// 1. Discover extension modules via capability API (native .omp/.pi only).
-		// Scope the load to the native provider — the extension-module capability
+		// 1. Discover extension modules via capability API (native .omp/.pi and the Ombra harness).
+		// Scope the load to those providers — the extension-module capability
 		// also has claude/codex/gemini/opencode providers, and their items were
 		// discarded here anyway (see #4198). The provider filter skips the walk
 		// entirely instead of running four foreign directory scans and dropping
-		// the results.
+		// the results. A native (user or project) extension shadows a same-name
+		// harness one: the harness provider ranks below native.
 		const discovered = await loadCapability<ExtensionModule>(extensionModuleCapability.id, {
 			...loadOptions,
-			providers: ["native"],
+			providers: ["native", HARNESS_PROVIDER_ID],
 		});
 		for (const ext of discovered.items) {
 			addPath(ext.path);

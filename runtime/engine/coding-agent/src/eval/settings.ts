@@ -31,6 +31,19 @@ export const cfgEvalJs = register({
 	},
 });
 
+export const cfgEvalProbePython = register({
+	id: "eval.probePython",
+	type: "boolean",
+	default: false,
+	ui: {
+		tab: "shell",
+		group: "Eval & Runtimes",
+		label: "Probe Python at Session Start",
+		description:
+			"Check once at session start whether the Python eval backend can start; when it cannot, the eval tool offers only JavaScript and says why",
+	},
+});
+
 export const cfgEvalAutoProvision = register({
 	id: "eval.autoProvision",
 	type: "boolean",

@@ -1,6 +1,12 @@
 // Aider Polyglot subset on a real model: one engine tree, the fixed exercises of polyglot-subset.json, N runs each.
 //
 //   BENCH_MODEL=anthropic/claude-haiku-4-5 bun polyglot.mjs <engine-dir> <installed-runtime-dir> <polyglot-checkout> <out-dir> [runs=1]
+//   BENCH_CODEX=1 BENCH_MODEL=gpt-6-luna BENCH_THINKING=low bun polyglot.mjs - <installed-runtime-dir> <polyglot-checkout> <out-dir> [runs=1]
+//   BENCH_CLAUDE=1 BENCH_MODEL=claude-haiku-5-5 BENCH_THINKING=low bun polyglot.mjs - <installed-runtime-dir> <polyglot-checkout> <out-dir> [runs=1]
+//
+// BENCH_SUBSET: the exercise list, default polyglot-subset.json (10); a JSON file in the same shape (e.g. the
+// polyglot-hard.json that select-hard.mjs writes), or `all` = every JavaScript and Python practice exercise of the
+// checkout (83 at the pinned commit; the checkout must be at that commit).
 //
 // <polyglot-checkout>: `git clone https://github.com/Aider-AI/polyglot-benchmark` at the commit in polyglot-subset.json.
 // Only JavaScript (tests run with `bun test`, Jest syntax) and Python (`python3 -m unittest`) exercises: no Docker or
@@ -13,17 +19,32 @@
 // failed tool calls, test runs the agent made) and spend (provider input/output tokens and cost).
 //
 // Credentials: the user's existing agent dir (PI_CODING_AGENT_DIR, default ~/.omp/agent) is read the way any second
-// omp process reads it; nothing here prints or copies them. HOME is a temp folder; extensions, skills, rules, LSP off.
+// omp process reads it; nothing here prints or copies them. The user's own MCP servers, extensions, rules, skills and
+// agents in that dir stay off in every mode (isolation.mjs: a `--config` overlay written to <out-dir>/isolation.yml,
+// after BENCH_CONFIG), as a Codex or Claude Code side gets a fresh CODEX_HOME / CLAUDE_CONFIG_DIR. HOME is a temp
+// folder; extensions, skills, rules, LSP off.
+// BENCH_AS_SHIPPED=1 keeps extensions, skills and rules on and sets OMBRA_HARNESS_DIR to BENCH_HARNESS_DIR (default
+// the repository's harness/profile; a variant: .temp/lab/variants/<name>), so the harness runs as Ombra ships it.
+// BENCH_THINKING=<level> passes `--thinking` (the reasoning effort for codex, `--effort` for Claude Code).
+// BENCH_CODEX=1 / BENCH_CLAUDE=1: the side is OpenAI's Codex CLI (`codex exec`, codex.mjs) or Anthropic's Claude Code
+// (`claude -p`, claudecode.mjs) instead of the engine; BENCH_MODEL is a model name without provider prefix and
+// <engine-dir> is ignored (the runtime still supplies `bun` for tests).
 // Cache: a run whose result.json exists in <out-dir> is not repeated (delete it to re-run).
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { claudeMetrics, runClaude } from "./claudecode.mjs";
+import { codexMetrics, runCodex } from "./codex.mjs";
+import { userIsolationArgs } from "./isolation.mjs";
 
 const [engineArg, rtArg, polyArg, outArg, runsArg = "1"] = process.argv.slice(2);
 const MODEL = process.env.BENCH_MODEL;
-if (!engineArg || !rtArg || !polyArg || !outArg || !MODEL) {
-	console.error("usage: BENCH_MODEL=<provider/model> bun polyglot.mjs <engine-dir> <runtime-dir> <polyglot-checkout> <out-dir> [runs]");
+const CODEX = process.env.BENCH_CODEX === "1";
+const CLAUDE = process.env.BENCH_CLAUDE === "1";
+const CLI = CODEX || CLAUDE;
+if (!engineArg || !rtArg || !polyArg || !outArg || !MODEL || (CLI && MODEL.includes("/")) || (CODEX && CLAUDE)) {
+	console.error("usage: BENCH_MODEL=<provider/model> bun polyglot.mjs <engine-dir> <runtime-dir> <polyglot-checkout> <out-dir> [runs]\n       BENCH_CODEX=1 BENCH_MODEL=<codex-model> bun polyglot.mjs - <runtime-dir> <polyglot-checkout> <out-dir> [runs]\n       BENCH_CLAUDE=1 BENCH_MODEL=<claude-model> bun polyglot.mjs - <runtime-dir> <polyglot-checkout> <out-dir> [runs]");
 	process.exit(2);
 }
 const HERE = path.dirname(new URL(import.meta.url).pathname);
@@ -36,17 +57,30 @@ const AGENT_DIR = process.env.BENCH_AGENT_DIR ?? path.join(os.homedir(), ".omp/a
 // Ombra runs it. BENCH_CONFIG: a settings overlay file passed as `--config`.
 const TOOLS = process.env.BENCH_TOOLS;
 const EXTRA = [...(TOOLS ? ["--no-tools", "--tools", TOOLS] : []), ...(process.env.BENCH_CONFIG ? ["--config", path.resolve(process.env.BENCH_CONFIG)] : [])];
-const subset = JSON.parse(fs.readFileSync(path.join(HERE, "polyglot-subset.json"), "utf8"));
+const PINNED = JSON.parse(fs.readFileSync(path.join(HERE, "polyglot-subset.json"), "utf8"));
+const subset = process.env.BENCH_SUBSET === "all"
+	? { ...PINNED, exercises: ["javascript", "python"].flatMap(lang => fs.readdirSync(path.join(POLY, lang, "exercises/practice")).sort().map(name => `${lang}/${name}`)) }
+	: process.env.BENCH_SUBSET ? JSON.parse(fs.readFileSync(path.resolve(process.env.BENCH_SUBSET), "utf8")) : PINNED;
+const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: POLY, encoding: "utf8" }).stdout.trim();
+if (head !== subset.commit) console.error(`warning: ${POLY} is at ${head || "?"}, the subset pins ${subset.commit}`);
 const only = process.env.BENCH_ONLY?.split(",");
+const AS_SHIPPED = process.env.BENCH_AS_SHIPPED === "1";
+const HARNESS_DIR = path.resolve(process.env.BENCH_HARNESS_DIR ?? path.join(HERE, "../../harness/profile"));
+if (AS_SHIPPED && !fs.existsSync(HARNESS_DIR)) throw new Error(`BENCH_HARNESS_DIR ${HARNESS_DIR} does not exist`);
+const THINKING = process.env.BENCH_THINKING;
 
 fs.mkdirSync(OUT, { recursive: true });
 const omp = path.join(OUT, "rt/omp");
-fs.mkdirSync(omp, { recursive: true });
-spawnSync("rsync", ["-a", "--delete", "--exclude", "node_modules", "--exclude", ".temp", path.resolve(engineArg) + "/", path.join(omp, "engine") + "/"], { stdio: "inherit" });
-for (const f of ["bunfig.toml", "package.json"]) fs.copyFileSync(path.join(RT, "omp", f), path.join(omp, f));
-if (!fs.existsSync(path.join(omp, "node_modules"))) fs.symlinkSync(path.join(RT, "omp/node_modules"), path.join(omp, "node_modules"));
+if (!CLI) {
+	fs.mkdirSync(omp, { recursive: true });
+	spawnSync("rsync", ["-a", "--delete", "--exclude", "node_modules", "--exclude", ".temp", path.resolve(engineArg) + "/", path.join(omp, "engine") + "/"], { stdio: "inherit" });
+	for (const f of ["bunfig.toml", "package.json"]) fs.copyFileSync(path.join(RT, "omp", f), path.join(omp, f));
+	if (!fs.existsSync(path.join(omp, "node_modules"))) fs.symlinkSync(path.join(RT, "omp/node_modules"), path.join(omp, "node_modules"));
+}
 const HOME = path.join(OUT, "home");
 fs.mkdirSync(HOME, { recursive: true });
+const ISOLATION_ARGS = CLI ? [] : userIsolationArgs({ agentDir: AGENT_DIR, harnessDir: AS_SHIPPED ? HARNESS_DIR : undefined, configs: process.env.BENCH_CONFIG ? [path.resolve(process.env.BENCH_CONFIG)] : [], outFile: path.join(OUT, "isolation.yml") });
+const TEST_RE = /\b(bun test|unittest|pytest)\b/;
 
 const testCommand = (lang, tests) => (lang === "javascript" ? `bun test ${tests.join(" ")}` : `python3 -m unittest ${tests.map(t => t.replace(/\.py$/, "")).join(" ")}`);
 function numstat(a, b) {
@@ -83,15 +117,25 @@ for (const ex of subset.exercises) for (let r = 0; r < RUNS; r++) {
 	const docs = ["instructions.md", "instructions.append.md"].map(f => path.join(src, ".docs", f)).filter(f => fs.existsSync(f)).map(f => fs.readFileSync(f, "utf8")).join("\n\n");
 	const cmd = testCommand(lang, tests);
 	const prompt = `${docs}\n\n####\n\nUse the above instructions to modify the supplied files: ${solution.join(", ")}. Keep and implement the existing function or class stubs; they are called from the tests. Only use standard libraries, don't suggest installing any packages. The tests are in ${tests.join(", ")} (do not change them); run them with \`${cmd}\`.`;
-	const t0 = Date.now();
-	const p = spawnSync(BUN, ["--config=" + path.join(omp, "bunfig.toml"), "--no-env-file", "--no-install", path.join(omp, "engine/coding-agent/src/cli.ts"),
-		"-p", "--mode", "json", "--approval-mode", "yolo", "--no-session", "--model", MODEL, "--no-extensions", "--no-skills", "--no-rules", "--no-lsp", "--no-prewalk", "--no-title", ...EXTRA, prompt], {
-		cwd: work, timeout: TIMEOUT_MS, encoding: "utf8", maxBuffer: 64 << 20,
-		env: { PATH: `${path.dirname(BUN)}:${process.env.PATH}`, HOME, PI_CODING_AGENT_DIR: AGENT_DIR, TERM: "dumb" },
-	});
-	const wallMs = Date.now() - t0;
-	fs.writeFileSync(path.join(dir, "stdout.jsonl"), p.stdout ?? "");
-	fs.writeFileSync(path.join(dir, "stderr.txt"), p.stderr ?? "");
+	let p;
+	if (CODEX) {
+		p = await runCodex({ model: MODEL, effort: THINKING, prompt, cwd: work, home: HOME, pathPrefix: `${path.dirname(BUN)}:${process.env.PATH}`, timeoutMs: TIMEOUT_MS });
+		fs.writeFileSync(path.join(dir, "rollout.jsonl"), p.rollout);
+	} else if (CLAUDE) {
+		p = await runClaude({ model: MODEL, effort: THINKING, prompt, cwd: work, home: HOME, pathPrefix: `${path.dirname(BUN)}:${process.env.PATH}`, timeoutMs: TIMEOUT_MS });
+	} else {
+		const t0 = Date.now();
+		const s = spawnSync(BUN, ["--config=" + path.join(omp, "bunfig.toml"), "--no-env-file", "--no-install", path.join(omp, "engine/coding-agent/src/cli.ts"),
+			"-p", "--mode", "json", "--approval-mode", "yolo", "--no-session", "--model", MODEL, ...(THINKING ? ["--thinking", THINKING] : []),
+			...(AS_SHIPPED ? [] : ["--no-extensions", "--no-skills", "--no-rules"]), "--no-lsp", "--no-prewalk", "--no-title", ...EXTRA, ...ISOLATION_ARGS, prompt], {
+			cwd: work, timeout: TIMEOUT_MS, encoding: "utf8", maxBuffer: 64 << 20,
+			// NODE_EXTRA_CA_CERTS: behind a TLS-intercepting proxy provider requests fail certificate checks without it.
+			env: { PATH: `${path.dirname(BUN)}:${process.env.PATH}`, HOME, PI_CODING_AGENT_DIR: AGENT_DIR, TERM: "dumb", ...(AS_SHIPPED ? { OMBRA_HARNESS_DIR: HARNESS_DIR } : {}), ...(process.env.NODE_EXTRA_CA_CERTS ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS } : {}) },
+		});
+		p = { stdout: s.stdout ?? "", stderr: s.stderr ?? "", code: s.status, timedOut: s.error?.code === "ETIMEDOUT", wallMs: Date.now() - t0 };
+	}
+	fs.writeFileSync(path.join(dir, "stdout.jsonl"), p.stdout);
+	fs.writeFileSync(path.join(dir, "stderr.txt"), p.stderr);
 	const before = listFiles(orig), after = listFiles(work);
 	const changed = [...new Set([...before, ...after])].filter(f => !fs.existsSync(path.join(orig, f)) || !fs.existsSync(path.join(work, f)) || fs.readFileSync(path.join(orig, f), "utf8") !== fs.readFileSync(path.join(work, f), "utf8"));
 	let added = 0, removed = 0, solutionBytes = 0;
@@ -103,26 +147,34 @@ for (const ex of subset.exercises) for (let r = 0; r < RUNS; r++) {
 	// Score against the original tests, whatever the agent did to them.
 	for (const t of tests) fs.copyFileSync(path.join(orig, t), path.join(work, t));
 	const score = spawnSync(lang === "javascript" ? BUN : "python3", lang === "javascript" ? ["test", ...tests] : ["-m", "unittest", ...tests.map(t => t.replace(/\.py$/, ""))], { cwd: work, encoding: "utf8", timeout: 120000 });
-	const events = (p.stdout ?? "").split("\n").filter(l => l.startsWith("{")).map(l => { try { return JSON.parse(l); } catch { return undefined; } }).filter(Boolean);
-	const assistant = events.filter(e => e.type === "message_end" && e.message?.role === "assistant");
-	const toolStarts = events.filter(e => e.type === "tool_execution_start");
-	const usage = assistant.reduce((u, e) => {
-		const x = e.message.usage ?? {};
-		return { input: u.input + (x.input ?? 0) + (x.cacheRead ?? 0) + (x.cacheWrite ?? 0), output: u.output + (x.output ?? 0), cost: u.cost + (x.cost?.total ?? 0) };
-	}, { input: 0, output: 0, cost: 0 });
+	let metrics;
+	if (CODEX) metrics = codexMetrics(p, TEST_RE);
+	else if (CLAUDE) metrics = claudeMetrics(p, TEST_RE);
+	else {
+		const events = p.stdout.split("\n").filter(l => l.startsWith("{")).map(l => { try { return JSON.parse(l); } catch { return undefined; } }).filter(Boolean);
+		const assistant = events.filter(e => e.type === "message_end" && e.message?.role === "assistant");
+		const toolStarts = events.filter(e => e.type === "tool_execution_start");
+		const usage = assistant.reduce((u, e) => {
+			const x = e.message.usage ?? {};
+			return { input: u.input + (x.input ?? 0) + (x.cacheRead ?? 0) + (x.cacheWrite ?? 0), output: u.output + (x.output ?? 0), cost: u.cost + (x.cost?.total ?? 0) };
+		}, { input: 0, output: 0, cost: 0 });
+		metrics = {
+			requests: assistant.length,
+			toolCalls: toolStarts.length,
+			toolErrors: events.filter(e => e.type === "tool_execution_end" && e.isError).length,
+			testRuns: toolStarts.filter(e => e.toolName === "bash" && TEST_RE.test(String(e.args?.command ?? ""))).length,
+			inputTokens: usage.input, outputTokens: usage.output, costUsd: Number(usage.cost.toFixed(4)),
+		};
+	}
 	const row = {
-		exercise: ex, run: r, model: MODEL,
+		exercise: ex, run: r, model: CODEX ? `codex/${MODEL}` : CLAUDE ? `claude-code/${MODEL}` : MODEL,
 		pass: score.status === 0,
-		wallMs,
-		exitCode: p.status, timedOut: p.error?.code === "ETIMEDOUT",
+		wallMs: p.wallMs,
+		exitCode: p.code, timedOut: p.timedOut,
 		linesAdded: added, linesRemoved: removed, solutionBytes,
 		changedFiles: changed,
 		unrequestedEdits: changed.filter(f => !solution.includes(f)).length,
-		requests: assistant.length,
-		toolCalls: toolStarts.length,
-		toolErrors: events.filter(e => e.type === "tool_execution_end" && e.isError).length,
-		testRuns: toolStarts.filter(e => e.toolName === "bash" && /\b(bun test|unittest|pytest)\b/.test(String(e.args?.command ?? ""))).length,
-		inputTokens: usage.input, outputTokens: usage.output, costUsd: Number(usage.cost.toFixed(4)),
+		...metrics,
 	};
 	fs.writeFileSync(cached, JSON.stringify(row, null, 2));
 	results.push(row);

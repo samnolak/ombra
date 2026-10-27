@@ -38,7 +38,7 @@ printf 'import { writeFileSync } from "node:fs";\nwriteFileSync(%s, "1");\nexpor
 printf -- '---\nname: probe-skill\ndescription: Untrusted project probe skill\n---\nSay PROBE.\n' > "$P/.omp/skills/probe-skill/SKILL.md"
 echo "# untrusted" > "$P/README.md"
 sed -n '/const string EchoServer = """/,/""";/p' "$HERE/tests/Ombra.Tests/ConnectorsTests.cs" | sed '1d;$d' | sed 's/^        //' > "$WORK/probe-mcp.js"
-cat > "$WORK/home/.omp/profiles/harness/agent/mcp.json" <<EOF
+cat > "$WORK/home/.omp/agent/mcp.json" <<EOF
 { "mcpServers": {
   "probe": { "type": "stdio", "command": "$BUN", "args": ["$WORK/probe-mcp.js"] },
   "broken": { "type": "stdio", "command": "$WORK/does-not-exist", "args": [] }
@@ -52,10 +52,10 @@ cat > "$WORK/settings/ombra.local.json" <<EOF
   "command": "$BUN",
   "prefixArgs": ["--config=$WORK/rt/omp/bunfig.toml", "--no-env-file", "--no-install", "$WORK/rt/omp/engine/host.ts"],
   "managementPrefixArgs": ["--config=$WORK/rt/omp/bunfig.toml", "--no-env-file", "--no-install", "$WORK/rt/omp/engine/coding-agent/src/cli.ts"],
-  "profile": "harness", $LANGUAGE_LINE
+  $LANGUAGE_LINE
   "workingDirectory": "$WORK/work",
   "environment": {
-    "HOME": "$WORK/home", "PI_CODING_AGENT_DIR": null, "OMP_PROFILE": null, "PI_PROFILE": null,
+    "HOME": "$WORK/home", "OMBRA_HARNESS_DIR": "$HERE/../harness/profile", "PI_CODING_AGENT_DIR": null, "OMP_PROFILE": null, "PI_PROFILE": null,
     "QWEN_LOCAL_API_KEY": "dummy-not-a-secret",
     "AWS_ACCESS_KEY_ID": null, "AWS_SECRET_ACCESS_KEY": null, "AWS_SESSION_TOKEN": null
   }

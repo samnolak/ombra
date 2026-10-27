@@ -36,8 +36,8 @@ const MAX_ATTEMPTS = 2;
 const COMPLETION_MAX_TOKENS = 8192;
 const REPAIR_TIMEOUT_MS = 20_000;
 
-/** One changed line run in pre-image (`a`) / post-image (`b`) coordinates. */
-interface EditHunk {
+/** One changed line run in pre-image (`a`) / post-image (`b`) coordinates (0-based, end-exclusive). */
+export interface EditHunk {
 	aStart: number;
 	aEnd: number;
 	bStart: number;
@@ -61,7 +61,8 @@ export interface RepairRegion {
 	language: string;
 }
 
-function buildHunks(prev: string, next: string): { hunks: EditHunk[]; a: string[]; b: string[] } {
+/** Changed line runs of `prev → next`, adjacent removed+added runs merged into one replace hunk. */
+export function buildHunks(prev: string, next: string): { hunks: EditHunk[]; a: string[]; b: string[] } {
 	const runs = diffLineRuns(prev, next);
 	const a = prev.split("\n");
 	const b = next.split("\n");
@@ -114,10 +115,16 @@ function revertHunks(a: string[], b: string[], hunks: EditHunk[], set: readonly 
 
 /**
  * Find the smallest hunk set whose reversion restores the parse: singles,
- * then pairs (bounded), then a greedy peel that re-applies hunks one at a
- * time while the file keeps parsing.
+ * then pairs (bounded by `maxPairSearchHunks`), then a greedy peel that
+ * re-applies hunks one at a time while the file keeps parsing.
  */
-function isolateCulpritHunks(path: string, a: string[], b: string[], hunks: EditHunk[]): number[] | undefined {
+function isolateCulpritHunks(
+	path: string,
+	a: string[],
+	b: string[],
+	hunks: EditHunk[],
+	maxPairSearchHunks = MAX_PAIR_SEARCH_HUNKS,
+): number[] | undefined {
 	const n = hunks.length;
 	if (n === 0) return undefined;
 	const scratch: string[] = [];
@@ -131,7 +138,7 @@ function isolateCulpritHunks(path: string, a: string[], b: string[], hunks: Edit
 		if (parsesReverted(trial)) return [i];
 	}
 
-	if (n <= MAX_PAIR_SEARCH_HUNKS) {
+	if (n <= maxPairSearchHunks) {
 		trial.length = 2;
 		for (let i = 0; i < n; i++) {
 			for (let j = i + 1; j < n; j++) {
@@ -163,6 +170,20 @@ function isolateCulpritHunks(path: string, a: string[], b: string[], hunks: Edit
 	// pre-image); an empty set would mean the pre-image itself is broken.
 	if (culprits.length === 0 || (!keepParses && !parsesReverted(culprits))) return undefined;
 	return culprits;
+}
+
+/**
+ * Hunks of `prev → next` whose reversion restores the parse, i.e. where the
+ * edit introduced the parse failure. `undefined` when the breakage cannot be
+ * isolated. The pair search is capped at `maxPairSearchHunks` so callers on
+ * the edit hot path stay at O(hunks) parses.
+ */
+export function locateParseRegression(
+	snapshot: AppliedEditSnapshot,
+	maxPairSearchHunks = MAX_PAIR_SEARCH_HUNKS,
+): EditHunk[] | undefined {
+	const { hunks, a, b } = buildHunks(snapshot.prev, snapshot.next);
+	return isolateCulpritHunks(snapshot.path, a, b, hunks, maxPairSearchHunks)?.map(i => hunks[i]);
 }
 
 /** A repair region plus the post-image lines it was computed against. */

@@ -47,3 +47,15 @@ export const sloppyEditSchema = type({
 });
 
 export type SloppyParams = typeof sloppyEditSchema.infer;
+
+/** `edit.run`: the optional shell command run after a clean apply (see `edit/run.ts`). */
+const runField = { "run?": "string" } as const;
+
+/** Each mode's schema with the optional {@link runField}; advertised only while `edit.run` is on. */
+export const editRunSchemas = {
+	replace: replaceEditSchema.merge(runField),
+	patch: patchEditSchema.merge(runField),
+	apply_patch: applyPatchSchema.merge(runField),
+	hashline: hashlineEditParamsSchema.merge(runField),
+	sloppy: sloppyEditSchema.merge(runField),
+};
