@@ -230,23 +230,27 @@ and it sets `--disable-tests`, which would leave the package without the mochite
    A packaged app also needs the read path (desktop root, not just `src/`): its content processes otherwise cannot
    load the harness's `resource://testing-common` actors and every test times out.
 5. In omp: `python3 runtime/nightly/pack-nightly.py --app <dmg> --stage`, then
-   `python3 runtime/nightly/pack-nightly.py --check`; commit `runtime/nightly/nightly-runtime.json`. Besides the runtime
-   archive, `pack` writes the standalone image `.temp/nightly-runtime/Nightly-<version>-<build>-macos-arm64.dmg`: a
+   `python3 runtime/nightly/pack-nightly.py --check`; commit `runtime/nightly/nightly-runtime.json` (`pack` writes its
+   `url`). `<rel>` is the public name of `surfer.json` displayVersion (`0.1.0b1` → `0.1.0-beta.1`, `release_name`); a
+   rebuild of a released version takes the next beta (bump displayVersion), never a second release under the same name.
+   Besides the runtime archive, `pack` writes the standalone image `.temp/nightly-runtime/Nightly-<rel>-macos-arm64.dmg`: a
    copy of the same build re-signed ad hoc with the hardened runtime and `nightly.entitlements.plist`, keeping
-   `io.github.samnolak.nightly` and its URL handlers, next to an `Applications` link (UDZO).
+   `io.github.samnolak.nightly` and its URL handlers, next to an `Applications` link (UDZO), laid out as Ombra's
+   installer (`avalonia/tools/package/dmg/make-dmg.py`: one Finder window, "Install Nightly / Drag to Applications",
+   the app, an arrow and the link; `package.sh` makes `ombra-<version>-osx-*.dmg` the same way next to the zip).
    **Image gate** (run by `pack`, and before any upload: `python3 runtime/nightly/pack-nightly.py --check-dmg <image>`):
    the one `Nightly.app` mounted from the image passes `codesign --verify --deep --strict`, is signed
    `flags=0x10002(adhoc,runtime)` and has bundle id `io.github.samnolak.nightly`.
-   From the same signed copy `pack` makes the installed browser's update: `Nightly-<version>-<build>-macos-arm64.mar`
+   From the same signed copy `pack` makes the installed browser's update: `Nightly-<rel>-macos-arm64.mar`
    (complete MAR, channel `release`, signed with the MAR key in `~/Developer/arclike/keys`, verified with `signmar -v`)
-   and `Nightly-<version>-<build>-update.xml`, the manifest naming that MAR as an asset of release `v<version>-<build>`.
-6. Publish the asset the pin's `url` names (`nightly-<version>-<build>` / `nightly-runtime-<version>-<build>.zip`):
-   `gh release create nightly-<version>-<build> -R samnolak/nightly-browser --target next --prerelease <omp>/.temp/nightly-runtime/<archive>`;
+   and `Nightly-<rel>-update.xml`, the manifest naming that MAR as an asset of release `v<rel>`.
+6. Publish the asset the pin's `url` names (`runtime-v<rel>` / `nightly-runtime-<rel>.zip`):
+   `gh release create runtime-v<rel> -R samnolak/nightly-browser --target next --prerelease <omp>/.temp/nightly-runtime/<archive>`;
    check `curl -sIL <url>` ends `200` with the pin's `size`. A standalone image is uploaded only as the
-   `Nightly-<version>-<build>-macos-arm64.dmg` from step 5 after the image gate passed, never the `mach package` one.
-   **Update feed.** The standalone release `v<version>-<build>` carries the image and the MAR (`gh release create
-   v<version>-<build> -R samnolak/nightly-browser --target next --latest <dmg> <mar>`); then
-   `python3 runtime/nightly/pack-nightly.py --publish-feed .temp/nightly-runtime/Nightly-<version>-<build>-update.xml`
+   `Nightly-<rel>-macos-arm64.dmg` from step 5 after the image gate passed, never the `mach package` one.
+   **Update feed.** The standalone release `v<rel>` carries the image and the MAR (`gh release create
+   v<rel> -R samnolak/nightly-browser --target next --latest <dmg> <mar>`); then
+   `python3 runtime/nightly/pack-nightly.py --publish-feed .temp/nightly-runtime/Nightly-<rel>-update.xml`
    downloads the MAR from the release, checks its size and SHA-512 against the manifest, commits the manifest to
    gh-pages as `updates/browser/Darwin_aarch64-gcc3/release/update.xml` and waits until
    `https://samnolak.github.io/nightly-browser/…/update.xml` serves it. Installed browsers (standalone, from step 1's

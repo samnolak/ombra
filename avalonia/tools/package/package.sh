@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Packs a self-contained publish of Ombra for one RID into a per-platform archive (+ .sha256).
 #   tools/package/package.sh <rid> <publish-dir> <out-dir> <version>
-# linux-*: tar.gz (app, icon, .desktop entry + installer script)   win-*: zip   osx-*: "Ombra.app" in a zip.
+# linux-*: tar.gz (app, icon, .desktop entry + installer script)   win-*: zip   osx-*: "Ombra.app" in a zip (what the
+# updater installs) and the drag-to-install image ombra-<version>-<rid>.dmg for people (tools/package/dmg/make-dmg.py).
 # Signing (tools/package/sign.sh): Authenticode / Developer ID + notarization when the owner's certificates are in the
 # CI secrets; otherwise unsigned (macOS: ad-hoc signature only, Apple Silicon refuses unsigned native code). What was
 # done is written to <package>.signing.txt next to the archive.
@@ -119,6 +120,10 @@ case "$RID" in
     ARCHIVE="$OUT/$NAME.zip"
     (cd "$STAGE" && ditto -c -k --sequesterRsrc --keepParent "$NAME" "$ARCHIVE")
     "$HERE/tools/package/sign.sh" notarize "$ARCHIVE" "$APP" "$SIGNING"
+    # The installer image holds the app as signed (and, with the owner's certificate, stapled) above
+    DMG="$OUT/$NAME.dmg"
+    python3 "$HERE/tools/package/dmg/make-dmg.py" "$APP" "$DMG" --volume Ombra
+    (cd "$OUT" && sha "$(basename "$DMG")" > "$(basename "$DMG").sha256")
     ;;
   *) echo "unknown rid $RID"; exit 1 ;;
 esac
@@ -128,4 +133,4 @@ esac
 python3 "$HERE/tools/package/native-platform.py" "$RID" "$ARCHIVE"
 
 (cd "$OUT" && sha "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256")
-ls -la "$ARCHIVE"; cat "$ARCHIVE.sha256" "$SIGNING" "$ENGINE_REC"
+ls -la "$ARCHIVE" ${DMG:+"$DMG"}; cat "$ARCHIVE.sha256" ${DMG:+"$DMG.sha256"} "$SIGNING" "$ENGINE_REC"

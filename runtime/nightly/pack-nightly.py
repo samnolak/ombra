@@ -239,13 +239,11 @@ def standalone_copy(app: Path, scratch: Path) -> Path:
 
 
 def make_dmg(standalone: Path, dmg: Path) -> str:
-    """The standalone browser's image: ``standalone`` next to an Applications link, compressed (UDZO), then gated
-    from its mount. Returns the app's cdhash."""
-    root = standalone.parent
-    (root / "Applications").symlink_to("/Applications")
-    subprocess.run(["hdiutil", "create", "-quiet", "-ov", "-volname", "Nightly", "-format", "UDZO", "-srcfolder", str(root),
-                    str(dmg)], check=True)
-    (root / "Applications").unlink()
+    """The standalone browser's image (avalonia/tools/package/dmg/make-dmg.py, as Ombra's): one Finder window with
+    "Install Nightly", the app and an arrow to the Applications link; compressed (UDZO), then gated from its mount.
+    Returns the app's cdhash."""
+    subprocess.run([sys.executable, str(HERE.parent.parent / "avalonia" / "tools" / "package" / "dmg" / "make-dmg.py"),
+                    str(standalone), str(dmg), "--volume", "Nightly"], check=True)
     return check_dmg(dmg)
 
 
@@ -306,6 +304,13 @@ def sha512(path: Path) -> str:
     return digest.hexdigest()
 
 
+def release_name(version: str) -> str:
+    """The public name of a version: Mozilla's ``0.1.0b1`` (what application.ini and the update service compare) is
+    ``0.1.0-beta.1``. Tags and file names use it; a rebuild of a released version needs the next beta."""
+    match = re.fullmatch(r"(\d+\.\d+\.\d+)b(\d+)", version)
+    return f"{match.group(1)}-beta.{match.group(2)}" if match else version
+
+
 def write_update_xml(standalone: Path, mar: Path, xml: Path, version: str, build: str) -> None:
     """The update manifest Nightly reads: this build, its MAR as an asset of the standalone release."""
     milestone = None
@@ -314,7 +319,7 @@ def write_update_xml(standalone: Path, mar: Path, xml: Path, version: str, build
             milestone = line[len("Milestone="):].strip()
     if not milestone:
         sys.exit(f"{standalone}: no Milestone in platform.ini")
-    tag = f"v{version}-{build}"
+    tag = f"v{release_name(version)}"
     updates = ET.Element("updates")
     update = ET.SubElement(updates, "update", type="minor", displayVersion=version, appVersion=version,
                            platformVersion=milestone, buildID=build,
@@ -386,7 +391,8 @@ def pack(args) -> None:
         app = app_from(Path(args.app).resolve(), scratch)
         version, build = read_ini(app)
         protocol = protocol_version()
-        name = f"nightly-runtime-{version}-{build}.zip"
+        rel = release_name(version)
+        name = f"nightly-runtime-{rel}.zip"
         out = Path(args.out).resolve() if args.out else HERE.parent.parent / ".temp" / "nightly-runtime"
         out.mkdir(parents=True, exist_ok=True)
         archive = out / name
@@ -401,11 +407,11 @@ def pack(args) -> None:
             archive.unlink()
         subprocess.run(["ditto", "-c", "-k", "--keepParent", str(staged), str(archive)], check=True)
         standalone = standalone_copy(app, scratch)
-        dmg = out / f"Nightly-{version}-{build}-macos-arm64.dmg"
+        dmg = out / f"Nightly-{rel}-macos-arm64.dmg"
         make_dmg(standalone, dmg)
-        mar = out / f"Nightly-{version}-{build}-macos-arm64.mar"
+        mar = out / f"Nightly-{rel}-macos-arm64.mar"
         make_mar(standalone, mar, version)
-        feed = out / f"Nightly-{version}-{build}-update.xml"
+        feed = out / f"Nightly-{rel}-update.xml"
         write_update_xml(standalone, mar, feed, version, build)
     manifest = {
         "version": version,
@@ -414,12 +420,13 @@ def pack(args) -> None:
         "sha256": sha256(archive),
         "size": archive.stat().st_size,
         "archive": name,
+        "url": f"https://github.com/{RELEASE_REPO}/releases/download/runtime-v{rel}/{name}",
         "cdhash": cdhash,
     }
     MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n")
     print(f"{archive}\n{json.dumps(manifest, indent=2)}")
     print(f"{dmg}\nsha256 {sha256(dmg)}, {dmg.stat().st_size} bytes")
-    print(f"{mar}\nsigned MAR, {mar.stat().st_size} bytes; upload it to release v{version}-{build}, then"
+    print(f"{mar}\nsigned MAR, {mar.stat().st_size} bytes; upload it to release v{rel}, then"
           f" pack-nightly.py --publish-feed {feed}")
     if args.stage:
         target = runtimes_root() / "nightly" / "packages"
