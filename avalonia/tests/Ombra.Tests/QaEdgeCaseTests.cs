@@ -230,6 +230,7 @@ public sealed class QaEdgeCaseTests(ITestOutputHelper log)
 public sealed class ReadmeScreenshotTests
 {
     private static readonly string? Out = Environment.GetEnvironmentVariable("OMBRA_README_SHOT");
+    private static readonly string Theme = Environment.GetEnvironmentVariable("OMBRA_README_THEME") ?? "light";
 
     private static object Text(string t) => new { type = "text", text = t };
 
@@ -307,7 +308,7 @@ public sealed class ReadmeScreenshotTests
     [AvaloniaFact]
     public async Task Readme_window_is_clean()
     {
-        MainViewModel.ApplyTheme("light");
+        MainViewModel.ApplyTheme(Theme);
         var root = TestProcesses.TempDir("readme-sessions");
         var home = TestProcesses.TempDir("readme");
         var cwd = Path.Combine(home, "weather-cli");
@@ -337,6 +338,14 @@ public sealed class ReadmeScreenshotTests
             vm.ShowPaneCommand.Execute(SidePane.Plan);
             var settle = DateTime.UtcNow.AddMilliseconds(1200);
             while (DateTime.UtcNow < settle) { Dispatcher.UIThread.RunJobs(); AvaloniaHeadlessPlatform.ForceRenderTimerTick(); await Task.Delay(15); }
+            // Headless, the UI thread is not the process's main thread, so macOS refuses the sleep/wake subscription and
+            // the composer reports it: the app itself never shows this, so it stays out of its picture.
+            if (vm.PowerNotificationsError is not null)
+            {
+                vm.ComposerMessage = "";
+                Dispatcher.UIThread.RunJobs();
+                AvaloniaHeadlessPlatform.ForceRenderTimerTick();
+            }
             using (var frame = w.CaptureRenderedFrame())
             {
                 if (Out is not null)

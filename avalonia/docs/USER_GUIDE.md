@@ -6,53 +6,56 @@ launch a separate omp application for each chat; upstream changes are reviewed b
 
 ## Requirements
 
+The current release is for **macOS 14 (Sonoma) or later on Apple silicon (arm64)**: Ombra and the Nightly browser
+it installs. Nothing else needs to be installed: the app carries .NET and its agent engine.
+
+The client also builds for other systems, but they are not part of the release and are not verified at run time;
+a build from source or from the package workflow needs:
+
 | OS | Architectures | Notes |
 |---|---|---|
-| Windows 11 (24H2 or later) | x64, arm64 | Windows 10 only in the Enterprise LTSC / IoT editions .NET 10 still supports; ordinary Windows 10 left support on 14 October 2025. The preview needs the WebView2 runtime (part of Windows 11). arm64: dictation's microphone is not available (no PortAudio build) |
-| macOS 14 (Sonoma) or later | Apple Silicon (arm64), Intel (x64) | .NET 10 supports macOS 14, 15 and 26; the package declares macOS 14 as its minimum |
+| macOS 14 or later | Intel (x64) | Built and smoke-started under Rosetta in CI only |
+| Windows 11 (24H2 or later) | x64, arm64 | Windows 10 only in the Enterprise LTSC / IoT editions .NET 10 still supports. The preview needs the WebView2 runtime (part of Windows 11). arm64: dictation's microphone is not available (no PortAudio build) |
 | Linux (glibc 2.27 or later) | x64, arm64 | For example Ubuntu 22.04+, Debian 12+, Fedora 42+, RHEL 8+. X11 or XWayland. The preview needs WebKitGTK (`libwebkit2gtk-4.1`), notifications need `notify-send` (libnotify). Dictation records through the bundled PortAudio (needs `libasound2` and the JACK client library `libjack-jackd2-0` / `jack-audio-connection-kit`) or, when that library is missing, through `parecord`, `pw-record` or `arecord` if one is installed. musl distributions (Alpine) are not supported |
 
-The download is self-contained: no .NET installation is needed. Supported OS versions follow
-[.NET 10's list](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md). Only Linux x64 has
-been run so far (see the README); Windows, macOS and arm64 are built but not yet verified at run time.
+The Nightly browser (the Browser page and Nightly in the preview) is macOS only; elsewhere the preview uses the
+system's web view. Supported OS versions follow
+[.NET 10's list](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md).
 
 ## Install
 
-**No release of this client is published yet**: the packages come from the package workflow (a CI build) or from
-`tools/package/package.sh`.
+Download from the [latest release](https://github.com/samnolak/ombra/releases/latest):
 
-Each package is `ombra-<version>-<platform>` (`.tar.gz` on Linux, `.zip` on Windows and macOS) and unpacks into a
-folder of the same name, with the licence notices and this guide. Every archive has a `.sha256` file next to it
-(and a `.signing.txt` that says how it was signed, an `.engine.txt` that says whether the engine is inside). Check it
-before you install (`sha256sum -c ombra-….tar.gz.sha256` on Linux, `shasum -a 256 -c …` on macOS, `Get-FileHash` on
-Windows).
+- `ombra-<version>-osx-arm64.dmg` (about 275 MB) — open it and drag *Ombra* onto *Applications*;
+- or `ombra-<version>-osx-arm64.zip` (about 260 MB) — unzip and move *Ombra.app* to Applications.
 
-**The agent engine is part of the app.** The package carries the pinned engine (`ombra-engine-18.12.2-bun-1.4.2-v1`:
-Bun 1.4.2, the integrity-locked npm dependencies and Ombra's own coding-agent sources, checked when the package was
-built), so the first start downloads nothing and works offline. On macOS it is inside *Ombra.app*
-(`Contents/Resources/engine`) and signed with the app; elsewhere it is the `engine` folder beside the executable.
-It runs from there read-only (the app never writes into its own folder; Bun's cache goes to the runtimes folder,
-see [Where things are kept](#where-things-are-kept)), an update replaces it together with the app, and copies of
-the app each use their own. The macOS package for Apple silicon is about 265 MB to download and about 780 MB once
-unpacked. Only the linux-arm64 and win-arm64 packages (built on another CPU, where the engine's check cannot run)
-come without it and set it up on first start as below.
+Each file has a `.sha256` next to it; check it before you install (`shasum -a 256 -c ombra-….dmg.sha256`). The app
+takes about 710 MB on disk.
 
-The packages are **not signed** with a developer certificate (no signing certificate is available to this
-project yet), so the OS warns on first start:
+**The agent engine is part of the app.** It carries the pinned engine (`ombra-engine-18.12.2-bun-1.4.2-v1`: Bun
+1.4.2, the integrity-locked npm dependencies and Ombra's own coding-agent sources, checked when the package was
+built) inside *Ombra.app* (`Contents/Resources/engine`), signed with the app, so the first start downloads nothing
+and works offline. It runs from there read-only (the app never writes into its own folder; Bun's cache goes to the
+runtimes folder, see [Where things are kept](#where-things-are-kept)), an update replaces it together with the app,
+and copies of the app each use their own.
 
-- **Windows** — extract the zip anywhere and run `Ombra.exe`. SmartScreen: *More info → Run anyway*.
-- **macOS** — unzip and move *Ombra.app* to Applications. The app is signed with the project's own certificate, not
-  an Apple Developer ID, and not notarized, so
-  macOS blocks its first start. macOS 15 (Sequoia) and later: open the app once, close the warning, then
-  *System Settings → Privacy & Security → Open Anyway* and confirm with *Open*. macOS 14 (Sonoma): Control-click the
-  app → *Open* → *Open* (Sequoia removed this way). On any version you can instead run
-  `xattr -dr com.apple.quarantine "/Applications/Ombra.app"`. After that it starts from its icon as usual. macOS
-  asks for microphone access the first time you dictate, and for a folder such as Documents the first time omp works
-  in it; what you allow stays across updates (every release is signed with the same certificate). Releases before
-  0.0.6 were ad-hoc signed, which macOS treats as a new app at every update: after updating to 0.0.6 it asks once more.
-- **Linux** — `tar -xzf ombra-….tar.gz` and run `./Ombra` in the extracted folder. `./install-desktop-entry.sh`
-  adds it to your application menu (only `~/.local/share/applications/ombra.desktop` is written; it points at the
-  folder, so run it again if you move the folder).
+**First start on macOS.** Ombra is signed with the project's own certificate (*Ombra (self-signed)*), not an Apple
+Developer ID, and is not notarized, so macOS blocks its first start. macOS 15 (Sequoia) and later: open the app
+once, close the warning, then *System Settings → Privacy & Security → Open Anyway* and confirm with *Open*. macOS 14
+(Sonoma): Control-click the app → *Open* → *Open*. On any version you can instead run
+`xattr -dr com.apple.quarantine "/Applications/Ombra.app"`. After that it starts from its icon as usual. macOS asks
+for microphone access the first time you dictate, and for a folder such as Documents the first time omp works in it;
+what you allow stays across updates (every release is signed with the same certificate).
+
+**Nightly** is not in the download: Ombra asks before it uses Nightly and then installs the version this release
+pins, checked against its SHA-256 (see [Nightly agent browser](#daily-use)). Nightly also has its own installer for
+use as a standalone browser, on the [Nightly releases page](https://github.com/samnolak/nightly-browser/releases/latest).
+
+**Builds for other systems** (from the package workflow or `tools/package/package.sh`) are `ombra-<version>-<platform>`
+archives (`.tar.gz` on Linux, `.zip` on Windows) with the licence notices and this guide; they are not signed with a
+developer certificate. Windows: extract anywhere and run `Ombra.exe` (SmartScreen: *More info → Run anyway*). Linux:
+`tar -xzf ombra-….tar.gz`, run `./Ombra`; `./install-desktop-entry.sh` adds it to your application menu. The
+linux-arm64 and win-arm64 packages come without the engine and set it up on first start.
 
 ## First start
 

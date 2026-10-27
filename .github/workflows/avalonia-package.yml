@@ -16,6 +16,8 @@ name: Avalonia packages
 # merge in a Claude Code session (README → Build, run, test).
 # A release (the update feed the client reads) is made only when a run is started with "release" set to draft or
 # published and a version given; update.json is then signed with the UPDATE_SIGNING_KEY secret (tools/release).
+# A published release also moves main to the released commit: main is always the current release, work for the next
+# one collects on next.
 on:
   workflow_dispatch:
     inputs:
@@ -314,3 +316,9 @@ jobs:
           printf '%s\n' "${FILES[@]}"
           gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Ombra $VERSION" \
             --notes "${NOTES:-Ombra $VERSION}" $DRAFT "${FILES[@]}"
+      - name: main → the released commit
+        # Fast-forward only: the API refuses (422) when main has commits the release lacks, and the run fails loudly.
+        if: ${{ inputs.release == 'published' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/main" -f sha="$GITHUB_SHA" -F force=false

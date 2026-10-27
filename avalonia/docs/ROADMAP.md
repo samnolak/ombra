@@ -19,7 +19,7 @@ K7 adds a native code editor; D1's server trust model remains open.
   client workarounds. Review upstream changes in integration branches,
   run contract and end-to-end gates, then pin an immutable runtime artifact. No automatic upstream cutover and
   no patching installed user runtimes. Upstream PRs are useful, not a prerequisite for shipping our changes.
-  The beta uses `ombra-engine-18.12.2-bun-1.4.2-v1`; published release readiness remains gated separately.
+  Releases carry `ombra-engine-18.12.2-bun-1.4.2-v1`.
 - Our layers: **Client Integration Layer** (`Ombra.Rpc`: process, stdio, framing, correlation) →
   **Application Core** (`Ombra.ClientCore`: state, reducer, session control) → **ViewModels** → **Avalonia UI**,
   plus a **Platform Layer** (OS adapters) created only when the first real OS-specific implementation appears.
@@ -46,9 +46,9 @@ TARGET MODEL / PROVIDER (a larger model or a hosted provider) · PROVIDER SIGN-I
 | Milestone | Status | Exit criterion |
 |---|---|---|
 | **M1 — First vertical slice** (15 features below, through the official RPC of the unmodified omp 18.2.0) | **IMPLEMENTATION COMPLETE ON LINUX** | all 15 features implemented and verified on the first platform — met on Linux |
-| **M2 — Cross-platform RC validation** | **IN PROGRESS** — CROSS-PLATFORM RELEASE READINESS: INCOMPLETE | the macOS and Windows gates are PASS or documented external platform gates needing no architectural change |
-| **M3 — Wave 2** (features beyond the slice) | IN PROGRESS — much of it is on `main` before M2's exit; not release-verified off Linux | M2 exit for a release |
-| Release | BLOCKED (external) | M2 gates PASS on each OS, signing, a published release |
+| **M2 — Cross-platform RC validation** | **macOS arm64: DONE** (RC QA 2026-10-18, [`RELEASE_GATES.md`](../../docs/RELEASE_GATES.md)); Windows / Linux: out of the current releases (owner, 2026-10-18) | the macOS and Windows gates are PASS or documented external platform gates needing no architectural change |
+| **M3 — Wave 2** (features beyond the slice) | DONE for macOS — shipped in 0.1.x with the next-release scope ([`NEXT_RELEASE_ROADMAP.md`](../../docs/NEXT_RELEASE_ROADMAP.md)) | M2 exit for a release |
+| Release | **macOS arm64 published**: 0.1.0-beta.1 (2026-10-19) … 0.1.4 (2026-10-27, Latest), signed with the project's certificate, Nightly pinned by cdhash | M2 gates PASS on each released OS, signing, a published release |
 
 ### M1 — First vertical slice · IMPLEMENTATION COMPLETE ON LINUX
 
@@ -59,19 +59,19 @@ model, packaged GUI with real keyboard / mouse, notifications, updater, 20-minut
 earlier commits passed build, headless tests, real omp and package smoke on hosted runners; the current code is not
 verified there (M2).
 
-### M2 — Cross-platform RC validation · IN PROGRESS
+### M2 — Cross-platform RC validation · DONE ON macOS arm64, OPEN FOR WINDOWS / LINUX
 
 Make the client demonstrably portable: Linux 20-min background gate; macOS and Windows build, package and runtime
 gates (one command each: `tools/verify/macos-gate.sh`, `tools/verify/windows-package-gate.ps1`, or the manual workflow
 `avalonia-platform-gates.yml`); a configurable TARGET model / provider gate (`tools/verify/target-model-gate.sh`).
 External inputs it waits for: macOS / Windows runners or machines, a larger model server, CI runners.
 
-### M3 — Wave 2 · IN PROGRESS
+### M3 — Wave 2 · DONE FOR macOS
 
-Started before M2's exit: side panes (Plan, Background tasks, Files), settings pages
-(Connectors / MCP, Plugins and skills, Computer use, Git and worktrees, SSH hosts, Pets), the session menu, context
-ring and model options, page comments, dictation and self-update are on `main` (parity in [`PARITY.md`](PARITY.md)),
-checked on Linux only ([`PROJECT_STATE.md`](PROJECT_STATE.md)). A release still needs M2's exit.
+Side panes (Plan, Background tasks, Files), settings pages (Connectors / MCP, Plugins and skills, Computer use, Git
+and worktrees, SSH hosts, Pets), the session menu, context ring and model options, page comments, dictation and
+self-update (parity in [`PARITY.md`](PARITY.md)), then the next-release scope — Nightly in Ombra, teams, sharing,
+marks, the editor — are released on macOS arm64; what is verified where: [`PROJECT_STATE.md`](PROJECT_STATE.md).
 
 In 0.0.6: file changes as one diff card per file with New file / Deleted / Renamed / Moved badges, old and new line
 numbers, colour bars and word-level marks (the Files pane's Changes alike). Tool steps read as verbs with clear status
@@ -179,8 +179,10 @@ settings replace the provider-gate script and close the `catalog.stencil.so` lim
 
 ## Next
 
-1. M2 gates: the macOS and Windows gates need runners or machines; the target model gate needs a larger model server.
-2. A release candidate from one commit once those gates pass on each OS, signed.
-3. The rest of Wave 2 (backlog above) after M2's exit.
-4. Parity with Codex / Claude Code, the bug classes they fixed and optimizations from other pi/omp clients, in
+1. The next update: the open items of «Отложено в следующее обновление» in
+   [`NEXT_RELEASE_ROADMAP.md`](../../docs/NEXT_RELEASE_ROADMAP.md) (installers, Nightly updates keeping the profile,
+   the Eagle-style gallery, MCP sign-in…). Work collects on `next`; a published release moves `main` to it.
+2. Windows and Linux releases: their M2 gates need runners or machines; the target model gate needs a larger model
+   server.
+3. Parity with Codex / Claude Code, the bug classes they fixed and optimizations from other pi/omp clients, in
    waves: [`PARITY_ROADMAP.md`](PARITY_ROADMAP.md) (sources and evidence in [`parity-research/`](parity-research/)).

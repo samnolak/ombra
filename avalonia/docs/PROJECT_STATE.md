@@ -29,6 +29,11 @@ The harness profile template (`harness/profile`) is used by the stand-in environ
 
 ## Current state
 
+- **Released (2026-10-27): Ombra 0.1.4 for macOS arm64** (DMG and zip, signed with the project's certificate *Ombra
+  (self-signed)*, hardened runtime) with the pinned Nightly 0.1.0 Beta 2 (`runtime/nightly/nightly-runtime.json`,
+  build 20261027221032). Release history since 0.1.0-beta.1 (2026-10-19) and the open items for the next update:
+  [NEXT_RELEASE_ROADMAP](../../docs/NEXT_RELEASE_ROADMAP.md); release checks: [RELEASE_GATES](../../docs/RELEASE_GATES.md).
+  Windows and Linux are built, not released. The entries below are the history that led there.
 - **Beta baseline, 2026-10-15:** `beta` already contains published alpha `v0.0.9` (`4ebcbd1`).
   On macOS arm64: Release build, 1105 tests passed / 34 gated tests skipped / 0 failed;
   clean pinned-runtime install and 15 real-omp smoke scenarios passed with a stand-in model.
@@ -229,6 +234,8 @@ REAL_MODEL_URL=http://127.0.0.1:18090/v1 REAL_MODEL_ID=smollm2-135m-instruct-q4_
 # Updates: E2E on two local packages (a throwaway key, a feed on 127.0.0.1); a release
 tools/verify/update-e2e.sh <work>                # builds 0.9.0 and 0.9.1, or pass <old.tar.gz> <new.tar.gz>
 # Actions → Avalonia packages → Run workflow with version 0.6.0 and release draft|published (needs UPDATE_SIGNING_KEY)
+# from release/<date>-<version>; published also fast-forwards main to that commit (main = the current release,
+# next = work for the next one)
 tools/release/keygen.sh <dir>                    # a new release key pair (see the script before replacing the key)
 
 # Before a merge (Actions run by hand only): build, the suite, and for UI changes the layout audit
