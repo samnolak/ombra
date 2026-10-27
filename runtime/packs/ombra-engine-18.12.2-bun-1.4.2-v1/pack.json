@@ -25,8 +25,8 @@
       "attestation": "https://registry.npmjs.org/-/npm/v1/attestations/@oh-my-pi%2fpi-coding-agent@18.12.2",
       "verification": "npm tarball integrity verified; SLSA payload decoded, signatures not independently verified"
     },
-    "sha256": "6f0a735a60c9b9135636eef7952497fb917967f139cccf32772ca72ce20bd86e",
-    "bytes": 30484876,
+    "sha256": "28fe474f587601153161f9473a3ac656913a8b921ed39eb45a4f3919585b1fad",
+    "bytes": 30484881,
     "files": [
       {
         "path": "engine/approval-lease.test.ts",
@@ -9455,8 +9455,8 @@
       },
       {
         "path": "harness/omp-readonly.cmd",
-        "size": 298,
-        "sha256": "b3f6260242429b61f4ce46b1afc72b96e5cc7d54f3ed9f85ae2ce4a905cb98f7"
+        "size": 303,
+        "sha256": "55c17b59579d05bcb44a88056e111ae83909de86bf1d76745b9f99182dc0c0a9"
       },
       {
         "path": "harness/skills/animate-expo/RECIPES.md",
