@@ -71,6 +71,50 @@ public static class ImageAttachments
         }
     }
 
+    /// <summary>Per sketch picture, raw bytes: several fit in one message next to the user's own images.</summary>
+    public const int MaxSketchBytes = 120 * 1024;
+    /// <summary>The longest side of a sketch picture.</summary>
+    public const int MaxSketchSide = 1600;
+
+    /// <summary>
+    /// A sketch's picture from a screenshot of the page's viewport (<paramref name="png"/>, <paramref name="viewportWidth"/>
+    /// CSS px wide): the sketch's box (<paramref name="x"/>, <paramref name="y"/>, <paramref name="width"/>,
+    /// <paramref name="height"/>, viewport CSS px) with as much again of the page around it, at most
+    /// <see cref="MaxSketchSide"/> px on its longer side, PNG when that fits <see cref="MaxSketchBytes"/>, else JPEG made
+    /// smaller until it does. Null when the screenshot is unreadable or the box is not on it. Not on the UI thread.
+    /// </summary>
+    public static ImageAttachment? SketchPicture(string name, byte[] png, int viewportWidth, int x, int y, int width, int height)
+    {
+        using var shot = SkiaSharp.SKBitmap.Decode(png);
+        if (shot is null || shot.Width <= 0 || viewportWidth <= 0) return null;
+        var scale = (double)shot.Width / viewportWidth;
+        // The context around the drawing: half its size on each side, at least 120 CSS px
+        double padX = Math.Max(120, width / 2.0), padY = Math.Max(120, height / 2.0);
+        var rect = SkiaSharp.SKRectI.Intersect(new SkiaSharp.SKRectI(0, 0, shot.Width, shot.Height), new SkiaSharp.SKRectI(
+            (int)Math.Floor((x - padX) * scale), (int)Math.Floor((y - padY) * scale),
+            (int)Math.Ceiling((x + width + padX) * scale), (int)Math.Ceiling((y + height + padY) * scale)));
+        if (rect.Width <= 0 || rect.Height <= 0) return null;
+        using var crop = new SkiaSharp.SKBitmap();
+        if (!shot.ExtractSubset(crop, rect)) return null;
+        var fit = Math.Min(1.0, (double)MaxSketchSide / Math.Max(rect.Width, rect.Height));
+        for (var quality = 0; ; quality++)
+        {
+            var size = new SkiaSharp.SKImageInfo(Math.Max(1, (int)(rect.Width * fit)), Math.Max(1, (int)(rect.Height * fit)));
+            using var scaled = size.Width == rect.Width && size.Height == rect.Height ? null
+                : crop.Resize(size, new SkiaSharp.SKSamplingOptions(SkiaSharp.SKCubicResampler.Mitchell));
+            var source = scaled ?? crop;
+            if (quality == 0)
+            {
+                using var asPng = source.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+                if (asPng is not null && asPng.Size <= MaxSketchBytes) return new ImageAttachment(name, "image/png", asPng.ToArray());
+            }
+            using var jpeg = source.Encode(SkiaSharp.SKEncodedImageFormat.Jpeg, 80);
+            if (jpeg is not null && jpeg.Size <= MaxSketchBytes) return new ImageAttachment(name, "image/jpeg", jpeg.ToArray());
+            if (Math.Max(size.Width, size.Height) <= MinSide) return null;
+            fit *= 0.75;
+        }
+    }
+
     /// <summary>
     /// Writes the image to the temp folder for another app to open, named by its content (the same image is written
     /// once) and its type. Returns the path.

@@ -398,10 +398,14 @@ public sealed partial class MainViewModel
             var paste = preserveWhitespace ? p.Text : p.Text.TrimEnd();
             text = text.Length > 0 ? text + "\n\n" + paste : paste;
         }
-        // Open local marks follow (MainViewModel.Marks.cs; resolved ones stay out)
-        text = WithComments(text);
+        // Open local marks follow (MainViewModel.Marks.cs; resolved ones stay out), and after the message's own images
+        // the sketches' pictures, as many as the message has room for
         var images = Attachments.Select(a => a.Model).ToArray();
-        return (text, images);
+        var marks = Marks.Models();
+        var sketches = LocalMarks.SketchImages(marks, images.Length + 1,
+            (long)ImageAttachments.MaxImages * ImageAttachments.MaxImageBytes - images.Sum(i => (long)i.Data.Length));
+        text = LocalMarks.BuildRequest(text, marks, sketches.Numbers);
+        return (text, [.. images, .. sketches.Images]);
     }
 
     private void ClearComposer()

@@ -34,7 +34,10 @@ public sealed partial class MarkViewModel(LocalMark mark, MarkCollection owner) 
     [ObservableProperty] private bool _isEditing;
     [ObservableProperty] private string _editText = "";
 
-    public LocalMark Model => new(Id, Note, Status, Code, Page, Legacy);
+    /// <summary>A sketch's picture (the page around it with its strokes), once taken.</summary>
+    public ImageAttachment? Image { get; internal set; } = mark.Image;
+
+    public LocalMark Model => new(Id, Note, Status, Code, Page, Legacy, Image);
 
     public bool IsResolved => Status == MarkStatus.Resolved;
     public bool IsCode => Code is not null;
@@ -60,7 +63,12 @@ public sealed partial class MarkViewModel(LocalMark mark, MarkCollection owner) 
             if (Page is { } p)
             {
                 var on = p.Element.Text.Length > 0 ? $"{p.Element.Tag} — {p.Element.Text}" : p.Element.Selector;
-                return p.Mark.Kind == PageMarkKind.Area ? Loc.F("Area {0}×{1} in {2}", p.Mark.Width, p.Mark.Height, on) : Loc.F("Point on {0}", on);
+                return p.Mark.Kind switch
+                {
+                    PageMarkKind.Area => Loc.F("Area {0}×{1} in {2}", p.Mark.Width, p.Mark.Height, on),
+                    PageMarkKind.Sketch => Loc.F("Sketch {0}×{1} over {2}", p.Mark.Width, p.Mark.Height, on),
+                    _ => Loc.F("Point on {0}", on),
+                };
             }
             return (Legacy ?? "").Split('\n')[0];
         }
@@ -165,6 +173,13 @@ public sealed partial class MarkCollection : ObservableObject
         Edited?.Invoke();
     }
 
+    /// <summary>A sketch's picture was taken (the draft keeps it; the request attaches it).</summary>
+    public void SetImage(MarkViewModel mark, ImageAttachment image)
+    {
+        mark.Image = image;
+        Edited?.Invoke();
+    }
+
     public void Show(MarkViewModel mark) => ShowRequested?.Invoke(mark);
 
     public IReadOnlyList<LocalMark> Models() => [.. Items.Select(m => m.Model)];
@@ -224,7 +239,4 @@ public sealed partial class MainViewModel
         if (m.Code is { } c) Files.OpenLinkCommand.Execute(new Controls.FileLink(c.Path, c.Line));
         else if (m.PageUri is not null) Preview.ShowMark(m);
     }
-
-    /// <summary>The message with the open marks after it, without clearing the original draft.</summary>
-    private string WithComments(string text) => LocalMarks.BuildRequest(text, Marks.Models());
 }

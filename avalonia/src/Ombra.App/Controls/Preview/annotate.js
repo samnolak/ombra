@@ -1,28 +1,33 @@
 // Page annotations for the preview panel (Controls/PreviewPanel): started on the page after each navigation.
 // In annotate mode (as Codex's: "click, or drag to select an area") a click marks a point and a drag marks an area;
-// nothing is outlined while the pointer moves. A comment box opens at the mark; the comment goes to the client with
-// the mark (its place in the viewport and on the page), the element that holds it (a selector, its opening tag, its
-// text, its box and, where the dev build exposes it, the source file) and, for an area, the elements inside it.
-// Numbered pins (and an area's outline) stay on the page they were made on, anchored to that element so they follow
-// scrolling; another page of the site (also one a single-page app shows without a navigation) shows only its own. A
-// click on a pin opens its comment again to change (Save) or delete it.
+// nothing is outlined while the pointer moves. With the brush (the bar's Brush, or B) drags draw freehand strokes on a
+// canvas over the viewport instead; the strokes drawn until the user pauses (or presses Done) are one sketch. A comment
+// box opens at the mark; the comment goes to the client with the mark (its place in the viewport and on the page; a
+// sketch's strokes in page px, simplified), the element that holds it (a selector, its opening tag, its text, its box
+// and, where the dev build exposes it, the source file) and, for an area or a sketch, the elements under it.
+// Numbered pins (and an area's outline, a sketch's strokes) stay on the page they were made on, anchored to that
+// element so they follow scrolling; another page of the site (also one a single-page app shows without a navigation)
+// shows only its own. A click on a pin opens its comment again to change (Save) or delete it.
 // Everything lives in a closed shadow root, so the page's CSS does not reach it and the page's scripts cannot read it;
 // messages carry a token from this closure.
 // The file is one function, (token, queued). The built-in preview calls it in the page's world, its messages going
 // through the web view's invokeCSharpAction; Nightly calls it in Ombra's isolated world (queued: the page neither sees
 // nor reaches it, and it has no host bridge), its messages waiting here for the panel's reader (next()).
-// Entry: window.__ompAnnotate.{setMode(bool), setPins([{id, number, url, kind, selector, offsetX, offsetY, width, height,
-// pageX, pageY, comment, shared}]), reveal(id), next()} (the site's pins; each is drawn on its url only; shared pins are
-// a team member's marks: another colour, not editable; reveal scrolls a pin into view; next, queued only: a Promise of
-// the messages not taken yet, once there is one, and null for a reader a newer one replaced). Messages (JSON strings):
-// {type: "annotation" | "annotation-update" {id, comment} | "annotation-remove" {id} | "annotate-exit" | "ready" |
-// "location" {url}, token, ...}.
+// Entry: window.__ompAnnotate.{setMode(bool), setTool("mark" | "brush"), setPins([{id, number, url, kind, selector,
+// offsetX, offsetY, width, height, pageX, pageY, comment, shared, strokes}]), reveal(id), next()} (the site's pins; each
+// is drawn on its url only; shared pins are a team member's marks: another colour, not editable; reveal scrolls a pin
+// into view; next, queued only: a Promise of the messages not taken yet, once there is one, and null for a reader a
+// newer one replaced). Messages (JSON strings): {type: "annotation" | "annotation-update" {id, comment} |
+// "annotation-remove" {id} | "annotate-exit" | "annotate-tool" {tool} | "ready" | "location" {url}, token, ...}.
 (function (token, queued) {
   "use strict";
   // Already here (started again after a navigation inside the page): it keeps its own token, never takes one from
   // an object the page could have put there.
   if (window.__ompAnnotate) return;
   var TEXT_MAX = 160, TAG_MAX = 300, COMMENT_MAX = 2000, DRAG_MIN = 6, INSIDE_MAX = 6;
+  // A sketch: it ends this long after the last stroke; its strokes are simplified to at most this many points in all
+  var SKETCH_IDLE = 800, SKETCH_POINTS = 600, SKETCH_STROKES = 64, INK = "#ff2d6f", HALO = "rgba(255,255,255,.9)";
+  var SVG = "http://www.w3.org/2000/svg";
   var outbox = [], reader = null;
   var send = function (o) {
     o.token = token;
@@ -61,23 +66,36 @@
     "button.del{display:none;margin-right:auto;background:none;color:#cf222e;padding:0 6px}" +
     "button.go{background:#ffc21a;color:#211a0a}" +
     "button:disabled{opacity:.5;cursor:default}" +
-    ".hint{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);display:none;background:#1f2328;color:#fff;font-size:12px;line-height:28px;" +
-    "padding:0 12px;border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,.25);white-space:nowrap;pointer-events:none}" +
+    ".bar{position:fixed;left:50%;bottom:12px;transform:translateX(-50%);display:none;align-items:center;gap:6px;background:#1f2328;color:#fff;" +
+    "font-size:12px;line-height:28px;padding:3px 3px 3px 12px;border-radius:17px;box-shadow:0 2px 10px rgba(0,0,0,.25);white-space:nowrap;pointer-events:auto}" +
+    ".bar button{height:28px;padding:0 10px;border-radius:14px;font-size:12px;background:transparent;color:#d0d7de}" +
+    ".bar button.on{background:#fff;color:#1f2328}.bar button.done{display:none;background:" + INK + ";color:#fff}" +
+    ".ink{position:fixed;left:0;top:0;pointer-events:none}" +
+    "svg.sketch{position:fixed;pointer-events:none;overflow:visible}" +
+    ".sketch path{fill:none;stroke-linecap:round;stroke-linejoin:round}" +
+    ".sketch .halo{stroke:" + HALO + ";stroke-width:5.5px}.sketch .line{stroke:" + INK + ";stroke-width:3px}.sketch.shared .line{stroke:#8b5cf6}" +
     "</style>" +
-    "<div class='pins'></div>" +
+    "<div class='pins'></div><div class='drawn'></div><canvas class='ink'></canvas>" +
     "<div class='sel'></div><div class='dot'></div>" +
-    "<div class='hint'>Click to mark a point or drag to select an area · Esc to stop</div>" +
+    "<div class='bar'><span class='tip'></span><button class='mark' type='button'>Mark</button><button class='brush' type='button'>Brush</button>" +
+    "<button class='done' type='button'>Done</button></div>" +
     "<div class='pop'><div class='what'></div><textarea></textarea>" +
     "<div class='row'><button class='del' type='button'>Delete</button><button class='no' type='button'>Cancel</button><button class='go' type='button'>Comment</button></div></div>";
   (document.documentElement || document.body).appendChild(host);
 
   var pinsBox = root.querySelector(".pins"), sel = root.querySelector(".sel"), dot = root.querySelector(".dot");
   var pop = root.querySelector(".pop"), what = root.querySelector(".what"), box = root.querySelector("textarea");
-  var go = root.querySelector(".go"), no = root.querySelector(".no"), del = root.querySelector(".del"), hint = root.querySelector(".hint");
+  var go = root.querySelector(".go"), no = root.querySelector(".no"), del = root.querySelector(".del");
+  var bar = root.querySelector(".bar"), tip = root.querySelector(".tip"), markButton = root.querySelector(".mark");
+  var brushButton = root.querySelector(".brush"), doneButton = root.querySelector(".done");
+  var ink = root.querySelector(".ink"), drawn = root.querySelector(".drawn");
   // drag: the pointer is down on the page ({x, y} where it went down, {x1, y1} where it is). draft: the mark the
-  // comment box is open for ({kind, el, offsetX, offsetY, width, height, inside}: its place follows el), or a pin
-  // being edited (draft.edit: the box opened from its pin; Save changes the comment, Delete removes it).
+  // comment box is open for ({kind, el, offsetX, offsetY, width, height, inside, strokes}: its place follows el), or a
+  // pin being edited (draft.edit: the box opened from its pin; Save changes the comment, Delete removes it).
+  // tool: what a drag does ("mark" | "brush"). sketch: the strokes being drawn ({strokes: [[x0, y0, x1, y1, …]]} in
+  // page px), stroke: the one the pointer draws now, idle: the timer that ends the sketch.
   var on = false, drag = null, draft = null, pins = [], frame = 0;
+  var tool = "mark", sketch = null, stroke = null, idle = 0;
 
   var esc = function (s) { return window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/[^a-zA-Z0-9_-]/g, "\\$&"); };
   var unique = function (sel) { try { return document.querySelectorAll(sel).length === 1; } catch (e) { return false; } };
@@ -188,29 +206,34 @@
 
   function showDraft() {
     var p = draft && whereIs(draft);
-    // A pin being edited is marked by its own pin (and outline)
+    // A pin being edited is marked by its own pin (and outline, strokes)
     sel.style.display = p && !draft.edit && draft.kind === "area" ? "block" : "none";
     dot.style.display = p && !draft.edit && draft.kind === "point" ? "block" : "none";
+    drawn.textContent = "";
     if (!p) return;
     if (draft.edit) { /* nothing more to draw */ }
     else if (draft.kind === "area") place(sel, p.left, p.top, draft.width, draft.height);
+    else if (draft.kind === "sketch") drawn.appendChild(sketchSvg(draft, p));
     else place(dot, p.left, p.top);
     var vw = window.innerWidth, vh = window.innerHeight, bottom = p.top + draft.height;
     var top = bottom + 8 + 150 < vh ? bottom + 8 : Math.max(8, p.top - 158);
     place(pop, Math.max(8, Math.min(p.left, vw - 308)), top);
   }
 
-  function openDraft(kind, left, top, width, height) {
-    var el = kind === "area" ? holderOf({ left: left, top: top, width: width, height: height }) : at(left, top);
+  // strokes: a sketch's, in page px; its box's place on the page is (left, top) less the scroll
+  function openDraft(kind, left, top, width, height, strokes) {
+    var r = { left: left, top: top, width: width, height: height };
+    var el = kind === "point" ? at(left, top) : holderOf(r);
     var b = el.getBoundingClientRect();
     draft = {
       kind: kind, el: el, selector: "", offsetX: left - b.left, offsetY: top - b.top, width: width, height: height,
       pageX: left + window.scrollX, pageY: top + window.scrollY,
-      inside: kind === "area" ? insideOf({ left: left, top: top, width: width, height: height }, el) : []
+      inside: kind === "point" ? [] : insideOf(r, el), strokes: strokes || null
     };
     var text = textOf(el);
-    what.textContent = (kind === "area" ? "Area " + round(width) + "×" + round(height) + " in " : "Point on ") + nameOf(el) + (text ? " — " + text : "");
-    box.placeholder = kind === "area" ? "Comment on this area" : "Comment on this point";
+    what.textContent = (kind === "area" ? "Area " + round(width) + "×" + round(height) + " in "
+      : kind === "sketch" ? "Sketch " + round(width) + "×" + round(height) + " over " : "Point on ") + nameOf(el) + (text ? " — " + text : "");
+    box.placeholder = kind === "area" ? "Comment on this area" : kind === "sketch" ? "What is this sketch? What should be built here?" : "Comment on this point";
     openBox("", "Comment", false);
   }
 
@@ -238,6 +261,155 @@
     if (draft) draft.edit = false;
     draft = null;
     pop.style.display = sel.style.display = dot.style.display = "none";
+    drawn.textContent = "";
+  }
+
+  // ── The brush: strokes on the canvas while drawn, then one sketch; saved sketches are SVG over the page ──
+
+  // A smooth path through a stroke's points (quadratic curves through the midpoints), shifted by (dx, dy)
+  function pathOf(p, dx, dy) {
+    var x = function (i) { return p[i] - dx; }, y = function (i) { return p[i + 1] - dy; };
+    var d = "M" + x(0) + " " + y(0);
+    if (p.length === 2) return d + " l0.01 0"; // a dot
+    for (var i = 2; i < p.length - 2; i += 2) d += " Q" + x(i) + " " + y(i) + " " + (x(i) + x(i + 2)) / 2 + " " + (y(i) + y(i + 2)) / 2;
+    return d + " L" + x(p.length - 2) + " " + y(p.length - 2);
+  }
+
+  // A sketch ({strokes, pageX, pageY, width, height, shared}) drawn with its box at p (where it is now)
+  function sketchSvg(m, p) {
+    var pad = 6, s = document.createElementNS(SVG, "svg");
+    s.setAttribute("class", m.shared ? "sketch shared" : "sketch");
+    s.setAttribute("width", String(m.width + 2 * pad));
+    s.setAttribute("height", String(m.height + 2 * pad));
+    place(s, p.left - pad, p.top - pad);
+    ["halo", "line"].forEach(function (c) {
+      (m.strokes || []).forEach(function (st) {
+        var path = document.createElementNS(SVG, "path");
+        path.setAttribute("class", c);
+        path.setAttribute("d", pathOf(st, m.pageX - pad, m.pageY - pad));
+        s.appendChild(path);
+      });
+    });
+    return s;
+  }
+
+  function sizeInk() {
+    var r = window.devicePixelRatio || 1;
+    ink.width = round(window.innerWidth * r); ink.height = round(window.innerHeight * r);
+    ink.style.width = window.innerWidth + "px"; ink.style.height = window.innerHeight + "px";
+  }
+
+  // The sketch being drawn, where its strokes are on the page now (it scrolls with the page)
+  function paintInk() {
+    var c = ink.getContext ? ink.getContext("2d") : null;
+    if (!c) return;
+    var r = window.devicePixelRatio || 1;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, ink.width, ink.height);
+    if (!sketch) return;
+    c.setTransform(r, 0, 0, r, -window.scrollX * r, -window.scrollY * r);
+    c.lineCap = c.lineJoin = "round";
+    [[HALO, 5.5], [INK, 3]].forEach(function (pen) {
+      c.strokeStyle = pen[0]; c.lineWidth = pen[1];
+      sketch.strokes.forEach(function (st) { c.stroke(new Path2D(pathOf(st, 0, 0))); });
+    });
+  }
+
+  // Ramer–Douglas–Peucker on one stroke: the points that keep its shape within tol px
+  function simplified(p, tol) {
+    var n = p.length / 2;
+    if (n < 3) return p.map(round);
+    var keep = []; keep[0] = keep[n - 1] = true;
+    var stack = [[0, n - 1]];
+    while (stack.length) {
+      var s = stack.pop(), a = s[0], b = s[1], ax = p[2 * a], ay = p[2 * a + 1], dx = p[2 * b] - ax, dy = p[2 * b + 1] - ay;
+      var len = Math.sqrt(dx * dx + dy * dy), best = 0, at = -1;
+      for (var i = a + 1; i < b; i++) {
+        var px = p[2 * i] - ax, py = p[2 * i + 1] - ay;
+        var d = len ? Math.abs(dx * py - dy * px) / len : Math.sqrt(px * px + py * py);
+        if (d > best) { best = d; at = i; }
+      }
+      if (best > tol) { keep[at] = true; stack.push([a, at], [at, b]); }
+    }
+    var out = [];
+    for (var k = 0; k < n; k++) if (keep[k]) out.push(round(p[2 * k]), round(p[2 * k + 1]));
+    return out;
+  }
+
+  function simplify(strokes) {
+    for (var tol = 1; ; tol *= 2) {
+      var out = strokes.slice(0, SKETCH_STROKES).map(function (s) { return simplified(s, tol); });
+      var count = out.reduce(function (n, s) { return n + s.length / 2; }, 0);
+      if (count <= SKETCH_POINTS || tol >= 256) return out;
+    }
+  }
+
+  function showBar() {
+    bar.style.display = on ? "flex" : "none";
+    markButton.className = tool === "mark" ? "mark on" : "mark";
+    brushButton.className = tool === "brush" ? "brush on" : "brush";
+    doneButton.style.display = sketch ? "block" : "none";
+    tip.textContent = tool === "brush"
+      ? "Draw what you want here; pause or press Done to describe it · B to mark · Esc to stop"
+      : "Click to mark a point or drag to select an area · B to draw · Esc to stop";
+  }
+
+  function dropSketch() {
+    if (idle) { clearTimeout(idle); idle = 0; }
+    sketch = stroke = null;
+    paintInk();
+    showBar();
+  }
+
+  // The strokes drawn so far are one sketch: its comment box opens (a stroke still being drawn waits for its end)
+  function finishSketch() {
+    if (idle) { clearTimeout(idle); idle = 0; }
+    if (!sketch || stroke) return;
+    var strokes = simplify(sketch.strokes), x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    strokes.forEach(function (s) {
+      for (var i = 0; i < s.length; i += 2) { x0 = Math.min(x0, s[i]); x1 = Math.max(x1, s[i]); y0 = Math.min(y0, s[i + 1]); y1 = Math.max(y1, s[i + 1]); }
+    });
+    dropSketch();
+    if (!strokes.length) return;
+    openDraft("sketch", x0 - window.scrollX, y0 - window.scrollY, Math.max(1, x1 - x0), Math.max(1, y1 - y0), strokes);
+  }
+
+  function brushDown(e) {
+    if (idle) { clearTimeout(idle); idle = 0; }
+    // Drawing again before the sketch was commented on adds to it
+    if (draft && draft.kind === "sketch" && !draft.edit) {
+      sketch = { strokes: draft.strokes.map(function (s) { return s.slice(); }) };
+      closeDraft();
+    } else if (draft) closeDraft();
+    if (!sketch) sketch = { strokes: [] };
+    if (sketch.strokes.length >= SKETCH_STROKES) { finishSketch(); return; }
+    stroke = [e.clientX + window.scrollX, e.clientY + window.scrollY];
+    sketch.strokes.push(stroke);
+    paintInk();
+    showBar();
+  }
+  function brushMove(e) {
+    if (!stroke) return;
+    var x = e.clientX + window.scrollX, y = e.clientY + window.scrollY;
+    if (Math.abs(x - stroke[stroke.length - 2]) < 2 && Math.abs(y - stroke[stroke.length - 1]) < 2) return;
+    stroke.push(x, y);
+    paintInk();
+  }
+  function brushUp() {
+    if (!stroke) return;
+    stroke = null;
+    idle = setTimeout(finishSketch, SKETCH_IDLE);
+  }
+
+  function setTool(value, fromPage) {
+    value = value === "brush" ? "brush" : "mark";
+    if (value === tool) return;
+    if (sketch) { stroke = null; finishSketch(); } // what was drawn is kept: its comment box opens
+    drag = null;
+    sel.style.display = "none";
+    tool = value;
+    showBar();
+    if (fromPage) send({ type: "annotate-tool", tool: tool });
   }
 
   function removeEdited() {
@@ -264,11 +436,14 @@
     var el = d.el, r = el.getBoundingClientRect();
     var id = "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     var selector = selectorOf(el);
+    // A sketch's strokes are on the page from where its box was when drawn (its pageX, pageY)
+    var sketched = d.kind === "sketch";
     var mark = {
       kind: d.kind, x: round(p.left), y: round(p.top), width: round(d.width), height: round(d.height),
-      pageX: round(p.left + window.scrollX), pageY: round(p.top + window.scrollY), offsetX: round(d.offsetX), offsetY: round(d.offsetY),
-      viewportWidth: window.innerWidth, viewportHeight: window.innerHeight
+      pageX: round(sketched ? d.pageX : p.left + window.scrollX), pageY: round(sketched ? d.pageY : p.top + window.scrollY),
+      offsetX: round(d.offsetX), offsetY: round(d.offsetY), viewportWidth: window.innerWidth, viewportHeight: window.innerHeight
     };
+    if (sketched) mark.strokes = d.strokes;
     send({
       type: "annotation", id: id, comment: comment, url: location.href, title: document.title, mark: mark,
       element: {
@@ -281,7 +456,7 @@
     pins.push({
       url: location.href,
       id: id, number: pins.length + 1, kind: d.kind, selector: selector, el: el, offsetX: mark.offsetX, offsetY: mark.offsetY,
-      width: mark.width, height: mark.height, pageX: mark.pageX, pageY: mark.pageY, comment: comment
+      width: mark.width, height: mark.height, pageX: mark.pageX, pageY: mark.pageY, comment: comment, strokes: d.strokes
     });
     closeDraft();
     drawPins();
@@ -310,7 +485,7 @@
         a.className = "area";
         place(a, p.left, p.top, m.width, m.height);
         pinsBox.appendChild(a);
-      }
+      } else if (m.kind === "sketch" && m.strokes) pinsBox.appendChild(sketchSvg(m, p));
       var d = document.createElement("div");
       d.className = m.shared ? "pin shared" : "pin";
       d.textContent = String(m.number);
@@ -324,7 +499,9 @@
     });
   }
 
-  function reflow() {
+  function reflow(e) {
+    if (e && e.type === "resize") sizeInk();
+    if (sketch) paintInk(); // at once: the strokes stay where they were drawn on the page
     if (frame) return;
     frame = requestAnimationFrame(function () {
       frame = 0;
@@ -346,10 +523,12 @@
     if (!on || mine(e)) return;
     block(e);
     if (e.button !== 0) return;
+    if (tool === "brush") { brushDown(e); return; }
     closeDraft(); // a new mark replaces the one not commented on yet
     drag = { x: e.clientX, y: e.clientY, x1: e.clientX, y1: e.clientY, moved: false };
   }
   function onMove(e) {
+    if (on && stroke) { block(e); brushMove(e); return; }
     if (!on || !drag) return;
     block(e);
     drag.x1 = e.clientX; drag.y1 = e.clientY;
@@ -360,6 +539,7 @@
     place(sel, r.left, r.top, r.width, r.height);
   }
   function onUp(e) {
+    if (on && stroke) { block(e); brushUp(); return; }
     if (!on || !drag) return;
     block(e);
     var d = drag, r = dragBox(d);
@@ -369,11 +549,20 @@
     if (d.moved && r.width >= DRAG_MIN && r.height >= DRAG_MIN) openDraft("area", r.left, r.top, r.width, r.height);
     else openDraft("point", d.x, d.y, 0, 0);
   }
-  function onCancel() { drag = null; if (!draft) sel.style.display = "none"; }
+  function onCancel() { drag = null; brushUp(); if (!draft) sel.style.display = "none"; }
   function onKey(e) {
-    if (!on || e.key !== "Escape") return;
+    if (!on) return;
+    // B switches the tool (not while typing: in the comment box, or a field of the page)
+    var t = e.target, typing = mine(e) || (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || "")));
+    if ((e.key === "b" || e.key === "B") && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault(); e.stopPropagation();
+      setTool(tool === "brush" ? "mark" : "brush", true);
+      return;
+    }
+    if (e.key !== "Escape") return;
     e.preventDefault(); e.stopPropagation();
     if (drag) onCancel();
+    else if (sketch) dropSketch();
     else if (draft) closeDraft();
     else setMode(false, true);
   }
@@ -387,6 +576,9 @@
   go.addEventListener("click", submit);
   no.addEventListener("click", closeDraft);
   del.addEventListener("click", removeEdited);
+  markButton.addEventListener("click", function () { setTool("mark", true); });
+  brushButton.addEventListener("click", function () { setTool("brush", true); });
+  doneButton.addEventListener("click", function () { stroke = null; finishSketch(); });
 
   var BLOCKED = ["click", "dblclick", "auxclick", "contextmenu", "dragstart", "selectstart"];
   var STOPPED = ["pointerdown", "pointerup", "pointermove"];
@@ -403,8 +595,9 @@
     document[method]("keydown", onKey, true);
     window[method]("blur", onCancel);
     document.documentElement.style.cursor = on ? "crosshair" : "";
-    hint.style.display = on ? "block" : "none";
-    if (!on) { drag = null; closeDraft(); }
+    if (on) { sizeInk(); paintInk(); }
+    if (!on) { drag = null; dropSketch(); closeDraft(); }
+    showBar();
     if (fromPage) send({ type: "annotate-exit" });
   }
 
@@ -420,6 +613,7 @@
     if (k === shownKey) return;
     shownKey = k;
     if (draft) closeDraft();
+    if (sketch) dropSketch();
     drawPins();
     send({ type: "location", url: location.href });
   }
@@ -429,12 +623,15 @@
 
   window.__ompAnnotate = {
     setMode: function (v) { setMode(v, false); },
+    setTool: function (t) { setTool(t, false); },
     setPins: function (list) {
       pins = (list || []).map(function (p) {
+        var kind = p.kind === "area" || p.kind === "sketch" ? p.kind : "point";
         return {
-          id: p.id, number: p.number, url: p.url, kind: p.kind === "area" ? "area" : "point", selector: p.selector, el: null,
+          id: p.id, number: p.number, url: p.url, kind: kind, selector: p.selector, el: null,
           offsetX: +p.offsetX || 0, offsetY: +p.offsetY || 0, width: +p.width || 0, height: +p.height || 0,
-          pageX: +p.pageX || 0, pageY: +p.pageY || 0, comment: p.comment, shared: !!p.shared
+          pageX: +p.pageX || 0, pageY: +p.pageY || 0, comment: p.comment, shared: !!p.shared,
+          strokes: kind === "sketch" && Array.isArray(p.strokes) ? p.strokes : null
         };
       });
       drawPins();

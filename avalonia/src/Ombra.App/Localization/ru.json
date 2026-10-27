@@ -1697,6 +1697,7 @@
     "Signed out of {0} ({1}). omp still signs in to it with {2}.": "Выполнен выход из {0} ({1}). omp по-прежнему входит туда с помощью {2}.",
     "Signing in to {0}… omp waits for the browser or the code; other actions wait too.": "Вход в {0}… omp ждёт браузер или код; остальные действия тоже ждут.",
     "Size": "Размер",
+    "Sketch {0}×{1} over {2}": "Набросок {0}×{1} поверх {2}",
     "Skill": "Навык",
     "Skill commands": "Команды навыков",
     "Skill {0}": "Навык {0}",

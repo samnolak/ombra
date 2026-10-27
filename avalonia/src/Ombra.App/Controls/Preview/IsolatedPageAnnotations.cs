@@ -17,9 +17,9 @@ internal sealed class IsolatedPageAnnotations(IIsolatedScripts scripts, PreviewV
 {
     internal const string NextSource = "() => window.__ompAnnotate ? window.__ompAnnotate.next() : null";
 
-    /// <summary>Mode, pins and the pin to reveal as arguments (nothing spliced into the source); true when it revealed it.</summary>
-    internal const string SyncSource = "(on, pins, reveal) => { const a = window.__ompAnnotate; if (!a) return false; "
-        + "a.setMode(on); a.setPins(pins); return reveal !== null && a.reveal(reveal); }";
+    /// <summary>Tool, mode, pins and the pin to reveal as arguments (nothing spliced into the source); true when it revealed it.</summary>
+    internal const string SyncSource = "(tool, on, pins, reveal) => { const a = window.__ompAnnotate; if (!a) return false; "
+        + "a.setTool(tool); a.setMode(on); a.setPins(pins); return reveal !== null && a.reveal(reveal); }";
 
     private int _reader;
     private string? _startedOn;
@@ -98,7 +98,7 @@ internal sealed class IsolatedPageAnnotations(IIsolatedScripts scripts, PreviewV
     {
         if (_closed) return;
         var reveal = vm.PendingReveal;
-        var args = "[" + (vm.IsAnnotating ? "true" : "false") + "," + vm.PinsJson(vm.CurrentUrl) + ","
+        var args = "[" + JsonSerializer.Serialize(vm.AnnotateToolName, PreviewJsonContext.Default.String) + "," + (vm.IsAnnotating ? "true" : "false") + "," + vm.PinsJson(vm.CurrentUrl) + ","
             + (reveal is null ? "null" : JsonSerializer.Serialize(reveal, PreviewJsonContext.Default.String)) + "]";
         try
         {

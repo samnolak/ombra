@@ -24,15 +24,18 @@ public sealed class PreviewAnnotationTests
 
     private static string Message(PreviewViewModel vm, string comment = "Make it blue", string? token = null, string id = "a1",
         string selector = "#login > button.btn", string url = "http://localhost:5173/", string source = "src/Login.tsx:42",
-        string kind = "point", int width = 0, int height = 0, object[]? inside = null) =>
-        JsonSerializer.Serialize(new Dictionary<string, object?>
+        string kind = "point", int width = 0, int height = 0, object[]? inside = null, object? strokes = null)
+    {
+        var mark = new Dictionary<string, object>
+        {
+            ["kind"] = kind, ["x"] = 452.4, ["y"] = 400, ["width"] = width, ["height"] = height, ["pageX"] = 452, ["pageY"] = 1200,
+            ["offsetX"] = 40, ["offsetY"] = 20, ["viewportWidth"] = 1280, ["viewportHeight"] = 800,
+        };
+        if (strokes is not null) mark["strokes"] = strokes;
+        return JsonSerializer.Serialize(new Dictionary<string, object?>
         {
             ["type"] = "annotation", ["token"] = token ?? vm.AnnotationToken, ["id"] = id, ["comment"] = comment, ["url"] = url, ["title"] = "Shop",
-            ["mark"] = new Dictionary<string, object>
-            {
-                ["kind"] = kind, ["x"] = 452.4, ["y"] = 400, ["width"] = width, ["height"] = height, ["pageX"] = 452, ["pageY"] = 1200,
-                ["offsetX"] = 40, ["offsetY"] = 20, ["viewportWidth"] = 1280, ["viewportHeight"] = 800,
-            },
+            ["mark"] = mark,
             ["element"] = new Dictionary<string, object>
             {
                 ["selector"] = selector, ["tag"] = "button", ["html"] = "<button class=\"btn\" type=\"submit\">", ["text"] = "Sign in",
@@ -40,6 +43,83 @@ public sealed class PreviewAnnotationTests
             },
             ["inside"] = inside ?? [],
         });
+    }
+
+    private static readonly int[][] TwoStrokes = [[10, 20, 30, 40, 50, 25], [60, 70]];
+
+    [Fact]
+    public void Sketches_come_with_their_strokes_and_are_drawn_from_them()
+    {
+        var vm = Opened();
+        Assert.Null(vm.OnPageMessage(Message(vm, kind: "sketch", width: 120, height: 60))); // no strokes
+        Assert.Null(vm.OnPageMessage(Message(vm, kind: "sketch", width: 120, height: 60, strokes: new[] { new[] { 1, 2, 3 } }))); // odd
+        Assert.Null(vm.OnPageMessage(Message(vm, kind: "sketch", width: 120, height: 60, strokes: new[] { Enumerable.Range(0, 2402).ToArray() }))); // too many points
+        Assert.Null(vm.OnPageMessage(Message(vm, kind: "sketch", strokes: TwoStrokes))); // no box
+        Assert.Empty(vm.Marks.Items);
+
+        Assert.Equal("annotation", vm.OnPageMessage(Message(vm, comment: "Login form here", kind: "sketch", width: 120, height: 60, strokes: TwoStrokes)));
+        var sketch = Assert.Single(vm.Marks.Items);
+        Assert.Equal(PageMarkKind.Sketch, sketch.Page!.Mark.Kind);
+        Assert.Equal(TwoStrokes, sketch.Page.Mark.Strokes);
+        Assert.Equal(Loc.F("Sketch {0}×{1} over {2}", 120, 60, "button — Sign in"), sketch.TargetLabel);
+        Assert.Null(sketch.Image); // no snapshot on a tab without a page view
+        var pins = vm.PinsJson(new Uri("http://localhost:5173/"));
+        Assert.Contains("\"kind\":\"sketch\"", pins);
+        Assert.Contains("\"strokes\":[[10,20,30,40,50,25],[60,70]]", pins);
+        // Points and areas carry none
+        Assert.Equal("annotation", vm.OnPageMessage(Message(vm, id: "a2")));
+        Assert.Contains("\"kind\":\"point\"", vm.PinsJson(new Uri("http://localhost:5173/")));
+        Assert.Contains("\"strokes\":null", vm.PinsJson(new Uri("http://localhost:5173/")));
+    }
+
+    [Fact]
+    public async Task A_sketch_gets_its_picture_from_the_tab_snapshot_cropped_and_bounded()
+    {
+        var vm = Opened();
+        PreviewViewModel.SketchPictureDelay = TimeSpan.Zero;
+        // The viewport (1280×800 CSS px) at 2×: the picture is the sketch's box and some page around it, ≤ 1600 px
+        using var surface = SkiaSharp.SKSurface.Create(new SkiaSharp.SKImageInfo(2560, 1600));
+        surface.Canvas.Clear(SkiaSharp.SKColors.White);
+        using var shot = surface.Snapshot().Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        var shots = 0;
+        vm.ActiveTab.CaptureScreenshot = _ => { shots++; return Task.FromResult(new AgentScreenshot(shot.ToArray(), 2560, 1600)); };
+        Assert.Equal("annotation", vm.OnPageMessage(Message(vm, kind: "sketch", width: 300, height: 200, strokes: TwoStrokes)));
+        var mark = vm.Marks.Items.Single();
+        for (var i = 0; i < 100 && mark.Image is null; i++) await Task.Delay(50);
+        var image = Assert.IsType<ImageAttachment>(mark.Image);
+        Assert.Equal(1, shots);
+        Assert.Equal("image/png", image.MimeType);
+        Assert.True(image.Data.Length <= Ombra.App.Services.ImageAttachments.MaxSketchBytes);
+        using var picture = SkiaSharp.SKBitmap.Decode(image.Data);
+        // (452 - 150, 400 - 120) … (452 + 300 + 150, 400 + 200 + 120) CSS px, ×2, then ≤ 1600 on the long side
+        Assert.True(picture.Width <= 1600 && picture.Height <= 1600, $"{picture.Width}×{picture.Height}");
+        Assert.Equal(1200.0 / 880, (double)picture.Width / picture.Height, 2);
+        Assert.Same(image, mark.Model.Image); // the draft keeps it
+    }
+
+    [AvaloniaFact]
+    public void Switching_tabs_keeps_annotate_mode_and_the_tool()
+    {
+        var vm = Opened();
+        vm.ToggleAnnotateCommand.Execute(null);
+        Assert.Equal("annotate-tool", vm.OnPageMessage(JsonSerializer.Serialize(new { type = "annotate-tool", tool = "brush", token = vm.AnnotationToken })));
+        Assert.Equal(AnnotateTool.Brush, vm.AnnotateTool);
+        var first = vm.ActiveTab;
+        vm.NewTabCommand.Execute(null);
+        vm.NavigateCommand.Execute("localhost:4000");
+        Assert.NotSame(first, vm.ActiveTab);
+        Assert.True(vm.IsAnnotating);
+        Assert.Equal(AnnotateTool.Brush, vm.AnnotateTool);
+        vm.SelectTabCommand.Execute(first);
+        Assert.Same(first, vm.ActiveTab);
+        Assert.True(vm.IsAnnotating);
+        Assert.Equal(AnnotateTool.Brush, vm.AnnotateTool);
+        // Esc on the page ends the mode; the tool stays for the next time
+        vm.OnPageMessage(JsonSerializer.Serialize(new { type = "annotate-exit", token = vm.AnnotationToken }));
+        Assert.Equal((false, AnnotateTool.Brush), (vm.IsAnnotating, vm.AnnotateTool));
+        Assert.Equal("annotate-tool", vm.OnPageMessage(JsonSerializer.Serialize(new { type = "annotate-tool", tool = "mark", token = vm.AnnotationToken })));
+        Assert.Equal(AnnotateTool.Mark, vm.AnnotateTool);
+    }
 
     [Fact]
     public void Only_messages_from_our_script_become_comments()
@@ -388,7 +468,7 @@ public sealed class PreviewAnnotationTests
         var page = new IsolatedPageAnnotations(world, vm, () => shown);
         await page.OnLoadedAsync("http://localhost:5173/");
         Assert.Equal("[\"" + vm.AnnotationToken + "\",true]", Assert.Single(world.Calls, c => c.Source == PreviewPanel.AnnotateFunction).Args);
-        Assert.Equal("[false,[],null]", world.LastArgs(IsolatedPageAnnotations.SyncSource));
+        Assert.Equal("[\"mark\",false,[],null]", world.LastArgs(IsolatedPageAnnotations.SyncSource));
         var first = await world.Read();
 
         var ready = JsonSerializer.Serialize(new { type = "ready", token = vm.AnnotationToken });
@@ -401,7 +481,7 @@ public sealed class PreviewAnnotationTests
         Assert.Equal(1, world.Count(PreviewPanel.AnnotateFunction));
         vm.IsAnnotating = true;
         await page.SyncAsync();
-        Assert.StartsWith("[true,[{", world.LastArgs(IsolatedPageAnnotations.SyncSource));
+        Assert.StartsWith("[\"mark\",true,[{", world.LastArgs(IsolatedPageAnnotations.SyncSource));
         // A team member's mark asked for: done once the page says it scrolled to the pin
         vm.PendingReveal = "team-m1-i1";
         world.Answer = "true";
@@ -574,5 +654,179 @@ public sealed class PreviewAnnotationTests
         Assert.False(vm.SendCommand.CanExecute(null)); // a resolved mark alone is not a message
         await vm.DisposeAsync();
         w.Close();
+    }
+
+    private static LocalMark SketchMark(string id, string note, ImageAttachment? image) =>
+        new(id, note, Page: new PageAnchor("http://localhost:5173/login", "Login", new PageMark(PageMarkKind.Sketch, 100, 200, 300, 150, 100, 900, 4, 8, 1280, 800, TwoStrokes),
+            new PageElement("main", "main", "<main>", "", "", 96, 192, 800, 600), [new PageInsideElement("form", "form", "Sign in")]), Image: image);
+
+    [Fact]
+    public void A_sketch_round_trips_through_the_draft_and_old_drafts_still_load()
+    {
+        var picture = new ImageAttachment("sketch-s1.png", "image/png", [0x89, 0x50, 0x4E, 0x47, 1, 2, 3]);
+        var json = JsonSerializer.Serialize(SketchMark("s1", "Login form here", picture));
+        var back = JsonSerializer.Deserialize<LocalMark>(json)!;
+        Assert.True(back.IsValid);
+        Assert.Equal(PageMarkKind.Sketch, back.Page!.Mark.Kind);
+        Assert.Equal(TwoStrokes, back.Page.Mark.Strokes);
+        Assert.Equal(picture.Data, back.Image!.Data);
+        Assert.Equal(("sketch-s1.png", "image/png"), (back.Image.Name, back.Image.MimeType));
+
+        // A draft saved before sketches: its marks have neither strokes nor a picture
+        var old = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(new LocalMark("p1", "Make it blue", Page: new PageAnchor("http://localhost:5173/", "Shop",
+            new PageMark(PageMarkKind.Area, 10, 20, 100, 40, 10, 1220, -6, -4, 1280, 800), new PageElement("#buy", "button", "<button>", "Buy", "", 0, 0, 80, 30), []))))!.AsObject();
+        old.Remove("Image");
+        old["Page"]!["Mark"]!.AsObject().Remove("Strokes");
+        var loaded = old.Deserialize<LocalMark>()!;
+        Assert.True(loaded.IsValid);
+        Assert.Null(loaded.Page!.Mark.Strokes);
+        Assert.Null(loaded.Image);
+        Assert.Contains("Area: 100×40 at 10,20", LocalMarks.BuildRequest("", [loaded]));
+
+        // Strokes that are not pairs of numbers make the mark invalid (the draft is refused, as other broken marks)
+        Assert.False((back with { Page = back.Page with { Mark = back.Page.Mark with { Strokes = [[1, 2, 3]] } } }).IsValid);
+        Assert.False((back with { Image = picture with { Data = [] } }).IsValid);
+    }
+
+    [Fact]
+    public void The_request_names_each_sketch_s_image_and_gives_the_strokes_when_it_has_none()
+    {
+        var picture = new ImageAttachment("sketch-s1.png", "image/png", new byte[1000]);
+        LocalMark[] marks = [
+            new("c1", "rename", Code: new CodeAnchor("src/a.cs", 3, false, "x")),
+            SketchMark("s1", "Login form here", picture),
+            SketchMark("s2", "A footer like this", null),
+            SketchMark("s3", "Resolved one", picture) with { Status = MarkStatus.Resolved },
+        ];
+        // One image of the user's own goes first: the sketch's is image 2
+        var (images, numbers) = LocalMarks.SketchImages(marks, 2, 10_000);
+        Assert.Equal([picture], images);
+        Assert.Equal(new Dictionary<string, int> { ["s1"] = 2 }, numbers);
+        var request = LocalMarks.BuildRequest("Build these", marks, numbers);
+        Assert.Contains("Each marks a point, an area or a sketch (a rough drawing of what I want there) of the page", request);
+        Assert.Contains("\n2. Sketch — see image 2: Login form here\n   Sketch: 2 strokes over 300×150 at 100,200 in a 1280×800 viewport (100,900 on the page)\n   Over: <main>\n", request);
+        Assert.Contains("   Under the sketch: form \"Sign in\" (form)\n", request);
+        Assert.Contains("\n3. Sketch: A footer like this\n", request);
+        Assert.Contains("   Strokes (SVG path, CSS px on the page): M10 20 L30 40 L50 25 M60 70\n", request);
+        Assert.DoesNotContain("Resolved one", request);
+        Assert.Contains("build what each sketch roughly draws, where it is drawn.", request);
+        // No room left in the message: no picture, the strokes instead
+        var full = LocalMarks.SketchImages(marks, 1, 999);
+        Assert.Empty(full.Images);
+        Assert.Contains("\n2. Sketch: Login form here\n", LocalMarks.BuildRequest("", marks, full.Numbers));
+    }
+
+    /// <summary>The message box sends the user's images, then the sketches' pictures, and the text names them in that order.</summary>
+    [AvaloniaFact]
+    public async Task Sketch_pictures_go_with_the_message_after_its_own_images()
+    {
+        var vm = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs());
+        var w = new Ombra.App.Views.MainWindow { DataContext = vm, Width = 1180, Height = 760 };
+        w.Show();
+        vm.OnWindowOpened();
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while (vm.Phase != SessionPhase.Ready && DateTime.UtcNow < deadline) { Dispatcher.UIThread.RunJobs(); await Task.Delay(15); }
+
+        var own = new ImageAttachment("own.png", "image/png", [0x89, 0x50, 0x4E, 0x47, 9]);
+        var picture = new ImageAttachment("sketch-s1.png", "image/png", [0x89, 0x50, 0x4E, 0x47, 7]);
+        Assert.True(vm.TryAddImage(own, "test"));
+        var preview = vm.Preview;
+        preview.OnNavigationCompleted(new Uri("http://localhost:5173/"), true, false, false);
+        Assert.Equal("annotation", preview.OnPageMessage(Message(preview, comment: "Login form here", kind: "sketch", width: 120, height: 60, strokes: TwoStrokes)));
+        vm.Marks.SetImage(vm.Marks.Items.Single(), picture);
+        vm.ComposerText = "Please";
+        vm.SendCommand.Execute(null);
+        while (!vm.Rows.OfType<UserRowViewModel>().Any() && DateTime.UtcNow < deadline) { Dispatcher.UIThread.RunJobs(); await Task.Delay(15); }
+        var row = vm.Rows.OfType<UserRowViewModel>().First();
+        Assert.Contains("\n1. Sketch — see image 2: Login form here\n", row.Text);
+        Assert.Equal([own.Data, picture.Data], row.Previews.Select(p => p.Model.Data));
+        Assert.Empty(vm.Marks.Items);
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    /// <summary>
+    /// The brush in the page script, run in Node over a stand-in DOM: B (or the bar) switches to it and tells the client;
+    /// drags draw strokes; after a pause the comment box opens for the sketch; its comment sends a "sketch" mark with
+    /// the strokes in page px (the page scrolled by 100), simplified; a straight line keeps only its ends.
+    /// </summary>
+    [Fact]
+    public void The_brush_draws_a_sketch_that_goes_out_with_its_strokes()
+    {
+        if (Node() is not { } node) return;
+        var dir = TestProcesses.TempDir("annotate-brush");
+        var script = Path.Combine(dir, "annotate.js");
+        File.WriteAllText(script, PreviewPanel.AnnotateFunction);
+        var harness = Path.Combine(dir, "harness.js");
+        File.WriteAllText(harness, """
+            const fs = require("fs");
+            const listeners = {};
+            function node(tag) {
+              const n = { tagName: (tag || "div").toUpperCase(), style: {}, classList: { add() {}, remove() {} }, l: {}, q: {}, children: [],
+                addEventListener(t, f) { n.l[t] = f; }, appendChild(c) { n.children.push(c); }, setAttribute() {}, getAttribute() { return null; },
+                focus() {}, setSelectionRange() {}, value: "",
+                querySelector(s) { return n.q[s] || (n.q[s] = node(s === "textarea" ? "textarea" : "div")); },
+                attachShadow() { return globalThis.shadow = node(); },
+                getBoundingClientRect() { return { left: 0, top: 0, right: 1280, bottom: 800, width: 1280, height: 800 }; } };
+              Object.defineProperty(n, "textContent", { set() { n.children = []; }, get() { return ""; } });
+              n.isConnected = true; n.nodeType = 1;
+              return n;
+            }
+            globalThis.window = globalThis;
+            const body = node("body");
+            globalThis.document = { createElement: node, createElementNS: (ns, t) => node(t), documentElement: node("html"), body, querySelectorAll: () => [],
+              elementFromPoint: () => null, title: "Login",
+              addEventListener: (t, f) => { listeners[t] = f; }, removeEventListener: (t) => { delete listeners[t]; } };
+            globalThis.location = { href: "http://localhost:5173/login" };
+            globalThis.requestAnimationFrame = () => 0;
+            globalThis.setInterval = () => 0;
+            window.innerWidth = 1280; window.innerHeight = 800; window.scrollX = 0; window.scrollY = 100;
+            window.addEventListener = () => {};
+            window.removeEventListener = () => {};
+            const posted = [];
+            window.invokeCSharpAction = m => posted.push(JSON.parse(m));
+            const ev = (x, y, more) => Object.assign({ button: 0, clientX: x, clientY: y, preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {} }, more);
+            eval(fs.readFileSync(process.argv[2], "utf8"))("tok", false);
+            const a = window.__ompAnnotate;
+            a.setMode(true);
+            listeners.keydown(ev(0, 0, { key: "b", target: body }));
+            // A straight line (10 points) and a dot
+            listeners.mousedown(ev(100, 100));
+            for (let i = 1; i <= 10; i++) listeners.mousemove(ev(100 + i * 10, 100));
+            listeners.mouseup(ev(200, 100));
+            listeners.mousedown(ev(300, 150));
+            listeners.mouseup(ev(300, 150));
+            const out = { tool: posted.find(m => m.type === "annotate-tool"), doneShown: shadow.q[".done"].style.display };
+            setTimeout(() => {
+              out.box = shadow.q[".pop"].style.display;
+              out.what = shadow.q[".what"].textContent;
+              shadow.q["textarea"].value = "Login form here";
+              shadow.q[".go"].l.click();
+              out.mark = posted.find(m => m.type === "annotation");
+              console.log(JSON.stringify(out));
+            }, 1000);
+            """);
+        using var p = Process.Start(new ProcessStartInfo(node, [harness, script]) { RedirectStandardOutput = true, RedirectStandardError = true })!;
+        var output = p.StandardOutput.ReadToEnd();
+        var err = p.StandardError.ReadToEnd();
+        p.WaitForExit();
+        Assert.True(p.ExitCode == 0, err);
+        using var doc = JsonDocument.Parse(output);
+        var o = doc.RootElement;
+        Assert.Equal("brush", o.GetProperty("tool").GetProperty("tool").GetString());
+        Assert.Equal("block", o.GetProperty("doneShown").GetString());
+        Assert.Equal("block", o.GetProperty("box").GetString());
+        var message = o.GetProperty("mark");
+        Assert.Equal("Login form here", message.GetProperty("comment").GetString());
+        var mark = message.GetProperty("mark");
+        Assert.Equal("sketch", mark.GetProperty("kind").GetString());
+        Assert.Equal("[[100,200,200,200],[300,250]]", mark.GetProperty("strokes").GetRawText());
+        Assert.Equal((100, 200, 200, 50), (mark.GetProperty("pageX").GetInt32(), mark.GetProperty("pageY").GetInt32(), mark.GetProperty("width").GetInt32(), mark.GetProperty("height").GetInt32()));
+        // Its id and the client's message parse as a sketch mark
+        var vm = Opened("http://localhost:5173/login");
+        var withToken = System.Text.Json.Nodes.JsonNode.Parse(message.GetRawText())!.AsObject();
+        withToken["token"] = vm.AnnotationToken;
+        Assert.Equal("annotation", vm.OnPageMessage(withToken.ToJsonString()));
+        Assert.Equal([[100, 200, 200, 200], [300, 250]], vm.Marks.Items.Single().Page!.Mark.Strokes);
     }
 }

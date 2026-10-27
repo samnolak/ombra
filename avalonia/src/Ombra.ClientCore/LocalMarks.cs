@@ -8,15 +8,17 @@ namespace Ombra.ClientCore;
 /// <summary>The element that holds a page mark, as the page reported it (Controls/Preview/annotate.js); its box in the viewport.</summary>
 public sealed record PageElement(string Selector, string Tag, string Html, string Text, string Source, int X, int Y, int Width, int Height);
 
-public enum PageMarkKind { Point, Area }
+public enum PageMarkKind { Point, Area, Sketch }
 
 /// <summary>
-/// Where the user marked the page: a point (no size) or an area, at <see cref="X"/>,<see cref="Y"/> in the viewport
-/// and <see cref="PageX"/>,<see cref="PageY"/> on the page; <see cref="OffsetX"/>,<see cref="OffsetY"/> from the
-/// holding element's corner (the pin follows that element).
+/// Where the user marked the page: a point (no size), an area or a sketch (its strokes' bounding box), at
+/// <see cref="X"/>,<see cref="Y"/> in the viewport and <see cref="PageX"/>,<see cref="PageY"/> on the page;
+/// <see cref="OffsetX"/>,<see cref="OffsetY"/> from the holding element's corner (the pin follows that element). A
+/// sketch's <see cref="Strokes"/> are freehand lines, each <c>[x0, y0, x1, y1, …]</c> in CSS px on the page (document
+/// coordinates, simplified by the page); null for points, areas and marks saved before sketches.
 /// </summary>
 public sealed record PageMark(PageMarkKind Kind, int X, int Y, int Width, int Height, int PageX, int PageY, int OffsetX, int OffsetY,
-    int ViewportWidth, int ViewportHeight);
+    int ViewportWidth, int ViewportHeight, int[][]? Strokes = null);
 
 /// <summary>An element an area shows (one of a few the page found under it).</summary>
 public sealed record PageInsideElement(string Selector, string Tag, string Text);
@@ -44,14 +46,18 @@ public enum MarkStatus { Open, Resolved }
 /// A local mark (K4, Figma-like, no threads): one anchor (<see cref="Code"/> or <see cref="Page"/>), an optional short
 /// <see cref="Note"/> and a status. Open marks go with the next request; resolved ones stay listed but are not sent.
 /// <see cref="Legacy"/> is the verbatim page-comments block of a draft saved before marks were structured.
+/// <see cref="Image"/> is a sketch's picture: the page around it with its strokes, taken when it was made.
 /// </summary>
-public sealed record LocalMark(string Id, string Note, MarkStatus Status = MarkStatus.Open, CodeAnchor? Code = null, PageAnchor? Page = null, string? Legacy = null)
+public sealed record LocalMark(string Id, string Note, MarkStatus Status = MarkStatus.Open, CodeAnchor? Code = null, PageAnchor? Page = null, string? Legacy = null,
+    ImageAttachment? Image = null)
 {
     public bool IsValid => Id is { Length: > 0 } && Note is not null && Enum.IsDefined(Status)
-        && (Code is not null ? Page is null && Legacy is null && Code.Path is not null && Code.LineText is not null
+        && (Code is not null ? Page is null && Legacy is null && Image is null && Code.Path is not null && Code.LineText is not null
             : Page is not null ? Legacy is null && Page.Url is not null && Page.Title is not null && Page.Mark is not null && Page.Element is { Selector: not null }
+                && Enum.IsDefined(Page.Mark.Kind) && (Page.Mark.Strokes is null || Page.Mark.Strokes.All(s => s is { Length: >= 2 } && s.Length % 2 == 0))
                 && Page.Inside is not null && Page.Inside.All(i => i is { Selector: not null })
-            : Legacy is { Length: > 0 });
+                && (Image is null || Image is { Name: not null, MimeType: not null, Data.Length: > 0 })
+            : Legacy is { Length: > 0 } && Image is null);
 }
 
 /// <summary>The one request format for marks, and the migration of drafts saved before marks.</summary>
@@ -76,13 +82,32 @@ public static class LocalMarks
     /// Marks sent without words get a first line that says what to do. Numbers are the marks' positions in the list,
     /// as the chips and pins show them.
     /// </summary>
-    public static string BuildRequest(string text, IReadOnlyList<LocalMark> marks)
+    public static string BuildRequest(string text, IReadOnlyList<LocalMark> marks, IReadOnlyDictionary<string, int>? images = null)
     {
         var code = CodeBlock(marks);
-        var page = PageBlock(marks);
+        var page = PageBlock(marks, images);
         if (code.Length == 0 && page.Length == 0) return text;
         var first = text.Length > 0 ? text : code.Length == 0 ? PageOnlyLine : page.Length == 0 ? CodeOnlyLine : AllOnlyLine;
         return string.Join("\n\n", new[] { first, code, page }.Where(s => s.Length > 0));
+    }
+
+    /// <summary>
+    /// The pictures of the open sketches that go with the request, in mark order, numbered from <paramref name="first"/>
+    /// (after the message's own images), while their bytes fit in <paramref name="budget"/>: the request is one message
+    /// of bounded size. <c>Numbers</c>: mark id → image number, for <see cref="BuildRequest"/>.
+    /// </summary>
+    public static (ImageAttachment[] Images, Dictionary<string, int> Numbers) SketchImages(IReadOnlyList<LocalMark> marks, int first, long budget)
+    {
+        var images = new List<ImageAttachment>();
+        var numbers = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var m in marks)
+        {
+            if (m is not { Status: MarkStatus.Open, Page.Mark.Kind: PageMarkKind.Sketch, Image: { } image } || image.Data.Length > budget) continue;
+            budget -= image.Data.Length;
+            numbers[m.Id] = first + images.Count;
+            images.Add(image);
+        }
+        return ([.. images], numbers);
     }
 
     public static string CodeBlock(IReadOnlyList<LocalMark> marks)
@@ -111,37 +136,60 @@ public static class LocalMarks
         return sb.ToString();
     }
 
-    public static string PageBlock(IReadOnlyList<LocalMark> marks)
+    public static string PageBlock(IReadOnlyList<LocalMark> marks, IReadOnlyDictionary<string, int>? images = null)
     {
         var sb = new StringBuilder();
         var open = marks.Select((m, i) => (Mark: m, Number: i + 1)).Where(x => x.Mark.Status == MarkStatus.Open).ToList();
         var pages = open.Where(x => x.Mark.Page is not null).ToList();
+        var sketches = pages.Any(x => x.Mark.Page!.Mark.Kind == PageMarkKind.Sketch);
         foreach (var group in pages.GroupBy(x => new Uri(x.Mark.Page!.Url).GetLeftPart(UriPartial.Query)))
         {
             if (sb.Length > 0) sb.Append('\n');
             var title = group.First().Mark.Page!.Title;
             sb.Append(CultureInfo.InvariantCulture, $"{PageMarker}{group.Key}{(title.Length > 0 ? $" (\"{title}\")" : "")}, left in the preview.");
-            sb.Append(" Each marks a point or an area of the page; the element details are quoted from the page:\n");
+            sb.Append(sketches
+                ? " Each marks a point, an area or a sketch (a rough drawing of what I want there) of the page; the element details are quoted from the page:\n"
+                : " Each marks a point or an area of the page; the element details are quoted from the page:\n");
             foreach (var (mark, number) in group)
             {
                 var (m, e) = (mark.Page!.Mark, mark.Page.Element);
-                sb.Append(CultureInfo.InvariantCulture, $"\n{number}. {(mark.Note.Length > 0 ? mark.Note : "(no note)")}\n");
+                var note = mark.Note.Length > 0 ? mark.Note : "(no note)";
                 var onPage = m.PageX != m.X || m.PageY != m.Y ? string.Create(CultureInfo.InvariantCulture, $" ({m.PageX},{m.PageY} on the page)") : "";
-                if (m.Kind == PageMarkKind.Area)
-                    sb.Append(CultureInfo.InvariantCulture, $"   Area: {m.Width}×{m.Height} at {m.X},{m.Y} in a {m.ViewportWidth}×{m.ViewportHeight} viewport{onPage}\n");
-                else
-                    sb.Append(CultureInfo.InvariantCulture, $"   Point: {m.X},{m.Y} in a {m.ViewportWidth}×{m.ViewportHeight} viewport{onPage}\n");
-                sb.Append(CultureInfo.InvariantCulture, $"   {(m.Kind == PageMarkKind.Area ? "Within" : "On")}: {e.Html}");
+                switch (m.Kind)
+                {
+                    case PageMarkKind.Sketch:
+                        var image = images?.GetValueOrDefault(mark.Id) is { } n and > 0 ? string.Create(CultureInfo.InvariantCulture, $" — see image {n}") : "";
+                        sb.Append(CultureInfo.InvariantCulture, $"\n{number}. Sketch{image}: {note}\n");
+                        var strokes = m.Strokes ?? [];
+                        sb.Append(CultureInfo.InvariantCulture, $"   Sketch: {strokes.Length} stroke{(strokes.Length == 1 ? "" : "s")} over {m.Width}×{m.Height} at {m.X},{m.Y} in a {m.ViewportWidth}×{m.ViewportHeight} viewport{onPage}\n");
+                        // Without its picture the drawing still reaches the agent: its lines as an SVG path in page px
+                        if (image.Length == 0 && strokes.Length > 0)
+                            sb.Append("   Strokes (SVG path, CSS px on the page): ").AppendJoin(' ', strokes.Select(Path)).Append('\n');
+                        break;
+                    case PageMarkKind.Area:
+                        sb.Append(CultureInfo.InvariantCulture, $"\n{number}. {note}\n");
+                        sb.Append(CultureInfo.InvariantCulture, $"   Area: {m.Width}×{m.Height} at {m.X},{m.Y} in a {m.ViewportWidth}×{m.ViewportHeight} viewport{onPage}\n");
+                        break;
+                    default:
+                        sb.Append(CultureInfo.InvariantCulture, $"\n{number}. {note}\n");
+                        sb.Append(CultureInfo.InvariantCulture, $"   Point: {m.X},{m.Y} in a {m.ViewportWidth}×{m.ViewportHeight} viewport{onPage}\n");
+                        break;
+                }
+                sb.Append(CultureInfo.InvariantCulture, $"   {m.Kind switch { PageMarkKind.Area => "Within", PageMarkKind.Sketch => "Over", _ => "On" }}: {e.Html}");
                 if (e.Text.Length > 0) sb.Append(CultureInfo.InvariantCulture, $" with the text \"{e.Text}\"");
                 sb.Append('\n');
                 sb.Append(CultureInfo.InvariantCulture, $"   Selector: {e.Selector}\n");
                 if (e.Source.Length > 0) sb.Append(CultureInfo.InvariantCulture, $"   Source: {e.Source}\n");
                 sb.Append(CultureInfo.InvariantCulture, $"   Element box: {e.Width}×{e.Height} at {e.X},{e.Y}\n");
                 if (mark.Page.Inside.Length > 0)
-                    sb.Append("   Inside the area: ").AppendJoin("; ", mark.Page.Inside.Select(i => i.Text.Length > 0 ? $"{i.Tag} \"{i.Text}\" ({i.Selector})" : i.Selector)).Append('\n');
+                    sb.Append(m.Kind == PageMarkKind.Sketch ? "   Under the sketch: " : "   Inside the area: ")
+                        .AppendJoin("; ", mark.Page.Inside.Select(i => i.Text.Length > 0 ? $"{i.Tag} \"{i.Text}\" ({i.Selector})" : i.Selector)).Append('\n');
             }
         }
-        if (sb.Length > 0) sb.Append("\nFind these places in the project's source and make the changes the comments ask for.");
+        if (sb.Length > 0)
+            sb.Append(sketches
+                ? "\nFind these places in the project's source and make the changes the comments ask for; build what each sketch roughly draws, where it is drawn."
+                : "\nFind these places in the project's source and make the changes the comments ask for.");
         // A draft's page comments saved before marks were structured: the exact block that would have been sent
         foreach (var (mark, _) in open.Where(x => x.Mark.Legacy is not null))
         {
@@ -149,6 +197,13 @@ public static class LocalMarks
             sb.Append(mark.Legacy);
         }
         return sb.ToString();
+
+        static string Path(int[] s)
+        {
+            var p = new StringBuilder();
+            for (var i = 0; i + 1 < s.Length; i += 2) p.Append(CultureInfo.InvariantCulture, $"{(i == 0 ? "M" : " L")}{s[i]} {s[i + 1]}");
+            return p.ToString();
+        }
     }
 
     /// <summary>

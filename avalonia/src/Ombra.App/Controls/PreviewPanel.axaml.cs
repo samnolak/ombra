@@ -650,7 +650,7 @@ public partial class PreviewPanel : UserControl
         var mode = vm.IsAnnotating ? "true" : "false";
         try
         {
-            await web.InvokeScript($"window.__ompAnnotate&&(__ompAnnotate.setMode({mode}),__ompAnnotate.setPins({vm.PinsJson(vm.CurrentUrl)}))");
+            await web.InvokeScript($"window.__ompAnnotate&&(__ompAnnotate.setTool(\"{vm.AnnotateToolName}\"),__ompAnnotate.setMode({mode}),__ompAnnotate.setPins({vm.PinsJson(vm.CurrentUrl)}))");
             // A team member's mark asked for (MainViewModel.SharedMarks.cs): scroll to its pin once the page has it
             if (vm.PendingReveal is { } id
                 && await web.InvokeScript($"window.__ompAnnotate?String(__ompAnnotate.reveal({System.Text.Json.JsonSerializer.Serialize(id)})):'false'") is { } shown
@@ -695,7 +695,7 @@ public partial class PreviewPanel : UserControl
                 if (OperatingSystem.IsMacOS())
                     foreach (var p in _nightly.Values) ((NightlyPane)p).Device = _vm?.EmbedDevice;
                 return;
-            case not nameof(PreviewViewModel.IsAnnotating):
+            case not (nameof(PreviewViewModel.IsAnnotating) or nameof(PreviewViewModel.AnnotateTool)):
                 return;
         }
         _ = SyncAnnotationsAsync();

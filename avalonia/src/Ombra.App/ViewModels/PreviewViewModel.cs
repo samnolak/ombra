@@ -550,7 +550,6 @@ public sealed partial class PreviewViewModel : ObservableObject
     partial void OnActiveTabChanged(PreviewTab value)
     {
         value.IsActive = true;
-        IsAnnotating = false;
         Dialogs.Follow(value.Dialogs); // the cards show this tab's questions; the others' wait for their tab
         CurrentUrl = value.Url;
         Address = value.Address;
