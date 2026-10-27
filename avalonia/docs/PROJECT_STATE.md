@@ -34,7 +34,7 @@ The harness profile template (`harness/profile`) is used by the stand-in environ
   build 20261027221032). Release history since 0.1.0-beta.1 (2026-10-19) and the open items for the next update:
   [NEXT_RELEASE_ROADMAP](../../docs/NEXT_RELEASE_ROADMAP.md); release checks: [RELEASE_GATES](../../docs/RELEASE_GATES.md).
   Windows and Linux are built, not released. The entries below are the history that led there.
-- **Beta baseline, 2026-10-15:** `beta` already contains published alpha `v0.0.9` (`4ebcbd1`).
+- **Beta baseline, 2026-10-15:** `beta` already contains published alpha `v0.0.9` (`2b6569a`).
   On macOS arm64: Release build, 1105 tests passed / 34 gated tests skipped / 0 failed;
   clean pinned-runtime install and 15 real-omp smoke scenarios passed with a stand-in model.
   The daily-work acceptance test initially waited on the previous chat's controller; it now checks the active

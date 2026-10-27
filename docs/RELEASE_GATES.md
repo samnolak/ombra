@@ -284,7 +284,7 @@ headless `--screenshot` with a `.temp/` profile and `-no-remote`.
 by cdhash, no unsigned switch; NightlyAcceptance ru 96 / 0, en 95 / 1 (`ime-pinyin-commit`) and 95 / 1
 (`cursor-pointer`, foreign mouse moves in the log): each check passed in at least one en run.
 
-**Integration pin (2026-10-20, not published).** Desktop `0de05d006702710ac64ad09049b59336e037147b`:
+**Integration pin (2026-10-20, not published).** Desktop `1f78f7bdff7b6b8252a9aebddfc3c227abe21c62`:
 incremental `./mach build` passed (0 compiler warnings), then `MOZ_PKG_DIR=ombra-release ./mach package`
 and `pack-nightly.py --app <dmg>` passed, including strict signature verification.
 BuildID `20261019233341`, version `1.23.2b`, protocol 4; archive
@@ -301,7 +301,7 @@ After updating the pin, `dotnet test --filter NightlyRuntimeTests`: **15 passed 
 the four real-runtime tests were not enabled. Full en/ru headless suites were launched in parallel with
 separate artifacts and `--blame-hang-timeout 4m`, but are not a green release gate: the owner requested
 stopping the overlong runs at handoff. Their partial results and outstanding failures are in the integration handoff.
-Merge-interleaved test declarations and documentation section order were repaired in `c6423a4`.
+Merge-interleaved test declarations and documentation section order were repaired in `59c8909`.
 
 ## Release trust: ad-hoc signatures pinned by cdhash
 
