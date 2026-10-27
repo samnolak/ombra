@@ -250,8 +250,10 @@ project yet), so the OS warns on first start:
 - **Message box** — Enter sends; Shift+Enter adds a line (*Settings → General → Send messages with* switches to
   Ctrl/⌘+Enter to send, Enter then adds a line). While omp is working and the box has text, the round blue button
   (or Enter) queues it as a follow-up, Alt/⌥+Enter steers it — hands it to the current run at its next step — and the
-  stop-and-send shortcut stops omp and sends it; the button's tooltip lists the three. A queued follow-up's ↑ steers it
-  later. The toolbar keeps the permission mode, thinking and model readable; with little room "By the way" and the
+  stop-and-send shortcut stops omp and sends it; the button's tooltip lists the three. Every queued message omp has
+  not read yet has ↑ (**Send now**): it steers it now. That includes messages Ombra holds until omp is idle (behind a
+  thinking level picked while omp works, or behind a command); sent now, such a message joins the current run at that
+  run's thinking level. A steer shows *next step* instead of ↑. The toolbar keeps the permission mode, thinking and model readable; with little room "By the way" and the
   model's provider go first. Queued messages are
   listed in grey above the box until omp takes them: **×** takes one back, and ↑ in the empty box brings the last
   one back to edit (with its images). A long paste (over 800 characters or 3 lines) becomes a *Pasted text +N lines*

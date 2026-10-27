@@ -1632,6 +1632,9 @@
                         ToolTip.Tip="{Binding SendNowTooltip}" AutomationProperties.Name="{loc:T 'Send now'}" VerticalAlignment="Center">
                   <ctl:Icon Data="{StaticResource IconArrowUp}" Size="15" />
                 </Button>
+                <!-- omp already holds it as a steer: in the ↑ slot, a quiet note instead of a button -->
+                <TextBlock Grid.Column="3" Classes="queued-next-step" Text="{loc:T 'next step'}" IsVisible="{Binding IsNextStep}"
+                           ToolTip.Tip="{Binding NextStepTooltip}" Margin="6,0,0,0" VerticalAlignment="Center" />
                 <Button Grid.Column="4" Classes="icon" Width="22" Height="22" Margin="6,0,0,0" Command="{Binding RemoveCommand}" ToolTip.Tip="{loc:T 'Don’t send this'}"
                         AutomationProperties.Name="{loc:T 'Remove queued message'}" VerticalAlignment="Center">
                   <ctl:Icon Data="{StaticResource IconClose}" Size="15" />

@@ -186,6 +186,11 @@
     <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
     <Setter Property="FontSize" Value="13" />
   </Style>
+  <!-- A steer omp already holds: where Send now would be, it says when omp reads it -->
+  <Style Selector="TextBlock.queued-next-step">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
+    <Setter Property="FontSize" Value="11" />
+  </Style>
   <Style Selector="Border.paste-chip">
     <Setter Property="Padding" Value="10,4,4,4" />
   </Style>

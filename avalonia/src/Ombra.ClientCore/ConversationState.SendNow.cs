@@ -16,6 +16,23 @@ public sealed partial class ConversationState
         Touch();
     }
 
+    /// <summary>
+    /// Send now on input waiting locally (a follow-up behind a picked thinking level or a builtin): it goes to omp as a
+    /// steer and joins the current run at that run's level, so its own level is dropped. Returns it, or null when it
+    /// no longer waits locally.
+    /// </summary>
+    public QueuedMessage? SteerDeferred(long sequence)
+    {
+        var index = _queued.FindIndex(q => q.Seq == sequence && q.Kind == QueueKind.DeferredFollowUp && !q.Recovered);
+        if (index < 0) return null;
+        var steer = _queued[index] with { Kind = QueueKind.Steer, ThinkingLevel = null, ThinkingApplied = false };
+        _queued[index] = steer;
+        _awaitingEngine.Add(sequence);
+        QueueChanged?.Invoke();
+        Touch();
+        return steer;
+    }
+
     /// <summary>The interrupt-and-send prompt whose run has not been seen yet (its row key; 0: none). Until its echo,
     /// the replaced run's late agent_start/agent_end (omp admits the replacement only after the abort settles, and image
     /// preparation can take a while) are the previous run's and must not show the session as idle.</summary>

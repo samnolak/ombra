@@ -12,11 +12,13 @@ public sealed partial class SessionController
     /// Sends a queued follow-up at omp's next step instead of after the run. Its chip stays (as a steer, in the recovery
     /// journal too) until omp's echo delivers it, so a crash before delivery still recovers it, and only once.
     /// False when omp no longer holds it (already delivered or withdrawn) or did not answer. An omp without the
-    /// command throws <see cref="RpcCommandException"/>.
+    /// command throws <see cref="RpcCommandException"/>. Input still waiting locally goes to omp as a steer
+    /// (<see cref="SteerDeferredAsync"/>).
     /// </summary>
     public async Task<bool> SendQueuedNowAsync(QueuedMessage message, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        if (message is { Kind: QueueKind.DeferredFollowUp, Recovered: false }) return await SteerDeferredAsync(message, ct).ConfigureAwait(false);
         if (message.Kind != QueueKind.FollowUp || message.Recovered) return false;
         var conn = RequireConnection();
         bool promoted;
@@ -31,6 +33,41 @@ public sealed partial class SessionController
             if (target is not null) s.PromoteQueued(target.Seq);
         });
         return true;
+    }
+
+    /// <summary>
+    /// Send now on a follow-up Ombra keeps until omp is idle (behind a picked thinking level or a builtin): it is sent as
+    /// a steer into the current run, at that run's level, ahead of whatever still waits. False when omp is not working
+    /// (the idle dispatch sends it anyway), the chip is already being dispatched, or omp did not take it.
+    /// </summary>
+    private async Task<bool> SteerDeferredAsync(QueuedMessage message, CancellationToken ct)
+    {
+        var conn = RequireConnection();
+        QueuedMessage? steer = null;
+        Mutate(s =>
+        {
+            if (s.Phase != SessionPhase.Running || _dispatchingDeferred?.Seq == message.Seq) return;
+            steer = s.SteerDeferred(message.Seq);
+            if (steer is not null) QueueCheckpoint?.Invoke(s.Queued.ToArray());
+        });
+        if (steer is null) return false;
+        try
+        {
+            var disposition = SkillTokens.HasInvocation(steer.Text)
+                ? await conn.QueuePromptAsync(steer.Text, Wire(steer.Images), steer: true, ct).ConfigureAwait(false)
+                : await conn.SteerAsync(steer.Text, Wire(steer.Images), ct).ConfigureAwait(false);
+            return ApplyQueuedInputDisposition(steer, disposition, pendingRun: false);
+        }
+        catch (Exception e) when (e is RpcCommandException or TimeoutException or RpcConnectionClosedException or IOException or UnauthorizedAccessException or OperationCanceledException)
+        {
+            Mutate(s =>
+            {
+                if (e is RpcCommandException or RpcConnectionClosedException or IOException or UnauthorizedAccessException)
+                    s.RecoverQueued(steer.Seq);
+                s.AddNotice(NoticeLevel.Error, $"Could not confirm the queued message ({e.Message}). Recovered input is not resent automatically.");
+            });
+            return false;
+        }
     }
 
     /// <summary>An omp builtin runs only as a new message; <c>abort_and_prompt</c> would hand its text to the model.</summary>

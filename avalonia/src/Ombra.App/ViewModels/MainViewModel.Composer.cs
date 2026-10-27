@@ -55,6 +55,7 @@ public sealed partial class QueuedItemViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(ThinkingLabel));
             OnPropertyChanged(nameof(HasThinking));
             OnPropertyChanged(nameof(CanSendNow));
+            OnPropertyChanged(nameof(IsNextStep));
             OnPropertyChanged(nameof(CanWithdraw));
             RemoveCommand.NotifyCanExecuteChanged();
             EditCommand.NotifyCanExecuteChanged();
@@ -81,10 +82,17 @@ public sealed partial class QueuedItemViewModel : ObservableObject, IDisposable
                 ? Loc.F("Sent when omp finishes its current work, thinking effort: {0}. ↑ in the empty message box edits it.", ThinkingLevelText.Label(level))
                 : Loc.T("Sent when omp finishes its current work. ↑ in the empty message box edits it.");
 
-    /// <summary>Only omp's follow-up queue can be promoted; a steer is already read at the next step.</summary>
-    public bool CanSendNow => Model is { Kind: QueueKind.FollowUp, Recovered: false };
+    /// <summary>Any message omp has not read yet: a follow-up in omp's queue is promoted, one Ombra still keeps (behind a
+    /// picked thinking level or a builtin) goes to omp as a steer at the current run's level. A steer is already read
+    /// at the next step (<see cref="IsNextStep"/>).</summary>
+    public bool CanSendNow => Model is { Kind: QueueKind.FollowUp or QueueKind.DeferredFollowUp, Recovered: false };
+    /// <summary>omp already holds it as a steer: nothing to send sooner, and the row says it is read at the next step.</summary>
+    public bool IsNextStep => Model is { Kind: QueueKind.Steer, Recovered: false };
     public bool CanWithdraw => !Model.LiveSteered;
-    public string SendNowTooltip => Loc.T("Send now: omp reads this at its next step instead of after its current work.");
+    public string SendNowTooltip => Model.ThinkingLevel is not null
+        ? Loc.T("Send now: omp reads this at its next step, at the current thinking effort, instead of after its current work.")
+        : Loc.T("Send now: omp reads this at its next step instead of after its current work.");
+    public string NextStepTooltip => Loc.T("omp reads this at its next step.");
 
     [RelayCommand(CanExecute = nameof(CanSendNow))] private Task SendNow() => _owner.SendQueuedNowAsync(this);
     [RelayCommand(CanExecute = nameof(CanWithdraw))] private Task Remove() => _owner.WithdrawQueuedAsync(this, edit: false);

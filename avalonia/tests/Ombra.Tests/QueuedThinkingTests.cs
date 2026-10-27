@@ -198,4 +198,49 @@ public sealed class QueuedThinkingTests
             w.Close();
         }
     }
+
+    [AvaloniaFact]
+    public async Task Every_message_waiting_behind_a_picked_level_keeps_send_now_and_a_steer_says_next_step()
+    {
+        // Regression: after a level was picked while omp worked, every later Enter waited locally (DeferredFollowUp)
+        // and its row lost the ↑ Send now button, leaving only ×.
+        var (w, vm, s, log) = await OpenAsync();
+        try
+        {
+            await StartLongRun(w, vm);
+            vm.SetThinkingCommand.Execute("high");
+            await Until(() => s.Snapshot().NextThinkingLevel == "high", "high kept");
+            Queue(w, "with its level");
+            Queue(w, "behind it");
+            await Until(() => vm.QueuedMessages.Count == 2, "both queued");
+            Assert.All(vm.QueuedMessages, q => Assert.Equal(QueueKind.DeferredFollowUp, q.Model.Kind));
+            Assert.All(vm.QueuedMessages, q => Assert.True(q.CanSendNow));
+            Button[] SendNowButtons() => [.. w.GetVisualDescendants().OfType<Button>()
+                .Where(b => Avalonia.Automation.AutomationProperties.GetName(b) == "Send now")];
+            Assert.Equal([true, true], SendNowButtons().Select(b => b.IsEffectivelyVisible));
+
+            await vm.QueuedMessages[1].SendNowCommand.ExecuteAsync(null);
+            vm.Apply(s.Snapshot());
+
+            // omp holds it as a steer now: no ↑, but the row says omp reads it at its next step.
+            var steered = Assert.Single(vm.QueuedMessages, q => q.Text == "behind it");
+            Assert.Equal(QueueKind.Steer, steered.Model.Kind);
+            Assert.Null(steered.Model.ThinkingLevel);
+            Assert.False(steered.CanSendNow);
+            Assert.True(steered.IsNextStep);
+            await Until(() => w.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Classes.Contains("queued-next-step") && t.IsEffectivelyVisible),
+                "the steered row says next step");
+            MicroUxTabTests.Shot(w, "queued-send-now-next-step");
+
+            await Until(() => vm.Phase == SessionPhase.Ready && vm.QueuedMessages.Count == 0
+                && vm.Rows.OfType<UserRowViewModel>().Count() == 3, "both delivered", 40);
+            // The steered one joined the current run, before the one still waiting for its level.
+            Assert.Equal(["LONG", "behind it", "with its level"], vm.Rows.OfType<UserRowViewModel>().Select(u => u.Text));
+        }
+        finally
+        {
+            await vm.DisposeAsync();
+            w.Close();
+        }
+    }
 }
