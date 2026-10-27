@@ -420,7 +420,7 @@ def pack(args) -> None:
         "sha256": sha256(archive),
         "size": archive.stat().st_size,
         "archive": name,
-        "url": f"https://github.com/{RELEASE_REPO}/releases/download/runtime-v{rel}/{name}",
+        "url": f"https://github.com/{RELEASE_REPO}/releases/download/v{rel}/{name}",
         "cdhash": cdhash,
     }
     MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n")

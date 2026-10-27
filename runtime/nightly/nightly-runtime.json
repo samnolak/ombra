@@ -5,6 +5,6 @@
   "sha256": "ec06d70c3da9a2d55999d300ed9325d2d4b010bb5533cb7e1fec9cba456c636d",
   "size": 136646841,
   "archive": "nightly-runtime-0.1.0-beta.1.zip",
-  "url": "https://github.com/samnolak/nightly-browser/releases/download/runtime-v0.1.0-beta.1/nightly-runtime-0.1.0-beta.1.zip",
+  "url": "https://github.com/samnolak/nightly-browser/releases/download/v0.1.0-beta.1/nightly-runtime-0.1.0-beta.1.zip",
   "cdhash": "19bbe86de6137aa266f9ed938079273b85323cf7"
 }

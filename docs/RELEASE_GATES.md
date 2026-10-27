@@ -244,12 +244,13 @@ and it sets `--disable-tests`, which would leave the package without the mochite
    From the same signed copy `pack` makes the installed browser's update: `Nightly-<rel>-macos-arm64.mar`
    (complete MAR, channel `release`, signed with the MAR key in `~/Developer/arclike/keys`, verified with `signmar -v`)
    and `Nightly-<rel>-update.xml`, the manifest naming that MAR as an asset of release `v<rel>`.
-6. Publish the asset the pin's `url` names (`runtime-v<rel>` / `nightly-runtime-<rel>.zip`):
-   `gh release create runtime-v<rel> -R samnolak/nightly-browser --target next --prerelease <omp>/.temp/nightly-runtime/<archive>`;
+6. Publish one release per version, `v<rel>` (Latest), holding all of step 5's output: the runtime archive Ombra's
+   pin names (`nightly-runtime-<rel>.zip`, a separate copy: its own bundle id, no URL handlers, never updates itself),
+   the standalone image and the MAR:
+   `gh release create v<rel> -R samnolak/nightly-browser --target next --latest <archive> <dmg> <mar>`;
    check `curl -sIL <url>` ends `200` with the pin's `size`. A standalone image is uploaded only as the
    `Nightly-<rel>-macos-arm64.dmg` from step 5 after the image gate passed, never the `mach package` one.
-   **Update feed.** The standalone release `v<rel>` carries the image and the MAR (`gh release create
-   v<rel> -R samnolak/nightly-browser --target next --latest <dmg> <mar>`); then
+   **Update feed.**
    `python3 runtime/nightly/pack-nightly.py --publish-feed .temp/nightly-runtime/Nightly-<rel>-update.xml`
    downloads the MAR from the release, checks its size and SHA-512 against the manifest, commits the manifest to
    gh-pages as `updates/browser/Darwin_aarch64-gcc3/release/update.xml` and waits until
