@@ -543,6 +543,48 @@ public sealed class SidebarRefreshTests
     }
 
     [AvaloniaFact]
+    public async Task A_project_folds_to_its_header_stays_folded_through_refreshes_and_a_search_still_finds_its_sessions()
+    {
+        var (w, vm, _) = await OpenAsync(projects: 2, perProject: 2, height: 800);
+        await vm.CatalogRefreshTask;
+        var group = vm.SessionGroups.Single(g => g.Name == "project-0");
+        bool RowShown(SessionItemViewModel r) =>
+            w.GetVisualDescendants().OfType<Button>().Any(b => b.DataContext == r && b.Classes.Contains("session") && b.IsEffectivelyVisible);
+        Assert.True(group.IsExpanded);
+        Assert.Equal(Loc.F("Fold {0}", "project-0"), group.FoldLabel);
+
+        // A click on the folder's name folds it: its header stays, its rows go, the other project keeps its own
+        var header = w.GetVisualDescendants().OfType<Button>().Single(b => b.Classes.Contains("group-fold") && b.DataContext == group && b.IsEffectivelyVisible);
+        header.Command!.Execute(header.CommandParameter);
+        Frames();
+        Assert.False(group.IsExpanded);
+        Assert.Equal(Loc.F("Unfold {0}", "project-0"), group.FoldLabel);
+        Assert.True(header.IsEffectivelyVisible);
+        Assert.DoesNotContain(group.Items, RowShown);
+        Assert.All(vm.SessionGroups.Single(g => g.Name == "project-1").Items, r => Assert.True(RowShown(r)));
+
+        // A refresh of the list keeps the fold
+        vm.RequestCatalogRefresh();
+        await vm.CatalogRefreshTask;
+        Frames();
+        Assert.False(vm.SessionGroups.Single(g => g.Name == "project-0").IsExpanded);
+
+        // A search shows its matches in the folded project; cleared, the project is folded again
+        vm.SessionFilter = "Session";
+        await Until(() => vm.SessionGroups.Single(g => g.Name == "project-0").IsExpanded, "search unfolds for its matches");
+        vm.SessionFilter = "";
+        await Until(() => !vm.SessionGroups.Single(g => g.Name == "project-0").IsExpanded, "folded again");
+
+        header = w.GetVisualDescendants().OfType<Button>().Single(b => b.Classes.Contains("group-fold") && b.DataContext == group && b.IsEffectivelyVisible);
+        header.Command!.Execute(header.CommandParameter);
+        Frames();
+        Assert.True(group.IsExpanded);
+        Assert.All(group.Items, r => Assert.True(RowShown(r)));
+        await vm.DisposeAsync();
+        w.Close();
+    }
+
+    [AvaloniaFact]
     public async Task Archive_moves_a_session_under_a_folded_Archived_group_and_back()
     {
         var (w, vm, _) = await OpenAsync(2, 2, 900);

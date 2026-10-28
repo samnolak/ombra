@@ -575,6 +575,8 @@ public sealed partial class MainViewModel
     {
         var project = _open.Last?.Cwd ?? ProjectPath;
         var (added, hidden) = ProjectPrefs();
+        // A search or a status filter shows every match, folded groups included (their fold comes back after it)
+        var filtering = SessionFilter.Trim().Length > 0 || StatusFilter != SessionStatusFilter.All;
         var known = new Dictionary<string, SessionGroupViewModel>(SessionCatalog.PathComparer);
         foreach (var g in SessionGroups)
             if (g.IsProject) known[g.Cwd] = g;
@@ -583,6 +585,7 @@ public sealed partial class MainViewModel
             if (!known.Remove(cwd, out var group)) group = NewGroup(cwd, project);
             group.IsCurrentProject = SessionCatalog.PathComparer.Equals(cwd, project);
             group.IsPinned = PinnedIndex(cwd) >= 0;
+            group.IsExpanded = filtering || !_collapsedProjects!.Contains(cwd);
             group.Name = ProjectDisplayName(cwd) is { Length: > 0 } n ? n : group.FolderName;
             return group;
         }
@@ -611,7 +614,7 @@ public sealed partial class MainViewModel
         }
         foreach (var g in groups) Reconcile(g.Group.Items, g.Items);
         var ordered = groups.OrderByDescending(g => g.Newest).Select(g => g.Group).ToList();
-        var unfiltered = SessionFilter.Trim().Length == 0 && StatusFilter == SessionStatusFilter.All;
+        var unfiltered = !filtering;
         if (unfiltered)
         {
             // Folders added from the sidebar that have no session yet go first, as just added; pinned ones are listed
@@ -625,8 +628,9 @@ public sealed partial class MainViewModel
                 }
         }
         // Chats keep their place under the top button that makes them; the group stays while one is shown, for its "+"
-        _chatsGroup ??= new SessionGroupViewModel(Chats.Root, false, isChatsGroup: true) { NewSessionCommand = NewChatCommand };
+        _chatsGroup ??= new SessionGroupViewModel(Chats.Root, false, isChatsGroup: true) { NewSessionCommand = NewChatCommand, FoldCommand = ToggleGroupFoldCommand };
         _chatsGroup.IsCurrentProject = IsProjectless;
+        _chatsGroup.IsExpanded = filtering || !_collapsedProjects!.Contains(_chatsGroup.Cwd);
         Reconcile(_chatsGroup.Items, chats);
         if (chats.Count > 0 || (IsProjectless && unfiltered)) ordered.Insert(0, _chatsGroup);
         // Pinned projects above everything, in the order they were pinned
@@ -647,6 +651,7 @@ public sealed partial class MainViewModel
             TogglePinCommand = TogglePinProjectCommand,
             RevealCommand = RevealProjectCommand,
             RenameCommand = RenameProjectCommand,
+            FoldCommand = ToggleGroupFoldCommand,
         };
 
     // ───────────── Projects added, removed, pinned and named in the sidebar (the client's settings file) ─────────────
@@ -654,11 +659,12 @@ public sealed partial class MainViewModel
     private List<string>? _addedProjects;
     private HashSet<string>? _hiddenProjects;
     private List<string>? _pinnedProjects;
+    private HashSet<string>? _collapsedProjects;
     private Dictionary<string, string>? _projectNames;
 
     private (List<string> Added, HashSet<string> Hidden) ProjectPrefs()
     {
-        if (_addedProjects is null || _hiddenProjects is null || _pinnedProjects is null || _projectNames is null)
+        if (_addedProjects is null || _hiddenProjects is null || _pinnedProjects is null || _collapsedProjects is null || _projectNames is null)
         {
             OmpRuntimeOptions? o = null;
             try { o = _settings?.Load(); }
@@ -669,6 +675,7 @@ public sealed partial class MainViewModel
             _addedProjects = [.. o?.SidebarProjects ?? []];
             _hiddenProjects = new HashSet<string>(o?.HiddenProjects ?? [], SessionCatalog.PathComparer);
             _pinnedProjects = [.. o?.PinnedProjects ?? []];
+            _collapsedProjects = new HashSet<string>(o?.CollapsedProjects ?? [], SessionCatalog.PathComparer);
             _projectNames = new Dictionary<string, string>(o?.ProjectNames ?? [], SessionCatalog.PathComparer);
         }
         return (_addedProjects, _hiddenProjects);
@@ -694,10 +701,25 @@ public sealed partial class MainViewModel
         string[]? addedOut = added.Count > 0 ? [.. added] : null;
         string[]? hiddenOut = hidden.Count > 0 ? [.. hidden.Order(StringComparer.Ordinal)] : null;
         string[]? pinnedOut = _pinnedProjects!.Count > 0 ? [.. _pinnedProjects] : null;
+        string[]? collapsedOut = _collapsedProjects!.Count > 0 ? [.. _collapsedProjects.Order(StringComparer.Ordinal)] : null;
         Dictionary<string, string>? namesOut = _projectNames!.Count > 0 ? new(_projectNames, StringComparer.Ordinal) : null;
-        Persist(o => o with { SidebarProjects = addedOut, HiddenProjects = hiddenOut, PinnedProjects = pinnedOut, ProjectNames = namesOut });
+        Persist(o => o with
+        {
+            SidebarProjects = addedOut, HiddenProjects = hiddenOut, PinnedProjects = pinnedOut, CollapsedProjects = collapsedOut, ProjectNames = namesOut,
+        });
         RebuildSessionGroups();
         if (!IsProjectless) ProjectName = ProjectDisplayName(ProjectPath) ?? SessionItemViewModel.ProjectName(ProjectPath);
+    }
+
+    /// <summary>A group's header: folds the project (or Chats) to its name, or unfolds it; kept in the settings.</summary>
+    [RelayCommand]
+    private void ToggleGroupFold(SessionGroupViewModel? group)
+    {
+        if (group is null || group.IsArchiveGroup) return;
+        ProjectPrefs();
+        var cwd = Path.TrimEndingDirectorySeparator(group.Cwd);
+        if (!_collapsedProjects!.Remove(cwd)) _collapsedProjects.Add(cwd);
+        SaveProjectPrefs();
     }
 
     /// <summary>Group header: pin the project to the top of the sidebar, or unpin it.</summary>

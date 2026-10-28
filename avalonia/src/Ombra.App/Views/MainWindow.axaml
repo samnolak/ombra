@@ -300,9 +300,18 @@
                       </StackPanel>
                     </Flyout>
                   </Grid.ContextFlyout>
-                  <ctl:Icon Classes="group-icon" Data="{StaticResource IconFolder}" Size="16" Margin="10,0,6,0" VerticalAlignment="Center" />
-                  <TextBlock Grid.Column="1" Classes="group-label project-label" Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
-                             IsVisible="{Binding !IsRenaming}" />
+                  <!-- The folder and its name fold the project to its header, or unfold it (kept in the settings); a chevron
+                       says it is folded -->
+                  <Button Grid.ColumnSpan="2" Classes="group-fold" Command="{Binding FoldCommand}" CommandParameter="{Binding}"
+                          IsVisible="{Binding !IsRenaming}" AutomationProperties.Name="{Binding FoldLabel}">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                      <ctl:Icon Classes="group-icon" Data="{StaticResource IconFolder}" Size="16" Margin="10,0,6,0" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="1" Classes="group-label project-label" Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                      <ctl:Icon Grid.Column="2" Classes="group-icon" Data="{StaticResource IconChevronRight}" Size="14" Margin="4,0,0,0" VerticalAlignment="Center"
+                                IsVisible="{Binding !IsExpanded}" />
+                    </Grid>
+                  </Button>
+                  <ctl:Icon Classes="group-icon" Data="{StaticResource IconFolder}" Size="16" Margin="10,0,6,0" VerticalAlignment="Center" IsVisible="{Binding IsRenaming}" />
                   <sidebar:ProjectNameBox Grid.Column="1" Classes="sm" Text="{Binding RenameText}" IsVisible="{Binding IsRenaming}"
                                           AutomationProperties.Name="{loc:T 'Project name'}" Margin="0,2,4,2" />
                   <ctl:Icon Grid.Column="2" Classes="group-icon" Data="{StaticResource IconPin}" Size="14" Margin="0,0,4,0" VerticalAlignment="Center"
@@ -334,8 +343,15 @@
                       </StackPanel>
                     </Flyout>
                   </Grid.ContextFlyout>
-                  <ctl:Icon Classes="group-icon" Data="{StaticResource IconComment}" Size="16" Margin="10,0,6,0" VerticalAlignment="Center" />
-                  <TextBlock Grid.Column="1" Classes="group-label project-label" Text="{Binding Name}" VerticalAlignment="Center" />
+                  <Button Grid.ColumnSpan="2" Classes="group-fold" Command="{Binding FoldCommand}" CommandParameter="{Binding}"
+                          AutomationProperties.Name="{Binding FoldLabel}">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                      <ctl:Icon Classes="group-icon" Data="{StaticResource IconComment}" Size="16" Margin="10,0,6,0" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="1" Classes="group-label project-label" Text="{Binding Name}" VerticalAlignment="Center" />
+                      <ctl:Icon Grid.Column="2" Classes="group-icon" Data="{StaticResource IconChevronRight}" Size="14" Margin="4,0,0,0" VerticalAlignment="Center"
+                                IsVisible="{Binding !IsExpanded}" />
+                    </Grid>
+                  </Button>
                   <Button Grid.Column="2" Classes="icon group-action" Width="26" Height="26" Margin="0,0,2,0"
                           Command="{Binding NewSessionCommand}"
                           ToolTip.Tip="{Binding NewSessionTooltip}" AutomationProperties.Name="{Binding NewSessionTooltip}">

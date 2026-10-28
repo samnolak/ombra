@@ -18,13 +18,19 @@ public sealed partial class SessionGroupViewModel(string cwd, bool isCurrentProj
     public bool IsArchiveGroup { get; } = isArchiveGroup;
     public bool IsProject => !IsChatsGroup && !IsArchiveGroup;
 
-    /// <summary>The archive's rows are shown (its header toggles them; a search shows them while it lasts).</summary>
-    [ObservableProperty] private bool _isExpanded = !isArchiveGroup;
+    /// <summary>The group's rows are shown: a project's (and Chats') header folds and unfolds it, kept in the settings;
+    /// Archived starts folded; a search shows every match.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FoldLabel))]
+    private bool _isExpanded = !isArchiveGroup;
     /// <summary>"Archived 3".</summary>
     [ObservableProperty] private string _archiveLabel = "";
 
     [RelayCommand]
     private void ToggleExpanded() => IsExpanded = !IsExpanded;
+
+    /// <summary>What the header's click does, for assistive tech ("Fold project-x" / "Unfold project-x").</summary>
+    public string FoldLabel => IsExpanded ? Loc.F("Fold {0}", Name) : Loc.F("Unfold {0}", Name);
 
     /// <summary>The folder's own name (what the project is called unless the user renamed it).</summary>
     public string FolderName { get; } = isChatsGroup ? Loc.T("Chats")
@@ -32,7 +38,7 @@ public sealed partial class SessionGroupViewModel(string cwd, bool isCurrentProj
 
     /// <summary>What the sidebar calls it: the name the user gave it, else its folder's name.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(NewSessionTooltip))]
+    [NotifyPropertyChangedFor(nameof(NewSessionTooltip), nameof(FoldLabel))]
     private string _name = isChatsGroup ? Loc.T("Chats") : SessionItemViewModel.ProjectName(cwd) is { Length: > 0 } n ? n : Loc.T("(no folder)");
 
     /// <summary>Pinned to the top of the sidebar (the client's settings).</summary>
@@ -83,6 +89,8 @@ public sealed partial class SessionGroupViewModel(string cwd, bool isCurrentProj
     public System.Windows.Input.ICommand? RevealCommand { get; init; }
     /// <summary>Takes <c>(group, name)</c>.</summary>
     public System.Windows.Input.ICommand? RenameCommand { get; init; }
+    /// <summary>Folds or unfolds a project or Chats (MainViewModel's ToggleGroupFold: the fold is kept in the settings).</summary>
+    public System.Windows.Input.ICommand? FoldCommand { get; init; }
     /// <summary>Archived's header: every archived session back into its group.</summary>
     public System.Windows.Input.ICommand? UnarchiveAllCommand { get; init; }
 }

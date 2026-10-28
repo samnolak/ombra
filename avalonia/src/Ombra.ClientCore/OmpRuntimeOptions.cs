@@ -62,6 +62,8 @@ public sealed record OmpRuntimeOptions
     public string[]? HiddenProjects { get; init; }
     /// <summary>Project folders pinned to the top of the sidebar, in the order they were pinned.</summary>
     public string[]? PinnedProjects { get; init; }
+    /// <summary>Sidebar groups folded by the user (project folders, and Chats by its root): their rows stay hidden until unfolded.</summary>
+    public string[]? CollapsedProjects { get; init; }
     /// <summary>Names the user gave project folders in the sidebar (folder → name); a folder not here shows its own name.</summary>
     public Dictionary<string, string>? ProjectNames { get; init; }
     /// <summary>Session files archived from the sidebar: listed only under Archived (nothing is deleted on disk).</summary>

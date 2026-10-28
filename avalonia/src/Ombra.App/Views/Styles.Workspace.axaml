@@ -75,6 +75,24 @@
   <Style Selector="Grid.group-header:pointerover Button.group-action, Grid.group-header:focus-within Button.group-action">
     <Setter Property="Opacity" Value="1" />
   </Style>
+  <!-- The folder and name of a project (or Chats) as one button that folds the group: the row looks as before, the whole
+       row height takes the click, the hover fill of a session row -->
+  <Style Selector="Button.group-fold">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusControl}" />
+  </Style>
+  <Style Selector="Button.group-fold:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+  </Style>
+  <Style Selector="Button.group-fold:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1Pressed}" />
+  </Style>
   <!-- A session: 30 high, radius 8; the title takes the row; its age (or status dot) at the right gives way to pin and ⋯
        on hover / focus -->
   <Style Selector="Button.session">
