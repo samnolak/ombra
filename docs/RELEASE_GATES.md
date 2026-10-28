@@ -209,7 +209,17 @@ is used as is, without `ZEN_RELEASE`: objdir `engine/obj-aarch64-apple-darwin`, 
 `~/artifact/merged.profdata`, `--enable-bootstrap`, clang plugin) is not used: there is no PGO profile on this machine
 and it sets `--disable-tests`, which would leave the package without the mochitest gate below.
 
-**Steps** (desktop repo, `source ~/Developer/arclike/env.sh`):
+**Where to build.** Release builds embed their source, object and toolchain paths (about 1,300 of them in the
+runtime archive). They are built from `/Users/Shared/nb`, never from the home folder (AGENTS.md › personal data is
+under NDA): `/Users/Shared/nb/desktop` is a clone of the desktop repo with the engine copied beside it (its `src/`
+links repointed there), `/Users/Shared/nb/home` holds copies of `.mozbuild`, `.rustup`, `.cargo` and `.local` (their
+absolute links repointed too), and `/Users/Shared/nb/env.sh` sets `HOME`, `MOZBUILD_STATE_PATH`, `RUSTUP_HOME`,
+`CARGO_HOME` and `PATH` to them. `/Users/Shared/nb/build.sh` runs steps 2–3; before publishing, every asset (the
+app, `omni.ja`, the runtime archive, the image, the manifests) is searched for the owner's private terms and must
+have none. The mochitest gate runs from there as well, except `zen/gallery/tests`, which needs the real `HOME`: with
+the build's `HOME` the system key store is not found and `browser_gallery_capture_unlocked.js` times out in setup.
+
+**Steps** (`. /Users/Shared/nb/env.sh`, in `/Users/Shared/nb/desktop`):
 
 1. Sources in the engine: every `src/` file is linked into `engine/` and every changed `src/**/*.patch` must already
    be applied (`cd engine && git apply -R --check ../<patch>`); then `npm run ffprefs` regenerates
@@ -226,10 +236,11 @@ and it sets `--disable-tests`, which would leave the package without the mochite
    seal no longer matches the bundle (`codesign --verify --deep --strict`: "code has no resources but signature
    indicates they must be present"; with quarantine macOS calls such an app damaged).
 4. Gate, against the packaged binary:
-   `./mach mochitest --appname $PWD/obj-aarch64-apple-darwin/dist/ombra-release/Nightly.app/Contents/MacOS/nightly --headless --setpref security.sandbox.content.mac.testing_read_path1=$HOME/Developer/arclike/desktop/ zen/teams/tests zen/gallery/tests zen/tests/tabs`.
+   `./mach mochitest --appname $PWD/obj-aarch64-apple-darwin/dist/ombra-release/Nightly.app/Contents/MacOS/nightly --headless --setpref security.sandbox.content.mac.testing_read_path1=/Users/Shared/nb/desktop/ zen/teams/tests zen/gallery/tests zen/open-in-app/tests zen/tests/tabs`
+   (`zen/gallery/tests` with the real `HOME`, see above). 0.1.0b3: teams, open-in-app and tabs 535 passed / 0 failed; gallery 172 / 0.
    A packaged app also needs the read path (desktop root, not just `src/`): its content processes otherwise cannot
    load the harness's `resource://testing-common` actors and every test times out.
-5. In omp: `python3 runtime/nightly/pack-nightly.py --app <dmg> --stage`, then
+5. In omp (Python 3.10+, `xz` on `PATH`): `NIGHTLY_DESKTOP=/Users/Shared/nb/desktop python3 runtime/nightly/pack-nightly.py --app <dmg> --stage`, then
    `python3 runtime/nightly/pack-nightly.py --check`; commit `runtime/nightly/nightly-runtime.json` (`pack` writes its
    `url`). `<rel>` is the public name of `surfer.json` displayVersion (`0.1.0b1` → `0.1.0-beta.1`, `release_name`); a
    rebuild of a released version takes the next beta (bump displayVersion), never a second release under the same name.

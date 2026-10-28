@@ -29,9 +29,9 @@ The harness profile template (`harness/profile`) is used by the stand-in environ
 
 ## Current state
 
-- **Released (2026-10-27): Ombra 0.1.4 for macOS arm64** (DMG and zip, signed with the project's certificate *Ombra
-  (self-signed)*, hardened runtime) with the pinned Nightly 0.1.0 Beta 2 (`runtime/nightly/nightly-runtime.json`,
-  build 20261027221032). Release history since 0.1.0-beta.1 (2026-10-19) and the open items for the next update:
+- **Released (2026-10-28): Ombra 0.1.5 for macOS arm64** (DMG and zip, signed with the project's certificate *Ombra
+  (self-signed)*, hardened runtime) with the pinned Nightly 0.1.0 Beta 3 (`runtime/nightly/nightly-runtime.json`,
+  build 20261028024451). Release history since 0.1.0-beta.1 (2026-10-19) and the open items for the next update:
   [NEXT_RELEASE_ROADMAP](../../docs/NEXT_RELEASE_ROADMAP.md); release checks: [RELEASE_GATES](../../docs/RELEASE_GATES.md).
   Windows and Linux are built, not released. The entries below are the history that led there.
 - **Beta baseline, 2026-10-15:** `beta` already contains published alpha `v0.0.9` (`2b6569a`).
