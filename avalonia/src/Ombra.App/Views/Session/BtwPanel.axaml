@@ -1,6 +1,7 @@
 <!-- The BTW panel above the message box (omp's /btw; MainViewModel.BtwGoal.cs): a side question asked beside the
      conversation, also while omp works on it. omp answers from the conversation without tools, the answer streams in
-     and Cancel stops it; the session's earlier topics are listed under it, and a topic takes follow-ups. -->
+     and Stop ends it; the session's topics read top to bottom like the conversation (the newest by the question box),
+     and a topic takes follow-ups. -->
 <UserControl xmlns:loc="using:Ombra.App.Localization"
              xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -51,13 +52,10 @@
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
-                  <WrapPanel ItemSpacing="8">
-                    <Button Classes="flat sm" Content="{loc:T 'Stop'}" IsVisible="{Binding IsRunning}"
-                            Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).CancelBtwCommand, FallbackValue={x:Null}}"
-                            ToolTip.Tip="{loc:T 'Stop this answer'}" />
-                    <Button Classes="flat sm" Content="{loc:T 'Follow up'}" Command="{Binding FollowUpCommand}" IsVisible="{Binding !IsRunning}"
-                            ToolTip.Tip="{loc:T 'Ask the next question in this topic, with its answers as context'}" />
-                  </WrapPanel>
+                  <!-- One Stop for the answer being written: the one beside the question box -->
+                  <Button Classes="flat sm" HorizontalAlignment="Left" Margin="-12,-6,0,-6" Content="{loc:T 'Follow up'}" Command="{Binding FollowUpCommand}"
+                          IsVisible="{Binding !IsRunning}"
+                          ToolTip.Tip="{loc:T 'Ask the next question in this topic, with its answers as context'}" />
                 </StackPanel>
               </Border>
             </DataTemplate>

@@ -146,11 +146,13 @@ public sealed class BtwGoalUiTests
         // A long answer, stopped: the topic says so
         vm.BtwQuestion = "SLOW tell me everything";
         await vm.AskBtwCommand.ExecuteAsync(null);
-        await Until(() => vm.IsBtwRunning && vm.BtwTopics.Count == 2 && vm.BtwTopics[0].Turns[0].HasAnswer, "streaming");
+        await Until(() => vm.IsBtwRunning && vm.BtwTopics.Count == 2 && vm.BtwTopics[^1].Turns[0].HasAnswer, "streaming");
+        // Read top to bottom like the conversation: the new topic under the earlier one
+        Assert.Equal(["what file is this", "SLOW tell me everything"], vm.BtwTopics.Select(t => t.Title));
         Assert.False(vm.AskBtwCommand.CanExecute(null));
         Assert.True(Named<Button>(e.W, "BtwCancelButton").IsVisible);
         await vm.CancelBtwCommand.ExecuteAsync(null);
-        await Until(() => !vm.IsBtwRunning && vm.BtwTopics[0].Turns[0].Outcome == Loc.T("Cancelled"), "stopped");
+        await Until(() => !vm.IsBtwRunning && vm.BtwTopics[^1].Turns[0].Outcome == Loc.T("Cancelled"), "stopped");
 
         // A follow-up in the first topic
         var first = vm.BtwTopics.Single(t => t.Title == "what file is this");
@@ -165,6 +167,40 @@ public sealed class BtwGoalUiTests
             Sent(e).Where(l => l.StartsWith("btw", StringComparison.Ordinal) || l == "get_btw_history"));
         vm.AbortCommand.Execute(null);
         await Until(() => vm.Phase == SessionPhase.Ready, "stopped turn");
+        await Close(e);
+    }
+
+    [AvaloniaFact]
+    public async Task The_side_question_panel_and_its_draft_stay_with_the_chat_they_were_opened_in()
+    {
+        var e = await OpenAsync();
+        var vm = e.Vm;
+        await Until(() => vm.IsBtwAvailable, "omp reports side questions");
+        await Send(e, "first chat");
+        await Until(() => vm.Phase == SessionPhase.Ready && vm.Session.SessionFile is not null, "first chat has a file");
+        var a = vm.Session;
+        var fileA = a.SessionFile!;
+        vm.ToggleBtwCommand.Execute(null);
+        vm.BtwQuestion = "half a side question";
+        await Settle();
+        Assert.True(e.W.FindControl<Control>("BtwPanelHost")!.IsVisible);
+
+        // Another chat: no panel, no draft of A's
+        await vm.NewChatCommand.ExecuteAsync(null);
+        await Until(() => vm.Session != a && vm.Phase == SessionPhase.Ready, "new chat");
+        await Settle();
+        Assert.False(vm.IsBtwOpen);
+        Assert.Equal("", vm.BtwQuestion);
+        Assert.False(e.W.FindControl<Control>("BtwPanelHost")!.IsVisible);
+
+        // Back in A: its panel open again with its draft
+        await Until(() => vm.Sessions.Any(x => x.Model.Path == fileA), "first chat listed");
+        await vm.OpenSessionCommand.ExecuteAsync(vm.Sessions.First(x => x.Model.Path == fileA));
+        await Until(() => vm.Session == a, "first chat shown");
+        await Settle();
+        Assert.True(vm.IsBtwOpen);
+        Assert.Equal("half a side question", vm.BtwQuestion);
+        Assert.True(e.W.FindControl<Control>("BtwPanelHost")!.IsVisible);
         await Close(e);
     }
 

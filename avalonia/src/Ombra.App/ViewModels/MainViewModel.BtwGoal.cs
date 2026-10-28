@@ -214,7 +214,7 @@ public sealed partial class MainViewModel
     /// <summary>The topic the next question follows up (null: a new topic).</summary>
     [ObservableProperty] private BtwTopicViewModel? _btwFollowUp;
 
-    /// <summary>This session's side-question topics, newest first.</summary>
+    /// <summary>This session's side-question topics, oldest first like the conversation: the newest is by the question box.</summary>
     public ObservableCollection<BtwTopicViewModel> BtwTopics { get; } = [];
 
     private IReadOnlyList<OmpBtwRecord>? _appliedBtw;
@@ -249,7 +249,7 @@ public sealed partial class MainViewModel
         var byId = BtwTopics.ToDictionary(t => t.Id, StringComparer.Ordinal);
         for (var i = 0; i < s.Btw.Count; i++)
         {
-            var record = s.Btw[i];
+            var record = s.Btw[s.Btw.Count - 1 - i]; // the engine keeps them newest first
             if (byId.Remove(record.Id, out var topic)) topic.Update(record);
             else topic = new BtwTopicViewModel(record, this);
             var at = BtwTopics.IndexOf(topic);

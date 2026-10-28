@@ -57,6 +57,12 @@ internal sealed class OpenSession(SessionController controller, CancellationToke
     public List<AttachmentViewModel> Attachments { get; set; } = [];
     public List<PastedTextViewModel> PastedTexts { get; set; } = [];
 
+    // ── The side-question panel (/btw) while another chat is shown ──
+
+    public bool BtwOpen { get; set; }
+    public string BtwQuestion { get; set; } = "";
+    /// <summary>The topic the next side question follows up, by id (its view model is rebuilt with the chat's topics).</summary>
+    public string? BtwFollowUpId { get; set; }
 
     /// <summary>Nothing typed or attached; used before replacing an empty chat and when warning about unsaved work.</summary>
     public bool HasNoDraft => ComposerText.Trim().Length == 0 && Attachments.Count == 0 && PastedTexts.Count == 0 && Marks.Count == 0;

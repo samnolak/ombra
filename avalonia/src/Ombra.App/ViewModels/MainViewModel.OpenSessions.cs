@@ -439,6 +439,9 @@ public sealed partial class MainViewModel
         open.ComposerMessage = ComposerMessage;
         open.Attachments = [.. Attachments];
         open.PastedTexts = [.. PastedTexts];
+        open.BtwOpen = IsBtwOpen;
+        open.BtwQuestion = BtwQuestion;
+        open.BtwFollowUpId = BtwFollowUp?.Id;
         open.Marks = [.. Marks.Items];
         open.Queued = [.. QueuedMessages];
         open.Dialog = CurrentDialog;
@@ -496,6 +499,10 @@ public sealed partial class MainViewModel
         OnPropertyChanged(nameof(Usage));
         OnPropertyChanged(nameof(ModelOptions));
         Apply(open.Controller.Snapshot());
+        // The side-question panel as this chat left it (its topics came with the snapshot above)
+        IsBtwOpen = open.BtwOpen;
+        BtwQuestion = open.BtwQuestion;
+        BtwFollowUp = open.BtwFollowUpId is { } followUp ? BtwTopics.FirstOrDefault(t => t.Id == followUp) : null;
         RestoreScrollRequested?.Invoke(open.ScrollAnchor);
         // The rows again, not only their dots: the row of the chat just left, if omp has no file for it yet, was named when
         // the list was last read (before its first message, say), and the header's live title no longer stands in for it
