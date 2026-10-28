@@ -1196,9 +1196,11 @@
     <Setter Property="ClipToBounds" Value="True" />
     <Setter Property="ctl:InnerClip.IsEnabled" Value="True" />
   </Style>
-  <!-- A side-question topic: the details surface with room around its question and answer -->
+  <!-- A side-question topic: the details surface with room around its question and answer, and an edge that holds on
+       the light panel (the soft one all but vanished there) -->
   <Style Selector="Border.details.btw-topic">
     <Setter Property="Padding" Value="12,10" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
   </Style>
   <Style Selector="SelectableTextBlock.details">
     <Setter Property="Padding" Value="12,8" />

@@ -53,8 +53,8 @@
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
                   <!-- One Stop for the answer being written: the one beside the question box -->
-                  <Button Classes="flat sm" HorizontalAlignment="Left" Margin="-12,-6,0,-6" Content="{loc:T 'Follow up'}" Command="{Binding FollowUpCommand}"
-                          IsVisible="{Binding !IsRunning}"
+                  <Button Classes="link action" HorizontalAlignment="Left" Padding="0" MinHeight="0" Content="{loc:T 'Follow up'}"
+                          Command="{Binding FollowUpCommand}" IsVisible="{Binding !IsRunning}"
                           ToolTip.Tip="{loc:T 'Ask the next question in this topic, with its answers as context'}" />
                 </StackPanel>
               </Border>
@@ -75,7 +75,7 @@
                  AcceptsReturn="False" TextWrapping="Wrap" AutomationProperties.Name="{loc:T 'Side question'}" />
         <Button x:Name="BtwAskButton" Grid.Column="1" Classes="accent" Margin="8,0,0,0" Content="{loc:T 'Ask'}" Command="{Binding AskBtwCommand}"
                 IsVisible="{Binding !IsBtwRunning}" VerticalAlignment="Bottom" />
-        <Button x:Name="BtwCancelButton" Grid.Column="1" Margin="8,0,0,0" Content="{loc:T 'Stop'}" Command="{Binding CancelBtwCommand}"
+        <Button x:Name="BtwCancelButton" Grid.Column="1" Classes="outline" Margin="8,0,0,0" Content="{loc:T 'Stop'}" Command="{Binding CancelBtwCommand}"
                 IsVisible="{Binding IsBtwRunning}" VerticalAlignment="Bottom" ToolTip.Tip="{loc:T 'Stop this answer'}" />
       </Grid>
     </StackPanel>
