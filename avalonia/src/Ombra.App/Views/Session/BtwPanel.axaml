@@ -32,15 +32,19 @@
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:BtwTopicViewModel">
               <Border Classes="details btw-topic">
-                <StackPanel Spacing="8">
+                <StackPanel Spacing="10">
+                  <!-- Each question and its answer read like the conversation: the question in the user's bubble on the
+                       right, the answer under it, a clear gap before the next question of the topic -->
                   <ItemsControl ItemsSource="{Binding Turns}">
                     <ItemsControl.ItemsPanel>
-                      <ItemsPanelTemplate><StackPanel Spacing="8" /></ItemsPanelTemplate>
+                      <ItemsPanelTemplate><StackPanel Spacing="16" /></ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="vm:BtwTurnViewModel">
-                        <StackPanel Spacing="4">
-                          <SelectableTextBlock Classes="btw-question" Text="{Binding Question}" FontWeight="Medium" TextWrapping="Wrap" />
+                        <StackPanel Spacing="8">
+                          <Border Classes="user-bubble btw-question" HorizontalAlignment="Right">
+                            <SelectableTextBlock Classes="body" Text="{Binding Question}" TextWrapping="Wrap" />
+                          </Border>
                           <ctl:MarkdownView Classes="btw-answer" Markdown="{Binding Answer}" IsVisible="{Binding HasAnswer}" />
                           <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsRunning}">
                             <Ellipse Classes="state-dot running" VerticalAlignment="Center" />

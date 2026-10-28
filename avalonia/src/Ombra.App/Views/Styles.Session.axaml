@@ -1202,6 +1202,11 @@
     <Setter Property="Padding" Value="12,10" />
     <Setter Property="BorderBrush" Value="{DynamicResource GuiBorder}" />
   </Style>
+  <!-- The question of a side-question turn: the conversation's user bubble, smaller inside the panel -->
+  <Style Selector="Border.user-bubble.btw-question">
+    <Setter Property="Padding" Value="12,7" />
+    <Setter Property="MaxWidth" Value="520" />
+  </Style>
   <Style Selector="SelectableTextBlock.details">
     <Setter Property="Padding" Value="12,8" />
     <Setter Property="LineHeight" Value="19" />
