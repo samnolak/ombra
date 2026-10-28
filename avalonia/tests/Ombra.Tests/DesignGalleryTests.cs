@@ -31,6 +31,9 @@ public sealed class DesignGalleryTests
 
     private static void Shot(Window w, string name)
     {
+        // Headless, the UI thread is not the process's main thread, so macOS refuses the sleep/wake subscription and
+        // the composer reports it: the app itself never shows this, so it stays out of the design guide.
+        if (w.DataContext is MainViewModel { PowerNotificationsError: not null } vm) vm.ComposerMessage = "";
         Dispatcher.UIThread.RunJobs();
         Directory.CreateDirectory(ShotDir);
         using var frame = w.CaptureRenderedFrame();
