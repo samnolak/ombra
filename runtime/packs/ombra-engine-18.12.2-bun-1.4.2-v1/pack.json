@@ -25,8 +25,8 @@
       "attestation": "https://registry.npmjs.org/-/npm/v1/attestations/@oh-my-pi%2fpi-coding-agent@18.12.2",
       "verification": "npm tarball integrity verified; SLSA payload decoded, signatures not independently verified"
     },
-    "sha256": "28fe474f587601153161f9473a3ac656913a8b921ed39eb45a4f3919585b1fad",
-    "bytes": 30484881,
+    "sha256": "45c6b8458e79edd0baa0cfb60a58d6353a883162cf10419fcd2e2c02f5c00d23",
+    "bytes": 30484873,
     "files": [
       {
         "path": "engine/approval-lease.test.ts",
@@ -9385,8 +9385,8 @@
       },
       {
         "path": "engine/yolo-critical-approval.test.ts",
-        "size": 3496,
-        "sha256": "526502654aa3eb8841131c42fb3ff73895d381a576df3d2dede0962511780b1e"
+        "size": 3488,
+        "sha256": "9ba36cf8da15318b43fa688018686ee60c3bb11add3c1dc542f254f6eb65b93d"
       },
       {
         "path": "harness/agent/AGENTS.md",
