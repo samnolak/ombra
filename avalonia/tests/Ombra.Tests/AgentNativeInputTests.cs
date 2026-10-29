@@ -87,7 +87,7 @@ public sealed class AgentNativeInputTests
 
     private sealed class Host(IAgentBrowserPage page) : IAgentBrowserHost
     {
-        public Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, CancellationToken ct) => Task.FromResult(page);
+        public Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, string? sessionId, CancellationToken ct) => Task.FromResult(page);
     }
 
     /// <summary>A button at (120, 45): visible, uncovered, not moving.</summary>

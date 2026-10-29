@@ -63,7 +63,7 @@ public sealed class AgentBrowserBridgeTimeoutTests
         private int _next;
         public IAgentSpeculation? Speculation { get; init; }
 
-        public Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, CancellationToken ct)
+        public Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, string? sessionId, CancellationToken ct)
         {
             log.Add("open");
             return Task.FromResult<IAgentBrowserPage>(pages[_next++]);

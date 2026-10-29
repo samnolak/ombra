@@ -243,7 +243,7 @@ public sealed partial class NightlyRuntimeTests
 
     private sealed class OneTab(IAgentBrowserPage page) : IAgentBrowserHost
     {
-        public Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, CancellationToken ct) => Task.FromResult(page);
+        public Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, string? sessionId, CancellationToken ct) => Task.FromResult(page);
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
 import { isRecord, logger, untilAborted } from "@oh-my-pi/pi-utils";
 import type { EvalPreludeContext, EvalPreludeDefinition } from "../eval/preludes";
 import type { ToolSession } from "../sdk";
+import { AgentRegistry } from "../registry/agent-registry";
 import { enforceInlineByteCap } from "@oh-my-pi/pi-tui/tools/streaming-output";
 import { resolveCmuxKind } from "./browser/cmux/rpc";
 import { describeRelayTargets, listRelayTargets, type RelayTarget, resolveSpawnArgs } from "./browser/attach";
@@ -497,6 +498,12 @@ async function openOnKind(
 					ignoreHttpsErrors: params.ignore_https_errors,
 					signal: openSignal,
 					ownerSessionId: session.getEvalKernelOwnerId?.() ?? session.getSessionId?.() ?? undefined,
+					// The chat's own session (its main agent's, a subagent's tab included): what the client knows the chat by
+					chatSessionId:
+						AgentRegistry.global()
+							.list()
+							.find(ref => ref.kind === "main")
+							?.session?.sessionManager.getSessionId() ?? session.getSessionId?.() ?? undefined,
 					// Omitted stays undefined: creation defaults it to false
 					// while reuse by the owner leaves a set value alone.
 					persist: params.persist,

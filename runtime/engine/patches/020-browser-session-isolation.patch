@@ -21,10 +21,18 @@ index 579d8dac028521aac5dc3fc5b7842833f892fbe5..91dd3b3cf2e5e93a628aad8f1679063a
    - Storage: `cookies`, `setCookies`, `clearCookies`, `storage`, `setStorage`, `clearStorage`, `saveState`, `loadState`; cookie imports accept objects, raw `Cookie:` headers, DevTools cURL dumps, or JSON arrays.
    - Initialization: `addInitScript`, `removeInitScript`, `initScripts`; downloads: `waitForDownload`, `downloads`.
 diff --git a/src/tools/browser.ts b/src/tools/browser.ts
-index 5d09ccc3908dadac92687c4a1d8b7616f3e91846..a43fafddb7024aea574347b7e2036503f56b17fa 100644
+index 5d09ccc3908dadac92687c4a1d8b7616f3e91846..fd9cfbffb87a0c7bdc3c73ba188e36ea68ae8c75 100644
 --- a/src/tools/browser.ts
 +++ b/src/tools/browser.ts
-@@ -292,7 +292,7 @@ export async function restartBrowserForModeChange(): Promise<void> {
+@@ -3,6 +3,7 @@ import type { AgentToolResult } from "@oh-my-pi/pi-agent-core";
+ import { isRecord, logger, untilAborted } from "@oh-my-pi/pi-utils";
+ import type { EvalPreludeContext, EvalPreludeDefinition } from "../eval/preludes";
+ import type { ToolSession } from "../sdk";
++import { AgentRegistry } from "../registry/agent-registry";
+ import { enforceInlineByteCap } from "@oh-my-pi/pi-tui/tools/streaming-output";
+ import { resolveCmuxKind } from "./browser/cmux/rpc";
+ import { describeRelayTargets, listRelayTargets, type RelayTarget, resolveSpawnArgs } from "./browser/attach";
+@@ -292,7 +293,7 @@ export async function restartBrowserForModeChange(): Promise<void> {
   * delay the open it follows.
   */
  function sweepIdleOwnedTabs(session: ToolSession): Promise<number> {
@@ -33,12 +41,18 @@ index 5d09ccc3908dadac92687c4a1d8b7616f3e91846..a43fafddb7024aea574347b7e2036503
  	if (!ownerId) return Promise.resolve(0);
  	const idleSec = cfgBrowserIdleCloseSec.get(session.settings);
  	if (!(idleSec > 0)) {
-@@ -496,7 +496,7 @@ async function openOnKind(
+@@ -496,7 +497,13 @@ async function openOnKind(
  					userAgent: params.user_agent,
  					ignoreHttpsErrors: params.ignore_https_errors,
  					signal: openSignal,
 -					ownerSessionId: session.getSessionId?.() ?? undefined,
 +					ownerSessionId: session.getEvalKernelOwnerId?.() ?? session.getSessionId?.() ?? undefined,
++					// The chat's own session (its main agent's, a subagent's tab included): what the client knows the chat by
++					chatSessionId:
++						AgentRegistry.global()
++							.list()
++							.find(ref => ref.kind === "main")
++							?.session?.sessionManager.getSessionId() ?? session.getSessionId?.() ?? undefined,
  					// Omitted stays undefined: creation defaults it to false
  					// while reuse by the owner leaves a set value alone.
  					persist: params.persist,
@@ -259,7 +273,7 @@ index c7e0053cacb9ab338bc3cdb786f8b0ef712a05b8..248781e14b533b92caa8945df71aebb4
 +	return getBrowserScope().browsers;
  }
 diff --git a/src/tools/browser/tab-supervisor.ts b/src/tools/browser/tab-supervisor.ts
-index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6773d8c84 100644
+index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..da18bdaae934df25e8bd68217d3c47619ea50ddc 100644
 --- a/src/tools/browser/tab-supervisor.ts
 +++ b/src/tools/browser/tab-supervisor.ts
 @@ -1,3 +1,5 @@
@@ -268,7 +282,20 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  import {
  	getProjectDir,
  	getPuppeteerDir,
-@@ -222,20 +224,43 @@ export interface ReleaseTabOptions {
+@@ -200,6 +202,12 @@ export interface AcquireTabOptions {
+ 	 * extend another session's tab lifetime.
+ 	 */
+ 	persist?: boolean;
++	/**
++	 * The acquiring session's own id (the chat its client knows). A cmux host
++	 * gets it with `browser.open_split` (`session_id`), so it can tell which
++	 * chat a surface belongs to and never show one chat's page over another's.
++	 */
++	chatSessionId?: string;
+ }
+ 
+ export interface AcquireTabResult {
+@@ -222,20 +230,43 @@ export interface ReleaseTabOptions {
  	timeoutMs?: number;
  }
  
@@ -317,7 +344,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  // Cold-start guard for the worker's `setup` handshake (realm usable: puppeteer
  // loaded, browser connected, page acquired). On hosts where the worker's cold
  // import stalls (observed: Bun worker inside a full RPC process), an
-@@ -251,10 +276,6 @@ const READY_BUDGET_FLOOR_MS = 500;
+@@ -251,10 +282,6 @@ const READY_BUDGET_FLOOR_MS = 500;
  // Share of an open's remaining budget kept back from its navigation so the
  // goto's own timeout report reaches the caller before the open's deadline.
  const OPEN_NAVIGATION_REPORT_MS = 500;
@@ -328,7 +355,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  const DEFAULT_TAB_CLOSE_TIMEOUT_MS = 5_000;
  // What every worker replacement resets, for results that report one.
  const WORKER_RESETS =
-@@ -320,7 +341,7 @@ async function waitForTabCleanup<T>(
+@@ -320,7 +347,7 @@ async function waitForTabCleanup<T>(
  }
  
  export function getTab(name: string): TabSession | undefined {
@@ -337,7 +364,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  }
  
  /** JSON-safe metadata for one managed browser tab. */
-@@ -341,7 +362,7 @@ export interface ManagedTabInfo {
+@@ -341,7 +368,7 @@ export interface ManagedTabInfo {
  
  /** List the currently alive tabs in the managed-tab registry. */
  export function listTabs(): ManagedTabInfo[] {
@@ -346,7 +373,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  		.filter(tab => tab.state === "alive")
  		.map(tab => ({
  			name: tab.name,
-@@ -360,7 +381,7 @@ export function acquireTab(name: string, browser: BrowserHandle, opts: AcquireTa
+@@ -360,7 +387,7 @@ export function acquireTab(name: string, browser: BrowserHandle, opts: AcquireTa
  	// promise settles; without an acquisition-owned hold, cleanup would then
  	// run through a disconnected handle and leave the worker's page behind.
  	holdBrowser(browser);
@@ -355,7 +382,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  	const acquisition = prior.then(() => acquireTabImpl(name, browser, opts));
  	const result = acquisition.then(
  		async value => {
-@@ -382,9 +403,9 @@ export function acquireTab(name: string, browser: BrowserHandle, opts: AcquireTa
+@@ -382,9 +409,9 @@ export function acquireTab(name: string, browser: BrowserHandle, opts: AcquireTa
  		() => undefined,
  		() => undefined,
  	);
@@ -367,7 +394,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  	});
  	return result;
  }
-@@ -407,7 +428,7 @@ async function acquireTabImpl(
+@@ -407,7 +434,7 @@ async function acquireTabImpl(
  	if (opts.signal?.aborted) {
  		throw new ToolAbortError("Browser tab open aborted");
  	}
@@ -376,7 +403,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  	// Temporary refCount hold so releasing an existing tab on the SAME browser
  	// below cannot drop it to refCount 0 and dispose the instance we are about
  	// to reuse (e.g. reopening the sole tab with a different dialogs policy).
-@@ -416,7 +437,7 @@ async function acquireTabImpl(
+@@ -416,7 +443,7 @@ async function acquireTabImpl(
  	// one if the reattach closed it, instead of reporting a tab whose worker is gone.
  	const reattaching = awaitWorkerRecovery(name, opts, "Browser tab open aborted");
  	if (reattaching) await reattaching;
@@ -385,7 +412,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  	if (existing) {
  		if (existing.browser === browser && existing.state === "alive") {
  			const requestedCmuxSurface = "client" in browser ? (opts.cmuxSurface ?? browser.surface) : undefined;
-@@ -455,7 +476,7 @@ async function acquireTabImpl(
+@@ -455,7 +482,7 @@ async function acquireTabImpl(
  				// the open reuses the reattached tab or opens a fresh one, as an open arriving during a reattach does.
  				const reattachingMeanwhile = awaitWorkerRecovery(name, opts, "Browser tab open aborted");
  				if (reattachingMeanwhile) await reattachingMeanwhile;
@@ -394,7 +421,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  					return await acquireTabImpl(name, browser, { ...opts, deadlineStartMs: startedAt });
  				}
  				// The creator may opt out later: an explicit `persist` on
-@@ -498,7 +519,11 @@ async function acquireTabImpl(
+@@ -498,7 +525,11 @@ async function acquireTabImpl(
  					// The tab's renderer had crashed: the failed step reloaded the page on a new worker, so the
  					// open goes on with it once. A tab closed by the crash, or a second crash, fails the open.
  					if (
@@ -407,7 +434,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  					)
  						throw error;
  					note = RENDERER_RELOADED_NOTE;
-@@ -506,7 +531,7 @@ async function acquireTabImpl(
+@@ -506,7 +537,7 @@ async function acquireTabImpl(
  				}
  				// The user may have navigated or switched tabs since: the result reports where the page is now.
  				if (existing.backend === "tern") existing.info = await existing.ternTab.readyInfo();
@@ -416,7 +443,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  			}
  		} else {
  			if (existing.browser === browser) {
-@@ -623,7 +648,8 @@ async function acquireTabImpl(
+@@ -623,7 +654,8 @@ async function acquireTabImpl(
  		uploadDir: initPayload.uploadDir,
  	};
  	attachTabWorker(tab, worker);
@@ -426,7 +453,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  	sweepClosedTabUploads();
  	// Durably record ownership so another live omp process can reap this page if
  	// this process dies abnormally before its own teardown closes the tab.
-@@ -670,7 +696,7 @@ async function navigateOpenedTab(
+@@ -670,7 +702,7 @@ async function navigateOpenedTab(
  			error instanceof ToolAbortError ||
  			error instanceof RendererCrashedError ||
  			!(error instanceof Error) ||
@@ -435,7 +462,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  		)
  			throw error;
  		throw new ToolError(
-@@ -686,7 +712,7 @@ async function navigateOpenedTab(
+@@ -686,7 +718,7 @@ async function navigateOpenedTab(
  
  /** Close a tab its failed open created, unless something already replaced or closed it. */
  async function rollBackCreatedTab(name: string, tab: WorkerTabSession): Promise<void> {
@@ -444,7 +471,15 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  	try {
  		await releaseTab(name, { kill: false });
  	} catch (error) {
-@@ -769,7 +795,7 @@ async function acquireCmuxTab(
+@@ -720,6 +752,7 @@ async function acquireCmuxTab(
+ 			const params: Record<string, unknown> = { url: opts.url ?? "about:blank", focus: false };
+ 			if (process.env.CMUX_WORKSPACE_ID) params.workspace_id = process.env.CMUX_WORKSPACE_ID;
+ 			if (process.env.CMUX_SURFACE_ID) params.surface_id = process.env.CMUX_SURFACE_ID;
++			if (opts.chatSessionId) params.session_id = opts.chatSessionId;
+ 			const result = await browser.client.request("browser.open_split", params, { timeoutMs: opts.timeoutMs });
+ 			if (typeof result.surface_id !== "string" || result.surface_id.length === 0) {
+ 				throw new ToolError("cmux browser.open_split did not return a surface_id");
+@@ -769,7 +802,7 @@ async function acquireCmuxTab(
  			lastActivityAt: Date.now(),
  			frozen: false,
  		};
@@ -453,7 +488,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  		return { tab, created: true };
  	} catch (error) {
  		if (ownsSurface && surfaceId) {
-@@ -780,12 +806,12 @@ async function acquireCmuxTab(
+@@ -780,12 +813,12 @@ async function acquireCmuxTab(
  }
  
  /**
@@ -468,7 +503,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  		if (name !== except && tab.backend === "tern" && tab.state === "alive") taken.set(tab.ternTab.block, name);
  	}
  	return taken;
-@@ -857,7 +883,7 @@ async function acquireTernTab(
+@@ -857,7 +890,7 @@ async function acquireTernTab(
  			lastActivityAt: Date.now(),
  			frozen: false,
  		};
@@ -477,7 +512,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  		return { tab, created: true };
  	} catch (error) {
  		await ternTab.close({ timeoutMs: DEFAULT_TAB_CLOSE_TIMEOUT_MS }).catch(() => undefined);
-@@ -877,7 +903,7 @@ export async function runInTab(name: string, opts: RunInTabOptions): Promise<Run
+@@ -877,7 +910,7 @@ export async function runInTab(name: string, opts: RunInTabOptions): Promise<Run
  	);
  	// A worker that exited with no run in flight left the reset unreported; this call reports it. Runs an open
  	// makes on the tab leave it for the open to report.
@@ -486,7 +521,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  	if (tab?.backend === "worker" && tab.workerExitNotice) {
  		result.displays.unshift({ type: "text", text: tab.workerExitNotice });
  		tab.workerExitNotice = undefined;
-@@ -903,15 +929,15 @@ async function runInTabWithSnapshot(
+@@ -903,15 +936,15 @@ async function runInTabWithSnapshot(
  	const reattaching = awaitWorkerRecovery(name, opts);
  	if (reattaching) {
  		const recovered = await reattaching;
@@ -505,7 +540,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  		throw new ToolError(
  			killed
  				? `Tab ${JSON.stringify(name)} was killed: ${killed}. Reopen it.`
-@@ -983,7 +1009,7 @@ async function runInTabWithSnapshot(
+@@ -983,7 +1016,7 @@ async function runInTabWithSnapshot(
  		tab.pending.delete(id);
  		throw new ToolAbortError();
  	}
@@ -514,7 +549,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  	if (current !== tab || current.state === "dead") {
  		// A teardown won the race with our unfreeze roundtrip. Prefer its
  		// close error when one was recorded (`releaseTab` rejects `pending`
-@@ -1096,7 +1122,7 @@ async function runInTabWithSnapshot(
+@@ -1096,7 +1129,7 @@ async function runInTabWithSnapshot(
  				for (const ctrl of pending.toolCalls.values()) ctrl.abort(error);
  				// Both paths below kill an inline worker's tab, and its `terminate()` is a no-op: without the close
  				// handshake its core keeps its relay connection and could claim the tab again once it is re-announced.
@@ -523,7 +558,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  					const closed = waitForClosed(tab).catch(() => undefined);
  					safeSend(tab, { type: "close" });
  					await closed;
-@@ -1104,7 +1130,7 @@ async function runInTabWithSnapshot(
+@@ -1104,7 +1137,7 @@ async function runInTabWithSnapshot(
  				if (error.reason === USER_CANCELLED_DEBUGGER) {
  					// The relay hides a tab whose debugging bar the user cancelled, so a re-adoption cannot succeed.
  					const cancelled = `${error.message}. The user cancelled Chrome's debugging bar${landed}. omp released the tab; the relay hides it until its URL changes, so navigate it in Chrome, then open it again`;
@@ -532,7 +567,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  					if (opts.signal?.aborted) throw new ToolAbortError();
  					throw new ToolError(cancelled);
  				}
-@@ -1182,7 +1208,7 @@ async function recoverWorkerTab(
+@@ -1182,7 +1215,7 @@ async function recoverWorkerTab(
  ): Promise<boolean> {
  	// The kills go by name: a tab closed meanwhile may have been reopened under it, and that one is not ours to kill.
  	const killTab = async (killReason: string): Promise<false> => {
@@ -541,7 +576,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  		return false;
  	};
  	try {
-@@ -1207,7 +1233,7 @@ async function recoverWorkerTab(
+@@ -1207,7 +1240,7 @@ async function recoverWorkerTab(
  const releaseInflight = new WeakMap<TabSession, { promise: Promise<boolean>; opts: ReleaseTabOptions }>();
  
  export async function releaseTab(name: string, opts: ReleaseTabOptions = {}): Promise<boolean> {
@@ -550,7 +585,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  	if (!tab) {
  		logger.debug("releaseTab: unknown tab", { name });
  		return false;
-@@ -1301,7 +1327,7 @@ async function releaseTabInner(tab: TabSession, name: string, opts: ReleaseTabOp
+@@ -1301,7 +1334,7 @@ async function releaseTabInner(tab: TabSession, name: string, opts: ReleaseTabOp
  		} catch (error) {
  			closeError ??= error;
  		} finally {
@@ -559,7 +594,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  		}
  		if (closeError) throw closeError;
  		return true;
-@@ -1335,7 +1361,7 @@ async function releaseTabInner(tab: TabSession, name: string, opts: ReleaseTabOp
+@@ -1335,7 +1368,7 @@ async function releaseTabInner(tab: TabSession, name: string, opts: ReleaseTabOp
  		} catch (error) {
  			closeError ??= error;
  		} finally {
@@ -568,7 +603,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  		}
  		if (closeError) throw closeError;
  		return true;
-@@ -1382,7 +1408,8 @@ async function releaseTabInner(tab: TabSession, name: string, opts: ReleaseTabOp
+@@ -1382,7 +1415,8 @@ async function releaseTabInner(tab: TabSession, name: string, opts: ReleaseTabOp
  	} catch (error) {
  		cleanupError ??= error;
  	} finally {
@@ -578,7 +613,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  		const scope = sharedScopeOf(tab.browser);
  		if (scope) {
  			if (targetCloseFailed) {
-@@ -1410,7 +1437,7 @@ async function releaseTabInner(tab: TabSession, name: string, opts: ReleaseTabOp
+@@ -1410,7 +1444,7 @@ async function releaseTabInner(tab: TabSession, name: string, opts: ReleaseTabOp
  }
  
  export async function releaseAllTabs(opts: ReleaseTabOptions = {}): Promise<number> {
@@ -587,7 +622,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  	let count = 0;
  	for (const name of names) {
  		if (await releaseTab(name, opts)) count++;
-@@ -1419,16 +1446,14 @@ export async function releaseAllTabs(opts: ReleaseTabOptions = {}): Promise<numb
+@@ -1419,16 +1453,14 @@ export async function releaseAllTabs(opts: ReleaseTabOptions = {}): Promise<numb
  }
  
  export async function dropHeadlessTabs(): Promise<void> {
@@ -608,7 +643,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
   *
   * Ownership is recorded ONLY on tab creation (`acquireTab` with
   * `ownerSessionId`), never on reuse: a subagent re-driving a tab another
-@@ -1438,7 +1463,7 @@ export async function dropHeadlessTabs(): Promise<void> {
+@@ -1438,7 +1470,7 @@ export async function dropHeadlessTabs(): Promise<void> {
   */
  export async function releaseTabsForOwner(ownerId: string, opts: ReleaseTabOptions = {}): Promise<number> {
  	if (!ownerId) return 0;
@@ -617,7 +652,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  	let count = 0;
  	for (const name of names) {
  		if (await releaseTab(name, opts)) count++;
-@@ -1620,7 +1645,7 @@ export function unfreezeTabSessionForTest(tab: TabSession): Promise<boolean> {
+@@ -1620,7 +1652,7 @@ export function unfreezeTabSessionForTest(tab: TabSession): Promise<boolean> {
  export async function freezeTabsForOwner(ownerId: string): Promise<number> {
  	if (!ownerId) return 0;
  	let count = 0;
@@ -626,7 +661,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  		if (tab.ownerSessionId !== ownerId) continue;
  		if (await setTabFrozen(tab, true).catch(() => false)) count++;
  	}
-@@ -1652,19 +1677,19 @@ export async function releaseIdleTabsForOwner(
+@@ -1652,19 +1684,19 @@ export async function releaseIdleTabsForOwner(
  ): Promise<number> {
  	if (!ownerId) return 0;
  	const now = Date.now();
@@ -649,7 +684,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  			if (!current || !isIdleCloseCandidate(current, ownerId, Date.now(), opts.idleMs)) continue;
  			try {
  				if (await releaseTab(name, opts)) count++;
-@@ -1682,25 +1707,13 @@ export async function releaseIdleTabsForOwner(
+@@ -1682,25 +1714,13 @@ export async function releaseIdleTabsForOwner(
  		// Leave the next deadline armed even when a close threw — unless
  		// cancelled mid-sweep. Sweeps only fire on turns, opens, and timer
  		// callbacks, so without re-arming the survivors would never close.
@@ -676,7 +711,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  /** Recheck cadence when a firing sweep skips due-but-busy tabs. Overridable in tests. */
  const IDLE_DUE_RETRY_MS = 30_000;
  
-@@ -1713,7 +1726,7 @@ const IDLE_DUE_RETRY_MS = 30_000;
+@@ -1713,7 +1733,7 @@ const IDLE_DUE_RETRY_MS = 30_000;
  export function earliestIdleCloseInMs(ownerId: string, idleMs: number, nowMs: number = Date.now()): number | undefined {
  	if (!ownerId || !(idleMs > 0)) return undefined;
  	let earliest: number | undefined;
@@ -685,7 +720,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  		if (tab.ownerSessionId !== ownerId || !isIdleManaged(tab)) continue;
  		const remaining = idleMs - (nowMs - tab.lastActivityAt);
  		if (remaining <= 0) return 0;
-@@ -1726,18 +1739,18 @@ export function earliestIdleCloseInMs(ownerId: string, idleMs: number, nowMs: nu
+@@ -1726,18 +1746,18 @@ export function earliestIdleCloseInMs(ownerId: string, idleMs: number, nowMs: nu
  export function cancelIdleCloseForOwner(ownerId: string): void {
  	if (!ownerId) return;
  	clearIdleCloseTimer(ownerId);
@@ -708,7 +743,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  	clearTimeout(existing);
  }
  
-@@ -1759,18 +1772,18 @@ export function armIdleCloseForOwner(ownerId: string, idleMs: number, retryMs: n
+@@ -1759,18 +1779,18 @@ export function armIdleCloseForOwner(ownerId: string, idleMs: number, retryMs: n
  	if (delay === undefined) return;
  	const wait = delay <= 0 ? retryMs : Math.min(delay, 2_147_483_647);
  	const timer = setTimeout(() => {
@@ -731,7 +766,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  }
  
  function isLastSurfaceCloseError(err: unknown): boolean {
-@@ -1788,9 +1801,7 @@ function sweepClosedTabUploads(): void {
+@@ -1788,9 +1808,7 @@ function sweepClosedTabUploads(): void {
  	const now = Date.now();
  	if (now - lastUploadSweep < UPLOAD_SWEEP_INTERVAL_MS) return;
  	lastUploadSweep = now;
@@ -742,7 +777,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  }
  
  async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTabOptions): Promise<WorkerInitPayload> {
-@@ -1854,7 +1865,7 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
+@@ -1854,7 +1872,7 @@ async function buildInitPayload(browser: PuppeteerBrowserHandle, opts: AcquireTa
  /** The tab most recently used on `browser`, for a new relay tab to open beside. */
  function lastUsedTargetOn(browser: PuppeteerBrowserHandle): string | undefined {
  	let last: WorkerTabSession | undefined;
@@ -751,7 +786,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  		if (tab.backend !== "worker" || tab.browser !== browser || tab.state !== "alive") continue;
  		if (!last || tab.lastActivityAt > last.lastActivityAt) last = tab;
  	}
-@@ -1933,7 +1944,7 @@ function awaitWorkerRecovery(
+@@ -1933,7 +1951,7 @@ function awaitWorkerRecovery(
  	opts: { timeoutMs: number; signal?: AbortSignal },
  	abortMessage?: string,
  ): Promise<WorkerTabSession> | undefined {
@@ -760,7 +795,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  	if (recovering?.backend !== "worker" || !recovering.workerRecovery) return undefined;
  	recovering.lastActivityAt = Date.now();
  	return raceWithTimeout(
-@@ -1965,15 +1976,20 @@ function safeSend(tab: WorkerTabSession, msg: WorkerInbound): void {
+@@ -1965,15 +1983,20 @@ function safeSend(tab: WorkerTabSession, msg: WorkerInbound): void {
   * when the new worker exits too within {@link WORKER_EXIT_RETRY_WINDOW_MS}.
   */
  function attachTabWorker(tab: WorkerTabSession, worker: WorkerHandle): void {
@@ -786,7 +821,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  			return;
  		// Bun's ErrorEvent message embeds a source excerpt; keep only its `error: …` line.
  		const cause = lastError && (/^error: (.+)$/m.exec(lastError.message)?.[1] ?? lastError.message.split("\n", 1)[0]);
-@@ -2020,7 +2036,7 @@ function attachTabWorker(tab: WorkerTabSession, worker: WorkerHandle): void {
+@@ -2020,7 +2043,7 @@ function attachTabWorker(tab: WorkerTabSession, worker: WorkerHandle): void {
  				if (tab.workerRecovery === recovery) tab.workerRecovery = undefined;
  			});
  		tab.workerRecovery = recovery;
@@ -795,7 +830,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  }
  
  /** Resolves `false` when the tab was closed while its new worker started; the new worker is then discarded. */
-@@ -2052,7 +2068,7 @@ async function recycleTimedOutWorkerTab(
+@@ -2052,7 +2075,7 @@ async function recycleTimedOutWorkerTab(
  	// A release can land while the new worker starts: it tore down the worker it saw, so a
  	// replacement published after it would drive a closed tab.
  	const publish = async (replacement: WorkerHandle, info: ReadyInfo): Promise<boolean> => {
@@ -804,7 +839,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  			await replacement.terminate().catch(() => undefined);
  			return false;
  		}
-@@ -2090,7 +2106,7 @@ async function recycleTimedOutWorkerTab(
+@@ -2090,7 +2113,7 @@ async function recycleTimedOutWorkerTab(
  }
  
  async function forceKillTab(name: string, reason: string): Promise<void> {
@@ -813,7 +848,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  	if (!tab) return;
  	// A release already owns this tab's teardown. Joining it keeps one worker
  	// termination, one browser-hold release, and one ownership decision — the
-@@ -2101,7 +2117,7 @@ async function forceKillTab(name: string, reason: string): Promise<void> {
+@@ -2101,7 +2124,7 @@ async function forceKillTab(name: string, reason: string): Promise<void> {
  		await ongoing.promise.catch(() => undefined);
  		return;
  	}
@@ -822,7 +857,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  	tab.state = "dead";
  	const error = postmortem.markExpectedCleanupError(new ToolError(reason));
  	for (const pending of tab.pending.values()) pending.reject(error);
-@@ -2125,7 +2141,7 @@ async function forceKillSurfaceTab(tab: CmuxTabSession | TernTabSession, name: s
+@@ -2125,7 +2148,7 @@ async function forceKillSurfaceTab(tab: CmuxTabSession | TernTabSession, name: s
  	if (tab.backend === "tern")
  		await tab.ternTab.close({ timeoutMs: DEFAULT_TAB_CLOSE_TIMEOUT_MS }).catch(() => undefined);
  	await releaseBrowser(tab.browser, { kill: false });
@@ -831,7 +866,7 @@ index 6b69bd9a4a3b275e57c1055798b159717cfbe7e2..4af3f6cbacb7580be2d2df6c89caf8a6
  }
  
  /**
-@@ -2151,7 +2167,8 @@ async function forceKillTabTeardown(tab: WorkerTabSession): Promise<void> {
+@@ -2151,7 +2174,8 @@ async function forceKillTabTeardown(tab: WorkerTabSession): Promise<void> {
  		).catch(() => false);
  	}
  	await releaseBrowser(tab.browser, { kill: false });

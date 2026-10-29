@@ -69,10 +69,12 @@ public sealed record AgentScreenshot(byte[] Png, int Width, int Height)
 public interface IAgentBrowserHost
 {
     /// <summary>
-    /// A new tab in the pane for the agent, named <paramref name="surfaceId"/>, empty until it is navigated. The pane
-    /// shows it unless the user picked another tab. Throws <see cref="AgentBrowserException"/> when no tab can open.
+    /// A new tab in the pane for the agent, named <paramref name="surfaceId"/>, empty until it is navigated, opened by the
+    /// chat <paramref name="sessionId"/> (omp's <c>session_id</c>; null when omp does not say). The pane brings it forward
+    /// only while that chat is the one shown and the user follows the agent; otherwise it opens behind the user's tab.
+    /// Throws <see cref="AgentBrowserException"/> when no tab can open.
     /// </summary>
-    Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, CancellationToken ct);
+    Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, string? sessionId, CancellationToken ct);
 
     /// <summary>Intent hints for the tab the agent opens next, before it exists (<c>agent_open</c>); null where the
     /// engine new tabs open in takes none. Any thread.</summary>
@@ -581,7 +583,7 @@ public sealed partial class AgentBrowserBridge : IDisposable
         IAgentBrowserPage page;
         try
         {
-            page = await host.OpenTabAsync(id, ct).ConfigureAwait(false);
+            page = await host.OpenTabAsync(id, Str(p, "session_id") is { Length: > 0 } session ? session : null, ct).ConfigureAwait(false);
         }
         catch
         {

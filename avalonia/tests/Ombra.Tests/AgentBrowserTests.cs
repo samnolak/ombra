@@ -89,13 +89,13 @@ public sealed class AgentBrowserTests
     /// <summary>The pane: a <see cref="FakePage"/> per tab omp opens.</summary>
     private sealed class FakeHost : IAgentBrowserHost
     {
-        public List<(string Surface, FakePage Page)> Tabs { get; } = [];
+        public List<(string Surface, FakePage Page, string? Session)> Tabs { get; } = [];
         public Func<FakePage> NewPage { get; set; } = () => new FakePage { HasPage = false };
 
-        public Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, CancellationToken ct)
+        public Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, string? sessionId, CancellationToken ct)
         {
             var page = NewPage();
-            Tabs.Add((surfaceId, page));
+            Tabs.Add((surfaceId, page, sessionId));
             return Task.FromResult<IAgentBrowserPage>(page);
         }
     }
@@ -184,17 +184,19 @@ public sealed class AgentBrowserTests
     {
         var host = new FakeHost();
         var bridge = new AgentBrowserBridge(host);
-        var open = await Call(bridge, "browser.open_split", new JsonObject { ["url"] = "http://localhost:3000/", ["focus"] = false });
+        var open = await Call(bridge, "browser.open_split", new JsonObject { ["url"] = "http://localhost:3000/", ["focus"] = false, ["session_id"] = "chat-a" });
         var surface = open["result"]!["surface_id"]!.GetValue<string>();
         Assert.False(string.IsNullOrEmpty(surface));
-        var (named, first) = Assert.Single(host.Tabs);
+        var (named, first, session) = Assert.Single(host.Tabs);
         Assert.Equal(surface, named);
+        Assert.Equal("chat-a", session); // the chat that opened it, for the pane to tell whose tab it is
         Assert.Equal(["http://localhost:3000/"], first.Navigations);
 
         // about:blank opens another tab and only shows it
         var blank = await Call(bridge, "browser.open_split", new JsonObject { ["url"] = "about:blank" });
         Assert.True(blank["ok"]!.GetValue<bool>());
         Assert.Equal(2, host.Tabs.Count);
+        Assert.Null(host.Tabs[1].Session); // an omp that does not say
         Assert.True(host.Tabs[1].Page.Shown);
         Assert.Empty(host.Tabs[1].Page.Navigations);
         Assert.Single(first.Navigations);
@@ -216,7 +218,7 @@ public sealed class AgentBrowserTests
         var a = await Open("http://localhost:3000/a");
         var b = await Open("http://localhost:4000/b");
         Assert.NotEqual(a, b);
-        foreach (var (_, page) in host.Tabs) page.Answer = s => s == "location.href" ? "\"" + page.State.Url!.AbsoluteUri + "\"" : "{\"ok\":true}";
+        foreach (var (_, page, _) in host.Tabs) page.Answer = s => s == "location.href" ? "\"" + page.State.Url!.AbsoluteUri + "\"" : "{\"ok\":true}";
 
         async Task<string> Url(string surface) =>
             (await Call(bridge, "browser.url.get", new JsonObject { ["surface_id"] = surface }))["result"]!["url"]!.GetValue<string>();
@@ -791,9 +793,10 @@ public sealed class AgentBrowserTests
     public async Task The_preview_gives_each_page_omp_opens_a_tab_of_its_own()
     {
         var main = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs());
+        var chat = await Started(main);
         var bridge = new AgentBrowserBridge(new PreviewAgentHost(main));
         async Task<string> Open(string url) =>
-            (await Call(bridge, "browser.open_split", new JsonObject { ["url"] = url }))["result"]!["surface_id"]!.GetValue<string>();
+            (await Call(bridge, "browser.open_split", new JsonObject { ["url"] = url, ["session_id"] = chat }))["result"]!["surface_id"]!.GetValue<string>();
         async Task<JsonObject> UrlOf(string surface) => await Call(bridge, "browser.url.get", new JsonObject { ["surface_id"] = surface });
 
         var a = await Open("http://localhost:3000/a");
@@ -825,11 +828,12 @@ public sealed class AgentBrowserTests
         // A KSO session: each eval cell did browser.open({name, url}) … browser.close, so omp let go of the tab shown
         // every time and the strip filled with "Kiosk …" tabs, one per cell
         var main = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs());
+        var chat = await Started(main);
         var bridge = new AgentBrowserBridge(new PreviewAgentHost(main));
         var preview = main.Preview;
         async Task<string> OpenAndRelease()
         {
-            var id = (await Call(bridge, "browser.open_split", new JsonObject { ["url"] = "http://localhost:4321/" }))["result"]!["surface_id"]!.GetValue<string>();
+            var id = (await Call(bridge, "browser.open_split", new JsonObject { ["url"] = "http://localhost:4321/", ["session_id"] = chat }))["result"]!["surface_id"]!.GetValue<string>();
             Assert.Equal("ok", Code(await Call(bridge, "surface.close", new JsonObject { ["surface_id"] = id })));
             return id;
         }
@@ -849,5 +853,66 @@ public sealed class AgentBrowserTests
         preview.SelectTabCommand.Execute(preview.Tabs[0]);
         Assert.Equal(["", kept], preview.Tabs.Select(t => t.Id));
         await main.DisposeAsync();
+    }
+
+    /// <summary>
+    /// An agent never takes the screen from the user: a page of a chat that is not the one shown, of an omp that does not
+    /// say whose it is, or of the shown chat while the user looks at another tool or picked another tab opens behind;
+    /// its screenshot does not bring it forward (the built-in preview refuses rather than switching tabs).
+    /// </summary>
+    [AvaloniaFact]
+    public async Task An_agents_page_opens_behind_unless_its_chat_is_shown_and_the_user_follows()
+    {
+        var main = new MainViewModel(new SessionController(TestProcesses.Fake("normal")), new AppArgs());
+        var chat = await Started(main);
+        var bridge = new AgentBrowserBridge(new PreviewAgentHost(main));
+        var preview = main.Preview;
+        async Task<string> Open(string? session)
+        {
+            var p = new JsonObject { ["url"] = "http://localhost:3000/" };
+            if (session is not null) p["session_id"] = session;
+            return (await Call(bridge, "browser.open_split", p))["result"]!["surface_id"]!.GetValue<string>();
+        }
+
+        // Another chat's agent, and one that does not say: the panel stays closed, the user's tab stays in front
+        var other = await Open("another-chat");
+        var unknown = await Open(null);
+        Assert.False(main.IsPreviewOpen);
+        Assert.Equal("", preview.ActiveTab.Id);
+        Assert.Contains(preview.Tabs, t => t.Id == other);
+        Assert.Contains(preview.Tabs, t => t.Id == unknown);
+        Assert.Equal("not_shown", Code(await Call(bridge, "browser.screenshot", new JsonObject { ["surface_id"] = other })));
+        Assert.Equal("", preview.ActiveTab.Id);
+        Assert.False(main.IsPreviewOpen);
+
+        // The shown chat's agent while the user looks at Files: Files stays
+        main.ShowPaneCommand.Execute(SidePane.Files);
+        var own = await Open(chat);
+        Assert.Equal(SidePane.Files, main.ActivePane);
+        Assert.NotEqual(own, preview.ActiveTab.Id);
+
+        // Back on the browser, following the agent: its page comes forward; once the user picks their own tab, the
+        // agent's next page opens behind it
+        main.ShowPaneCommand.Execute(SidePane.Browser);
+        var shown = await Open(chat);
+        Assert.Equal(shown, preview.ActiveTab.Id);
+        preview.SelectTabCommand.Execute(preview.Tabs[0]);
+        var behind = await Open(chat);
+        Assert.Equal("", preview.ActiveTab.Id);
+        Assert.Contains(preview.Tabs, t => t.Id == behind);
+        await main.DisposeAsync();
+    }
+
+    /// <summary>The chat <paramref name="main"/> shows, started: its omp session id.</summary>
+    private static async Task<string> Started(MainViewModel main)
+    {
+        await main.Session.StartAsync();
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while (main.Session.SessionId is null && DateTime.UtcNow < deadline)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            await Task.Delay(15);
+        }
+        return main.Session.SessionId ?? throw new TimeoutException("the fake omp never reported its session");
     }
 }

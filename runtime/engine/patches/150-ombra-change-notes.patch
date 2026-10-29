@@ -8,10 +8,10 @@ Why: Ombra embeds multiple concurrent sessions and renders native host features.
 Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
 
 diff --git a/CHANGELOG.md b/CHANGELOG.md
-index 8b299b899693383a7e24627e841874cafae0bd9a..0b05931bf942c4b4637086dc40d5286cb7536852 100644
+index 8b299b899693383a7e24627e841874cafae0bd9a..e2d15b53bddbd1f51c951918526faad694c7d4d4 100644
 --- a/CHANGELOG.md
 +++ b/CHANGELOG.md
-@@ -2,6 +2,66 @@
+@@ -2,6 +2,67 @@
  
  ## [Unreleased]
  
@@ -22,6 +22,7 @@ index 8b299b899693383a7e24627e841874cafae0bd9a..0b05931bf942c4b4637086dc40d5286c
 +- Compaction summaries use a checkpoint template that adds "Files and Code", "Errors and Fixes", "Pending Jobs" (with job and subagent ids) and "Current Work" sections, makes the first "Next Steps" item the immediate next action and forbids tool calls; an extension's `session.compacting` prompt still wins. A summary over 512 tokens that is not smaller than the history it replaces fails with "Compaction summary is not smaller than the history it replaces" and goes to the next model or method instead of being committed.
 +- A skill description already within the compressed-description limits (one line, ≤160 characters, ≤12 words) is shown verbatim and never sent to the `smol` model for compression.
 +- The context-file block tells the model that nearer files override broader ones and that none override system or direct user instructions.
++- The cmux browser backend's `browser.open_split` carries `session_id`: the chat's own session (its main agent's, also for a subagent's tab), so a host serving several chats can tell whose page a surface is and keep one chat's agent from bringing its page over another chat.
 +
 +### Added
 +
@@ -78,7 +79,7 @@ index 8b299b899693383a7e24627e841874cafae0bd9a..0b05931bf942c4b4637086dc40d5286c
  ## [18.12.2] - 2026-10-18
  
  ### Added
-@@ -786,7 +846,6 @@
+@@ -786,7 +847,6 @@
  - Corrected tool behavior and configuration documentation for `read`, background `bash`, Python evaluation, replace editing, goal removal, and `advisor.immuneTurns`.
  - Fixed custom glob backends from hanging indefinitely; scans now respect the tool deadline and report incomplete results when necessary.
  - Fixed `--resume <path>` from silently creating a new session for a missing path; it now reports the missing path, consistent with `--fork <path>` and `--resume <id>`.

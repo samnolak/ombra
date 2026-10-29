@@ -26,6 +26,13 @@ public sealed partial class PreviewTab(string id, bool isAgentTab) : ObservableO
     /// <summary>omp opened it (the user's own tab stays for good; agent tabs can be closed).</summary>
     public bool IsAgentTab { get; } = isAgentTab;
 
+    /// <summary>
+    /// The session id of the chat whose agent opened it (omp sends it with <c>browser.open_split</c>); null for the user's
+    /// tabs and for a subagent's or an older omp's. Only that chat's agent, while that chat is the one shown, brings the
+    /// tab forward (<see cref="MainViewModel.MayRevealAgentTab"/>).
+    /// </summary>
+    public string? OwnerSessionId { get; init; }
+
     /// <summary>The user opened it with the strip's + (closable, unlike their first tab).</summary>
     public bool IsOpenedByUser { get; init; }
 

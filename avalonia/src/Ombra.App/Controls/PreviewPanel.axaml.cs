@@ -206,11 +206,13 @@ public partial class PreviewPanel : UserControl
     private void OnOpenExternallyRequested(Uri uri) => ContextMenus.OpenLink(this, uri.AbsoluteUri,
         ConversationMenus.Owner(this) is { } main && !ReferenceEquals(_vm, main.Preview) ? LinkTarget.SystemBrowser : LinkTarget.BrowserPage);
 
-    /// <summary>Creates the web views for pending navigations once the panel is shown in a window.</summary>
+    /// <summary>Creates the web views for pending navigations once the panel is shown in a window; the Nightly runtime's
+    /// panes as soon as it is in a window, shown or not: an agent's tab opened behind another chat or tool still loads,
+    /// runs its scripts and takes its screenshots (NightlyPane AgentSeen).</summary>
     private void Realize()
     {
         if (_pending.Count == 0 || _vm is null || _vm.IsEngineUnavailable) return;
-        if (!IsEffectivelyVisible || TopLevel.GetTopLevel(this) is not { } top)
+        if ((!_vm.DrawsHiddenTabs && !IsEffectivelyVisible) || TopLevel.GetTopLevel(this) is not { } top)
         {
             // Hidden by a container, or not in a window yet: try again after the next layout pass (a container that
             // becomes visible lays the panel out).
@@ -219,7 +221,7 @@ public partial class PreviewPanel : UserControl
             return;
         }
         LayoutUpdated -= OnLayoutUpdatedWhilePending;
-        if (_vm.UseNightly && OperatingSystem.IsMacOS())
+        if (_vm.DrawsHiddenTabs && OperatingSystem.IsMacOS())
         {
             // The Nightly runtime draws into the panel itself: no platform web view, no engine probe.
             foreach (var (tab, uri) in _pending.ToList())

@@ -89,8 +89,42 @@ internal static partial class FeatureSmoke
                 && tool.Output?.Contains("timed out", StringComparison.OrdinalIgnoreCase) != true,
                 $"status={tool?.Status} {evalLatency?.TotalMilliseconds:0} ms after the last answer output='{tool?.Output?.ReplaceLineEndings(" ")}'");
             Check("agent-browser-reply", final.Contains("agent-browser", StringComparison.Ordinal), $"'{final.ReplaceLineEndings(" ")}'");
+            // omp named the chat that opened the page (open_split's session_id), and as it is the one shown the page came
+            // forward
+            var page = Opened();
+            Check("agent-browser-owner", page is not null && page.OwnerSessionId is { Length: > 0 } owner && owner == vm.Session.SessionId,
+                $"owner={page?.OwnerSessionId} chat={vm.Session.SessionId}");
+            Check("agent-browser-shown", page is not null && vm.Preview.ActiveTab == page && vm.IsPreviewOpen, $"active={vm.Preview.ActiveTab.Id}");
+
             await Task.Delay(500);
             Shot("61-agent-browser-opened");
+
+            // The user turns to Files: the agent's next page (the same named tab, or a new one) loads behind, Files stays
+            // on screen and nothing switches
+            vm.ShowPaneCommand.Execute(SidePane.Files);
+            var active = vm.Preview.ActiveTab;
+            var switched = false;
+            void Watch(object? s, System.ComponentModel.PropertyChangedEventArgs e)
+            {
+                if (e.PropertyName is nameof(MainViewModel.ActivePane) && vm.ActivePane != SidePane.Files) switched = true;
+            }
+            vm.PropertyChanged += Watch;
+            evalsBefore = Evals().Count();
+            await Send("BROWSERCALL " + url + "&behind");
+            var behindEnd = DateTime.UtcNow.AddSeconds(90);
+            while (DateTime.UtcNow < behindEnd && (Eval() is null or { Status: ToolStatus.Running } || vm.IsRunning))
+            {
+                // its cards were clicked above; here only where the page goes matters
+                if (vm.CurrentDialog is { IsApproval: true } d && d.AllowCommand.CanExecute(null)) d.AllowCommand.Execute(null);
+                await Task.Delay(50);
+            }
+            vm.PropertyChanged -= Watch;
+            Shot("62-agent-browser-behind");
+            Check("agent-browser-behind", Eval() is { Status: ToolStatus.Succeeded }
+                && vm.Preview.Tabs.Any(t => t.IsAgentTab && t.Url?.AbsoluteUri.Contains("behind", StringComparison.Ordinal) == true)
+                && vm.ActivePane == SidePane.Files && !switched && vm.Preview.ActiveTab == active,
+                $"eval={Eval()?.Status} pane={vm.ActivePane} switched={switched} active={vm.Preview.ActiveTab.Id} was={active.Id} "
+                + $"tabs=[{string.Join(", ", vm.Preview.Tabs.Select(t => $"{t.Id}:{t.Url}"))}]");
         }
     }
 }

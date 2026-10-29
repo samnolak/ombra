@@ -15,7 +15,12 @@ public sealed class RealOmpBrowserTests
     private sealed class RecordingHost : IAgentBrowserHost
     {
         public List<string> Navigations { get; } = [];
-        public Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, CancellationToken ct) => Task.FromResult<IAgentBrowserPage>(new Tab(this));
+        public List<string?> Sessions { get; } = [];
+        public Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, string? sessionId, CancellationToken ct)
+        {
+            Sessions.Add(sessionId);
+            return Task.FromResult<IAgentBrowserPage>(new Tab(this));
+        }
 
         private sealed class Tab(RecordingHost host) : IAgentBrowserPage
         {
@@ -66,5 +71,7 @@ public sealed class RealOmpBrowserTests
         var tool = snap.Items.OfType<ToolItem>().Last(t => t.Name == "eval");
         Assert.True(tool.Status == ToolStatus.Succeeded, tool.Output);
         Assert.Contains("on cmux browser", tool.Output); // omp names the backend: "Opened tab "main" on cmux browser (split)"
+        // omp says which chat opened the tab: the session the app has open, so only that chat brings the tab forward
+        lock (page.Sessions) Assert.Contains(snap.SessionId, page.Sessions);
     }
 }

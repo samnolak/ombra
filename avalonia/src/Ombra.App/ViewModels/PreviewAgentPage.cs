@@ -7,17 +7,20 @@ namespace Ombra.App.ViewModels;
 
 /// <summary>
 /// The preview panel as omp's browser (<see cref="AgentBrowserBridge"/>): every page omp opens gets a tab of its own
-/// in the panel (<see cref="PreviewViewModel.OpenAgentTab"/>), and the panel opens while the agent uses it.
+/// in the panel (<see cref="PreviewViewModel.OpenAgentTab"/>). The panel opens on it, and its tab comes forward, only
+/// while the chat whose agent acts is the one on screen and the user follows the agent
+/// (<see cref="MainViewModel.MayRevealAgentTab"/>); otherwise the agent works behind what the user looks at.
 /// </summary>
 internal sealed class PreviewAgentHost(MainViewModel main) : IAgentBrowserHost, IAgentSpeculation
 {
-    public async Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, CancellationToken ct) =>
+    public async Task<IAgentBrowserPage> OpenTabAsync(string surfaceId, string? sessionId, CancellationToken ct) =>
         await Dispatcher.UIThread.InvokeAsync<IAgentBrowserPage>(() =>
         {
             var p = main.Preview;
             p.NoteAgentActivity();
-            main.IsPreviewOpen = true;
-            return new PreviewAgentPage(main, p.OpenAgentTab(surfaceId));
+            var reveal = main.MayRevealAgentTab(sessionId);
+            if (reveal) main.IsPreviewOpen = true;
+            return new PreviewAgentPage(main, p.OpenAgentTab(surfaceId, sessionId, reveal));
         });
 
     public IAgentSpeculation? Speculation => OperatingSystem.IsMacOS() ? this : null;
@@ -71,6 +74,7 @@ internal sealed class PreviewAgentPage(MainViewModel main, PreviewTab tab) : IAg
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
             main.Preview.NoteAgentActivity();
+            if (!main.MayRevealAgentTab(tab.OwnerSessionId)) return;
             main.IsPreviewOpen = true;
             main.Preview.ShowForAgent(tab);
         });
@@ -83,10 +87,11 @@ internal sealed class PreviewAgentPage(MainViewModel main, PreviewTab tab) : IAg
         {
             var p = main.Preview;
             p.NoteAgentActivity();
-            main.IsPreviewOpen = true;
+            var reveal = main.MayRevealAgentTab(tab.OwnerSessionId);
+            if (reveal) main.IsPreviewOpen = true;
             if (p.IsEngineUnavailable) return (null, "unavailable", Unavailable(p));
             if (tab.IsClosed) return (null, "not_found", "The user closed this tab in the Ombra preview: open a new one.");
-            if (p.NavigateTabForAgent(tab, address) is { } refused) return (null, "invalid_params", refused);
+            if (p.NavigateTabForAgent(tab, address, reveal) is { } refused) return (null, "invalid_params", refused);
             return (tab.Url, "", "");
         });
         return url ?? throw new AgentBrowserException(code, error);
@@ -125,16 +130,23 @@ internal sealed class PreviewAgentPage(MainViewModel main, PreviewTab tab) : IAg
 
     public async Task<AgentScreenshot> CaptureAsync(CancellationToken ct)
     {
-        // The web view only draws while the panel shows it: a tab in the background is shown for the capture (and the
-        // user's pick comes back after it), a panel just opened gets a moment to lay the page out
+        // The Nightly runtime draws a tab nobody sees (its pane counts as seen while the agent acts on it, NightlyPane
+        // AgentSeen): it is captured where it is. The web view only draws while the panel shows it: a tab in the
+        // background is shown for the capture (and the user's pick comes back after it), a panel just opened gets a
+        // moment to lay the page out — only when the agent may bring the tab forward at all; else the capture is refused.
         var (wait, restore) = await Dispatcher.UIThread.InvokeAsync(() =>
         {
             var p = main.Preview;
             p.NoteAgentActivity();
+            if (p.DrawsHiddenTabs || tab.IsClosed) return (false, (PreviewTab?)null);
+            if (main.IsPreviewOpen && p.ActiveTab == tab) return (false, (PreviewTab?)null);
+            if (!main.MayRevealAgentTab(tab.OwnerSessionId))
+                throw new AgentBrowserException("not_shown",
+                    "This tab is behind what the user is looking at (another chat or tab), and this preview only draws the tab it shows: try again later.");
             var closed = !main.IsPreviewOpen;
             main.IsPreviewOpen = true;
             var previous = p.ActiveTab;
-            if (previous == tab || tab.IsClosed) return (closed, (PreviewTab?)null);
+            if (previous == tab) return (closed, (PreviewTab?)null);
             var follows = p.FollowsAgent;
             p.ShowForAgent(tab);
             if (!follows) p.ActiveTab = tab;

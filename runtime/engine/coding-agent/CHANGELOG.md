@@ -9,6 +9,7 @@
 - Compaction summaries use a checkpoint template that adds "Files and Code", "Errors and Fixes", "Pending Jobs" (with job and subagent ids) and "Current Work" sections, makes the first "Next Steps" item the immediate next action and forbids tool calls; an extension's `session.compacting` prompt still wins. A summary over 512 tokens that is not smaller than the history it replaces fails with "Compaction summary is not smaller than the history it replaces" and goes to the next model or method instead of being committed.
 - A skill description already within the compressed-description limits (one line, ≤160 characters, ≤12 words) is shown verbatim and never sent to the `smol` model for compression.
 - The context-file block tells the model that nearer files override broader ones and that none override system or direct user instructions.
+- The cmux browser backend's `browser.open_split` carries `session_id`: the chat's own session (its main agent's, also for a subagent's tab), so a host serving several chats can tell whose page a surface is and keep one chat's agent from bringing its page over another chat.
 
 ### Added
 

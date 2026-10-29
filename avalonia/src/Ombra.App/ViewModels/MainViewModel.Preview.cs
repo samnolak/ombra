@@ -41,6 +41,16 @@ public sealed partial class MainViewModel
         if (!HasTabFor(ActivePane)) ShowNeighbour(at);
     }
 
+    /// <summary>
+    /// Whether an agent's action on a tab of chat <paramref name="owner"/> may bring the browser forward (open the panel on
+    /// it, show its tab): only when that chat is the one on screen, the user follows the agent (did not pick another tab),
+    /// and the panel shows no other tool the user chose (Files, Changes, Plan, Tasks). Otherwise the agent works on its tab
+    /// behind whatever the user looks at: another chat's agent, or one the user turned away from, never takes the screen.
+    /// </summary>
+    internal bool MayRevealAgentTab(string? owner) =>
+        owner is not null && owner == Session.SessionId && Preview.FollowsAgent
+        && ActivePane is SidePane.None or SidePane.Browser or SidePane.NewTab;
+
     /// <summary>Ctrl/⌘+Shift+S: the preview opens if needed and element selection toggles (when a page is shown).</summary>
     [RelayCommand]
     private void SelectElement()

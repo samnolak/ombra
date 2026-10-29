@@ -202,6 +202,12 @@ export interface AcquireTabOptions {
 	 * extend another session's tab lifetime.
 	 */
 	persist?: boolean;
+	/**
+	 * The acquiring session's own id (the chat its client knows). A cmux host
+	 * gets it with `browser.open_split` (`session_id`), so it can tell which
+	 * chat a surface belongs to and never show one chat's page over another's.
+	 */
+	chatSessionId?: string;
 }
 
 export interface AcquireTabResult {
@@ -746,6 +752,7 @@ async function acquireCmuxTab(
 			const params: Record<string, unknown> = { url: opts.url ?? "about:blank", focus: false };
 			if (process.env.CMUX_WORKSPACE_ID) params.workspace_id = process.env.CMUX_WORKSPACE_ID;
 			if (process.env.CMUX_SURFACE_ID) params.surface_id = process.env.CMUX_SURFACE_ID;
+			if (opts.chatSessionId) params.session_id = opts.chatSessionId;
 			const result = await browser.client.request("browser.open_split", params, { timeoutMs: opts.timeoutMs });
 			if (typeof result.surface_id !== "string" || result.surface_id.length === 0) {
 				throw new ToolError("cmux browser.open_split did not return a surface_id");

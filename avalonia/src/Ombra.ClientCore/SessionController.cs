@@ -114,6 +114,12 @@ public sealed partial class SessionController : IAsyncDisposable
         get { lock (_lock) return _state.SessionFile; }
     }
 
+    /// <summary>omp's id of the session it has open now (null before omp reported it). Cheaper than a whole snapshot.</summary>
+    public string? SessionId
+    {
+        get { lock (_lock) return _state.SessionId; }
+    }
+
     /// <summary>Wakes whenever the snapshot may have changed. Read it, then call <see cref="Snapshot"/>.</summary>
     public ChannelReader<bool> Changes => _changes.Reader;
 

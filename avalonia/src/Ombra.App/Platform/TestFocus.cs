@@ -14,8 +14,8 @@ namespace Ombra.App.Platform;
 /// not when the front app quits — its windows still show and take in-process events); every activation call the process
 /// makes does nothing (Avalonia's at launch and in <c>Window.Show</c>/<c>Activate</c>, <c>-[NSApp unhide:]</c>, the
 /// drivers', another app's too); the Dock never bounces; the main window is shown without becoming key, behind the other
-/// apps' windows (<see cref="SendBehind"/>), on the display left of the main one (<see cref="LeftDisplay"/>); the Nightly
-/// runtime it starts cannot raise itself (<c>mozilla.widget.raise-on-setfocus</c>); a check starts no <c>screencapture</c>
+/// apps' windows (<see cref="SendBehind"/>), on the display left of the main one (<see cref="LeftDisplay"/>); (the Nightly
+/// runtime never raises itself, in a harness run or not: NightlyRuntime.WriteUserPrefs); a check starts no <c>screencapture</c>
 /// without Screen Recording (<see cref="ScreenCaptureAllowed"/>). <see cref="Activate"/> gives the window Avalonia's
 /// activation (focus, menus) in-process. Should the app still become active, stderr says so with the mouse state.
 /// <para>On by default for every run a harness drives: the feature smoke (<c>OMBRA_FEATURE_SMOKE</c>), NightlyAcceptance

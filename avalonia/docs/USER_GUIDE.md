@@ -481,8 +481,12 @@ linux-arm64 and win-arm64 packages come without the engine and set it up on firs
   Enter or Esc like you would; an alert omp's own click causes is simply accepted, and a question omp caused but
   hasn't answered within 10 seconds comes to you as a card. omp reads pages as text (their elements and content) and can take screenshots of what the preview
   shows: the visible part of the page (not the whole page, not one element), taken by the web view itself, so no
-  Screen Recording permission is needed; keep the preview open while omp works (a screenshot of a tab in the
-  background shows that tab for a moment). Only http and https pages open
+  Screen Recording permission is needed. omp never takes the screen from you: its page comes forward (the panel opens
+  on the browser, its tab is shown) only while its chat is the one on screen, you have not picked another tab and the
+  panel shows no other tool (Files, Changes, Plan, Tasks); otherwise it opens and works behind what you look at, and
+  another chat's omp never switches your tab. With the Nightly agent browser omp also screenshots a tab in the
+  background where it is; the built-in preview only draws the tab it shows, so there omp's screenshot of a background
+  tab it may not bring forward is refused, and omp is told to try again later. Only http and https pages open
   (for a local file, ask omp to serve it, e.g. `python3 -m http.server`).
   Every omp the app starts uses it by default: each chat and the terminal's omp. omp is told that you see this
   browser, so pages you should look at or sign in to, and anything on localhost, open here rather than in your system
@@ -541,6 +545,10 @@ linux-arm64 and win-arm64 packages come without the engine and set it up on firs
   change its note, **Show** its place (the file at its line, or the page), or **Resolve** it: a resolved comment stays
   as a dimmed chip but is not sent (**Reopen** brings it back). The next message carries the open comments — code
   first, then pages — and they leave the box once sent.
+  In the conversation the message shows them as a pill (*2 comments on localhost:5173*); click it for the list, one
+  row per comment with its number, note and what it marks (`button "Sign in"`, or the file and line), and click a row
+  for its details (where, selector, source, box; for code, the quoted lines) and **Open the page** / **Open in the Files
+  pane** — one comment open at a time. **Show what was sent** in the bubble still shows the whole request.
   With a team (see [Team](#team)), **Send N comments to the team…** under the chips sends the open code and page
   comments to team members instead.
 - **Device size** — the device button in the preview's toolbar (Ctrl/⌘+Shift+M) lays the page out at a device's size,

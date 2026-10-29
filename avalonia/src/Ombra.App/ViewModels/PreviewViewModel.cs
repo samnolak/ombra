@@ -300,16 +300,21 @@ public sealed partial class PreviewViewModel : ObservableObject
         TabNavigationRequested?.Invoke(tab, new Uri("about:blank"));
     }
 
-    /// <summary>omp's browser tool opened a page (a cmux surface): a tab of its own, shown unless the user picked another.
-    /// Shown in place of a tab omp let go of while it was on screen, which then goes (<see cref="OnActiveTabChanged"/>).</summary>
-    public PreviewTab OpenAgentTab(string id)
+    /// <summary>
+    /// omp's browser tool opened a page (a cmux surface): a tab of its own, for the chat <paramref name="owner"/>. Shown
+    /// when <paramref name="reveal"/> (its chat is the one on screen) and the user did not pick another tab; else it opens
+    /// behind, the user's tab staying in front. Shown in place of a tab omp let go of while it was on screen, which then
+    /// goes (<see cref="OnActiveTabChanged"/>).
+    /// </summary>
+    public PreviewTab OpenAgentTab(string id, string? owner = null, bool reveal = true)
     {
-        var tab = Configure(new PreviewTab(id, isAgentTab: true));
-        var replaces = FollowsAgent && ActiveTab is { IsReleasedByAgent: true } released ? Tabs.IndexOf(released) : -1;
+        var tab = Configure(new PreviewTab(id, isAgentTab: true) { OwnerSessionId = owner });
+        var shows = reveal && FollowsAgent;
+        var replaces = shows && ActiveTab is { IsReleasedByAgent: true } released ? Tabs.IndexOf(released) : -1;
         if (replaces > 0) Tabs.Insert(replaces + 1, tab);
         else Tabs.Add(tab);
-        _agentTab = tab;
-        if (FollowsAgent) ActiveTab = tab;
+        if (reveal) _agentTab = tab;
+        if (shows) ActiveTab = tab;
         return tab;
     }
 
@@ -397,18 +402,20 @@ public sealed partial class PreviewViewModel : ObservableObject
         return false;
     }
 
-    /// <summary>omp shows <paramref name="tab"/> (opened or navigated it): the pane follows unless the user picked another tab.</summary>
-    public void ShowForAgent(PreviewTab tab)
+    /// <summary>omp shows <paramref name="tab"/> (opened or navigated it): the pane follows when <paramref name="reveal"/>
+    /// (its chat is on screen) unless the user picked another tab.</summary>
+    public void ShowForAgent(PreviewTab tab, bool reveal = true)
     {
-        if (tab.IsClosed) return;
+        if (tab.IsClosed || !reveal) return;
         _agentTab = tab;
         if (FollowsAgent) ActiveTab = tab;
     }
 
-    /// <summary>omp navigates <paramref name="tab"/>: like the address box when it is the active tab; the reason when refused.</summary>
-    public string? NavigateTabForAgent(PreviewTab tab, string address)
+    /// <summary>omp navigates <paramref name="tab"/>: like the address box when it is the active tab, in the background
+    /// otherwise; the reason when refused.</summary>
+    public string? NavigateTabForAgent(PreviewTab tab, string address, bool reveal = true)
     {
-        ShowForAgent(tab);
+        ShowForAgent(tab, reveal);
         if (tab == ActiveTab) return NavigateForAgent(address);
         if (!TryNormalize(address, out var uri, out var error)) return error;
         tab.Url = uri;

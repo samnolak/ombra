@@ -540,9 +540,11 @@ internal sealed class NightlyRuntime : IDisposable
             "user_pref(\"media.devices.unfocused.enabled\", true);",
         }) prefs.AppendLine(line);
         prefs.AppendLine($"user_pref(\"ui.systemUsesDarkTheme\", {(_darkTheme ? 1 : 0)});");
-        // A harness run (Platform/TestFocus.cs, set for what it starts): Nightly never activates itself to raise a window.
-        if (Environment.GetEnvironmentVariable(Platform.TestFocus.Variable) == "1")
-            prefs.AppendLine("user_pref(\"mozilla.widget.raise-on-setfocus\", false);");
+        // Nightly never activates itself to raise a window it focuses: the embedded runtime's windows are Ombra's panes,
+        // and an agent's click or a page's focus() in a hidden tab would make the invisible runtime the front app and take
+        // the keyboard from whatever the user works in (Gecko's SetFocus calls activateIgnoringOtherApps). Ombra alone
+        // decides which pane has the keys (NightlyRuntime.SetActive).
+        prefs.AppendLine("user_pref(\"mozilla.widget.raise-on-setfocus\", false);");
         File.WriteAllText(Path.Combine(_options.ProfileDirectory, "user.js"), prefs.ToString());
     }
 

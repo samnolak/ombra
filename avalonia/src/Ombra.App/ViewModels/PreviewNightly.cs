@@ -15,6 +15,10 @@ public sealed partial class PreviewViewModel
     [ObservableProperty]
     private bool _wantsNightly;
 
+    /// <summary>The engine draws a tab no one sees (the Nightly runtime: its panes render off screen while the agent
+    /// acts on them), so the agent's screenshot of a background tab needs no tab of the user's to change.</summary>
+    public bool DrawsHiddenTabs => UseNightly && OperatingSystem.IsMacOS();
+
     /// <summary>The engine was never chosen: the pane asks once whether pages may move to Nightly.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowNightlyFallback))]
