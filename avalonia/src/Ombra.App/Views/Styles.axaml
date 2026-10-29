@@ -372,16 +372,106 @@
     <Setter Property="Padding" Value="14,10" />
   </Style>
   <!-- The comments sent with a message: Codex's "3 annotations" pill under its images, right-aligned (surface 2, a
-       hairline, 28 high, full radius) -->
-  <Style Selector="Border.bubble-chip">
+       hairline, 28 high, full radius); a click lists them under it -->
+  <Style Selector="Button.bubble-chip">
     <Setter Property="Background" Value="{DynamicResource GuiSurface2}" />
     <Setter Property="BorderBrush" Value="{DynamicResource GuiCardBorder}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="{DynamicResource GuiRadiusFull}" />
     <Setter Property="MinHeight" Value="28" />
-    <Setter Property="Padding" Value="12,4" />
-    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextPrimary}" />
-    <Setter Property="TextElement.FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="Padding" Value="12,4,10,4" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="FontWeight" Value="Normal" />
+  </Style>
+  <Style Selector="Button.bubble-chip:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiCardBorder}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+  </Style>
+  <Style Selector="Button.bubble-chip ctl|Icon.chip-chevron">
+    <Setter Property="TextElement.Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <!-- Open: the chip looks pressed (fill 1) and its chevron turns up -->
+  <Style Selector="Button.bubble-chip.open">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+  </Style>
+  <Style Selector="Button.bubble-chip.open ctl|Icon.chip-chevron">
+    <Setter Property="RenderTransform" Value="rotate(180deg)" />
+  </Style>
+  <!-- Their list: one card (the chip's surface and hairline, radius 12, padding 4), a comment per item; an item opens
+       in place, one at a time -->
+  <Style Selector="Border.sent-comments">
+    <Setter Property="Background" Value="{DynamicResource GuiSurface2}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource GuiCardBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius12}" />
+    <Setter Property="Padding" Value="4" />
+    <!-- one width, open or not (the details wrap): an item opening never moves the card's left edge -->
+    <Setter Property="Width" Value="400" />
+  </Style>
+  <!-- An item: radius 8 inside the card's 12 with its 4 padding; hovered or open, the whole item (row and details) is
+       one fill-1 region -->
+  <Style Selector="Border.sent-comment">
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Border.sent-comment:pointerover, Border.sent-comment.expanded">
+    <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+  </Style>
+  <Style Selector="Button.sent-comment-row">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+    <Setter Property="Padding" Value="8" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="FontWeight" Value="Normal" />
+  </Style>
+  <Style Selector="Button.sent-comment-row:pointerover /template/ ContentPresenter#PART_ContentPresenter, Button.sent-comment-row:pressed /template/ ContentPresenter#PART_ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <!-- The note leads (body size, primary, two lines folded, all of it opened); what was marked is a caption under it -->
+  <Style Selector="TextBlock.sent-comment-note">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontS}" />
+    <Setter Property="LineHeight" Value="20" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="MaxLines" Value="2" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+  <Style Selector="Border.sent-comment.expanded TextBlock.sent-comment-note">
+    <Setter Property="MaxLines" Value="0" />
+  </Style>
+  <Style Selector="TextBlock.sent-comment-note.empty">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextTertiary}" />
+  </Style>
+  <Style Selector="TextBlock.sent-comment-where">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+  <!-- The details, in the note's column (row padding 8 + pin 20 + gap 10), the row's 8 on the right and below -->
+  <Style Selector="StackPanel.sent-comment-details">
+    <Setter Property="Margin" Value="38,0,8,8" />
+  </Style>
+  <!-- Key / value rows: the key a secondary label, the value the content (primary, mono, 17 px lines) -->
+  <Style Selector="TextBlock.sent-comment-key">
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="LineHeight" Value="17" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+  </Style>
+  <Style Selector="SelectableTextBlock.sent-comment-value">
+    <Setter Property="FontFamily" Value="{DynamicResource GuiFontMono}" />
+    <Setter Property="FontSize" Value="{DynamicResource GuiFontCaption}" />
+    <Setter Property="LineHeight" Value="17" />
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+  <!-- The one action of an open comment: the link colour with its arrow -->
+  <Style Selector="Button.link.sent-comment-open">
+    <Setter Property="Foreground" Value="{DynamicResource GuiTextLink}" />
   </Style>
   <Style Selector="Border.attachment.comment-chip">
     <Setter Property="Padding" Value="6,4,4,4" />

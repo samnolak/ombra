@@ -60,6 +60,14 @@ public sealed record LocalMark(string Id, string Note, MarkStatus Status = MarkS
             : Legacy is { Length: > 0 } && Image is null);
 }
 
+/// <summary>
+/// One comment of a sent message, read back from its request text (<see cref="LocalMarks.ParseSent"/>): its number in
+/// the list, the note, where it was left (a page's address, or the code place as sent), the page's address when it is on
+/// a page or the file and first line when it is on the code, and the details the request quoted (element, selector,
+/// box; the code's lines).
+/// </summary>
+public sealed record SentComment(int Number, string Note, string Where, string? Url, string? Path, int? Line, IReadOnlyList<string> Details);
+
 /// <summary>The one request format for marks, and the migration of drafts saved before marks.</summary>
 public static class LocalMarks
 {
@@ -203,6 +211,79 @@ public static class LocalMarks
             var p = new StringBuilder();
             for (var i = 0; i + 1 < s.Length; i += 2) p.Append(CultureInfo.InvariantCulture, $"{(i == 0 ? "M" : " L")}{s[i]} {s[i + 1]}");
             return p.ToString();
+        }
+    }
+
+    /// <summary>
+    /// The comments of a sent request's comments block (from <see cref="CodeMarker"/> or <see cref="PageMarker"/> on, as
+    /// <see cref="CodeBlock"/> and <see cref="PageBlock"/> write it), one by one, in the order sent. A note's later lines
+    /// stay with it; the closing instructions and a legacy block (no numbered comments) give none.
+    /// </summary>
+    public static IReadOnlyList<SentComment> ParseSent(string block)
+    {
+        var comments = new List<SentComment>();
+        string? url = null;
+        var code = false;
+        (int Number, StringBuilder Note, string Where, List<string> Details)? item = null;
+        foreach (var raw in block.Replace("\r\n", "\n").Split('\n'))
+        {
+            var line = raw.TrimEnd();
+            if (line.StartsWith(CodeMarker, StringComparison.Ordinal) || line.StartsWith(PageMarker, StringComparison.Ordinal))
+            {
+                Flush();
+                code = line.StartsWith(CodeMarker, StringComparison.Ordinal);
+                url = code ? null : line[PageMarker.Length..].Split(' ')[0].TrimEnd(',');
+            }
+            else if (line.StartsWith("Find these places", StringComparison.Ordinal) || line.StartsWith("Make the changes", StringComparison.Ordinal))
+                Flush();
+            else if (Numbered(line) is var (number, rest))
+            {
+                Flush();
+                var where = code ? rest : Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.Authority + u.AbsolutePath.TrimEnd('/') : url ?? "";
+                var note = rest;
+                // code: "path, line 3 (in the editor): note"; a sketch: "Sketch — see image 2: note"
+                if ((code || rest.StartsWith("Sketch", StringComparison.Ordinal)) && rest.IndexOf(": ", StringComparison.Ordinal) is var colon and > 0)
+                {
+                    if (code) where = rest[..colon];
+                    note = rest[(colon + 2)..];
+                }
+                item = (number, new StringBuilder(note == "(no note)" ? "" : note), where, []);
+            }
+            else if (item is { } it)
+            {
+                if (line.StartsWith("   ", StringComparison.Ordinal)) it.Details.Add(line[3..]);
+                else if (line.Length > 0 && it.Details.Count == 0) it.Note.Append('\n').Append(line);
+            }
+        }
+        Flush();
+        return comments;
+
+        void Flush()
+        {
+            if (item is not { } it) return;
+            item = null;
+            if (!code)
+            {
+                comments.Add(new SentComment(it.Number, it.Note.ToString().Trim(), it.Where, url, null, null, it.Details));
+                return;
+            }
+            // "path, line 3", "path, lines 3-5", "path" (the whole file), each maybe followed by " of the last commit…" / " (in …)"
+            var path = it.Where;
+            int? line = null;
+            if (path.IndexOf(", line", StringComparison.Ordinal) is var at and > 0)
+            {
+                var digits = new string(path[at..].SkipWhile(c => !char.IsAsciiDigit(c)).TakeWhile(char.IsAsciiDigit).ToArray());
+                if (int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var n)) line = n;
+                path = path[..at];
+            }
+            else if (path.IndexOf(" (", StringComparison.Ordinal) is var paren and > 0) path = path[..paren];
+            comments.Add(new SentComment(it.Number, it.Note.ToString().Trim(), it.Where, null, path, line, it.Details));
+        }
+
+        static (int, string)? Numbered(string line)
+        {
+            var dot = line.IndexOf(". ", StringComparison.Ordinal);
+            return dot is > 0 and < 4 && int.TryParse(line.AsSpan(0, dot), NumberStyles.None, CultureInfo.InvariantCulture, out var n) ? (n, line[(dot + 2)..]) : null;
         }
     }
 

@@ -629,12 +629,61 @@
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-              <!-- Page comments sent with the message: a pill under the images, like Codex's "3 annotations" -->
-              <Border Classes="bubble-chip" IsVisible="{Binding HasComments}" HorizontalAlignment="Right">
+              <!-- Comments sent with the message: a pill under the images, like Codex's "3 annotations"; a click lists them
+                   one by one, each with its pin number (as on the page and in the message box) -->
+              <Button Classes="bubble-chip" IsVisible="{Binding HasComments}" HorizontalAlignment="Right" Command="{Binding ToggleCommentsCommand}"
+                      Classes.open="{Binding IsCommentsOpen}"
+                      ToolTip.Tip="{Binding CommentsToggleTip}"
+                      AutomationProperties.Name="{Binding CommentsLabel}">
                 <StackPanel Orientation="Horizontal" Spacing="6">
                   <ctl:Icon Data="{StaticResource IconComment}" Size="16" />
                   <TextBlock Text="{Binding CommentsLabel}" VerticalAlignment="Center" />
+                  <ctl:Icon Classes="chip-chevron" Data="{StaticResource IconChevronDown}" Size="12" VerticalAlignment="Center" />
                 </StackPanel>
+              </Button>
+              <Border Classes="sent-comments" IsVisible="{Binding IsCommentsOpen}" MaxWidth="515" HorizontalAlignment="Right">
+                <ItemsControl ItemsSource="{Binding Comments}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:SentCommentViewModel">
+                      <Border Classes="sent-comment" Classes.expanded="{Binding IsExpanded}">
+                        <StackPanel>
+                          <Button Classes="sent-comment-row" Command="{Binding $parent[ItemsControl].((vm:UserRowViewModel)DataContext).ToggleCommentCommand}"
+                                  CommandParameter="{Binding}" AutomationProperties.Name="{Binding ToggleName}">
+                            <Grid ColumnDefinitions="Auto,*">
+                              <Border Classes="pin" VerticalAlignment="Top" Margin="0,0,10,0">
+                                <TextBlock Text="{Binding Number}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                              </Border>
+                              <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock Classes="sent-comment-note" Classes.empty="{Binding !HasNote}" Text="{Binding Note}" />
+                                <TextBlock Classes="sent-comment-where" Text="{Binding Where}" />
+                              </StackPanel>
+                            </Grid>
+                          </Button>
+                          <StackPanel Classes="sent-comment-details" IsVisible="{Binding IsExpanded}" Spacing="8">
+                            <ItemsControl ItemsSource="{Binding Fields}" IsVisible="{Binding HasFields}">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:SentCommentField">
+                                  <Grid ColumnDefinitions="72,*" Margin="0,0,0,2">
+                                    <TextBlock Classes="sent-comment-key" Text="{Binding Key}" />
+                                    <SelectableTextBlock Grid.Column="1" Classes="sent-comment-value" Text="{Binding Value}" />
+                                  </Grid>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <SelectableTextBlock Classes="sent-comment-value" Text="{Binding Quote}" IsVisible="{Binding HasQuote}" />
+                            <Button Classes="link sent-comment-open" IsVisible="{Binding CanOpen}" HorizontalAlignment="Left"
+                                    Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenSentCommentCommand}" CommandParameter="{Binding}">
+                              <StackPanel Orientation="Horizontal" Spacing="4">
+                                <TextBlock Text="{Binding OpenLabel}" VerticalAlignment="Center" />
+                                <ctl:Icon Data="{StaticResource IconExternal}" Size="12" VerticalAlignment="Center" />
+                              </StackPanel>
+                            </Button>
+                          </StackPanel>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
               </Border>
               <Border Classes="user-bubble" MaxWidth="515" HorizontalAlignment="Right" IsVisible="{Binding HasBubble}"
                       ContextFlyout="{StaticResource UserMessageMenu}">

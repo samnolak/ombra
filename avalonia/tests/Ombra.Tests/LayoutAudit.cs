@@ -23,7 +23,7 @@ internal static class LayoutAudit
     /// <summary>Buttons whose content is a left-aligned row on purpose (lists, menus, links).</summary>
     private static readonly string[] LeftAligned =
         ["menu-item", "session", "sidebar-action", "option", "tool-row", "link", "title", "todo-head", "thinking-toggle", "chip", "flat", "segment", "settings-nav",
-         "turn-files-toggle", "turn-file", "card-header", "turn-fold-head", "plug-open"];
+         "turn-files-toggle", "turn-file", "card-header", "turn-fold-head", "plug-open", "group-fold", "sent-comment-row"];
 
     public static List<Finding> Run(Window w, Control? scope = null)
     {

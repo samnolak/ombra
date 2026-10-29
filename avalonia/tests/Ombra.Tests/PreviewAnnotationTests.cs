@@ -3,6 +3,7 @@ using System.Text.Json;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Ombra.App;
 using Ombra.App.Controls;
 using Ombra.App.Localization;
@@ -595,6 +596,24 @@ public sealed class PreviewAnnotationTests
         Assert.Equal(Loc.F("{0} on {1}", Loc.F("{0} comments", 2), "localhost:5173"), row.CommentsLabel);
         row.ToggleFoldCommand.Execute(null);
         Assert.Equal(row.Text, row.DisplayText);
+        row.ToggleFoldCommand.Execute(null);
+
+        // The chip lists the comments one by one; a comment opens its details, one at a time
+        Assert.Equal(["Make it blue", "Less padding"], row.Comments.Select(c => c.Note));
+        Assert.False(row.IsCommentsOpen);
+        row.ToggleCommentsCommand.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+        var list = w.GetVisualDescendants().OfType<Border>().Single(b => b.Classes.Contains("sent-comments") && b.DataContext == row);
+        Assert.True(list.IsEffectivelyVisible);
+        row.ToggleCommentCommand.Execute(row.Comments[1]);
+        Assert.Equal([false, true], row.Comments.Select(c => c.IsExpanded));
+        Assert.Contains(row.Comments[1].Fields, f => f.Key == Loc.T("Selector") && f.Value == "main > p");
+        Assert.DoesNotContain(row.Comments[1].Fields, f => f.Value.StartsWith("<button", StringComparison.Ordinal)); // the caption names it
+        row.ToggleCommentCommand.Execute(row.Comments[0]);
+        Assert.Equal([true, false], row.Comments.Select(c => c.IsExpanded));
+        row.ToggleCommentCommand.Execute(row.Comments[0]);
+        Assert.All(row.Comments, c => Assert.False(c.IsExpanded));
+        row.ToggleCommentsCommand.Execute(null);
 
         // Comments alone: a first line says what to do (it also names a new session)
         while (vm.Phase != SessionPhase.Ready && DateTime.UtcNow < deadline) { Dispatcher.UIThread.RunJobs(); await Task.Delay(15); }

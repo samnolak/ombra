@@ -239,4 +239,13 @@ public sealed partial class MainViewModel
         if (m.Code is { } c) Files.OpenLinkCommand.Execute(new Controls.FileLink(c.Path, c.Line));
         else if (m.PageUri is not null) Preview.ShowMark(m);
     }
+
+    /// <summary>A comment sent with a message: its page in the Browser, or its file at its line in Files.</summary>
+    [RelayCommand]
+    private void OpenSentComment(SentCommentViewModel? comment)
+    {
+        if (comment?.Model is not { } c) return;
+        if (c.Url is { } url) OpenLink(url);
+        else if (c.Path is { } path) Files.OpenLinkCommand.Execute(new Controls.FileLink(path, c.Line));
+    }
 }

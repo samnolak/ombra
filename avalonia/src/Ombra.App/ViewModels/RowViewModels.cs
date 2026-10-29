@@ -133,6 +133,39 @@ public sealed partial class UserRowViewModel(UserItem item) : RowViewModel(item)
 
     public bool HasComments => CommentsAt >= 0;
 
+    private IReadOnlyList<SentCommentViewModel>? _comments;
+
+    /// <summary>The comments sent with the message, one by one: the chip opens their list, a comment opens its details.</summary>
+    public IReadOnlyList<SentCommentViewModel> Comments => _comments ??= LoadComments();
+
+    private SentCommentViewModel[] LoadComments()
+    {
+        if (CommentsAt is var at && at < 0) return [];
+        var sent = LocalMarks.ParseSent(Text[at..]);
+        var places = sent.Where(c => c.Url is not null).Select(c => c.Where).Distinct().Count();
+        return [.. sent.Select(c => new SentCommentViewModel(c, places > 1))];
+    }
+
+    /// <summary>The list of the comments under the chip is open.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CommentsToggleTip))]
+    private bool _isCommentsOpen;
+
+    public string CommentsToggleTip => IsCommentsOpen ? Loc.T("Hide the comments") : Loc.T("Show the comments");
+
+    [RelayCommand]
+    private void ToggleComments() => IsCommentsOpen = !IsCommentsOpen;
+
+    /// <summary>Opens <paramref name="comment"/>'s details (the others close: one is read at a time), or closes them.</summary>
+    [RelayCommand]
+    private void ToggleComment(SentCommentViewModel? comment)
+    {
+        if (comment is null) return;
+        var open = !comment.IsExpanded;
+        foreach (var c in Comments) c.IsExpanded = false;
+        comment.IsExpanded = open;
+    }
+
     /// <summary>What the user wrote (without the comments block, and without the line added when there were no words).</summary>
     private string OwnText
     {
@@ -184,6 +217,8 @@ public sealed partial class UserRowViewModel(UserItem item) : RowViewModel(item)
         OnPropertyChanged(nameof(DisplayText));
         OnPropertyChanged(nameof(HasComments));
         OnPropertyChanged(nameof(CommentsLabel));
+        _comments = null;
+        OnPropertyChanged(nameof(Comments));
         OnPropertyChanged(nameof(HasOwnText));
         OnPropertyChanged(nameof(HasBubble));
         OnPropertyChanged(nameof(FoldLabel));
