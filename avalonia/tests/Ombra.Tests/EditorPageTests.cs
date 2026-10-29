@@ -54,7 +54,7 @@ public sealed class EditorPageTests
         // Dirty dot, reorder, close: the buffer stays the workspace's
         page.ActiveTab.Document.Buffer.Insert(0, "x");
         Assert.True(page.ActiveTab.IsDirty);
-        page.MoveTabRightCommand.Execute(page.ActiveTab);
+        page.ActiveGroup.MoveTabRightCommand.Execute(page.ActiveTab);
         Assert.Equal(["b.txt", "a.txt"], page.Tabs.Select(t => t.Name));
         var a = page.ActiveTab;
         a.CloseCommand.Execute(null);

@@ -50,6 +50,8 @@ public sealed record OmpRuntimeOptions
     public bool? WatchGitRemotes { get; init; }
     /// <summary>How the message box sends: <c>enter</c> (default; Shift+Enter adds a line) or <c>mod-enter</c> (⌘/Ctrl+Enter sends, Enter adds a line).</summary>
     public string? SendKey { get; init; }
+    /// <summary>The editors' autosave: null/<c>off</c> (default), <c>delay</c> (1 s after the last edit) or <c>focus</c> (when the editor or the window loses focus).</summary>
+    public string? EditorAutosave { get; init; }
     /// <summary>Update manifest address (https, signed with the release key); unset = this client's release feed.</summary>
     public string? UpdateFeed { get; init; }
     /// <summary>Check the feed at every start and once a day, and get a newer version ready for the next restart or quit (default on).</summary>

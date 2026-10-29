@@ -198,6 +198,7 @@ var jobs = new Ombra.FakeOmp.FakeJobs(Respond);
 var planMode = new Ombra.FakeOmp.FakePlanMode(Emit, Respond, supported: scenario != "no-plan-mode");
 var hostTools = new Ombra.FakeOmp.FakeHostTools(Emit, Respond); // FakeHostTools.cs: set_host_tools, host_tool_* frames
 var btwGoal = new Ombra.FakeOmp.FakeBtwGoal(Emit, Respond, supported: scenario != "no-goal"); // FakeBtwGoal.cs: goal, btw*, goal_updated/btw_* frames
+var editorLsp = new Ombra.FakeOmp.FakeEditorLsp(); // FakeEditorLsp.cs: editor_document formatting, symbols, capabilities
 
 // Sessions like omp 18.2.0: <root>/<project>/<file>.jsonl with a title line and a session header (cwd).
 var sessionsRoot = Environment.GetEnvironmentVariable("FAKE_SESSION_DIR") ?? Path.Combine(Path.GetTempPath(), $"ombra-fake-{Environment.ProcessId}");
@@ -1203,11 +1204,11 @@ await foreach (var cmd in session.Commands.ReadAllAsync(session.Stopping))
             Respond(id, type);
             break;
         case "editor_document":
-            if (cmd?["action"]?.GetValue<string>() == "request")
-                Respond(id, type, error: "The fake engine does not run language servers");
-            else
-                Respond(id, type, new { });
+        {
+            var (editorData, editorError) = editorLsp.Handle(cmd);
+            Respond(id, type, editorData, editorError);
             break;
+        }
         case "get_state":
             // "todo-state-glitch": the second get_state (the first refresh after start) succeeds without data.
             stateCalls++;

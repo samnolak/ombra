@@ -164,6 +164,7 @@ public sealed class App : Application
             vm.NotificationsEnabled = options.Notifications ?? true;
             vm.WatchGitRemotes = options.WatchGitRemotes ?? true;
             vm.SendKey = options.SendKey == "mod-enter" ? "mod-enter" : "enter";
+            vm.EditorAutosaveMode = options.EditorAutosave is "delay" or "focus" ? options.EditorAutosave : "off";
             vm.LoadAgentBrowserEngine(options.AgentBrowserEngine);
             SetUpMenus(desktop, window, vm);
             if (OperatingSystem.IsMacOS()) Ombra.App.Nightly.NightlyAcceptance.StartIfRequested(window, vm); // OMBRA_NIGHTLY_ACCEPTANCE: development check only

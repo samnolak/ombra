@@ -402,8 +402,8 @@ public sealed class TeamUiTests
             {
                 calls++;
                 p?.Report(new ServerInstallProgress(ServerInstallStep.PreparingHost, null));
-                return Task.FromException<ServerInstallResult>(new ServerInstallException("Server install failed (exit 1).",
-                    "##OMBRA-STEP PreparingHost\ninstall FAILED: unsupported OS: Fedora 40 (Debian or Ubuntu required)"));
+                return Task.FromException<ServerInstallResult>(new ServerInstallException(ServerInstallFailure.UnsupportedOs, "Fedora 40 (Debian or Ubuntu required)",
+                    "##OMBRA-STEP PreparingHost\ninstall FAILED [unsupported-os]: Fedora 40 (Debian or Ubuntu required)"));
             };
             var createdWith = new List<string>();
             vm.Team.CreateOnServerAsync = (_, _, code) => { createdWith.Add(code); return Task.CompletedTask; };
@@ -411,8 +411,11 @@ public sealed class TeamUiTests
             await vm.Team.InstallServerCommand.ExecuteAsync(null);
             Settle(w);
             Assert.True(vm.Team.HasInstallFailed);
-            Assert.Equal("Server install failed (exit 1).", Named<SelectableTextBlock>(w, "InstallErrorText").Text);
-            Assert.Contains("unsupported OS", vm.Team.InstallLog);
+            Assert.Equal(Loc.T("This server's operating system is not supported. Use Debian or Ubuntu.") + "\nFedora 40 (Debian or Ubuntu required)",
+                Named<SelectableTextBlock>(w, "InstallErrorText").Text);
+            Assert.Contains("install FAILED [unsupported-os]", vm.Team.InstallLog);
+            Assert.Equal(Loc.T("The SSH key file does not exist. Choose your private key file."),
+                TeamViewModel.InstallErrorText(new ServerInstallException(ServerInstallFailure.MissingKey, null, null)));
             Assert.True(Named<SelectableTextBlock>(w, "InstallLogText").IsEffectivelyVisible);
             Assert.True(Named<Control>(w, "RetryInstallButton").IsEffectivelyVisible);
             Assert.Contains(vm.Team.InstallSteps, s => s.IsFailed);

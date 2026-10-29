@@ -14,9 +14,14 @@ export interface EditorDocumentCommand extends Omit<EditorDocumentSnapshot, "tex
 	languageId?: string;
 	baseHash?: string;
 	dirty?: boolean;
-	method?: "completion" | "hover" | "definition" | "rename" | "diagnostics";
+	method?: "completion" | "hover" | "definition" | "rename" | "diagnostics" | "formatting" | "rangeFormatting" | "documentSymbol" | "capabilities";
 	position?: { line: number; character: number };
+	/** rangeFormatting: where the range ends (position is its start). */
+	end?: { line: number; character: number };
 	newName?: string;
+	/** formatting / rangeFormatting: the editor's indentation. */
+	tabSize?: number;
+	insertSpaces?: boolean;
 }
 export type EditorCommand = EditorDocumentCommand
 	| { id?: string; type: "editor_trust"; trusted: boolean }
@@ -75,14 +80,16 @@ export class RpcEditorBridge {
 		if (!this.#trusted) throw new Error("Explicit project trust is required for language services");
 		const file = fileURLToPath(uri);
 		assertEditorDocumentTrusted(this.cwd, file);
-		const methods: Record<string, string> = { completion: "textDocument/completion", hover: "textDocument/hover", definition: "textDocument/definition", rename: "textDocument/rename", diagnostics: "textDocument/diagnostic" };
+		const methods: Record<string, string> = { completion: "textDocument/completion", hover: "textDocument/hover", definition: "textDocument/definition", rename: "textDocument/rename", diagnostics: "textDocument/diagnostic", formatting: "textDocument/formatting", rangeFormatting: "textDocument/rangeFormatting", documentSymbol: "textDocument/documentSymbol", capabilities: "" };
 		if (!command.method || !Object.hasOwn(methods, command.method)) throw new Error("Unsupported editor request");
-		if (command.method !== "diagnostics") {
-			const position = command.position;
+		const lines = document.text.split("\n");
+		const checkPosition = (position: { line: number; character: number } | undefined) => {
 			if (!position || !Number.isSafeInteger(position.line) || !Number.isSafeInteger(position.character) || position.line < 0 || position.character < 0) throw new Error("Invalid UTF-16 position");
-			const line = document.text.split("\n")[position.line];
+			const line = lines[position.line];
 			if (line === undefined || position.character > line.replace(/\r$/, "").length) throw new Error("Position outside document");
-		}
+		};
+		if (["completion", "hover", "definition", "rename"].includes(command.method)) checkPosition(command.position);
+		if (command.method === "rangeFormatting") { checkPosition(command.position); checkPosition(command.end); }
 		if (command.method === "rename" && (!command.newName || typeof command.newName !== "string")) throw new Error("Rename requires newName");
 		const server = getServersForFile(getConfig(this.cwd), file).find(([, config]) => !config.isLinter && !config.createClient);
 		if (!server) throw new Error(`No language server configured for ${document.languageId}`);
@@ -90,8 +97,22 @@ export class RpcEditorBridge {
 		assertEditorRevision(document, command.version, document.baseHash);
 		await syncContent(client, file, document.text, undefined, document.version, document.languageId);
 		let result: unknown;
-		if (command.method === "diagnostics") {
+		const formatOptions = {
+			tabSize: Number.isSafeInteger(command.tabSize) && command.tabSize! > 0 ? command.tabSize! : 4,
+			insertSpaces: command.insertSpaces !== false,
+		};
+		if (command.method === "capabilities") {
+			// What the editor may offer for this file: commands the server cannot answer are disabled with a reason.
+			const caps = client.serverCapabilities ?? {};
+			result = { formatting: !!caps.documentFormattingProvider, rangeFormatting: !!caps.documentRangeFormattingProvider, documentSymbol: !!caps.documentSymbolProvider, server: server[0] };
+		} else if (command.method === "diagnostics") {
 			result = await waitForDiagnostics(client, uri, { expectedDocumentVersion: command.version, timeoutMs: 5000 });
+		} else if (command.method === "formatting") {
+			result = await sendRequest(client, methods.formatting!, { textDocument: { uri }, options: formatOptions });
+		} else if (command.method === "rangeFormatting") {
+			result = await sendRequest(client, methods.rangeFormatting!, { textDocument: { uri }, range: { start: command.position, end: command.end }, options: formatOptions });
+		} else if (command.method === "documentSymbol") {
+			result = await sendRequest(client, methods.documentSymbol!, { textDocument: { uri } });
 		} else {
 			result = await sendRequest(client, methods[command.method]!, { textDocument: { uri }, position: command.position, ...(command.method === "rename" ? { newName: command.newName } : {}) });
 		}

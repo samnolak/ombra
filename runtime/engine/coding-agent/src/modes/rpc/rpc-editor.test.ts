@@ -345,6 +345,17 @@ describe("K7 canonical document coordination", () => {
 		await expect(bridge.handle({ ...snapshot, type: "editor_document", action: "request", method: "hover", position: { line: 0, character: 0 } })).rejects.toThrow("Stale");
 	});
 
+	test("formatting, symbols and capabilities are editor methods; range formatting checks both ends", async () => {
+		const bridge = new RpcEditorBridge(directory, () => {});
+		bridges.push(bridge);
+		await bridge.handle({ ...snapshot, type: "editor_document", action: "open" });
+		await bridge.handle({ type: "editor_trust", trusted: true });
+		const request = { ...snapshot, type: "editor_document" as const, action: "request" as const };
+		await expect(bridge.handle({ ...request, method: "rangeFormatting", position: { line: 0, character: 0 }, end: { line: 5, character: 0 } })).rejects.toThrow("Position outside document");
+		await expect(bridge.handle({ ...request, method: "rangeFormatting", position: { line: 0, character: 0 } })).rejects.toThrow("Invalid UTF-16 position");
+		await expect(bridge.handle({ ...request, method: "bogus" as never })).rejects.toThrow("Unsupported editor request");
+	});
+
 	test("explicit trust is separate from document opening and binds server configuration", () => {
 		requireEditorProjectTrust();
 		const config = { command: "typescript-language-server", args: ["--stdio"] };

@@ -92,6 +92,85 @@ public static class GitLineChanges
         for (var l = 0; l < added; l++) marks.Add(new LineChange(at + l + 1, kind));
     }
 
+    /// <summary>
+    /// A unified diff (<c>@@ -a,b +c,d @@</c> hunks with <paramref name="context"/> unchanged lines around each change) of
+    /// <paramref name="current"/> against <paramref name="baseText"/>, for the Editor page's diff vs HEAD (DiffView);
+    /// empty when they have the same lines. Line ends do not count, as in <see cref="Compute"/>.
+    /// </summary>
+    public static string UnifiedDiff(string baseText, string current, int context = 3)
+    {
+        var a = Lines(baseText);
+        var b = Lines(current);
+        // The edit script: ' ' kept, '-' removed (from a), '+' added (from b)
+        var ops = new List<(char Op, int A, int B)>();
+        var start = 0;
+        while (start < a.Length && start < b.Length && a[start] == b[start]) { ops.Add((' ', start, start)); start++; }
+        int endA = a.Length, endB = b.Length;
+        while (endA > start && endB > start && a[endA - 1] == b[endB - 1]) { endA--; endB--; }
+        int n = endA - start, m = endB - start;
+        if (n == 0 && m == 0) return "";
+        if ((long)(n + 1) * (m + 1) > MaxTable)
+        {
+            for (var i = 0; i < n; i++) ops.Add(('-', start + i, -1));
+            for (var j = 0; j < m; j++) ops.Add(('+', -1, start + j));
+        }
+        else
+        {
+            var table = new int[n + 1, m + 1];
+            for (var i = n - 1; i >= 0; i--)
+                for (var j = m - 1; j >= 0; j--)
+                    table[i, j] = a[start + i] == b[start + j] ? table[i + 1, j + 1] + 1 : Math.Max(table[i + 1, j], table[i, j + 1]);
+            int x = 0, y = 0;
+            while (x < n || y < m)
+            {
+                if (x < n && y < m && a[start + x] == b[start + y]) { ops.Add((' ', start + x, start + y)); x++; y++; }
+                else if (x < n && (y == m || table[x + 1, y] >= table[x, y + 1])) { ops.Add(('-', start + x, -1)); x++; }
+                else { ops.Add(('+', -1, start + y)); y++; }
+            }
+        }
+        for (var k = 0; k < a.Length - endA; k++) ops.Add((' ', endA + k, endB + k));
+
+        var text = new System.Text.StringBuilder();
+        var index = 0;
+        while (index < ops.Count)
+        {
+            while (index < ops.Count && ops[index].Op == ' ') index++;
+            if (index == ops.Count) break;
+            var first = Math.Max(0, index - context);
+            // The hunk takes in every later change fewer than 2×context kept lines away, then context lines after the last
+            var lastChange = index;
+            for (var k = index + 1; k < ops.Count && k - lastChange <= context * 2 + 1; k++)
+                if (ops[k].Op != ' ') lastChange = k;
+            var last = Math.Min(ops.Count - 1, lastChange + context);
+            int oldStart = -1, newStart = -1, oldCount = 0, newCount = 0;
+            var body = new System.Text.StringBuilder();
+            for (var k = first; k <= last; k++)
+            {
+                var (op, ia, ib) = ops[k];
+                if (op != '+') { if (oldStart < 0) oldStart = ia; oldCount++; }
+                if (op != '-') { if (newStart < 0) newStart = ib; newCount++; }
+                body.Append(op).Append(op == '+' ? b[ib] : a[ia]).Append('\n');
+            }
+            // An empty side starts at the line before (git's convention)
+            oldStart = oldStart < 0 ? OldBefore(ops, first) : oldStart + 1;
+            newStart = newStart < 0 ? NewBefore(ops, first) : newStart + 1;
+            text.Append($"@@ -{oldStart},{oldCount} +{newStart},{newCount} @@\n").Append(body);
+            index = last + 1;
+        }
+        return text.ToString();
+
+        static int OldBefore(List<(char Op, int A, int B)> ops, int at)
+        {
+            for (var k = at - 1; k >= 0; k--) if (ops[k].A >= 0) return ops[k].A + 1;
+            return 0;
+        }
+        static int NewBefore(List<(char Op, int A, int B)> ops, int at)
+        {
+            for (var k = at - 1; k >= 0; k--) if (ops[k].B >= 0) return ops[k].B + 1;
+            return 0;
+        }
+    }
+
     /// <summary>Lines without their ends; a final line break does not start another line.</summary>
     private static string[] Lines(string text)
     {

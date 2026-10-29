@@ -1,3 +1,4 @@
+using Ombra.App.Services.Documents;
 using System.Collections.ObjectModel;
 using Avalonia;
 using Avalonia.Styling;
@@ -447,6 +448,21 @@ public sealed partial class MainViewModel
         if (key is not ("enter" or "mod-enter") || key == SendKey) return;
         SendKey = key;
         Persist(o => o with { SendKey = key == "enter" ? null : key });
+    }
+
+    /// <summary>The editors' autosave (<see cref="EditorAutosave"/>): <c>off</c>, <c>delay</c> or <c>focus</c>. Saved when chosen.</summary>
+    [ObservableProperty] private string _editorAutosaveMode = EditorAutosave.Off;
+
+    public EditorAutosave EditorAutosave => field ??= new EditorAutosave(Documents);
+
+    partial void OnEditorAutosaveModeChanged(string value) => EditorAutosave.Mode = value;
+
+    [RelayCommand]
+    private void SetEditorAutosave(string? mode)
+    {
+        if (mode is not (EditorAutosave.Off or EditorAutosave.AfterDelay or EditorAutosave.OnFocusChange) || mode == EditorAutosaveMode) return;
+        EditorAutosaveMode = mode;
+        Persist(o => o with { EditorAutosave = mode == EditorAutosave.Off ? null : mode });
     }
 
     /// <summary>

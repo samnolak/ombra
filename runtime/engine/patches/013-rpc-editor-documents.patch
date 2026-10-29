@@ -9,10 +9,10 @@ Upstream-Status: Ombra-only RPC integration; generic recovery fixes are upstream
 
 diff --git a/src/modes/rpc/rpc-editor.test.ts b/src/modes/rpc/rpc-editor.test.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..7090430762874422ac096d5bfe7aaa64ed051c6a
+index 0000000000000000000000000000000000000000..6b816502be63d5701159d57cb05c4646492715de
 --- /dev/null
 +++ b/src/modes/rpc/rpc-editor.test.ts
-@@ -0,0 +1,358 @@
+@@ -0,0 +1,369 @@
 +import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 +import { createHash } from "node:crypto";
 +import { realpathSync } from "node:fs";
@@ -360,6 +360,17 @@ index 0000000000000000000000000000000000000000..7090430762874422ac096d5bfe7aaa64
 +		await expect(bridge.handle({ ...snapshot, type: "editor_document", action: "request", method: "hover", position: { line: 0, character: 0 } })).rejects.toThrow("Stale");
 +	});
 +
++	test("formatting, symbols and capabilities are editor methods; range formatting checks both ends", async () => {
++		const bridge = new RpcEditorBridge(directory, () => {});
++		bridges.push(bridge);
++		await bridge.handle({ ...snapshot, type: "editor_document", action: "open" });
++		await bridge.handle({ type: "editor_trust", trusted: true });
++		const request = { ...snapshot, type: "editor_document" as const, action: "request" as const };
++		await expect(bridge.handle({ ...request, method: "rangeFormatting", position: { line: 0, character: 0 }, end: { line: 5, character: 0 } })).rejects.toThrow("Position outside document");
++		await expect(bridge.handle({ ...request, method: "rangeFormatting", position: { line: 0, character: 0 } })).rejects.toThrow("Invalid UTF-16 position");
++		await expect(bridge.handle({ ...request, method: "bogus" as never })).rejects.toThrow("Unsupported editor request");
++	});
++
 +	test("explicit trust is separate from document opening and binds server configuration", () => {
 +		requireEditorProjectTrust();
 +		const config = { command: "typescript-language-server", args: ["--stdio"] };
@@ -373,10 +384,10 @@ index 0000000000000000000000000000000000000000..7090430762874422ac096d5bfe7aaa64
 +});
 diff --git a/src/modes/rpc/rpc-editor.ts b/src/modes/rpc/rpc-editor.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..5ea2933440a6e75d713e22573bbfcc8c3328221a
+index 0000000000000000000000000000000000000000..aaea9a6f6ebc567ee17d35dc57e9177fbda77cd6
 --- /dev/null
 +++ b/src/modes/rpc/rpc-editor.ts
-@@ -0,0 +1,120 @@
+@@ -0,0 +1,141 @@
 +import { randomUUID } from "node:crypto";
 +import { fileURLToPath } from "node:url";
 +import { applyWorkspaceEditWithLsp, getEditorLspClients, getOrCreateClient, notifySaved, sendNotification, sendRequest, syncContent } from "../../lsp/client";
@@ -393,9 +404,14 @@ index 0000000000000000000000000000000000000000..5ea2933440a6e75d713e22573bbfcc8c
 +	languageId?: string;
 +	baseHash?: string;
 +	dirty?: boolean;
-+	method?: "completion" | "hover" | "definition" | "rename" | "diagnostics";
++	method?: "completion" | "hover" | "definition" | "rename" | "diagnostics" | "formatting" | "rangeFormatting" | "documentSymbol" | "capabilities";
 +	position?: { line: number; character: number };
++	/** rangeFormatting: where the range ends (position is its start). */
++	end?: { line: number; character: number };
 +	newName?: string;
++	/** formatting / rangeFormatting: the editor's indentation. */
++	tabSize?: number;
++	insertSpaces?: boolean;
 +}
 +export type EditorCommand = EditorDocumentCommand
 +	| { id?: string; type: "editor_trust"; trusted: boolean }
@@ -454,14 +470,16 @@ index 0000000000000000000000000000000000000000..5ea2933440a6e75d713e22573bbfcc8c
 +		if (!this.#trusted) throw new Error("Explicit project trust is required for language services");
 +		const file = fileURLToPath(uri);
 +		assertEditorDocumentTrusted(this.cwd, file);
-+		const methods: Record<string, string> = { completion: "textDocument/completion", hover: "textDocument/hover", definition: "textDocument/definition", rename: "textDocument/rename", diagnostics: "textDocument/diagnostic" };
++		const methods: Record<string, string> = { completion: "textDocument/completion", hover: "textDocument/hover", definition: "textDocument/definition", rename: "textDocument/rename", diagnostics: "textDocument/diagnostic", formatting: "textDocument/formatting", rangeFormatting: "textDocument/rangeFormatting", documentSymbol: "textDocument/documentSymbol", capabilities: "" };
 +		if (!command.method || !Object.hasOwn(methods, command.method)) throw new Error("Unsupported editor request");
-+		if (command.method !== "diagnostics") {
-+			const position = command.position;
++		const lines = document.text.split("\n");
++		const checkPosition = (position: { line: number; character: number } | undefined) => {
 +			if (!position || !Number.isSafeInteger(position.line) || !Number.isSafeInteger(position.character) || position.line < 0 || position.character < 0) throw new Error("Invalid UTF-16 position");
-+			const line = document.text.split("\n")[position.line];
++			const line = lines[position.line];
 +			if (line === undefined || position.character > line.replace(/\r$/, "").length) throw new Error("Position outside document");
-+		}
++		};
++		if (["completion", "hover", "definition", "rename"].includes(command.method)) checkPosition(command.position);
++		if (command.method === "rangeFormatting") { checkPosition(command.position); checkPosition(command.end); }
 +		if (command.method === "rename" && (!command.newName || typeof command.newName !== "string")) throw new Error("Rename requires newName");
 +		const server = getServersForFile(getConfig(this.cwd), file).find(([, config]) => !config.isLinter && !config.createClient);
 +		if (!server) throw new Error(`No language server configured for ${document.languageId}`);
@@ -469,8 +487,22 @@ index 0000000000000000000000000000000000000000..5ea2933440a6e75d713e22573bbfcc8c
 +		assertEditorRevision(document, command.version, document.baseHash);
 +		await syncContent(client, file, document.text, undefined, document.version, document.languageId);
 +		let result: unknown;
-+		if (command.method === "diagnostics") {
++		const formatOptions = {
++			tabSize: Number.isSafeInteger(command.tabSize) && command.tabSize! > 0 ? command.tabSize! : 4,
++			insertSpaces: command.insertSpaces !== false,
++		};
++		if (command.method === "capabilities") {
++			// What the editor may offer for this file: commands the server cannot answer are disabled with a reason.
++			const caps = client.serverCapabilities ?? {};
++			result = { formatting: !!caps.documentFormattingProvider, rangeFormatting: !!caps.documentRangeFormattingProvider, documentSymbol: !!caps.documentSymbolProvider, server: server[0] };
++		} else if (command.method === "diagnostics") {
 +			result = await waitForDiagnostics(client, uri, { expectedDocumentVersion: command.version, timeoutMs: 5000 });
++		} else if (command.method === "formatting") {
++			result = await sendRequest(client, methods.formatting!, { textDocument: { uri }, options: formatOptions });
++		} else if (command.method === "rangeFormatting") {
++			result = await sendRequest(client, methods.rangeFormatting!, { textDocument: { uri }, range: { start: command.position, end: command.end }, options: formatOptions });
++		} else if (command.method === "documentSymbol") {
++			result = await sendRequest(client, methods.documentSymbol!, { textDocument: { uri } });
 +		} else {
 +			result = await sendRequest(client, methods[command.method]!, { textDocument: { uri }, position: command.position, ...(command.method === "rename" ? { newName: command.newName } : {}) });
 +		}

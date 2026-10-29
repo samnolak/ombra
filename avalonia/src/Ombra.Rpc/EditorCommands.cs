@@ -4,11 +4,14 @@ namespace Ombra.Rpc;
 
 public sealed record EditorDocumentSnapshot(string Uri, long Version, string Text, string LanguageId, string BaseHash, bool Dirty, bool Conflict);
 
+/// <summary>Extra fields of a language request: rangeFormatting's end, and the indentation formatting uses.</summary>
+public sealed record EditorRequestOptions(int? EndLine = null, int? EndCharacter = null, int? TabSize = null, bool? InsertSpaces = null);
+
 public static class EditorCommands
 {
     public static async Task<JsonElement> EditorDocumentAsync(this RpcConnection connection, string action,
         EditorDocumentSnapshot document, string? method = null, int line = 0, int character = 0,
-        string? newName = null, CancellationToken ct = default)
+        string? newName = null, CancellationToken ct = default, EditorRequestOptions? options = null)
     {
         var response = await connection.RequestAsync("editor_document", writer =>
         {
@@ -22,6 +25,15 @@ public static class EditorCommands
                 writer.WriteNumber("character", character);
                 writer.WriteEndObject();
                 if (newName is not null) writer.WriteString("newName", newName);
+                if (options?.EndLine is { } endLine)
+                {
+                    writer.WriteStartObject("end");
+                    writer.WriteNumber("line", endLine);
+                    writer.WriteNumber("character", options.EndCharacter ?? 0);
+                    writer.WriteEndObject();
+                }
+                if (options?.TabSize is { } tabSize) writer.WriteNumber("tabSize", tabSize);
+                if (options?.InsertSpaces is { } spaces) writer.WriteBoolean("insertSpaces", spaces);
             }
         }, ct: ct).ConfigureAwait(false);
         if (!response.Success) throw new RpcCommandException("editor_document", response.Error ?? "Editor request failed", response.Code);

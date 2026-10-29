@@ -2115,10 +2115,10 @@ index e19d6d1f7cb3ce27a5e2e3bca0b3bc6d05171bf5..88974bb1a0adf9089cb0023da3559d46
  
  // ============================================================================
 diff --git a/src/modes/rpc/wire/commands.ts b/src/modes/rpc/wire/commands.ts
-index 580eb02ec33a6dc1de5f78b4cfe5525f9654d0b5..1e730e35609ed6ab23b6bf4dad10d2d37660cf06 100644
+index 580eb02ec33a6dc1de5f78b4cfe5525f9654d0b5..c67a51f1b6061c33e23f1e9b29b5f25b8c8eed82 100644
 --- a/src/modes/rpc/wire/commands.ts
 +++ b/src/modes/rpc/wire/commands.ts
-@@ -38,6 +38,29 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+@@ -38,6 +38,30 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
  		params: { protocolVersion: "number.integer" },
  		result: { protocolVersion: "number.integer" },
  	},
@@ -2129,8 +2129,9 @@ index 580eb02ec33a6dc1de5f78b4cfe5525f9654d0b5..1e730e35609ed6ab23b6bf4dad10d2d3
 +			action: "'open' | 'change' | 'save' | 'close' | 'request'",
 +			uri: "string", version: "number.integer", "text?": "string", "languageId?": "string",
 +			"baseHash?": "string", "dirty?": "boolean", "conflict?": "boolean",
-+			"method?": "'completion' | 'hover' | 'definition' | 'rename' | 'diagnostics'",
-+			"position?": "EditorPosition", "newName?": "string",
++			"method?": "'completion' | 'hover' | 'definition' | 'rename' | 'diagnostics' | 'formatting' | 'rangeFormatting' | 'documentSymbol' | 'capabilities'",
++			"position?": "EditorPosition", "end?": "EditorPosition", "newName?": "string",
++			"tabSize?": "number.integer", "insertSpaces?": "boolean",
 +		},
 +		result: { version: "number.integer", result: "unknown", positionEncoding: "'utf-16'" },
 +	},
@@ -2148,7 +2149,7 @@ index 580eb02ec33a6dc1de5f78b4cfe5525f9654d0b5..1e730e35609ed6ab23b6bf4dad10d2d3
  	{
  		name: "prompt",
  		doc: "Submit a prompt; acknowledged once admitted, completed by its `prompt_result`.",
-@@ -45,8 +68,8 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+@@ -45,8 +69,8 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
  		result: "PromptAck",
  		completion: "prompt_result",
  	},
@@ -2159,7 +2160,7 @@ index 580eb02ec33a6dc1de5f78b4cfe5525f9654d0b5..1e730e35609ed6ab23b6bf4dad10d2d3
  	{
  		name: "remove_queued_message",
  		doc: "Remove one pending queued message by its queue-chip text.",
-@@ -64,6 +87,7 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+@@ -64,6 +88,7 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
  		name: "abort_and_prompt",
  		doc: "Abort the current run and submit a prompt; completed by its `prompt_result`.",
  		params: { message: "string", "images?": IMAGES },
@@ -2167,7 +2168,7 @@ index 580eb02ec33a6dc1de5f78b4cfe5525f9654d0b5..1e730e35609ed6ab23b6bf4dad10d2d3
  		completion: "prompt_result",
  	},
  	{
-@@ -104,6 +128,12 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+@@ -104,6 +129,12 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
  		params: { op: "GoalOp", "objective?": "string", "token_budget?": "number.integer" },
  		result: "GoalResult",
  	},
@@ -2180,7 +2181,7 @@ index 580eb02ec33a6dc1de5f78b4cfe5525f9654d0b5..1e730e35609ed6ab23b6bf4dad10d2d3
  	{
  		name: "set_ask_dialog",
  		doc: "Opt in to `ask` UI requests; returns the applied setting.",
-@@ -184,6 +214,25 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+@@ -184,6 +215,25 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
  		doc: "Send a message to a running subagent as its user.",
  		params: { subagentId: "string", message: "string" },
  	},
@@ -2206,7 +2207,7 @@ index 580eb02ec33a6dc1de5f78b4cfe5525f9654d0b5..1e730e35609ed6ab23b6bf4dad10d2d3
  	{
  		name: "live_start",
  		doc: "Start a live voice session bound to this session; returns the voice in use.",
-@@ -274,6 +323,12 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+@@ -274,6 +324,12 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
  		params: { "entryId?": "string" },
  		result: "CancellationResult",
  	},
@@ -2219,7 +2220,7 @@ index 580eb02ec33a6dc1de5f78b4cfe5525f9654d0b5..1e730e35609ed6ab23b6bf4dad10d2d3
  	{
  		name: "get_branch_messages",
  		doc: "List user messages that can be branched from.",
-@@ -304,7 +359,7 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+@@ -304,7 +360,7 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
  	{
  		name: "get_messages_page",
  		doc: "One stable page of messages.",
@@ -2228,7 +2229,7 @@ index 580eb02ec33a6dc1de5f78b4cfe5525f9654d0b5..1e730e35609ed6ab23b6bf4dad10d2d3
  		result: "MessagesPage",
  	},
  
-@@ -371,4 +426,40 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
+@@ -371,4 +427,40 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
  		result: { records: "BtwHistoryRecord[]" },
  		unwrap: "records",
  	},
@@ -2432,7 +2433,7 @@ index b00c3930004891e0eebd85b5e9d160e1989ea5d0..469edb4a0b9084d66c885b5abc725cc0
  			"SessionInfoUpdateEvent",
  			"ConfigUpdateEvent",
 diff --git a/src/modes/rpc/wire/rpc-wire.generated.ts b/src/modes/rpc/wire/rpc-wire.generated.ts
-index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..4e3e8b0e6d49eb0bbafdb646cf21890d2c4ac4d5 100644
+index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..462a11c95c99ba9dd0c15b2e47dc1990860171b9 100644
 --- a/src/modes/rpc/wire/rpc-wire.generated.ts
 +++ b/src/modes/rpc/wire/rpc-wire.generated.ts
 @@ -368,6 +368,11 @@ export interface ModelInfo {
@@ -2801,7 +2802,7 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..4e3e8b0e6d49eb0bbafdb646cf21890d
  
  /** Any frame the server writes to stdout (after reassembling `rpc_chunk` sequences), discriminated by `type`. */
  export type RpcServerFrame = RpcResponse | RpcHostRequest | RpcNotification;
-@@ -1462,6 +1704,43 @@ export interface NegotiateProtocolResult {
+@@ -1462,6 +1704,46 @@ export interface NegotiateProtocolResult {
  	protocolVersion: number;
  }
  
@@ -2814,9 +2815,12 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..4e3e8b0e6d49eb0bbafdb646cf21890d
 +	baseHash?: string;
 +	dirty?: boolean;
 +	conflict?: boolean;
-+	method?: "completion" | "hover" | "definition" | "rename" | "diagnostics";
++	method?: "completion" | "hover" | "definition" | "rename" | "diagnostics" | "formatting" | "rangeFormatting" | "documentSymbol" | "capabilities";
 +	position?: EditorPosition;
++	end?: EditorPosition;
 +	newName?: string;
++	tabSize?: number;
++	insertSpaces?: boolean;
 +}
 +
 +export interface EditorDocumentResult {
@@ -2845,7 +2849,7 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..4e3e8b0e6d49eb0bbafdb646cf21890d
  export interface PromptParams {
  	message: string;
  	/** Images attached to the message. */
-@@ -1524,6 +1803,13 @@ export interface GoalParams {
+@@ -1524,6 +1806,13 @@ export interface GoalParams {
  	token_budget?: number;
  }
  
@@ -2859,7 +2863,7 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..4e3e8b0e6d49eb0bbafdb646cf21890d
  export interface SetAskDialogParams {
  	enabled: boolean;
  }
-@@ -1605,6 +1891,24 @@ export interface SteerSubagentParams {
+@@ -1605,6 +1894,24 @@ export interface SteerSubagentParams {
  	message: string;
  }
  
@@ -2884,7 +2888,7 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..4e3e8b0e6d49eb0bbafdb646cf21890d
  export interface LiveStartParams {
  	voice?: string;
  	instructions?: string;
-@@ -1697,6 +2001,10 @@ export interface ForkParams {
+@@ -1697,6 +2004,10 @@ export interface ForkParams {
  	entryId?: string;
  }
  
@@ -2895,7 +2899,7 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..4e3e8b0e6d49eb0bbafdb646cf21890d
  export interface GetBranchMessagesResult {
  	messages: BranchMessage[];
  }
-@@ -1720,6 +2028,7 @@ export interface GetMessagesResult {
+@@ -1720,6 +2031,7 @@ export interface GetMessagesResult {
  export interface GetMessagesPageParams {
  	cursor?: string;
  	limit?: number;
@@ -2903,7 +2907,7 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..4e3e8b0e6d49eb0bbafdb646cf21890d
  }
  
  export interface GetLoginProvidersResult {
-@@ -1788,16 +2097,47 @@ export interface GetBtwHistoryResult {
+@@ -1788,16 +2100,47 @@ export interface GetBtwHistoryResult {
  	records: BtwHistoryRecord[];
  }
  
@@ -2954,7 +2958,7 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..4e3e8b0e6d49eb0bbafdb646cf21890d
  	abort_and_restore_queue: { params: undefined; result: AbortAndRestoreQueueResult };
  	new_session: { params: NewSessionParams; result: CancellationResult };
  	open_session: { params: OpenSessionParams; result: OpenSessionResult };
-@@ -1805,6 +2145,7 @@ export interface RpcWireCommands {
+@@ -1805,6 +2148,7 @@ export interface RpcWireCommands {
  	set_fast_mode: { params: SetFastModeParams; result: FastModeResult };
  	set_slow_mode: { params: SetSlowModeParams; result: SetSlowModeResult };
  	goal: { params: GoalParams; result: GoalResult };
@@ -2962,7 +2966,7 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..4e3e8b0e6d49eb0bbafdb646cf21890d
  	set_ask_dialog: { params: SetAskDialogParams; result: SetAskDialogResult };
  	get_available_commands: { params: undefined; result: GetAvailableCommandsResult };
  	get_entries: { params: GetEntriesParams; result: SessionEntries };
-@@ -1818,6 +2159,9 @@ export interface RpcWireCommands {
+@@ -1818,6 +2162,9 @@ export interface RpcWireCommands {
  	get_subagent_messages: { params: GetSubagentMessagesParams; result: SubagentMessages };
  	cancel_subagent: { params: CancelSubagentParams; result: CancelSubagentResult };
  	steer_subagent: { params: SteerSubagentParams; result: undefined };
@@ -2972,7 +2976,7 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..4e3e8b0e6d49eb0bbafdb646cf21890d
  	live_start: { params: LiveStartParams; result: LiveStartResult };
  	live_stop: { params: undefined; result: undefined };
  	live_mute: { params: LiveMuteParams; result: LiveMuteResult };
-@@ -1842,6 +2186,7 @@ export interface RpcWireCommands {
+@@ -1842,6 +2189,7 @@ export interface RpcWireCommands {
  	switch_session: { params: SwitchSessionParams; result: CancellationResult };
  	branch: { params: BranchParams; result: BranchResult };
  	fork: { params: ForkParams; result: CancellationResult };
@@ -2980,7 +2984,7 @@ index 067aaa4f4796d8b3bea89b371cf6d64fe4a1a485..4e3e8b0e6d49eb0bbafdb646cf21890d
  	get_branch_messages: { params: undefined; result: GetBranchMessagesResult };
  	get_last_assistant_text: { params: undefined; result: GetLastAssistantTextResult };
  	set_session_name: { params: SetSessionNameParams; result: undefined };
-@@ -1857,4 +2202,9 @@ export interface RpcWireCommands {
+@@ -1857,4 +2205,9 @@ export interface RpcWireCommands {
  	btw: { params: BtwParams; result: BtwResult };
  	btw_cancel: { params: BtwCancelParams; result: BtwCancelResult };
  	get_btw_history: { params: undefined; result: GetBtwHistoryResult };

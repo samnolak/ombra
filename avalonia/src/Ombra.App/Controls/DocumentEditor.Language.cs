@@ -53,10 +53,19 @@ public sealed partial class DocumentEditor
 
     private void SubscribeLanguageService()
     {
-        if (_subscribedService is not null) _subscribedService.DiagnosticsChanged -= DiagnosticsChanged;
+        if (_subscribedService is not null)
+        {
+            _subscribedService.DiagnosticsChanged -= DiagnosticsChanged;
+            _subscribedService.Changed -= LanguageServiceChanged;
+        }
         _subscribedService = _attached ? LanguageService : null;
-        if (_subscribedService is not null) _subscribedService.DiagnosticsChanged += DiagnosticsChanged;
+        if (_subscribedService is not null)
+        {
+            _subscribedService.DiagnosticsChanged += DiagnosticsChanged;
+            _subscribedService.Changed += LanguageServiceChanged;
+        }
         LoadDiagnostics();
+        _ = RefreshCapabilitiesAsync();
     }
 
     private void LoadDiagnostics()

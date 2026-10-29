@@ -13,6 +13,7 @@
 
 ### Added
 
+- `editor_document` requests also take `formatting` and `rangeFormatting` (with `end`, `tabSize`, `insertSpaces`; the result is the server's `TextEdit[]`, applied by the host), `documentSymbol`, and `capabilities`, which starts the file's language server and answers whether it formats documents, ranges and lists symbols, so a host can disable what the server cannot do.
 - `eval.probePython` setting (default off): the session checks once at start (cached per folder and interpreter) whether the Python eval backend can start; when it cannot, the `eval` tool offers only `js` in its schema and says why in one line, and a `py` call names the reason instead of "disabled".
 - `wait.maxHeadlessMs` setting (default 0 = off): in a session without a UI (print/json runs), `wait` returns after this many milliseconds with "Still running after N s (headless wait limit)", the running job ids and how to cancel them, instead of blocking up to 30 minutes.
 - `edit.seenFromEditResults` setting (default off): lines a hashline edit wrote count as displayed for the file's new tag, even where the edit result elides them, so a follow-up edit anchored inside a just-written block needs no re-read. Rows an edit result shows already counted; untouched lines it did not show still need a read.

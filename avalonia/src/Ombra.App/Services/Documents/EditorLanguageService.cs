@@ -5,6 +5,12 @@ using Ombra.Rpc;
 
 namespace Ombra.App.Services.Documents;
 
+/// <summary>What a file's language server answers besides completion, hover, definition, rename and diagnostics.</summary>
+public sealed record EditorCapabilities(bool Formatting, bool RangeFormatting, bool DocumentSymbol)
+{
+    public static EditorCapabilities None { get; } = new(false, false, false);
+}
+
 /// <summary>Application-owned document transport. The engine's existing LSP client is the only server owner.</summary>
 public sealed class EditorLanguageService : IDisposable
 {
@@ -14,6 +20,7 @@ public sealed class EditorLanguageService : IDisposable
     private readonly Dictionary<string, JsonElement> _diagnostics = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CancellationTokenSource> _diagnosticRequests = new(StringComparer.Ordinal);
     private readonly Dictionary<(RpcConnection Connection, string Uri), (long Version, string Hash, bool Dirty, bool Conflict, string Language)> _sent = [];
+    private readonly Dictionary<(int Generation, string Language), EditorCapabilities> _capabilities = [];
     private readonly SemaphoreSlim _sync = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
     // Made on the UI thread: RPC continuations return to this dispatcher, even after another Application is created.
@@ -107,13 +114,13 @@ public sealed class EditorLanguageService : IDisposable
     public bool TryGetDiagnostics(string uri, out JsonElement diagnostics) => _diagnostics.TryGetValue(uri, out diagnostics);
 
     public async Task<JsonElement?> RequestAsync(WorkspaceDocument document, string method, int line, int character,
-        string? newName = null, CancellationToken ct = default)
+        string? newName = null, CancellationToken ct = default, EditorRequestOptions? options = null)
     {
         if (!IsTrusted) throw new InvalidOperationException("Explicit project trust is required for language services");
         var connection = _connection ?? throw new InvalidOperationException("Editor disconnected");
         var generation = _generation;
         var snapshot = await SynchronizeAsync(connection, document, "sync", ct).ConfigureAwait(false);
-        var response = await connection.EditorDocumentAsync("request", snapshot, method, line, character, newName, ct).ConfigureAwait(false);
+        var response = await connection.EditorDocumentAsync("request", snapshot, method, line, character, newName, ct, options).ConfigureAwait(false);
         return await _ui.InvokeAsync<JsonElement?>(() =>
         {
             if (_disposed || generation != _generation || (!IsTrusted) || (method != "rename" && document.Revision != snapshot.Version)) return null;
@@ -128,6 +135,30 @@ public sealed class EditorLanguageService : IDisposable
             }
             return result.ValueKind == JsonValueKind.Null ? null : result;
         });
+    }
+
+    /// <summary>
+    /// What the file's language server can do (format document / selection, list symbols), asked once per language
+    /// while trust and the connection last. Null: no language services (untrusted, disconnected, or no server).
+    /// </summary>
+    public async Task<EditorCapabilities?> CapabilitiesAsync(WorkspaceDocument document, CancellationToken ct = default)
+    {
+        if (!IsTrusted || _connection is null) return null;
+        var key = (_generation, string.IsNullOrEmpty(document.LanguageId) ? "plaintext" : document.LanguageId);
+        if (_capabilities.TryGetValue(key, out var known)) return known;
+        EditorCapabilities? found;
+        try
+        {
+            var result = await RequestAsync(document, "capabilities", 0, 0, ct: ct);
+            found = result is { ValueKind: JsonValueKind.Object } value
+                ? new EditorCapabilities(Flag(value, "formatting"), Flag(value, "rangeFormatting"), Flag(value, "documentSymbol"))
+                : null;
+        }
+        catch (Exception error) when (error is RpcCommandException or InvalidDataException) { found = EditorCapabilities.None; }
+        if (found is not null) _capabilities[key] = found;
+        return found;
+
+        static bool Flag(JsonElement value, string name) => value.TryGetProperty(name, out var flag) && flag.ValueKind == JsonValueKind.True;
     }
 
     private void Observe(WorkspaceDocument document)

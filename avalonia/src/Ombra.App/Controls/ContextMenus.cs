@@ -19,8 +19,9 @@ using Ombra.ClientCore;
 namespace Ombra.App.Controls;
 
 /// <summary>One row of a menu made in code: what it says, its icon (a geometry key in Icons*.axaml), what it does with
-/// the control the menu was opened on, and when it can (asked each time the menu opens; always when null).</summary>
-public sealed record MenuAction(string Label, string Icon, Action<Control> Run, Func<bool>? CanRun = null);
+/// the control the menu was opened on, when it can (asked each time the menu opens; always when null), and why not
+/// (the disabled row's tooltip).</summary>
+public sealed record MenuAction(string Label, string Icon, Action<Control> Run, Func<bool>? CanRun = null, Func<string?>? Reason = null);
 
 /// <summary>
 /// Right-click menus made in code (code blocks, links, the code viewer), in the same shape as the ones in XAML: a
@@ -254,7 +255,13 @@ public static class ContextMenus
                 }
                 flyout.Content = panel;
             }
-            foreach (var (row, action) in rows) row.IsEnabled = action.CanRun?.Invoke() ?? true;
+            foreach (var (row, action) in rows)
+            {
+                row.IsEnabled = action.CanRun?.Invoke() ?? true;
+                // A disabled row says why (e.g. "the language server can't format"), on hover
+                ToolTip.SetTip(row, row.IsEnabled ? null : action.Reason?.Invoke());
+                ToolTip.SetShowOnDisabled(row, true);
+            }
         };
         return flyout;
     }

@@ -70,6 +70,11 @@ public sealed partial class DocumentEditor : UserControl
             new MenuAction(Loc.T("Comment…"), "IconComment", _ => BeginMark(), () => WorkspaceDocument is not null),
             new MenuAction(Loc.T("Share with team…"), "IconShare", _ => BeginShare(), () => WorkspaceDocument is not null),
             null,
+            new MenuAction(Loc.T("Format document"), "IconCode", async _ => await FormatAsync(false),
+                () => FormatUnavailableReason(false) is null, () => FormatUnavailableReason(false)),
+            new MenuAction(Loc.T("Format selection"), "IconCode", async _ => await FormatAsync(true),
+                () => FormatUnavailableReason(true) is null, () => FormatUnavailableReason(true)),
+            null,
             new MenuAction(Loc.T("Select all"), "IconSelect", _ => { Editor.TextArea.Focus(); Editor.SelectAll(); }));
         ToolTip.SetTip(Editor, "Multiple carets: Ctrl+Alt-click. Column editing: Alt/Option-drag. Escape returns to one caret.");
         var toolbar = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4) };
@@ -125,6 +130,7 @@ public sealed partial class DocumentEditor : UserControl
         Grid.SetRow(Editor, 1);
         body.Children.Add(Editor);
         BuildLanguageUi(body);
+        BuildFormatUi();
         Grid.SetRow(_status, 4);
         body.Children.Add(_status);
         Content = body;
@@ -209,6 +215,7 @@ public sealed partial class DocumentEditor : UserControl
         RefreshFoldings();
         GoToTargetLine();
         LoadDiagnostics();
+        _ = RefreshCapabilitiesAsync();
     }
 
     private void DocumentChanged(WorkspaceDocument document)
@@ -322,6 +329,12 @@ public sealed partial class DocumentEditor : UserControl
         else if (e.KeyModifiers == command && e.Key == Key.H) { e.Handled = true; ShowSearch(true); }
         else if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.G) { e.Handled = true; ShowGoToLine(); }
         else if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.Space) { e.Handled = true; await RequestLanguageAsync("completion"); }
+        else if (e.KeyModifiers == (KeyModifiers.Shift | KeyModifiers.Alt) && e.Key == Key.F)
+        {
+            // ⇧⌥F: the selection when there is one the server can format, else the whole file
+            e.Handled = true;
+            await FormatAsync(Editor.SelectionLength > 0 && FormatUnavailableReason(true) is null);
+        }
         else if (e.KeyModifiers == KeyModifiers.None && e.Key == Key.F12) { e.Handled = true; await RequestLanguageAsync("definition"); }
         else if (e.KeyModifiers == KeyModifiers.None && e.Key == Key.F2) { e.Handled = true; ShowRename(); }
         else if (e.KeyModifiers == (command | KeyModifiers.Shift) && e.Key == Key.Space) { e.Handled = true; await RequestLanguageAsync("hover"); }

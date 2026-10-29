@@ -157,13 +157,52 @@ public sealed partial class TeamViewModel
                 Error = Loc.T("An Ombra server is already installed there. Enter its certificate pin and a bootstrap code under “My server is already installed”.");
                 return;
             }
-            InstallError = e.Message;
+            InstallError = e is ServerInstallException ie ? InstallErrorText(ie) : e.Message;
         }
         finally
         {
             _installCts = null;
             IsBusy = false;
         }
+    }
+
+    /// <summary>The localized sentence for a failed install: what went wrong and what to do, with the installer's detail when it helps.</summary>
+    internal static string InstallErrorText(ServerInstallException e)
+    {
+        var text = e.Reason switch
+        {
+            ServerInstallFailure.InvalidAddress => Loc.T("The server address must be an IP address or a domain name."),
+            ServerInstallFailure.InvalidPort => Loc.T("The SSH port must be between 1 and 65535."),
+            ServerInstallFailure.InvalidUser => Loc.T("The SSH user name is not valid."),
+            ServerInstallFailure.MissingKey => Loc.T("The SSH key file does not exist. Choose your private key file."),
+            ServerInstallFailure.InvalidAcmeEmail => Loc.T("The email for the TLS certificate is not valid."),
+            ServerInstallFailure.AcmeEmailNeedsDomain => Loc.T("An email for the TLS certificate only applies to a domain name."),
+            ServerInstallFailure.SshNotStarted => Loc.T("Could not start ssh. Check that OpenSSH is installed on this computer."),
+            ServerInstallFailure.SshFailed => Loc.T("Could not connect over SSH. Check the address, port, user and key."),
+            ServerInstallFailure.NoSudo => Loc.T("The SSH user is not root and has no passwordless sudo. Connect as root or allow sudo without a password."),
+            ServerInstallFailure.UnsupportedOs => Loc.T("This server's operating system is not supported. Use Debian or Ubuntu."),
+            ServerInstallFailure.UnsupportedArch => Loc.T("This server's processor is not supported. Use an x86_64 server."),
+            ServerInstallFailure.AlreadyInstalled => Loc.T("An Ombra server is already installed there. Enter its certificate pin and a bootstrap code under “My server is already installed”."),
+            ServerInstallFailure.LowDisk => Loc.T("Not enough free disk space on the server: 4 GB are needed. Free some space and try again."),
+            ServerInstallFailure.PackagesFailed => Loc.T("Could not install system packages on the server. Check its internet access and apt sources, then try again."),
+            ServerInstallFailure.DockerInstallFailed => Loc.T("Could not install Docker on the server. Install Docker Engine with Compose v2 and try again."),
+            ServerInstallFailure.DownloadFailed => Loc.T("The server could not download the Ombra release. Check its internet access and try again."),
+            ServerInstallFailure.ChecksumMismatch => Loc.T("The downloaded release is damaged (checksum mismatch). Try again."),
+            ServerInstallFailure.SignatureInvalid => Loc.T("The downloaded release is not signed by Ombra. The install was stopped."),
+            ServerInstallFailure.ReleaseInvalid => Loc.T("The downloaded release could not be unpacked. Try again."),
+            ServerInstallFailure.MissingOutput => e.Detail switch
+            {
+                "tls-pin" => Loc.T("The installer finished without reporting the certificate pin. See the installer log."),
+                "server-id" => Loc.T("The installer finished without reporting the server ID. See the installer log."),
+                _ => Loc.T("The installer finished without reporting a bootstrap code. See the installer log."),
+            },
+            _ => Loc.T("The server install failed. See the installer log."),
+        };
+        // The detail names the OS, the architecture, the URL or the error itself: kept for the ones it explains
+        var withDetail = e.Reason is ServerInstallFailure.SshNotStarted or ServerInstallFailure.SshFailed or ServerInstallFailure.UnsupportedOs
+            or ServerInstallFailure.UnsupportedArch or ServerInstallFailure.LowDisk or ServerInstallFailure.PackagesFailed
+            or ServerInstallFailure.DockerInstallFailed or ServerInstallFailure.DownloadFailed or ServerInstallFailure.InstallFailed;
+        return withDetail && e.Detail is { Length: > 0 } d ? text + "\n" + d : text;
     }
 
     [RelayCommand] private void CancelInstall() => _installCts?.Cancel();

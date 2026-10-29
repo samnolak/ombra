@@ -211,6 +211,7 @@ public sealed partial class MainWindow : Window
             _caretIdle.Stop();
             StopCaretBlink(visible: false);
             Vm?.SetWindowActive(false);
+            Vm?.EditorAutosave.WindowDeactivated(); // autosave "on focus change"
         };
         PropertyChanged += (_, e) =>
         {

@@ -1713,9 +1713,12 @@ export interface EditorDocumentParams {
 	baseHash?: string;
 	dirty?: boolean;
 	conflict?: boolean;
-	method?: "completion" | "hover" | "definition" | "rename" | "diagnostics";
+	method?: "completion" | "hover" | "definition" | "rename" | "diagnostics" | "formatting" | "rangeFormatting" | "documentSymbol" | "capabilities";
 	position?: EditorPosition;
+	end?: EditorPosition;
 	newName?: string;
+	tabSize?: number;
+	insertSpaces?: boolean;
 }
 
 export interface EditorDocumentResult {

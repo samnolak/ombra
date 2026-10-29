@@ -8,10 +8,10 @@ Why: Ombra embeds multiple concurrent sessions and renders native host features.
 Upstream-status: Ombra-only integration; generic safety fixes are upstream candidates.
 
 diff --git a/CHANGELOG.md b/CHANGELOG.md
-index 8b299b899693383a7e24627e841874cafae0bd9a..e2d15b53bddbd1f51c951918526faad694c7d4d4 100644
+index 8b299b899693383a7e24627e841874cafae0bd9a..4b11af446f4a3b6da752dcf2788507647b945e67 100644
 --- a/CHANGELOG.md
 +++ b/CHANGELOG.md
-@@ -2,6 +2,67 @@
+@@ -2,6 +2,68 @@
  
  ## [Unreleased]
  
@@ -26,6 +26,7 @@ index 8b299b899693383a7e24627e841874cafae0bd9a..e2d15b53bddbd1f51c951918526faad6
 +
 +### Added
 +
++- `editor_document` requests also take `formatting` and `rangeFormatting` (with `end`, `tabSize`, `insertSpaces`; the result is the server's `TextEdit[]`, applied by the host), `documentSymbol`, and `capabilities`, which starts the file's language server and answers whether it formats documents, ranges and lists symbols, so a host can disable what the server cannot do.
 +- `eval.probePython` setting (default off): the session checks once at start (cached per folder and interpreter) whether the Python eval backend can start; when it cannot, the `eval` tool offers only `js` in its schema and says why in one line, and a `py` call names the reason instead of "disabled".
 +- `wait.maxHeadlessMs` setting (default 0 = off): in a session without a UI (print/json runs), `wait` returns after this many milliseconds with "Still running after N s (headless wait limit)", the running job ids and how to cancel them, instead of blocking up to 30 minutes.
 +- `edit.seenFromEditResults` setting (default off): lines a hashline edit wrote count as displayed for the file's new tag, even where the edit result elides them, so a follow-up edit anchored inside a just-written block needs no re-read. Rows an edit result shows already counted; untouched lines it did not show still need a read.
@@ -79,7 +80,7 @@ index 8b299b899693383a7e24627e841874cafae0bd9a..e2d15b53bddbd1f51c951918526faad6
  ## [18.12.2] - 2026-10-18
  
  ### Added
-@@ -786,7 +847,6 @@
+@@ -786,7 +848,6 @@
  - Corrected tool behavior and configuration documentation for `read`, background `bash`, Python evaluation, replace editing, goal removal, and `advisor.immuneTurns`.
  - Fixed custom glob backends from hanging indefinitely; scans now respect the tool deadline and report incomplete results when necessary.
  - Fixed `--resume <path>` from silently creating a new session for a missing path; it now reports the missing path, consistent with `--fork <path>` and `--resume <id>`.

@@ -2467,6 +2467,23 @@
                 <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
                 <Grid ColumnDefinitions="*,Auto">
                   <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
+                    <TextBlock Text="{loc:T 'Autosave'}" FontWeight="Medium" />
+                    <TextBlock Classes="muted" Text="{loc:T 'Saves files edited in the editor a second after the last change, or when you leave the editor or the window. A file changed on disk meanwhile is never overwritten'}" TextWrapping="Wrap" />
+                  </StackPanel>
+                  <Border Grid.Column="1" Classes="segmented" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="2">
+                      <Button x:Name="AutosaveOff" Classes="segment" Classes.selected="{Binding EditorAutosaveMode, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=off}"
+                              Content="{loc:T 'Off'}" Command="{Binding SetEditorAutosaveCommand}" CommandParameter="off" AutomationProperties.Name="{loc:T 'Autosave: off'}" />
+                      <Button x:Name="AutosaveDelay" Classes="segment" Classes.selected="{Binding EditorAutosaveMode, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=delay}"
+                              Content="{loc:T 'After 1 s'}" Command="{Binding SetEditorAutosaveCommand}" CommandParameter="delay" AutomationProperties.Name="{loc:T 'Autosave: after a delay'}" />
+                      <Button x:Name="AutosaveFocus" Classes="segment" Classes.selected="{Binding EditorAutosaveMode, Converter={x:Static ObjectConverters.Equal}, ConverterParameter=focus}"
+                              Content="{loc:T 'On focus change'}" Command="{Binding SetEditorAutosaveCommand}" CommandParameter="focus" AutomationProperties.Name="{loc:T 'Autosave: on focus change'}" />
+                    </StackPanel>
+                  </Border>
+                </Grid>
+                <Border Height="1" Background="{DynamicResource GuiBorderSoft}" />
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Spacing="2" VerticalAlignment="Center" Margin="0,0,16,0">
                     <TextBlock Text="{loc:T 'Agent uses the Ombra browser'}" FontWeight="Medium" />
                     <TextBlock Classes="muted" TextWrapping="Wrap"
                                Text="{loc:T 'omp opens web pages in the preview pane, where you see them, instead of its own browser. All chats restart together once their current work finishes'}" />

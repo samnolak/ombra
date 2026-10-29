@@ -17,15 +17,30 @@ public sealed record ServerInstallProgress(ServerInstallStep Step, string? Line)
 /// <summary>What <see cref="TeamSession.ConnectAsync"/> needs: <paramref name="Server"/> as its address, <paramref name="Pin"/> (IP mode only).</summary>
 public sealed record ServerInstallResult(string Server, string? Pin, string BootstrapCode, string ServerId);
 
-/// <summary>The install failed; <see cref="Log"/> holds the last lines of the output with the code and pin redacted.</summary>
-public class ServerInstallException(string message, string? log) : Exception(message)
+/// <summary>Why an install failed; the App turns it into a localized sentence.</summary>
+public enum ServerInstallFailure
 {
+    InvalidAddress, InvalidPort, InvalidUser, MissingKey, InvalidAcmeEmail, AcmeEmailNeedsDomain,
+    SshNotStarted, SshFailed, NoSudo, UnsupportedOs, UnsupportedArch, AlreadyInstalled, LowDisk, PackagesFailed,
+    DockerInstallFailed, DownloadFailed, ChecksumMismatch, SignatureInvalid, ReleaseInvalid, InstallFailed, MissingOutput,
+}
+
+/// <summary>
+/// The install failed for <see cref="Reason"/>. <see cref="Detail"/> is the redacted reason line (for <see cref="ServerInstallFailure.MissingOutput"/>
+/// one of <c>bootstrap-code</c>, <c>tls-pin</c>, <c>server-id</c>); <see cref="Log"/> holds the last lines of the output with the code and pin redacted.
+/// <see cref="Exception.Message"/> is English, for logs only.
+/// </summary>
+public class ServerInstallException(ServerInstallFailure reason, string? detail, string? log)
+    : Exception(detail is { Length: > 0 } ? $"Server install failed ({reason}): {detail}" : $"Server install failed ({reason}).")
+{
+    public ServerInstallFailure Reason { get; } = reason;
+    public string? Detail { get; } = detail;
     public string? Log { get; } = log;
 }
 
 /// <summary>The host already runs an Ombra server: connect to it with its pin and a bootstrap code instead.</summary>
 public sealed class ServerAlreadyInstalledException(string? log)
-    : ServerInstallException("An Ombra server is already installed on this host. Use \"My server is already installed\" with its pin and a bootstrap code.", log);
+    : ServerInstallException(ServerInstallFailure.AlreadyInstalled, null, log);
 
 /// <summary>
 /// Installs <see cref="TeamServerRelease"/> on a Debian/Ubuntu x86_64 host over the system OpenSSH client: one bash
@@ -89,7 +104,7 @@ public sealed partial class TeamServerInstaller
                 if (PinRe().Match(line) is { Success: true } p) pin = p.Groups[1].Value.ToLowerInvariant();
                 if (ServerIdRe().Match(line) is { Success: true } s) serverId = s.Groups[1].Value;
                 if (EndpointRe().Match(line) is { Success: true } e) endpoint = e.Groups[1].Value;
-                if (line.Contains("install FAILED", StringComparison.Ordinal)) { failed = true; failLine ??= line; }
+                if (line.Contains(FailedMarker, StringComparison.Ordinal)) { failed = true; failLine ??= line; }
                 if (AlreadyRe().IsMatch(line)) already = true;
                 var safe = Redact(line);
                 if (ErrorRe().IsMatch(safe)) errorLine = safe;
@@ -101,7 +116,7 @@ public sealed partial class TeamServerInstaller
 
         using var proc = new Process { StartInfo = psi };
         try { proc.Start(); }
-        catch (Exception ex) { throw new ServerInstallException("Could not start ssh: " + ex.Message, null); }
+        catch (Exception ex) { throw new ServerInstallException(ServerInstallFailure.SshNotStarted, ex.Message, null); }
 
         using var reg = ct.Register(() => { try { proc.Kill(entireProcessTree: true); } catch { } });
         var outTask = Pump(proc.StandardOutput, OnLine);
@@ -120,23 +135,26 @@ public sealed partial class TeamServerInstaller
         if (already) throw new ServerAlreadyInstalledException(Log());
         if (failed || proc.ExitCode != 0)
         {
-            string? reason;
-            lock (gate) reason = failLine is { } f ? Redact(f) : errorLine;
-            if (reason is not null)
+            string? tagged, untagged;
+            lock (gate) { tagged = failLine is { } f ? Redact(f) : null; untagged = errorLine; }
+            var reason = ServerInstallFailure.InstallFailed;
+            string? detail = untagged;
+            if (tagged is not null && FailRe().Match(tagged) is { Success: true } m)
             {
-                var at = reason.IndexOf("install FAILED:", StringComparison.Ordinal);
-                if (at >= 0) reason = reason[(at + "install FAILED:".Length)..];
-                reason = reason.Trim();
-                if (reason.Length > 200) reason = reason[..200] + "…";
+                reason = m.Groups[1].Success ? ReasonForTag(m.Groups[1].Value) : ServerInstallFailure.InstallFailed;
+                detail = m.Groups[2].Value;
             }
-            var msg = reason is { Length: > 0 } ? "Server install failed: " + reason
-                : proc.ExitCode == 255 ? "SSH connection failed (exit 255): check the address, user, port and key."
-                : "Server install failed" + (proc.ExitCode != 0 ? $" (exit {proc.ExitCode.ToString(CultureInfo.InvariantCulture)})" : "") + ".";
-            throw new ServerInstallException(msg, Log());
+            else if (proc.ExitCode == 255) reason = ServerInstallFailure.SshFailed;
+            detail = detail?.Trim();
+            if (detail is { Length: > 200 }) detail = detail[..200] + "…";
+            if (detail is { Length: 0 }) detail = null;
+            if (reason == ServerInstallFailure.InstallFailed && detail is null && proc.ExitCode != 0)
+                detail = "exit " + proc.ExitCode.ToString(CultureInfo.InvariantCulture);
+            throw new ServerInstallException(reason, detail, Log());
         }
-        if (code is null) throw new ServerInstallException("The installer finished without a bootstrap code.", Log());
-        if (ipMode && pin is null) throw new ServerInstallException("The installer finished without a TLS pin.", Log());
-        if (serverId is null) throw new ServerInstallException("The installer finished without a server id.", Log());
+        if (code is null) throw new ServerInstallException(ServerInstallFailure.MissingOutput, "bootstrap-code", Log());
+        if (ipMode && pin is null) throw new ServerInstallException(ServerInstallFailure.MissingOutput, "tls-pin", Log());
+        if (serverId is null) throw new ServerInstallException(ServerInstallFailure.MissingOutput, "server-id", Log());
 
         progress?.Report(new ServerInstallProgress(ServerInstallStep.Done, null));
         var server = endpoint ?? "https://" + (request.Address.Contains(':') ? "[" + request.Address + "]" : request.Address);
@@ -156,6 +174,25 @@ public sealed partial class TeamServerInstaller
         while (await reader.ReadLineAsync() is { } line) onLine(line);
     }
 
+    private const string FailedMarker = "install FAILED";
+
+    /// <summary>The script's <c>fail &lt;tag&gt;</c> tags; an unknown tag is a plain <see cref="ServerInstallFailure.InstallFailed"/>.</summary>
+    internal static ServerInstallFailure ReasonForTag(string tag) => tag switch
+    {
+        "no-sudo" => ServerInstallFailure.NoSudo,
+        "unsupported-os" => ServerInstallFailure.UnsupportedOs,
+        "unsupported-arch" => ServerInstallFailure.UnsupportedArch,
+        "already-installed" => ServerInstallFailure.AlreadyInstalled,
+        "low-disk" => ServerInstallFailure.LowDisk,
+        "packages" => ServerInstallFailure.PackagesFailed,
+        "docker" => ServerInstallFailure.DockerInstallFailed,
+        "download" => ServerInstallFailure.DownloadFailed,
+        "checksum" => ServerInstallFailure.ChecksumMismatch,
+        "signature" => ServerInstallFailure.SignatureInvalid,
+        "release" => ServerInstallFailure.ReleaseInvalid,
+        _ => ServerInstallFailure.InstallFailed,
+    };
+
     internal static IReadOnlyList<string> SshArguments(ServerInstallRequest r) =>
     [
         "-i", r.SshKeyPath, "-p", r.SshPort.ToString(CultureInfo.InvariantCulture),
@@ -164,18 +201,20 @@ public sealed partial class TeamServerInstaller
         "--", r.SshUser + "@" + r.Address, "bash -s",
     ];
 
-    /// <summary>Checks the request; true for IP mode. Throws <see cref="ArgumentException"/> before anything runs.</summary>
+    /// <summary>Checks the request; true for IP mode. Throws <see cref="ServerInstallException"/> before anything runs.</summary>
     internal static bool Validate(ServerInstallRequest r)
     {
         ArgumentNullException.ThrowIfNull(r);
         var ip = IPAddress.TryParse(r.Address, out var addr) && addr.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6;
-        if (!ip && !DomainRe().IsMatch(r.Address ?? "")) throw new ArgumentException("The server address must be an IP address or a domain name.", nameof(r));
-        if (r.SshPort is < 1 or > 65535) throw new ArgumentException("The SSH port must be between 1 and 65535.", nameof(r));
-        if (!UserRe().IsMatch(r.SshUser ?? "")) throw new ArgumentException("The SSH user name is not valid.", nameof(r));
-        if (string.IsNullOrEmpty(r.SshKeyPath) || !File.Exists(r.SshKeyPath)) throw new ArgumentException("The SSH key file does not exist.", nameof(r));
+        if (!ip && !DomainRe().IsMatch(r.Address ?? "")) throw Invalid(ServerInstallFailure.InvalidAddress);
+        if (r.SshPort is < 1 or > 65535) throw Invalid(ServerInstallFailure.InvalidPort);
+        if (!UserRe().IsMatch(r.SshUser ?? "")) throw Invalid(ServerInstallFailure.InvalidUser);
+        if (string.IsNullOrEmpty(r.SshKeyPath) || !File.Exists(r.SshKeyPath)) throw Invalid(ServerInstallFailure.MissingKey);
         if (r.AcmeEmail is { Length: > 0 } email && (ip || !EmailRe().IsMatch(email)))
-            throw new ArgumentException(ip ? "An ACME email only applies to a domain." : "The ACME email is not valid.", nameof(r));
+            throw Invalid(ip ? ServerInstallFailure.AcmeEmailNeedsDomain : ServerInstallFailure.InvalidAcmeEmail);
         return ip;
+
+        static ServerInstallException Invalid(ServerInstallFailure reason) => new(reason, null, null);
     }
 
     /// <summary>Single-quotes <paramref name="s"/> for bash.</summary>
@@ -202,18 +241,18 @@ public sealed partial class TeamServerInstaller
 
     // Runs as the SSH user; root work goes through sudo -n. Step markers go to stdout; errors to stderr with exit 1.
     private const string Script = """
-        fail() { echo "install FAILED: $*" >&2; exit 1; }
+        fail() { local tag=$1; shift; echo "install FAILED [$tag]: $*" >&2; exit 1; }
         step() { echo "##OMBRA-STEP $1"; }
         if [ "$(id -u)" = 0 ]; then SUDO=(); else
-          command -v sudo >/dev/null 2>&1 || fail "user is not root and sudo is not installed"
-          sudo -n true 2>/dev/null || fail "user is not root and has no passwordless sudo (sudo -n)"
+          command -v sudo >/dev/null 2>&1 || fail no-sudo "user is not root and sudo is not installed"
+          sudo -n true 2>/dev/null || fail no-sudo "user is not root and has no passwordless sudo (sudo -n)"
           SUDO=(sudo -n)
         fi
         step PreparingHost
-        [ -r /etc/os-release ] || fail "unsupported OS: /etc/os-release missing (Debian or Ubuntu required)"
+        [ -r /etc/os-release ] || fail unsupported-os "/etc/os-release missing (Debian or Ubuntu required)"
         . /etc/os-release
-        case " ${ID:-} ${ID_LIKE:-} " in *" debian "*|*" ubuntu "*) ;; *) fail "unsupported OS: ${PRETTY_NAME:-unknown} (Debian or Ubuntu required)";; esac
-        [ "$(uname -m)" = x86_64 ] || fail "unsupported architecture: $(uname -m) (x86_64 required)"
+        case " ${ID:-} ${ID_LIKE:-} " in *" debian "*|*" ubuntu "*) ;; *) fail unsupported-os "${PRETTY_NAME:-unknown} (Debian or Ubuntu required)";; esac
+        [ "$(uname -m)" = x86_64 ] || fail unsupported-arch "$(uname -m) (x86_64 required)"
         MARK=/var/lib/ombra-ssh-install.incomplete
         if [ -e /etc/ombra ] && "${SUDO[@]}" test -e "$MARK"; then
           echo "removing the unfinished install left by an earlier attempt"
@@ -228,43 +267,43 @@ public sealed partial class TeamServerInstaller
           "${SUDO[@]}" rm -rf /etc/ombra /etc/ombra-offline /opt/ombra /var/lib/ombra /etc/cron.daily/ombra-backup /etc/periodic/daily/ombra-backup "$MARK" || true
           echo "unfinished install removed"
         fi
-        if [ -e /etc/ombra ]; then echo "##OMBRA-ALREADY-INSTALLED"; fail "an Ombra server is already installed (/etc/ombra exists)"; fi
+        if [ -e /etc/ombra ]; then echo "##OMBRA-ALREADY-INSTALLED"; fail already-installed "an Ombra server is already installed (/etc/ombra exists)"; fi
         free_kb=$(df -Pk / | awk 'NR==2{print $4}')
-        [ "${free_kb:-0}" -ge 4194304 ] || fail "not enough free disk space on / (4 GB required)"
+        [ "${free_kb:-0}" -ge 4194304 ] || fail low-disk "$((${free_kb:-0} / 1048576)) GB free on / (4 GB required)"
         export DEBIAN_FRONTEND=noninteractive
         pkgs=()
         for t in curl openssl; do command -v "$t" >/dev/null 2>&1 || pkgs+=("$t"); done
         [ -d /etc/ssl/certs ] && [ -n "$(ls -A /etc/ssl/certs 2>/dev/null)" ] || pkgs+=(ca-certificates)
         if [ ${#pkgs[@]} -gt 0 ] || ! command -v docker >/dev/null 2>&1 || ! "${SUDO[@]}" docker compose version >/dev/null 2>&1; then
-          "${SUDO[@]}" apt-get update -q || fail "apt-get update failed"
+          "${SUDO[@]}" apt-get update -q || fail packages "apt-get update failed"
         fi
-        if [ ${#pkgs[@]} -gt 0 ]; then "${SUDO[@]}" apt-get install -y -q "${pkgs[@]}" || fail "could not install ${pkgs[*]}"; fi
+        if [ ${#pkgs[@]} -gt 0 ]; then "${SUDO[@]}" apt-get install -y -q "${pkgs[@]}" || fail packages "could not install ${pkgs[*]}"; fi
         if ! command -v docker >/dev/null 2>&1 || ! "${SUDO[@]}" docker compose version >/dev/null 2>&1; then
           "${SUDO[@]}" apt-get install -y -q docker.io docker-compose-v2 \
             || "${SUDO[@]}" apt-get install -y -q docker.io docker-compose-plugin \
-            || { [ "$OMBRA_NEED_DOCKER" = 0 ] || fail "could not install Docker Engine and Compose v2"; }
+            || { [ "$OMBRA_NEED_DOCKER" = 0 ] || fail docker "could not install Docker Engine and Compose v2"; }
           "${SUDO[@]}" systemctl enable --now docker >/dev/null 2>&1 || true
         fi
         SYSTEMD=()
         if ! "${SUDO[@]}" docker compose version >/dev/null 2>&1; then
-          [ "$OMBRA_NEED_DOCKER" = 0 ] || fail "Docker Compose v2 is not available"
+          [ "$OMBRA_NEED_DOCKER" = 0 ] || fail docker "Docker Compose v2 is not available"
           SYSTEMD=(--systemd)
         fi
         step Downloading
-        work=$("${SUDO[@]}" mktemp -d /root/ombra-install.XXXXXX) || fail "could not create a work directory"
+        work=$("${SUDO[@]}" mktemp -d /root/ombra-install.XXXXXX) || fail host "could not create a work directory"
         "${SUDO[@]}" chmod 700 "$work"
         cleanup() { case "$work" in /root/ombra-install.?*) "${SUDO[@]}" rm -rf -- "$work";; esac; }
         trap cleanup EXIT
-        "${SUDO[@]}" curl -fsSL --proto '=https' --retry 3 -o "$work/release.tar.gz" "$OMBRA_URL" || fail "download failed: $OMBRA_URL"
+        "${SUDO[@]}" curl -fsSL --proto '=https' --retry 3 -o "$work/release.tar.gz" "$OMBRA_URL" || fail download "$OMBRA_URL"
         step Verifying
-        echo "$OMBRA_SHA256  $work/release.tar.gz" | "${SUDO[@]}" sha256sum -c --quiet - || fail "release checksum mismatch"
+        echo "$OMBRA_SHA256  $work/release.tar.gz" | "${SUDO[@]}" sha256sum -c --quiet - || fail checksum "release checksum mismatch"
         printf '%s' "$OMBRA_PUBKEY" | "${SUDO[@]}" tee "$work/release.pub" >/dev/null
-        "${SUDO[@]}" tar -xzf "$work/release.tar.gz" -C "$work" || fail "could not unpack the release"
+        "${SUDO[@]}" tar -xzf "$work/release.tar.gz" -C "$work" || fail release "could not unpack the release"
         rel="$work/ombra-server-$OMBRA_VERSION"
-        "${SUDO[@]}" test -f "$rel/SHA256SUMS" || fail "release layout unexpected"
+        "${SUDO[@]}" test -f "$rel/SHA256SUMS" || fail release "release layout unexpected"
         "${SUDO[@]}" openssl dgst -sha256 -verify "$work/release.pub" -signature "$rel/SHA256SUMS.sig" "$rel/SHA256SUMS" >/dev/null \
-          || fail "release signature does not verify"
-        "${SUDO[@]}" bash -c 'cd "$1" && sha256sum -c --quiet SHA256SUMS' _ "$rel" || fail "release files do not match SHA256SUMS"
+          || fail signature "release signature does not verify"
+        "${SUDO[@]}" bash -c 'cd "$1" && sha256sum -c --quiet SHA256SUMS' _ "$rel" || fail checksum "release files do not match SHA256SUMS"
         step Installing
         "${SUDO[@]}" install -d -m 755 /var/lib
         ( umask 077; "${SUDO[@]}" touch "$MARK" ) && "${SUDO[@]}" chmod 600 "$MARK"
@@ -299,4 +338,8 @@ public sealed partial class TeamServerInstaller
 
     [GeneratedRegex(@"already installed|/etc/ombra (?:already )?exists", RegexOptions.IgnoreCase)]
     private static partial Regex AlreadyRe();
+
+    // "install FAILED [tag]: detail"; the tag is optional (install.sh's own failures have none)
+    [GeneratedRegex(@"install FAILED(?: \[([a-z-]+)\])?:?\s*(.*)$")]
+    private static partial Regex FailRe();
 }

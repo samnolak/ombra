@@ -56,6 +56,9 @@ public sealed class WorkspaceDocument
         }
     }
     public event Action<WorkspaceDocument>? Changed;
+    /// <summary>An editor showing this buffer lost the keyboard (autosave "on focus change", <see cref="EditorAutosave"/>).</summary>
+    public event Action<WorkspaceDocument>? EditorFocusLeft;
+    public void NoteEditorFocusLeft() => EditorFocusLeft?.Invoke(this);
     /// <summary>Keep mine needs the changed disk text that the next save will replace.</summary>
     public bool CanKeepMine => HasConflict && _conflictDisk is not null;
 

@@ -104,8 +104,9 @@ public sealed class TeamServerInstallerTests : IDisposable
     [Fact]
     public async Task MissingPinInIpMode_Throws()
     {
-        await Assert.ThrowsAsync<ServerInstallException>(() =>
+        var ex = await Assert.ThrowsAsync<ServerInstallException>(() =>
             Fake($"serverId: s\nbootstrap code: {Code}\n").InstallAsync(new("203.0.113.7", "root", 22, _key), null, default));
+        Assert.Equal((ServerInstallFailure.MissingOutput, "tls-pin"), (ex.Reason, ex.Detail));
     }
 
     [Fact]
@@ -138,28 +139,60 @@ public sealed class TeamServerInstallerTests : IDisposable
         const string err = "Error response from daemon: failed to resolve reference \"docker.io/library/postgres:17-alpine\": tls: x509: certificate signed by unknown authority";
         var ex = await Assert.ThrowsAsync<ServerInstallException>(() =>
             Fake($"##OMBRA-STEP Installing\nbootstrap code: {Code}\n{err}\n", exit: 1).InstallAsync(new("203.0.113.7", "root", 22, _key), null, default));
-        Assert.StartsWith("Server install failed: Error response from daemon", ex.Message);
+        Assert.Equal((ServerInstallFailure.InstallFailed, err), (ex.Reason, ex.Detail));
         Assert.Contains(err, ex.Log);
         Assert.DoesNotContain(Code, ex.Log);
 
         var ex2 = await Assert.ThrowsAsync<ServerInstallException>(() =>
             Fake("some error first\ninstall FAILED: compose up\n", exit: 1).InstallAsync(new("203.0.113.7", "root", 22, _key), null, default));
-        Assert.Equal("Server install failed: compose up", ex2.Message);
+        Assert.Equal((ServerInstallFailure.InstallFailed, "compose up"), (ex2.Reason, ex2.Detail));
+
+        var ssh = await Assert.ThrowsAsync<ServerInstallException>(() =>
+            Fake("root@203.0.113.7: Permission denied (publickey).\n", exit: 255).InstallAsync(new("203.0.113.7", "root", 22, _key), null, default));
+        Assert.Equal((ServerInstallFailure.SshFailed, "root@203.0.113.7: Permission denied (publickey)."), (ssh.Reason, ssh.Detail));
+
+        var bare = await Assert.ThrowsAsync<ServerInstallException>(() =>
+            Fake("", exit: 7).InstallAsync(new("203.0.113.7", "root", 22, _key), null, default));
+        Assert.Equal((ServerInstallFailure.InstallFailed, "exit 7"), (bare.Reason, bare.Detail));
     }
 
     [Theory]
-    [InlineData("203.0.113.7; rm -rf /", "root", 22, true, null)]
-    [InlineData("$(reboot).example.com", "root", 22, true, null)]
-    [InlineData("203.0.113.7", "Root;x", 22, true, null)]
-    [InlineData("203.0.113.7", "root", 0, true, null)]
-    [InlineData("203.0.113.7", "root", 70000, true, null)]
-    [InlineData("203.0.113.7", "root", 22, false, null)]
-    [InlineData("team.example.com", "root", 22, true, "a'$(reboot)'@example.com")]
-    public async Task InvalidInputs_RejectedBeforeSsh(string address, string user, int port, bool keyExists, string? email)
+    [InlineData("no-sudo", ServerInstallFailure.NoSudo)]
+    [InlineData("unsupported-os", ServerInstallFailure.UnsupportedOs)]
+    [InlineData("unsupported-arch", ServerInstallFailure.UnsupportedArch)]
+    [InlineData("low-disk", ServerInstallFailure.LowDisk)]
+    [InlineData("packages", ServerInstallFailure.PackagesFailed)]
+    [InlineData("docker", ServerInstallFailure.DockerInstallFailed)]
+    [InlineData("download", ServerInstallFailure.DownloadFailed)]
+    [InlineData("checksum", ServerInstallFailure.ChecksumMismatch)]
+    [InlineData("signature", ServerInstallFailure.SignatureInvalid)]
+    [InlineData("release", ServerInstallFailure.ReleaseInvalid)]
+    [InlineData("host", ServerInstallFailure.InstallFailed)]
+    [InlineData("something-new", ServerInstallFailure.InstallFailed)]
+    public async Task FailureTag_MapsToReason(string tag, ServerInstallFailure reason)
+    {
+        var ex = await Assert.ThrowsAsync<ServerInstallException>(() =>
+            Fake($"##OMBRA-STEP PreparingHost\ninstall FAILED [{tag}]: Fedora 40 (Debian or Ubuntu required)\n", exit: 1)
+                .InstallAsync(new("203.0.113.7", "root", 22, _key), null, default));
+        Assert.Equal((reason, "Fedora 40 (Debian or Ubuntu required)"), (ex.Reason, ex.Detail));
+        if (tag != "something-new") Assert.Contains($"fail {tag} ", Stdin); // the script really uses the tag
+    }
+
+    [Theory]
+    [InlineData("203.0.113.7; rm -rf /", "root", 22, true, null, ServerInstallFailure.InvalidAddress)]
+    [InlineData("$(reboot).example.com", "root", 22, true, null, ServerInstallFailure.InvalidAddress)]
+    [InlineData("203.0.113.7", "Root;x", 22, true, null, ServerInstallFailure.InvalidUser)]
+    [InlineData("203.0.113.7", "root", 0, true, null, ServerInstallFailure.InvalidPort)]
+    [InlineData("203.0.113.7", "root", 70000, true, null, ServerInstallFailure.InvalidPort)]
+    [InlineData("203.0.113.7", "root", 22, false, null, ServerInstallFailure.MissingKey)]
+    [InlineData("team.example.com", "root", 22, true, "a'$(reboot)'@example.com", ServerInstallFailure.InvalidAcmeEmail)]
+    [InlineData("203.0.113.7", "root", 22, true, "me@example.com", ServerInstallFailure.AcmeEmailNeedsDomain)]
+    public async Task InvalidInputs_RejectedBeforeSsh(string address, string user, int port, bool keyExists, string? email, ServerInstallFailure reason)
     {
         var installer = Fake(IpOutput);
         var key = keyExists ? _key : Path.Combine(_dir, "missing");
-        await Assert.ThrowsAsync<ArgumentException>(() => installer.InstallAsync(new(address, user, port, key, email), null, default));
+        var ex = await Assert.ThrowsAsync<ServerInstallException>(() => installer.InstallAsync(new(address, user, port, key, email), null, default));
+        Assert.Equal(reason, ex.Reason);
         Assert.False(File.Exists(Path.Combine(_dir, "stdin.txt")));
     }
 

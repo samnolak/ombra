@@ -818,16 +818,40 @@ conversation's place; ⌘⇧O again or **Chats** goes back. On the left is the c
 tree as the Files panel, with git's marks); on the right, tabs of the files you opened.
 
 - **Tabs**: click a file in the tree to open it in a tab. An unsaved tab shows a dot instead of its close button.
-  Right-click a tab for **Close**, **Close others**, **Move left** and **Move right**. Closing a tab keeps unsaved edits:
-  the Files panel lists them under **Unsaved**, and reopening the file brings them back with their undo history. The
-  Editor page and the Files panel edit the same buffer, so an edit in one shows in the other.
+  Drag a tab along the strip to reorder it, or right-click it for **Close**, **Close others**, **Move left**,
+  **Move right** and **Open to the side**. Closing a tab keeps unsaved edits: the Files panel lists them under
+  **Unsaved**, and reopening the file brings them back with their undo history. The Editor page and the Files panel
+  edit the same buffer, so an edit in one shows in the other.
+- **Split view**: the split button at the right of the tab strip (or **Open to the side**) opens the current file in a
+  second group to the right, with its own tabs. Both groups can show the same file; they edit one buffer. Files open
+  in the group you last clicked or typed in; the × at the end of a group's strip closes it.
+- **Breadcrumbs**: above the editor, the file's path from the project folder. Click a folder or the file to show it
+  in the tree. With language services on and a server that lists symbols, the symbol at the caret follows
+  (`Greeter › hello`).
+- **Diff vs HEAD**: the diff button at the right of the tab strip shows the file's changes against the last commit
+  (unsaved edits included) in place of the editor; click it again to go back. A file not in git, or not committed
+  yet, says so.
 - **Go to file**: ⌘P (Ctrl+P), or the file button above the tree. Opens the palette's file search; the chosen file
   opens in a tab.
 - **Go to line**: ⌃G (Ctrl+G) in the editor, or **Edit → Go to line**. Type `42` or `42:7`, then Enter.
 - **Find and replace** in the file: ⌘F / ⌘H (Ctrl+F / Ctrl+H).
-- **Find in files**: the magnifier above the tree. Type text and press Enter: every line containing it (case-insensitive)
-  is listed with its file and line; click one to open it there. Files git ignores, `node_modules`, `bin`, `obj`,
-  files over 1 MB and binary files are skipped. The list stops at 500 matches.
+- **Find in files**: the magnifier above the tree. Type text and press Enter: every matching line is listed with its
+  file and line; click one to open it there. **Aa** matches case, **ab** whole words only, **.\*** treats the text as
+  a regular expression (.NET syntax, one line at a time). Open files are searched as their buffers are, unsaved edits
+  included. Files git ignores, `node_modules`, `bin`, `obj`, files over 1 MB and binary files are skipped. The list
+  stops at 500 matches.
+- **Replace in files**: the pencil next to the search box adds **Replace with** (with regular expressions, `$1` or
+  `${name}` inserts a group). **Preview** lists every file it would change with each line before and after; untick a
+  file to leave it out. **Replace all…** asks first. Each file changes in its editor buffer (open tabs follow) as one
+  undo step; files that were saved are saved again, and files that already had unsaved edits change in the editor and
+  stay unsaved. A file that is read-only or changed on disk meanwhile is left alone and named.
+- **Format document**: ⇧⌥F (Shift+Alt+F), or **Format document** / **Format selection** in the editor's right-click
+  menu. The project's language server formats the file (or the selected lines; ⇧⌥F formats the selection when there
+  is one), as one undo step. The commands are greyed out, with the reason on hover, until you trust the project's
+  language services or when the file's server can't format.
+- **Autosave**: **Settings → General → Autosave**: **Off** (default), **After 1 s** (a second after the last edit) or
+  **On focus change** (when you leave the editor, or the window). It applies to the Editor page and the Files panel
+  alike, and never saves over a file that changed on disk.
 - **Change gutter**: in a git project, a green bar marks lines added since the last commit, a blue bar marks changed
   lines and a red mark shows where lines were deleted. It follows your typing, saved or not, and reads the last commit
   again when you save or switch to the tab. A new file git does not track yet shows every line as added.
@@ -861,8 +885,11 @@ computer**.
   then shows the steps — *Connecting*, *Preparing the server*, *Downloading*, *Verifying*, *Installing*, *Creating
   the team* — with the current one marked, **Cancel**, and the folded **Installer log**. Ombra downloads the signed
   server release, checks its signature, installs it, reads the certificate pin and the one-time bootstrap code from
-  the installer itself, signs in and creates the team; you are its owner. If something fails, the message and the
-  log stay on the page with **Retry** and **Change settings**. The **Owner recovery key** is shown once: *Write it
+  the installer itself, signs in and creates the team; you are its owner. If something fails, a message in your
+  language says what went wrong and what to do (for example *This server's operating system is not supported. Use
+  Debian or Ubuntu.*, a missing passwordless `sudo`, too little disk space, a failed download or a release whose
+  signature does not verify), followed by the installer's own line where it helps; it and the log stay on the page
+  with **Retry** and **Change settings**. The **Owner recovery key** is shown once: *Write it
   down or print it and keep it offline. It is shown only now: Ombra does not keep it. Without it a lost owner device
   cannot be replaced.* **Copy** copies it; **I saved it** removes it from the screen.
 - **My server is already installed** (folded, under Create a team) — for a server you installed yourself with
