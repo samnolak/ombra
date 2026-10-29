@@ -6,7 +6,9 @@ namespace Ombra.Tests;
 public sealed class TeamServerInstallerTests : IDisposable
 {
     private const string Pin = "ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12";
-    private const string Code = "ABCDE-FGHIJ-KLMNO-PQRST-UVWXY-Z";
+    // As the server issues them (BootstrapCodes: ABCDEFGHJKLMNPQRSTUVWXYZ23456789, 26 in groups of 5): a live install
+    // printed one with 8 and 9, which an RFC 4648 pattern cut short
+    private const string Code = "ABCDE-FGH2K-LMN3P-QRS4T-8GFN9-G";
     private readonly string _dir = TestProcesses.TempDir("ombra-installer");
     private readonly string _key;
 
@@ -112,6 +114,37 @@ public sealed class TeamServerInstallerTests : IDisposable
         await Assert.ThrowsAsync<ServerAlreadyInstalledException>(() =>
             Fake("##OMBRA-ALREADY-INSTALLED\ninstall FAILED: an Ombra server is already installed\n", exit: 1)
                 .InstallAsync(new("203.0.113.7", "root", 22, _key), null, default));
+    }
+
+    [Fact]
+    public async Task UnfinishedEarlierInstall_IsRemovedThenInstalledFresh()
+    {
+        var r = await Fake("removing the unfinished install left by an earlier attempt\nunfinished install removed\n" + IpOutput)
+            .InstallAsync(new("203.0.113.7", "root", 22, _key), null, default);
+        Assert.Equal(Code, r.BootstrapCode);
+        var script = Stdin;
+        var cleanup = script.IndexOf("if [ -e /etc/ombra ] && \"${SUDO[@]}\" test -e \"$MARK\"", StringComparison.Ordinal);
+        var already = script.IndexOf("##OMBRA-ALREADY-INSTALLED", StringComparison.Ordinal);
+        Assert.True(cleanup >= 0 && cleanup < already);
+        Assert.Contains("down -v --remove-orphans", script);
+        Assert.Contains("rm -rf /etc/ombra /etc/ombra-offline /opt/ombra /var/lib/ombra", script);
+        Assert.True(script.IndexOf("touch \"$MARK\"", StringComparison.Ordinal) < script.IndexOf("./deploy/install.sh", StringComparison.Ordinal));
+        Assert.True(script.LastIndexOf("rm -f \"$MARK\"", StringComparison.Ordinal) > script.IndexOf("./deploy/install.sh", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task FailedInstall_MessageSaysWhy()
+    {
+        const string err = "Error response from daemon: failed to resolve reference \"docker.io/library/postgres:17-alpine\": tls: x509: certificate signed by unknown authority";
+        var ex = await Assert.ThrowsAsync<ServerInstallException>(() =>
+            Fake($"##OMBRA-STEP Installing\nbootstrap code: {Code}\n{err}\n", exit: 1).InstallAsync(new("203.0.113.7", "root", 22, _key), null, default));
+        Assert.StartsWith("Server install failed: Error response from daemon", ex.Message);
+        Assert.Contains(err, ex.Log);
+        Assert.DoesNotContain(Code, ex.Log);
+
+        var ex2 = await Assert.ThrowsAsync<ServerInstallException>(() =>
+            Fake("some error first\ninstall FAILED: compose up\n", exit: 1).InstallAsync(new("203.0.113.7", "root", 22, _key), null, default));
+        Assert.Equal("Server install failed: compose up", ex2.Message);
     }
 
     [Theory]

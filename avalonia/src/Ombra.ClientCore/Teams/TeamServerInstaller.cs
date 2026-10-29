@@ -67,6 +67,7 @@ public sealed partial class TeamServerInstaller
         var gate = new object();
         string? code = null, pin = null, serverId = null, endpoint = null;
         bool failed = false, already = false;
+        string? failLine = null, errorLine = null;
 
         void OnLine(string? raw)
         {
@@ -88,9 +89,10 @@ public sealed partial class TeamServerInstaller
                 if (PinRe().Match(line) is { Success: true } p) pin = p.Groups[1].Value.ToLowerInvariant();
                 if (ServerIdRe().Match(line) is { Success: true } s) serverId = s.Groups[1].Value;
                 if (EndpointRe().Match(line) is { Success: true } e) endpoint = e.Groups[1].Value;
-                if (line.Contains("install FAILED", StringComparison.Ordinal)) failed = true;
+                if (line.Contains("install FAILED", StringComparison.Ordinal)) { failed = true; failLine ??= line; }
                 if (AlreadyRe().IsMatch(line)) already = true;
                 var safe = Redact(line);
+                if (ErrorRe().IsMatch(safe)) errorLine = safe;
                 log.Enqueue(safe);
                 while (log.Count > LogLines) log.Dequeue();
                 progress?.Report(new ServerInstallProgress(last, safe));
@@ -118,7 +120,17 @@ public sealed partial class TeamServerInstaller
         if (already) throw new ServerAlreadyInstalledException(Log());
         if (failed || proc.ExitCode != 0)
         {
-            var msg = proc.ExitCode == 255 ? "SSH connection failed (exit 255): check the address, user, port and key."
+            string? reason;
+            lock (gate) reason = failLine is { } f ? Redact(f) : errorLine;
+            if (reason is not null)
+            {
+                var at = reason.IndexOf("install FAILED:", StringComparison.Ordinal);
+                if (at >= 0) reason = reason[(at + "install FAILED:".Length)..];
+                reason = reason.Trim();
+                if (reason.Length > 200) reason = reason[..200] + "…";
+            }
+            var msg = reason is { Length: > 0 } ? "Server install failed: " + reason
+                : proc.ExitCode == 255 ? "SSH connection failed (exit 255): check the address, user, port and key."
                 : "Server install failed" + (proc.ExitCode != 0 ? $" (exit {proc.ExitCode.ToString(CultureInfo.InvariantCulture)})" : "") + ".";
             throw new ServerInstallException(msg, Log());
         }
@@ -181,7 +193,10 @@ public sealed partial class TeamServerInstaller
         sb.Append("OMBRA_PUBKEY=").Append(Quote(TeamServerRelease.PublicKeyPem)).Append('\n');
         sb.Append("OMBRA_MODE_ARGS=(").Append(mode).Append(")\n");
         sb.Append("OMBRA_NEED_DOCKER=").Append(ipMode ? "0" : "1").Append('\n');
-        sb.Append(Script);
+        // The script comes on ssh's stdin (bash -s): wrapped in one function that bash reads whole before running it,
+        // run with stdin closed, so a child that reads stdin (install.sh, apt, docker) cannot swallow the lines after it.
+        // A live install showed it: the line removing the incomplete-install marker after install.sh never ran.
+        sb.Append("ombra_install() {\n").Append(Script).Append("\n}\nombra_install </dev/null\n");
         return sb.ToString();
     }
 
@@ -199,6 +214,20 @@ public sealed partial class TeamServerInstaller
         . /etc/os-release
         case " ${ID:-} ${ID_LIKE:-} " in *" debian "*|*" ubuntu "*) ;; *) fail "unsupported OS: ${PRETTY_NAME:-unknown} (Debian or Ubuntu required)";; esac
         [ "$(uname -m)" = x86_64 ] || fail "unsupported architecture: $(uname -m) (x86_64 required)"
+        MARK=/var/lib/ombra-ssh-install.incomplete
+        if [ -e /etc/ombra ] && "${SUDO[@]}" test -e "$MARK"; then
+          echo "removing the unfinished install left by an earlier attempt"
+          if "${SUDO[@]}" test -f /opt/ombra/compose.yaml; then
+            "${SUDO[@]}" docker compose --project-directory /opt/ombra -f /opt/ombra/compose.yaml down -v --remove-orphans || true
+          fi
+          if "${SUDO[@]}" systemctl cat ombra-server >/dev/null 2>&1; then "${SUDO[@]}" systemctl disable --now ombra-server || true; fi
+          if command -v psql >/dev/null 2>&1; then
+            "${SUDO[@]}" runuser -u postgres -- dropdb --if-exists ombra || true
+            "${SUDO[@]}" runuser -u postgres -- dropuser --if-exists ombra || true
+          fi
+          "${SUDO[@]}" rm -rf /etc/ombra /etc/ombra-offline /opt/ombra /var/lib/ombra /etc/cron.daily/ombra-backup /etc/periodic/daily/ombra-backup "$MARK" || true
+          echo "unfinished install removed"
+        fi
         if [ -e /etc/ombra ]; then echo "##OMBRA-ALREADY-INSTALLED"; fail "an Ombra server is already installed (/etc/ombra exists)"; fi
         free_kb=$(df -Pk / | awk 'NR==2{print $4}')
         [ "${free_kb:-0}" -ge 4194304 ] || fail "not enough free disk space on / (4 GB required)"
@@ -237,7 +266,10 @@ public sealed partial class TeamServerInstaller
           || fail "release signature does not verify"
         "${SUDO[@]}" bash -c 'cd "$1" && sha256sum -c --quiet SHA256SUMS' _ "$rel" || fail "release files do not match SHA256SUMS"
         step Installing
+        "${SUDO[@]}" install -d -m 755 /var/lib
+        ( umask 077; "${SUDO[@]}" touch "$MARK" ) && "${SUDO[@]}" chmod 600 "$MARK"
         "${SUDO[@]}" bash -c 'cd "$1" && shift && exec ./deploy/install.sh "$@"' _ "$rel" "${OMBRA_MODE_ARGS[@]}" --release-key "$work/release.pub" "${SYSTEMD[@]}" 2>&1
+        "${SUDO[@]}" rm -f "$MARK"
         """;
 
     [GeneratedRegex(@"^(?=.{1,253}$)(?!-)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$", RegexOptions.IgnoreCase)]
@@ -249,7 +281,8 @@ public sealed partial class TeamServerInstaller
     [GeneratedRegex(@"^[^\s@'""\\`$;&|<>()]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$")]
     private static partial Regex EmailRe();
 
-    [GeneratedRegex(@"bootstrap code:\s*([A-Z2-7]{5}(?:[- ]?[A-Z2-7]{1,5})*)", RegexOptions.IgnoreCase)]
+    // The server's alphabet (BootstrapCodes.Alphabet: no I, O, 0, 1), 26 characters in groups of 5 joined by '-'
+    [GeneratedRegex(@"bootstrap code:\s*([A-HJ-NP-Z2-9]{1,5}(?:-[A-HJ-NP-Z2-9]{1,5})*)", RegexOptions.IgnoreCase)]
     private static partial Regex CodeRe();
 
     [GeneratedRegex(@"(?:TLS pin \(current\)|pin \(SPKI SHA-256\)):\s*([0-9a-fA-F]{64})")]
@@ -260,6 +293,9 @@ public sealed partial class TeamServerInstaller
 
     [GeneratedRegex(@"^\s*endpoint:\s*(https://\S+)")]
     private static partial Regex EndpointRe();
+
+    [GeneratedRegex(@"error|failed|denied", RegexOptions.IgnoreCase)]
+    private static partial Regex ErrorRe();
 
     [GeneratedRegex(@"already installed|/etc/ombra (?:already )?exists", RegexOptions.IgnoreCase)]
     private static partial Regex AlreadyRe();
