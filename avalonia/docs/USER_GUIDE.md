@@ -716,6 +716,8 @@ linux-arm64 and win-arm64 packages come without the engine and set it up on firs
 | Esc | close the image viewer, leave Settings, close the shortcut sheet, the *say why* box, a question card or the session card (when it has the focus), clear a search box (then leave it), or stop the run (from the message box or the conversation) |
 | ← / →, Space | in the image viewer: previous / next image, actual size / fit |
 | F12 | event log beside the conversation, or over it when the window is too narrow for both (also *Settings → Diagnostics → RPC events*) |
+| Ctrl+Shift+O (⌘⇧O) | the Editor page, or back to the chats from it |
+| Ctrl+G (⌃G) | in the editor: go to line |
 
 Closing an image viewer, request/session card or menu returns focus to its opener when that control still exists.
 A deliberate click or an action that opens another editor keeps its new focus. Selecting a model deliberately returns
@@ -809,6 +811,33 @@ session); the `/` menu lists these last, under *Terminal only*. A skill, prompt 
 extension omp itself offers under such a name is sent to omp as usual. `!command` runs a shell command in the project
 through omp (the output joins the conversation and the context); `!!command` offers to open a shell instead.
 
+## Editor
+
+**Editor** in the rail (the code icon, just above **Browser**) or ⌘⇧O (Ctrl+Shift+O) opens the Editor page in the
+conversation's place; ⌘⇧O again or **Chats** goes back. On the left is the current chat's project as a tree (the same
+tree as the Files panel, with git's marks); on the right, tabs of the files you opened.
+
+- **Tabs**: click a file in the tree to open it in a tab. An unsaved tab shows a dot instead of its close button.
+  Right-click a tab for **Close**, **Close others**, **Move left** and **Move right**. Closing a tab keeps unsaved edits:
+  the Files panel lists them under **Unsaved**, and reopening the file brings them back with their undo history. The
+  Editor page and the Files panel edit the same buffer, so an edit in one shows in the other.
+- **Go to file**: ⌘P (Ctrl+P), or the file button above the tree. Opens the palette's file search; the chosen file
+  opens in a tab.
+- **Go to line**: ⌃G (Ctrl+G) in the editor, or **Edit → Go to line**. Type `42` or `42:7`, then Enter.
+- **Find and replace** in the file: ⌘F / ⌘H (Ctrl+F / Ctrl+H).
+- **Find in files**: the magnifier above the tree. Type text and press Enter: every line containing it (case-insensitive)
+  is listed with its file and line; click one to open it there. Files git ignores, `node_modules`, `bin`, `obj`,
+  files over 1 MB and binary files are skipped. The list stops at 500 matches.
+- **Change gutter**: in a git project, a green bar marks lines added since the last commit, a blue bar marks changed
+  lines and a red mark shows where lines were deleted. It follows your typing, saved or not, and reads the last commit
+  again when you save or switch to the tab. A new file git does not track yet shows every line as added.
+- Syntax colours, folding, multiple carets (Ctrl+Alt-click), column selection (Option/Alt-drag), language features
+  (completion, hover, F12 definition, F2 rename, diagnostics, after you trust the project) and **Comment…** for the
+  agent work as in the Files panel's editor.
+
+While the Editor page is shown, a file link in a chat (a change card, a tool's file) opens in a tab of the page instead
+of the Files panel.
+
 ## Team
 
 **Team** in the rail at the window's left edge (the people icon) opens the Team page in the conversation's place;
@@ -880,7 +909,14 @@ You can share with the team:
 - a skill — **Share with team…** on its page (**Plugins → Skills**, then the skill's row);
 - the project's changes since the last commit, as a patch — the share button of the Files pane's **Changed** view
   (*Share the changes with the team as a patch*);
-- the Browser page's open pages, as one collection — *Share open browser pages with team…* in the command palette.
+- the Browser page's open pages, as one collection — *Share open browser pages with team…* in the command palette;
+- lines of code — select them in the editor, right-click → **Share with team…** (or **Edit → Share with team…** in
+  the editor's toolbar): the whole lines go with the file's path in the project, the line numbers, the language, and
+  the project, branch and commit when git knows them (up to 200 KB of text);
+- an assistant reply — right-click it → **Send to colleague…**: its Markdown goes as a note titled with the chat;
+- a comment you sent with a message — open it under the message's comments chip → **Send to team…**: a note with
+  the comment, where it was and the page's address. (Open comments still in the message box go with **Send N comments
+  to the team…**, below.)
 
 The **Share with team** dialog names what goes (*Share a file “notes.md”*). **Send to**: **Everyone in the team** or
 **Specific members** (find them by name, tick them); an optional **Comment** (up to 280 characters); then **Share**.
@@ -902,6 +938,12 @@ sender no. Accepting:
   from its next start;
 - a patch gets **Apply to project**: it applies only to a clone of the repository it was made in that has its base
   commit — the open project, or a folder you pick — and the changes show in the Changes view.
+
+Code and notes are read in place: their **Show** accepts and shows them in the row at once (nothing is saved). Code
+shows highlighted under its path, lines and branch, with **Copy**, **Open in editor** (the project's file at the first
+line; **Save as file** when the open project does not have it) and **Ask the agent about it** (a quoted block in the
+message box). A note shows its Markdown and where it is from, with **Copy**, **Add to message** and **Open link** when
+it names a page. Older Ombra versions and the Nightly runtime receive code and notes as plain files (their JSON).
 
 **Open** does it again later. Opening the Inbox marks what it lists as seen for the sender. What you shared is listed
 under **Shared by you** with *N of M answered* and each recipient's status: *Not opened yet*, *Seen*, *Accepted* or

@@ -750,6 +750,8 @@ public sealed partial class MainWindow : Window
                 }) });
                 KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.P, command | KeyModifiers.Shift), Command = vm.TogglePaneCommand, CommandParameter = SidePane.Plan });
                 KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.T, command | KeyModifiers.Shift), Command = vm.TogglePaneCommand, CommandParameter = SidePane.Tasks });
+                // The rail's Editor page (⇧⌘E was taken by Thinking effort; ⇧⌘O was free)
+                KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.O, command | KeyModifiers.Shift), Command = vm.ToggleEditorPageCommand });
                 // Claude Code's shortcut sheet
                 KeyBindings.Add(new KeyBinding { Gesture = new KeyGesture(Key.OemQuestion, command), Command = vm.ToggleShortcutsCommand });
                 // The command palette (MainViewModel.Palette.cs): ⌘K everything, ⌘P the project's files. Both were free

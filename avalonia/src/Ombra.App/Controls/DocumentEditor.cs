@@ -68,6 +68,7 @@ public sealed partial class DocumentEditor : UserControl
                 () => Editor.CanPaste),
             null,
             new MenuAction(Loc.T("Comment…"), "IconComment", _ => BeginMark(), () => WorkspaceDocument is not null),
+            new MenuAction(Loc.T("Share with team…"), "IconShare", _ => BeginShare(), () => WorkspaceDocument is not null),
             null,
             new MenuAction(Loc.T("Select all"), "IconSelect", _ => { Editor.TextArea.Focus(); Editor.SelectAll(); }));
         ToolTip.SetTip(Editor, "Multiple carets: Ctrl+Alt-click. Column editing: Alt/Option-drag. Escape returns to one caret.");
@@ -75,7 +76,7 @@ public sealed partial class DocumentEditor : UserControl
         var editActions = new ComboBox
         {
             Name = "EditorEditAction", PlaceholderText = "Edit", MinWidth = 75,
-            ItemsSource = new[] { "Find", "Replace", "Undo", "Redo", "Fold" }
+            ItemsSource = new[] { "Find", "Replace", "Go to line", "Undo", "Redo", "Fold", Loc.T("Share with team…") }
         };
         editActions.SelectionChanged += (_, _) =>
         {
@@ -85,12 +86,15 @@ public sealed partial class DocumentEditor : UserControl
             {
                 case "Find": ShowSearch(false); break;
                 case "Replace": ShowSearch(true); break;
+                case "Go to line": ShowGoToLine(); break;
                 case "Undo": Editor.Undo(); break;
                 case "Redo": Editor.Redo(); break;
                 case "Fold": ToggleFold(); break;
+                default: if (action == Loc.T("Share with team…")) BeginShare(); break;
             }
         };
         toolbar.Children.Add(editActions);
+        BuildNavigationUi(toolbar);
         var languages = _registry.GetAvailableLanguages().Select(x => x.Id).Distinct().OrderBy(x => x).Prepend("plaintext").ToArray();
         _language.ItemsSource = languages;
         _language.SelectionChanged += (_, _) =>
@@ -145,6 +149,7 @@ public sealed partial class DocumentEditor : UserControl
         if (change.Property == WorkspaceDocumentProperty) SetDocument();
         else if (change.Property == TargetLineProperty) GoToTargetLine();
         else if (change.Property == LanguageServiceProperty) SubscribeLanguageService();
+        else if (change.Property == LineChangesProperty) ChangeMargin.SetChanges(LineChanges ?? []);
     }
 
     private void AttachEditor()
@@ -315,6 +320,7 @@ public sealed partial class DocumentEditor : UserControl
         if (e.KeyModifiers == command && e.Key == Key.S) { e.Handled = true; await SaveAsync(); }
         else if (e.KeyModifiers == command && e.Key == Key.F) { e.Handled = true; ShowSearch(false); }
         else if (e.KeyModifiers == command && e.Key == Key.H) { e.Handled = true; ShowSearch(true); }
+        else if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.G) { e.Handled = true; ShowGoToLine(); }
         else if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.Space) { e.Handled = true; await RequestLanguageAsync("completion"); }
         else if (e.KeyModifiers == KeyModifiers.None && e.Key == Key.F12) { e.Handled = true; await RequestLanguageAsync("definition"); }
         else if (e.KeyModifiers == KeyModifiers.None && e.Key == Key.F2) { e.Handled = true; ShowRename(); }

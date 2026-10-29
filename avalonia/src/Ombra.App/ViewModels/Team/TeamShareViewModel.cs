@@ -102,18 +102,22 @@ public sealed partial class TeamInboxRow : ObservableObject
         Item = item;
         From = from;
         Status = TeamShare.MyStatus(item, me);
+        Kind = TeamShare.ShownKind(item);
     }
 
     public TeamItem Item { get; }
     public string From { get; }
     public string? Status { get; }
+    /// <summary>What the user sees it as: a snippet or a note is a file with their mime.</summary>
+    public string Kind { get; }
     public string Title => TeamShare.Title(Item);
-    public string KindText => TeamShareViewModel.KindText(Item.Kind);
-    public string Headline => Loc.F("{0} shared {1}", From, TeamShareViewModel.KindPhrase(Item.Kind));
+    public string KindText => TeamShareViewModel.KindText(Kind);
+    public string Headline => Loc.F("{0} shared {1}", From, TeamShareViewModel.KindPhrase(Kind));
     public string When => SessionItemViewModel.Relative(DateTimeOffset.FromUnixTimeSeconds((long)Item.CreatedAt), DateTimeOffset.Now);
     public string? Comment => TeamShare.Comment(Item);
     public bool HasComment => Comment is { Length: > 0 };
     public string Preview => TeamShareViewModel.PreviewOf(Item, _all);
+    public bool HasPreview => !HasContent && Preview.Length > 0;
     private IReadOnlyList<TeamItem> _all = [];
     internal TeamInboxRow WithAll(IReadOnlyList<TeamItem> all) { _all = all; return this; }
     public bool IsPending => Status is not (TeamItemStatuses.Accepted or TeamItemStatuses.Declined);
@@ -124,16 +128,65 @@ public sealed partial class TeamInboxRow : ObservableObject
         TeamItemStatuses.Declined => Loc.T("Declined"),
         _ => Loc.T("Waiting for you"),
     };
+    /// <summary>A snippet or a note: read in place ("Show" accepts and fetches it at once), nothing lands on disk.</summary>
+    public bool IsReadable => Kind is TeamShare.SnippetKind or TeamShare.NoteKind;
+    /// <summary>Accept / Decline for the resources that land somewhere; a readable one has Show instead of Accept.</summary>
+    public bool CanAccept => IsPending && !IsReadable;
+    public bool CanDecline => IsPending;
+    public bool CanShow => IsReadable && Status != TeamItemStatuses.Declined && !HasContent;
     /// <summary>After Accept: a link or collection opens again, a file shows, a patch can be applied (again).</summary>
-    public bool CanOpen => IsAccepted && Item.Kind is TeamItemKinds.Link or TeamItemKinds.Collection or TeamItemKinds.File or TeamItemKinds.Skill or TeamItemKinds.Snapshot;
+    public bool CanOpen => IsAccepted && !IsReadable && Item.Kind is TeamItemKinds.Link or TeamItemKinds.Collection or TeamItemKinds.File or TeamItemKinds.Skill or TeamItemKinds.Snapshot;
     public bool CanApply => IsAccepted && Item.Kind == TeamItemKinds.Edit;
 
     [ObservableProperty] private bool _isBusy;
+
+    /// <summary>The snippet, once shown.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSnippet), nameof(HasContent), nameof(CanShow), nameof(HasPreview), nameof(SnippetPlace), nameof(SnippetMarkdown), nameof(SnippetOpenLabel))]
+    private SharedSnippet? _snippet;
+
+    /// <summary>The note, once shown.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNote), nameof(HasContent), nameof(CanShow), nameof(HasPreview), nameof(NoteSource), nameof(CanOpenNoteLink))]
+    private SharedNote? _note;
+
+    public bool HasSnippet => Snippet is not null;
+    public bool HasNote => Note is not null;
+    public bool HasContent => HasSnippet || HasNote;
+
+    /// <summary>"src/app.cs · lines 10–20 · main @ 1a2b3c4 · Project".</summary>
+    public string SnippetPlace => Snippet is not { } s ? "" : string.Join(" · ", new[]
+    {
+        s.Path,
+        s.EndLine > s.StartLine ? Loc.F("lines {0}-{1}", s.StartLine, s.EndLine) : Loc.F("line {0}", s.StartLine),
+        s.Branch is { Length: > 0 } b ? (s.Commit is { Length: > 0 } c ? $"{b} @ {c[..Math.Min(7, c.Length)]}" : b) : s.Commit is { Length: > 0 } c2 ? c2[..Math.Min(7, c2.Length)] : null,
+        s.Project,
+    }.Where(x => x is { Length: > 0 }));
+
+    /// <summary>The code as a fenced block (MarkdownView highlights it by its language).</summary>
+    public string SnippetMarkdown => Snippet is { } s ? TeamShareViewModel.Fenced(s.Text, s.Language) : "";
+
+    /// <summary>"From a reply in “Fix login”", "From a comment in …".</summary>
+    public string NoteSource => Note is not { } n ? ""
+        : n.Source == TeamShare.NoteFromComment
+            ? n.ChatTitle is { Length: > 0 } t ? Loc.F("A comment from the chat “{0}”", t) : Loc.T("A comment")
+            : n.ChatTitle is { Length: > 0 } t2 ? Loc.F("A reply from the chat “{0}”", t2) : Loc.T("An assistant reply");
+
+    public bool CanOpenNoteLink => Note?.Url is not null;
+
+    /// <summary>"Open in editor" when the open project has the snippet's file, else "Save as file".</summary>
+    public string SnippetOpenLabel => Snippet is { } s && _page.SnippetFile(s) is not null ? Loc.T("Open in editor") : Loc.T("Save as file");
 
     [RelayCommand] private Task Accept() => _page.AcceptAsync(this);
     [RelayCommand] private Task Decline() => _page.DeclineAsync(this);
     [RelayCommand] private Task Open() => _page.OpenAsync(this);
     [RelayCommand] private Task Apply() => _page.ApplyPatchAsync(this);
+    [RelayCommand] private Task Show() => _page.ShowAsync(this);
+    [RelayCommand] private void CopyContent() => _page.CopyContent(this);
+    [RelayCommand] private void OpenSnippet() => _page.OpenSnippet(this);
+    [RelayCommand] private void AskAgent() => _page.AskAgent(this);
+    [RelayCommand] private void AddNoteToMessage() => _page.AddNoteToMessage(this);
+    [RelayCommand] private void OpenNoteLink() { if (Note?.Url is { } url) _page.OpenNoteLink(url); }
 }
 
 /// <summary>One recipient of something I shared, and what they did with it.</summary>
@@ -262,7 +315,17 @@ public sealed partial class TeamShareViewModel : ObservableObject
         var fresh = incoming.Where(i => _known.Add(i.AuthorMemberId + "/" + i.ItemId) && TeamShare.IsPending(i, me)).ToList();
         Inbox.Clear();
         _all = all;
-        foreach (var i in incoming) Inbox.Add(new TeamInboxRow(this, i, NameOf(i.AuthorMemberId), me).WithAll(all));
+        foreach (var i in incoming)
+        {
+            var row = new TeamInboxRow(this, i, NameOf(i.AuthorMemberId), me).WithAll(all);
+            Inbox.Add(row);
+            // A snippet or a note shown before stays shown (fetched again once after a restart)
+            if (row.IsReadable && row.IsAccepted)
+            {
+                if (_readable.TryGetValue(KeyOf(i), out var shown)) Put(row, shown);
+                else _ = FetchAsync(row);
+            }
+        }
         InboxCount = incoming.Count(i => TeamShare.IsPending(i, me));
         Sent.Clear();
         foreach (var s in TeamShare.Sent(all, me))
@@ -275,7 +338,7 @@ public sealed partial class TeamShareViewModel : ObservableObject
 
     private void Announce(TeamItem item)
     {
-        var text = Loc.F("{0} shared {1} “{2}”", NameOf(item.AuthorMemberId), KindPhrase(item.Kind), TeamShare.Title(item));
+        var text = Loc.F("{0} shared {1} “{2}”", NameOf(item.AuthorMemberId), KindPhrase(TeamShare.ShownKind(item)), TeamShare.Title(item));
         _owner.ShowTeamToast(text, () => _owner.ShowTeamInbox());
     }
 
@@ -295,6 +358,8 @@ public sealed partial class TeamShareViewModel : ObservableObject
         TeamItemKinds.Edit => Loc.T("Patch"),
         TeamItemKinds.Snapshot => Loc.T("Screenshot"),
         TeamItemKinds.Collection => Loc.T("Collection"),
+        TeamShare.SnippetKind => Loc.T("Code"),
+        TeamShare.NoteKind => Loc.T("Note"),
         _ => kind,
     };
 
@@ -307,6 +372,8 @@ public sealed partial class TeamShareViewModel : ObservableObject
         TeamItemKinds.Edit => Loc.T("a patch"),
         TeamItemKinds.Snapshot => Loc.T("a screenshot"),
         TeamItemKinds.Collection => Loc.T("a collection"),
+        TeamShare.SnippetKind => Loc.T("a code snippet"),
+        TeamShare.NoteKind => Loc.T("a note"),
         _ => kind,
     };
 
@@ -314,6 +381,7 @@ public sealed partial class TeamShareViewModel : ObservableObject
     internal static string PreviewOf(TeamItem i, IReadOnlyList<TeamItem> all) => i.Kind switch
     {
         TeamItemKinds.Link => TeamShare.Url(i) ?? "",
+        TeamItemKinds.File when TeamShare.ShownKind(i) != TeamItemKinds.File => Size(TeamShare.Size(i)),
         TeamItemKinds.File => Loc.F("{0} · {1}", TeamShare.FileName(i) ?? "", Size(TeamShare.Size(i))),
         TeamItemKinds.Snapshot => Loc.F("{0} · {1}", TeamShare.SourceUrl(i) ?? "", Size(TeamShare.Size(i))),
         TeamItemKinds.Skill => (TeamShare.Description(i) is { Length: > 0 } d ? d + " · " : "") + Size(TeamShare.Size(i)),
@@ -400,7 +468,7 @@ public sealed partial class TeamShareViewModel : ObservableObject
         }
         catch (TeamShareTooLargeException e)
         {
-            Error = Loc.F("It is too large to share: {0} KB, at most {1} KB.", e.Bytes / 1024, TeamShare.MaxContentBytes / 1024);
+            Error = Loc.F("It is too large to share: {0} KB, at most {1} KB.", e.Bytes / 1024, e.Limit / 1024);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or TeamsServerException)
         {
@@ -569,4 +637,115 @@ public sealed partial class TeamShareViewModel : ObservableObject
 
     private static string DownloadsFolder() =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+
+    // ───────────── Snippets and notes ─────────────
+
+    /// <summary>Snippets and notes shown, by author/item (a refresh builds the rows again; they keep what was fetched).</summary>
+    private readonly Dictionary<string, object> _readable = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _fetching = new(StringComparer.Ordinal);
+
+    private static string KeyOf(TeamItem i) => i.AuthorMemberId + "/" + i.ItemId;
+
+    private static void Put(TeamInboxRow row, object shown)
+    {
+        if (shown is SharedSnippet s) row.Snippet = s;
+        else if (shown is SharedNote n) row.Note = n;
+    }
+
+    /// <summary>"Show": accepts a snippet or a note (its content is handed out only then) and shows it in the row, in one step.</summary>
+    internal async Task ShowAsync(TeamInboxRow row)
+    {
+        if (row.IsBusy) return;
+        row.IsBusy = true;
+        try
+        {
+            if (!row.IsAccepted) await SetStatusAsync(row, TeamItemStatuses.Accepted);
+            await FetchAsync(row, quiet: false);
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException or InvalidOperationException or TeamsServerException
+                                       or HttpRequestException or System.Security.Cryptography.CryptographicException)
+        {
+            _owner.Notify("IconAlert", Loc.T("Couldn't show it"), e.Message);
+        }
+        finally
+        {
+            row.IsBusy = false;
+            await RefreshAsync();
+        }
+    }
+
+    private async Task FetchAsync(TeamInboxRow row, bool quiet = true)
+    {
+        var key = KeyOf(row.Item);
+        if (_items is not { } items || TeamId is not { } team || !_fetching.Add(key)) return;
+        try
+        {
+            var item = await Task.Run(() => items.Get(team, row.Item.AuthorMemberId, row.Item.ItemId)) ?? row.Item;
+            var data = await Task.Run(() => items.DownloadAsync(item));
+            object shown = row.Kind == TeamShare.SnippetKind ? TeamShare.ReadSnippet(data) : TeamShare.ReadNote(data);
+            _readable[key] = shown;
+            Put(row, shown);
+            foreach (var r in Inbox.Where(r => KeyOf(r.Item) == key)) Put(r, shown);
+        }
+        catch (Exception e) when (quiet && e is IOException or InvalidDataException or InvalidOperationException or TeamsServerException
+                                       or HttpRequestException or System.Security.Cryptography.CryptographicException) { }
+        finally { _fetching.Remove(key); }
+    }
+
+    /// <summary>The snippet's file in the open project, when it is there.</summary>
+    internal string? SnippetFile(SharedSnippet s) =>
+        _owner.ProjectFolder is { } root && Path.Combine(root, s.Path.Replace('/', Path.DirectorySeparatorChar)) is var full && File.Exists(full) ? full : null;
+
+    internal void CopyContent(TeamInboxRow row)
+    {
+        if ((row.Snippet?.Text ?? row.Note?.Text) is { } text) _owner.CopyText(text);
+    }
+
+    /// <summary>Opens the snippet's file at its first line when the project has it; else saves the code as a file (in the project, or Downloads).</summary>
+    internal void OpenSnippet(TeamInboxRow row)
+    {
+        if (row.Snippet is not { } s) return;
+        if (SnippetFile(s) is { } full)
+        {
+            _owner.OpenPath(new Controls.PathTarget(full, s.StartLine, Controls.PathKind.File));
+            return;
+        }
+        try
+        {
+            var path = TeamShare.SaveSnippet(s, _owner.ProjectFolder ?? DownloadsFolder());
+            _owner.Notify("IconCheck", Loc.T("File saved"), path);
+            if (_owner.ProjectFolder is not null) _owner.OpenPath(new Controls.PathTarget(path, null, Controls.PathKind.File));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _owner.Notify("IconAlert", Loc.T("Couldn't save"), e.Message);
+        }
+    }
+
+    /// <summary>The snippet as a quoted block in the message box, with where it is from, for the agent to look at.</summary>
+    internal void AskAgent(TeamInboxRow row)
+    {
+        if (row.Snippet is not { } s) return;
+        var lines = s.EndLine > s.StartLine ? $"{s.StartLine}-{s.EndLine}" : $"{s.StartLine}";
+        _owner.InsertMessageText(Quote(Loc.F("{0} shared {1}:", row.From, $"`{s.Path}:{lines}`") + "\n\n" + Fenced(s.Text, s.Language)) + "\n\n");
+    }
+
+    internal void AddNoteToMessage(TeamInboxRow row)
+    {
+        if (row.Note is { } n) _owner.InsertMessageText(Quote(n.Text) + "\n\n");
+    }
+
+    internal void OpenNoteLink(string url) => _owner.OpenSharedLinks([url]);
+
+    private static string Quote(string text) => "> " + text.ReplaceLineEndings("\n").TrimEnd('\n').Replace("\n", "\n> ");
+
+    /// <summary>Code as a Markdown fence longer than any run of backticks in it.</summary>
+    internal static string Fenced(string text, string? language)
+    {
+        var longest = 0;
+        for (int i = 0, run = 0; i < text.Length; i++) longest = Math.Max(longest, run = text[i] == '`' ? run + 1 : 0);
+        var fence = new string('`', Math.Max(3, longest + 1));
+        var lang = language is { Length: > 0 } l && l != "plaintext" ? l : "";
+        return $"{fence}{lang}\n{text.ReplaceLineEndings("\n").TrimEnd('\n')}\n{fence}";
+    }
 }

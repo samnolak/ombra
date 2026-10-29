@@ -94,7 +94,7 @@
                 <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />
                 <TextBlock Classes="tertiary" Text="{Binding Comment}" TextWrapping="Wrap" IsVisible="{Binding HasComment}" />
                 <WrapPanel ItemSpacing="6" LineSpacing="6" Margin="0,4,0,0">
-                  <Button Classes="accent sm" Content="{loc:T 'Accept'}" Command="{Binding AcceptCommand}" />
+                  <Button Classes="accent sm" Content="{loc:T 'Accept'}" Command="{Binding AcceptCommand}" IsVisible="{Binding CanAccept}" />
                   <Button Classes="outline sm" Content="{loc:T 'Decline'}" Command="{Binding DeclineCommand}" />
                   <Button Classes="flat sm" Content="{loc:T 'Open Inbox'}"
                           Command="{Binding $parent[ItemsControl].((vm:GitBellViewModel)DataContext).OpenTeamCommand}" />

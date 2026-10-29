@@ -1,5 +1,6 @@
 using System.Text;
 using Avalonia.Controls;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -437,7 +438,7 @@ public sealed class TeamShareTests
             Assert.Contains("https://example.com/spec", texts);
             Assert.Contains(Loc.T("Waiting for you"), texts);
             Assert.Contains(Loc.T("Send to"), texts);
-            var buttons = section.GetVisualDescendants().OfType<Button>().Where(b => b.IsVisible).Select(b => b.Content as string).ToList();
+            var buttons = section.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible).Select(b => b.Content as string).ToList();
             Assert.Equal([Loc.T("Accept"), Loc.T("Decline")], buttons);
             var radios = dialog.GetVisualDescendants().OfType<RadioButton>().Select(r => r.Content as string).ToList();
             Assert.Equal([Loc.T("Everyone in the team"), Loc.T("Specific members")], radios);
@@ -452,6 +453,205 @@ public sealed class TeamShareTests
         finally
         {
             Loc.Load(previous, Path.Combine(tmp, "settings.json"));
+            await alice.Vm.DisposeAsync();
+            await bob.Vm.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Snippets_and_notes_travel_as_files_with_their_mime_round_trip_and_keep_their_caps()
+    {
+        var hub = new FakeHub();
+        var alice = new FakeTeamItems(hub, A);
+        var bob = new FakeTeamItems(hub, B);
+        var snippet = new SharedSnippet("src/app.cs", 3, 5, "csharp", "a\nb\nc", "proj", "main", "abc1234");
+        await TeamShare.Snippet(snippet).SendAsync(alice, Team, [B], null);
+        await TeamShare.Note(new SharedNote("Fix login", "**do** this", TeamShare.NoteFromReply, "Fix login")).SendAsync(alice, Team, [B], null);
+        var inbox = TeamShare.Incoming(bob.List(Team), B);
+        Assert.All(inbox, i => Assert.Equal(TeamItemKinds.File, i.Kind)); // the core's kinds are closed
+        var s = inbox.Single(i => TeamShare.ShownKind(i) == TeamShare.SnippetKind);
+        var n = inbox.Single(i => TeamShare.ShownKind(i) == TeamShare.NoteKind);
+        Assert.Equal(["name", "blobRef", "size", "sha256", "mime"], s.Body!.AsObject().Select(p => p.Key));
+        Assert.Equal("app.cs:3-5", TeamShare.Title(s));
+        Assert.Equal("Fix login", TeamShare.Title(n));
+        foreach (var i in inbox) await bob.SetStatusAsync(Team, A, i.ItemId, TeamItemStatuses.Accepted);
+        Assert.Equal(snippet, TeamShare.ReadSnippet(await bob.DownloadAsync(bob.Get(Team, A, s.ItemId)!)));
+        var note = TeamShare.ReadNote(await bob.DownloadAsync(bob.Get(Team, A, n.ItemId)!));
+        Assert.Equal(("**do** this", TeamShare.NoteFromReply), (note.Text, note.Source));
+        Assert.Equal([TeamShare.SnippetKind, TeamShare.NoteKind], TeamShare.Sent(alice.List(Team), A).Select(x => x.Kind).Order().Reverse());
+
+        // Caps and checks
+        var big = new string('x', TeamShare.MaxSnippetBytes + 1);
+        Assert.Equal(TeamShare.MaxSnippetBytes, Assert.Throws<TeamShareTooLargeException>(() => TeamShare.Snippet(snippet with { Text = big })).Limit);
+        Assert.Equal(TeamShare.MaxNoteBytes, Assert.Throws<TeamShareTooLargeException>(() => TeamShare.Note(new SharedNote("t", big, TeamShare.NoteFromComment))).Limit);
+        Assert.Throws<ArgumentException>(() => TeamShare.Snippet(snippet with { Path = "../etc/passwd" }));
+        Assert.Throws<ArgumentException>(() => TeamShare.Note(new SharedNote("t", "x", "other")));
+        Assert.Throws<InvalidDataException>(() => TeamShare.ReadSnippet(Encoding.UTF8.GetBytes("{\"path\":\"/abs\",\"startLine\":1,\"endLine\":1,\"text\":\"x\"}")));
+        Assert.Throws<InvalidDataException>(() => TeamShare.ReadNote(Encoding.UTF8.GetBytes("not json")));
+        Assert.Null(TeamShare.ReadNote(Encoding.UTF8.GetBytes("{\"title\":\"t\",\"text\":\"x\",\"source\":\"comment\",\"url\":\"javascript:alert(1)\"}")).Url);
+    }
+
+    [AvaloniaFact]
+    public async Task A_reply_and_a_sent_comment_go_as_notes_and_show_in_the_inbox_with_their_actions()
+    {
+        var tmp = TestProcesses.TempDir("team-share-notes");
+        var hub = new FakeHub();
+        var alice = await Open(hub, SharedMarksTests.AliceId, tmp);
+        var bob = await Open(hub, SharedMarksTests.BobId, tmp);
+        try
+        {
+            var reply = new AssistantRowViewModel(new AssistantItem(2, "Use `retry()` here.", "", false, "stop", null));
+            alice.Vm.ShareReplyCommand.Execute(reply);
+            Assert.True(alice.Vm.Share.IsDialogOpen);
+            Assert.Equal(Loc.F("Share {0} “{1}”", Loc.T("a note"), alice.Vm.SessionTitle), alice.Vm.Share.DialogTitle);
+            await alice.Vm.Share.SendCommand.ExecuteAsync(null);
+            var comment = new SentCommentViewModel(new SentComment(1, "Button is off", "example.dev", "https://example.dev/p", null, null, ["On: <button>"]), false);
+            alice.Vm.ShareSentCommentCommand.Execute(comment);
+            await alice.Vm.Share.SendCommand.ExecuteAsync(null);
+            await Settle(alice, bob);
+
+            Assert.Equal(2, bob.Vm.Share.Inbox.Count);
+            Assert.All(bob.Vm.Share.Inbox, r => Assert.True(r.CanShow && !r.CanAccept && r.IsPending));
+            var replyRow = bob.Vm.Share.Inbox.Single(r => TeamShare.Title(r.Item) == alice.Vm.SessionTitle);
+            await replyRow.ShowCommand.ExecuteAsync(null);
+            await Settle(alice, bob);
+            replyRow = bob.Vm.Share.Inbox.Single(r => TeamShare.Title(r.Item) == alice.Vm.SessionTitle);
+            Assert.True(replyRow.IsAccepted);
+            Assert.Equal("Use `retry()` here.", replyRow.Note!.Text);
+            Assert.Equal(TeamShare.NoteFromReply, replyRow.Note.Source);
+            Assert.False(replyRow.CanShow);
+            replyRow.AddNoteToMessageCommand.Execute(null);
+            Assert.Contains("> Use `retry()` here.", bob.Vm.ComposerText);
+
+            var commentRow = bob.Vm.Share.Inbox.Single(r => r != replyRow && TeamShare.Title(r.Item) == "Button is off");
+            await commentRow.ShowCommand.ExecuteAsync(null);
+            await Settle(alice, bob);
+            commentRow = bob.Vm.Share.Inbox.Single(r => TeamShare.Title(r.Item) == "Button is off");
+            Assert.Equal(("https://example.dev/p", TeamShare.NoteFromComment), (commentRow.Note!.Url, commentRow.Note.Source));
+            Assert.Contains("Button is off", commentRow.Note.Text);
+            Assert.True(commentRow.CanOpenNoteLink);
+        }
+        finally
+        {
+            await alice.Vm.DisposeAsync();
+            await bob.Vm.DisposeAsync();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task Editor_lines_go_as_a_snippet_and_open_at_their_line_in_the_recipients_project()
+    {
+        var tmp = TestProcesses.TempDir("team-share-snippet");
+        var hub = new FakeHub();
+        var alice = await Open(hub, SharedMarksTests.AliceId, tmp);
+        var bob = await Open(hub, SharedMarksTests.BobId, tmp);
+        await using var documents = new Ombra.App.Services.Documents.WorkspaceDocumentService(watchFiles: false);
+        var w = new Window { Width = 720, Height = 480, DataContext = alice.Vm };
+        try
+        {
+            const string code = "one\ntwo\nthree\nfour\nfive\n";
+            Directory.CreateDirectory(Path.Combine(alice.Project, "src"));
+            Directory.CreateDirectory(Path.Combine(bob.Project, "src"));
+            var path = Path.Combine(alice.Project, "src", "app.py");
+            File.WriteAllText(path, code);
+            File.WriteAllText(Path.Combine(bob.Project, "src", "app.py"), code);
+            var view = new Ombra.App.Controls.DocumentEditor { WorkspaceDocument = await documents.OpenAsync(path) };
+            w.Content = view;
+            w.Show();
+            Dispatcher.UIThread.RunJobs();
+            // From the middle of line 2 to the start of line 4: lines 2-3, whole
+            view.Editor.Select(5, code.IndexOf("four", StringComparison.Ordinal) - 5);
+            var lines = view.SelectedLines()!;
+            Assert.Equal((2, 3, "two\nthree"), (lines.FirstLine, lines.LastLine, lines.Text));
+            view.BeginShare();
+            Assert.True(alice.Vm.Share.IsDialogOpen);
+            Assert.Equal(Loc.F("Share {0} “{1}”", Loc.T("a code snippet"), "app.py:2-3"), alice.Vm.Share.DialogTitle);
+            await alice.Vm.Share.SendCommand.ExecuteAsync(null);
+            await Settle(alice, bob);
+
+            var row = Assert.Single(bob.Vm.Share.Inbox);
+            Assert.Equal(Loc.T("Code"), row.KindText);
+            await row.ShowCommand.ExecuteAsync(null);
+            await Settle(alice, bob);
+            row = Assert.Single(bob.Vm.Share.Inbox);
+            Assert.Equal(("src/app.py", 2, 3, "two\nthree", "project"), (row.Snippet!.Path, row.Snippet.StartLine, row.Snippet.EndLine, row.Snippet.Text, row.Snippet.Project));
+            Assert.Contains("```", row.SnippetMarkdown);
+            Assert.Equal(Loc.T("Open in editor"), row.SnippetOpenLabel);
+            row.OpenSnippetCommand.Execute(null);
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while ((bob.Vm.Files.Viewer?.FullPath != Path.Combine(bob.Project, "src", "app.py") || bob.Vm.Files.Viewer?.TargetLine != 2) && DateTime.UtcNow < deadline) { Dispatcher.UIThread.RunJobs(); await Task.Delay(15); }
+            Assert.Equal(Path.Combine(bob.Project, "src", "app.py"), bob.Vm.Files.Viewer?.FullPath);
+            Assert.Equal(2, bob.Vm.Files.Viewer?.TargetLine);
+            row.AskAgentCommand.Execute(null);
+            Assert.Contains("> two", bob.Vm.ComposerText);
+            Assert.Contains("`src/app.py:2-3`", bob.Vm.ComposerText);
+
+            // Not in the project: saved as a file instead
+            File.Delete(Path.Combine(bob.Project, "src", "app.py"));
+            Assert.Equal(Loc.T("Save as file"), row.SnippetOpenLabel);
+        }
+        finally
+        {
+            w.Close();
+            await alice.Vm.DisposeAsync();
+            await bob.Vm.DisposeAsync();
+        }
+    }
+
+    [AvaloniaTheory]
+    [InlineData("light")]
+    [InlineData("dark")]
+    public async Task Shown_code_and_notes_lay_out_cleanly_in_the_inbox_and_the_dialog(string theme)
+    {
+        var tmp = TestProcesses.TempDir("team-share-readable-" + theme);
+        var hub = new FakeHub();
+        var alice = await Open(hub, SharedMarksTests.AliceId, tmp);
+        var bob = await Open(hub, SharedMarksTests.BobId, tmp);
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(bob.Project, "src"));
+            File.WriteAllText(Path.Combine(bob.Project, "src", "retry.cs"), "x\n");
+            alice.Vm.ShareSnippet(Path.Combine(alice.Project, "src", "retry.cs"), 12, 16,
+                "static async Task<T> Retry<T>(Func<Task<T>> run, int times = 3)\n{\n    for (var i = 1; ; i++)\n        try { return await run(); }\n        catch when (i < times) { await Task.Delay(100 * i); }\n}", "csharp");
+            alice.Vm.Share.Comment = "This is the loop I meant";
+            await alice.Vm.Share.SendCommand.ExecuteAsync(null);
+            alice.Vm.ShareReplyCommand.Execute(new AssistantRowViewModel(new AssistantItem(2,
+                "The login fails because the **token** expires before the retry.\n\n- refresh it first\n- then call `Retry`", "", false, "stop", null)));
+            await alice.Vm.Share.SendCommand.ExecuteAsync(null);
+            alice.Vm.ShareLink("https://example.com/spec");
+            await alice.Vm.Share.SendCommand.ExecuteAsync(null);
+            await Settle(alice, bob);
+            foreach (var r in bob.Vm.Share.Inbox.Where(r => r.IsReadable).ToList()) await r.ShowCommand.ExecuteAsync(null);
+            await Settle(alice, bob);
+            Assert.Equal(2, bob.Vm.Share.Inbox.Count(r => r.HasContent));
+            bob.Vm.ShareSnippet(Path.Combine(bob.Project, "src", "retry.cs"), 1, 1, "x", "csharp");
+
+            var section = new Ombra.App.Views.Team.TeamShareSection { DataContext = bob.Vm };
+            var dialog = new Ombra.App.Views.Team.ShareDialog { DataContext = bob.Vm };
+            var w = new Window
+            {
+                Content = new ScrollViewer { Content = new StackPanel { Spacing = 24, Margin = new Avalonia.Thickness(24), Children = { section, dialog } } },
+                Width = 820, Height = 1500,
+                RequestedThemeVariant = theme == "dark" ? Avalonia.Styling.ThemeVariant.Dark : Avalonia.Styling.ThemeVariant.Light,
+            };
+            w.Show();
+            Dispatcher.UIThread.RunJobs();
+            if (Environment.GetEnvironmentVariable("OMBRA_SHOT_DIR") is { } dir)
+            {
+                Directory.CreateDirectory(dir);
+                using var frame = w.CaptureRenderedFrame();
+                using var file = File.Create(Path.Combine(dir, $"team-share-readable-{theme}.png"));
+                frame!.Save(file, new Avalonia.Media.Imaging.PngBitmapEncoderOptions());
+            }
+            Assert.Empty(LayoutAudit.Run(w, section));
+            var buttons = section.GetVisualDescendants().OfType<Button>().Where(b => b.IsEffectivelyVisible).Select(b => b.Content as string).ToList();
+            Assert.Contains(Loc.T("Open in editor"), buttons);
+            Assert.Contains(Loc.T("Ask the agent about it"), buttons);
+            Assert.Contains(Loc.T("Add to message"), buttons);
+            w.Close();
+        }
+        finally
+        {
             await alice.Vm.DisposeAsync();
             await bob.Vm.DisposeAsync();
         }

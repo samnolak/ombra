@@ -43,6 +43,7 @@ public sealed partial class MainViewModel
     {
         if (IsSettingsOpen) CloseSettingsCommand.Execute(null);
         IsTeamPageOpen = false;
+        IsEditorPageOpen = false;
         IsBrowserPageOpen = true;
     }
 
@@ -53,5 +54,6 @@ public sealed partial class MainViewModel
         if (IsSettingsOpen) CloseSettingsCommand.Execute(null);
         IsBrowserPageOpen = false;
         IsTeamPageOpen = false;
+        IsEditorPageOpen = false;
     }
 }

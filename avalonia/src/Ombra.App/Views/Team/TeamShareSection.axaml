@@ -5,6 +5,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:loc="using:Ombra.App.Localization"
              xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
              x:Class="Ombra.App.Views.Team.TeamShareSection"
              x:DataType="vm:MainViewModel">
   <StackPanel Spacing="24" DataContext="{Binding Share}" x:DataType="vm:TeamShareViewModel">
@@ -20,7 +21,7 @@
           <StackPanel>
             <StackPanel Classes="plug-body" IsVisible="{Binding !HasInboxRows}">
               <TextBlock x:Name="TeamInboxEmpty" Classes="muted" TextWrapping="Wrap"
-                         Text="{loc:T 'Files, skills, links, patches and collections members share with you appear here. Nothing is saved or opened until you accept it.'}" />
+                         Text="{loc:T 'Files, skills, links, patches, collections, code and notes members share with you appear here. Nothing is saved or opened until you accept it.'}" />
             </StackPanel>
             <ItemsControl x:Name="TeamInboxList" ItemsSource="{Binding Inbox}">
               <ItemsControl.ItemTemplate>
@@ -32,7 +33,7 @@
                         <TextBlock Classes="plug-line" Text="{Binding Headline}" />
                         <TextBlock Classes="conn-name" Text="{Binding Title}" ToolTip.Tip="{Binding Title}" />
                         <TextBlock Text="{Binding Comment}" TextWrapping="Wrap" IsVisible="{Binding HasComment}" />
-                        <TextBlock Classes="muted mono" Text="{Binding Preview}" FontSize="{DynamicResource GuiFontCaption}" TextWrapping="Wrap" MaxLines="4" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Classes="muted mono" Text="{Binding Preview}" IsVisible="{Binding HasPreview}" FontSize="{DynamicResource GuiFontCaption}" TextWrapping="Wrap" MaxLines="4" TextTrimming="CharacterEllipsis" />
                         <StackPanel Orientation="Horizontal" Spacing="8">
                           <Border Classes="conn-tag"><TextBlock Text="{Binding KindText}" /></Border>
                           <Border Classes="conn-tag"><TextBlock Text="{Binding StatusText}" /></Border>
@@ -40,9 +41,11 @@
                         </StackPanel>
                       </StackPanel>
                       <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                        <Button Classes="accent" Content="{loc:T 'Accept'}" Command="{Binding AcceptCommand}" IsVisible="{Binding IsPending}" IsEnabled="{Binding !IsBusy}"
+                        <Button Classes="accent" Content="{loc:T 'Show'}" Command="{Binding ShowCommand}" IsVisible="{Binding CanShow}" IsEnabled="{Binding !IsBusy}"
+                                AutomationProperties.Name="{Binding Title, StringFormat={loc:T 'Show {0}'}}" />
+                        <Button Classes="accent" Content="{loc:T 'Accept'}" Command="{Binding AcceptCommand}" IsVisible="{Binding CanAccept}" IsEnabled="{Binding !IsBusy}"
                                 AutomationProperties.Name="{Binding Title, StringFormat={loc:T 'Accept {0}'}}" />
-                        <Button Classes="flat" Content="{loc:T 'Decline'}" Command="{Binding DeclineCommand}" IsVisible="{Binding IsPending}" IsEnabled="{Binding !IsBusy}"
+                        <Button Classes="flat" Content="{loc:T 'Decline'}" Command="{Binding DeclineCommand}" IsVisible="{Binding CanDecline}" IsEnabled="{Binding !IsBusy}"
                                 AutomationProperties.Name="{Binding Title, StringFormat={loc:T 'Decline {0}'}}" />
                         <Button Classes="outline" Content="{loc:T 'Open'}" Command="{Binding OpenCommand}" IsVisible="{Binding CanOpen}"
                                 AutomationProperties.Name="{Binding Title, StringFormat={loc:T 'Open {0}'}}" />
@@ -50,6 +53,25 @@
                                 AutomationProperties.Name="{Binding Title, StringFormat={loc:T 'Apply {0}'}}" />
                       </StackPanel>
                     </Grid>
+                    <!-- A snippet or a note, once shown: where it is from, the code (highlighted by its language) or the Markdown, what to do with it -->
+                    <StackPanel x:Name="TeamInboxContent" Margin="16,0,20,14" Spacing="8" IsVisible="{Binding HasContent}">
+                      <TextBlock Classes="muted mono" Text="{Binding SnippetPlace}" IsVisible="{Binding HasSnippet}" FontSize="{DynamicResource GuiFontCaption}"
+                                 TextWrapping="Wrap" ToolTip.Tip="{Binding SnippetPlace}" />
+                      <TextBlock Classes="muted" Text="{Binding NoteSource}" IsVisible="{Binding HasNote}" FontSize="{DynamicResource GuiFontCaption}" TextWrapping="Wrap" />
+                      <ScrollViewer MaxHeight="360" HorizontalScrollBarVisibility="Disabled" IsVisible="{Binding HasSnippet}">
+                        <ctl:MarkdownView Markdown="{Binding SnippetMarkdown}" />
+                      </ScrollViewer>
+                      <ScrollViewer MaxHeight="360" HorizontalScrollBarVisibility="Disabled" IsVisible="{Binding HasNote}">
+                        <ctl:MarkdownView Markdown="{Binding Note.Text, FallbackValue=''}" />
+                      </ScrollViewer>
+                      <WrapPanel ItemSpacing="8" LineSpacing="8">
+                        <Button Classes="outline" Content="{loc:T 'Copy'}" Command="{Binding CopyContentCommand}" />
+                        <Button Classes="outline" Content="{Binding SnippetOpenLabel}" Command="{Binding OpenSnippetCommand}" IsVisible="{Binding HasSnippet}" />
+                        <Button Classes="outline" Content="{loc:T 'Ask the agent about it'}" Command="{Binding AskAgentCommand}" IsVisible="{Binding HasSnippet}" />
+                        <Button Classes="outline" Content="{loc:T 'Add to message'}" Command="{Binding AddNoteToMessageCommand}" IsVisible="{Binding HasNote}" />
+                        <Button Classes="outline" Content="{loc:T 'Open link'}" Command="{Binding OpenNoteLinkCommand}" IsVisible="{Binding CanOpenNoteLink}" />
+                      </WrapPanel>
+                    </StackPanel>
                   </StackPanel>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>

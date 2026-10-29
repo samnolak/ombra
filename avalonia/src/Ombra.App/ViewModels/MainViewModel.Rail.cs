@@ -10,7 +10,8 @@ namespace Ombra.App.ViewModels;
 /// </summary>
 public partial class MainViewModel
 {
-    public bool IsChatsRailOn => !IsSettingsOpen && !IsBrowserPageOpen && !IsTeamPageOpen;
+    public bool IsChatsRailOn => !IsSettingsOpen && !IsBrowserPageOpen && !IsTeamPageOpen && !IsEditorPageOpen;
+    public bool IsEditorRailOn => !IsSettingsOpen && IsEditorPageOpen;
     public bool IsBrowserRailOn => !IsSettingsOpen && IsBrowserPageOpen;
     public bool IsTeamRailOn => !IsSettingsOpen && IsTeamPageOpen;
     public bool IsPluginsRailOn => IsSettingsOpen && SettingsCategory == "plugins";
@@ -29,6 +30,8 @@ public partial class MainViewModel
         OnPropertyChanged(nameof(IsSettingsRailOn));
         OnPropertyChanged(nameof(IsBrowserRailOn));
         OnPropertyChanged(nameof(ShowBrowserPage));
+        OnPropertyChanged(nameof(IsEditorRailOn));
+        OnPropertyChanged(nameof(ShowEditorPage));
         OnPropertyChanged(nameof(IsTeamRailOn));
         OnPropertyChanged(nameof(ShowTeamPage));
         OnPropertyChanged(nameof(ShowPet));

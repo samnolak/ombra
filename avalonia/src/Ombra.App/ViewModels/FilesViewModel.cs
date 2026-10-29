@@ -190,8 +190,8 @@ public sealed partial class FilesViewModel : ObservableObject
     /// <summary>Raised when a node should be scrolled into view in the tree (after "open" from the conversation).</summary>
     public event Action<FileNodeViewModel>? RevealRequested;
 
-    /// <summary>On screen: as the right panel's Files tab, or its Changes tab (the changed files only).</summary>
-    private bool IsActive => Owner.IsFilesViewShown;
+    /// <summary>On screen: as the right panel's Files tab, or its Changes tab (the changed files only), or as the Editor page's tree.</summary>
+    private bool IsActive => Owner.IsFilesViewShown || Owner.ShowEditorPage;
 
     /// <summary>The list shows the Changes tab's files (git's changes, or this session's without git).</summary>
     private bool _inChangesTab;
@@ -209,6 +209,7 @@ public sealed partial class FilesViewModel : ObservableObject
         switch (e.PropertyName)
         {
             case nameof(MainViewModel.ActivePane):
+            case nameof(MainViewModel.ShowEditorPage):
                 FollowTab();
                 if (IsActive) Activate();
                 else Deactivate();
@@ -901,11 +902,21 @@ public sealed partial class FilesViewModel : ObservableObject
 
     // ───────────────────────── From the conversation ─────────────────────────
 
-    /// <summary>A path in the conversation (a change card, a tool's file): the Files pane opens it at its line.</summary>
+    /// <summary>
+    /// A path in the conversation (a change card, a tool's file): the Files pane opens it at its line; while the Editor
+    /// page is shown, the page opens it in a tab instead.
+    /// </summary>
     [RelayCommand(AllowConcurrentExecutions = true)]
     private async Task OpenLinkAsync(FileLink? link)
     {
         if (link is null) return;
+        if (Owner.ShowEditorPage)
+        {
+            if (!SamePath(Owner.ProjectFolder, _loadedRoot)) Activate();
+            await _rootLoad;
+            if (ProjectFiles.Resolve(Root ?? Owner.ProjectFolder, link.Path) is { } inPage) await Owner.EditorPage.OpenAsync(inPage, link.Line);
+            return;
+        }
         Owner.ShowPaneCommand.Execute(SidePane.Files);
         // Shown already, there was no change to hear about: it may still need its project
         if (!SamePath(Owner.ProjectFolder, _loadedRoot)) Activate();

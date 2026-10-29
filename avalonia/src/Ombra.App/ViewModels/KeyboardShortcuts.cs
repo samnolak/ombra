@@ -46,6 +46,9 @@ public static class KeyboardShortcuts
     /// <summary>"Comment on the page" in the composer's + menu.</summary>
     public static string CommentOnPage { get; } = Text(OperatingSystem.IsMacOS(), Mod.Command | Mod.Shift, "S");
 
+    /// <summary>The rail's Editor page (⌘⇧E is Thinking effort).</summary>
+    public static string EditorPage { get; } = Text(OperatingSystem.IsMacOS(), Mod.Command | Mod.Shift, "O");
+
     /// <summary>Steering a running reply (placeholder, Steer's tooltip).</summary>
     public static string Steer { get; } = Text(OperatingSystem.IsMacOS(), Mod.Alt, "Enter");
 
@@ -131,6 +134,9 @@ public static class KeyboardShortcuts
                 S("Plan", Mod.Command | Mod.Shift, "P"),
                 S("Browser preview", Mod.Command | Mod.Shift, "B"),
                 S("Comment on the page", Mod.Command | Mod.Shift, "S"),
+                S("Editor page", Mod.Command | Mod.Shift, "O"),
+                S("Go to line", Mod.Control, "G", "in the editor"),
+                S("Find and replace", Mod.Command, "F / H", "in the editor"),
                 S("Close focused tab or window", Mod.Command, "W"),
                 S("Focus address", Mod.Command, "L", "in the browser"),
                 S("New tab", Mod.Command, "T", "in the browser"),

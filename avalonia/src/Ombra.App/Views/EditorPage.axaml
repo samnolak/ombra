@@ -1,0 +1,183 @@
+<!-- The rail's Editor page (ViewModels/EditorPageViewModel.cs): the project's tree (the Files pane's) or find in files on the
+     left, tabs of open files and the editor on the right. Built from the Files pane's tokens and rows (Styles.Files.axaml):
+     a dense workbench, the editor the one thing that leads; tabs are 32 px, the active one on fill 2 with its dirty dot. -->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="using:Ombra.App.Localization"
+             xmlns:vm="using:Ombra.App.ViewModels"
+             xmlns:ctl="using:Ombra.App.Controls"
+             x:Class="Ombra.App.Views.EditorPage"
+             x:DataType="vm:EditorPageViewModel">
+  <UserControl.Styles>
+    <Style Selector="Border.editor-tab">
+      <Setter Property="Height" Value="32" />
+      <Setter Property="Padding" Value="10,0,4,0" />
+      <Setter Property="CornerRadius" Value="{DynamicResource GuiRadius8}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Cursor" Value="Hand" />
+    </Style>
+    <Style Selector="Border.editor-tab:pointerover">
+      <Setter Property="Background" Value="{DynamicResource GuiFill1}" />
+    </Style>
+    <Style Selector="Border.editor-tab.active">
+      <Setter Property="Background" Value="{DynamicResource GuiFill2}" />
+    </Style>
+    <Style Selector="Border.editor-tab TextBlock.tab-name">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    </Style>
+    <Style Selector="Border.editor-tab.active TextBlock.tab-name">
+      <Setter Property="Foreground" Value="{DynamicResource GuiTextPrimary}" />
+    </Style>
+    <Style Selector="Ellipse.dirty-dot">
+      <Setter Property="Width" Value="7" />
+      <Setter Property="Height" Value="7" />
+      <Setter Property="Fill" Value="{DynamicResource GuiTextSecondary}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.hit-text">
+      <Setter Property="FontFamily" Value="{DynamicResource GuiFontMono}" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Foreground" Value="{DynamicResource GuiTextSecondary}" />
+    </Style>
+  </UserControl.Styles>
+
+  <Grid ColumnDefinitions="260,1,*">
+    <!-- ── The project: its tree, or find in files ── -->
+    <DockPanel x:Name="EditorSide">
+      <Border DockPanel.Dock="Top" Classes="files-toolbar">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Classes="files-title" Text="{Binding Files.RootName}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                     ToolTip.Tip="{Binding Files.Root}" />
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+            <Button x:Name="EditorQuickOpenButton" Classes="icon" Command="{Binding QuickOpenCommand}" ToolTip.Tip="{Binding QuickOpenTip}"
+                    AutomationProperties.Name="{loc:T 'Go to file'}">
+              <ctl:Icon Data="{StaticResource IconFile}" Size="16" />
+            </Button>
+            <Button x:Name="EditorSearchButton" Classes="icon" Classes.on="{Binding IsSearchShown}" Command="{Binding ToggleSearchCommand}" ToolTip.Tip="{loc:T 'Find in files'}"
+                          AutomationProperties.Name="{loc:T 'Find in files'}">
+              <ctl:Icon Data="{StaticResource IconSearch}" Size="16" />
+            </Button>
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <DockPanel IsVisible="{Binding IsSearchShown}">
+        <StackPanel DockPanel.Dock="Top" Margin="12,0,12,8" Spacing="6">
+          <TextBox x:Name="EditorSearchBox" Text="{Binding SearchQuery}" PlaceholderText="{loc:T 'Find in files — Enter to search'}"
+                   AutomationProperties.Name="{loc:T 'Find in files'}" />
+          <TextBlock Classes="tertiary" Text="{Binding SearchNote}" IsVisible="{Binding HasSearchNote}" TextTrimming="CharacterEllipsis" />
+          <TextBlock Classes="tertiary" Text="{loc:T 'Searching…'}" IsVisible="{Binding IsSearchRunning}" />
+        </StackPanel>
+        <ListBox x:Name="EditorSearchHits" Classes="file-list" ItemsSource="{Binding SearchHits}" AutomationProperties.Name="{loc:T 'Matches'}"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+          <ListBox.Styles>
+            <Style Selector="ListBox.file-list ListBoxItem">
+              <Setter Property="Height" Value="44" />
+            </Style>
+          </ListBox.Styles>
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:EditorSearchHit">
+              <StackPanel VerticalAlignment="Center" Spacing="1" ToolTip.Tip="{Binding Location}">
+                <TextBlock Classes="file-name" Text="{Binding Location}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Classes="hit-text" Text="{Binding Text}" TextTrimming="CharacterEllipsis" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+
+      <Panel IsVisible="{Binding !IsSearchShown}">
+        <ListBox x:Name="EditorTree" Classes="file-list" ItemsSource="{Binding Files.Nodes}" AutomationProperties.Name="{loc:T 'Project files'}"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:FileNodeViewModel">
+              <Grid ColumnDefinitions="Auto,Auto,*,Auto" ToolTip.Tip="{Binding Tip}" AutomationProperties.Name="{Binding Name}">
+                <Panel Width="16" Margin="{Binding Indent}">
+                  <ctl:Icon Classes="tree-chevron" Classes.open="{Binding IsExpanded}" Data="{StaticResource IconChevronRight}" Size="16"
+                            IsVisible="{Binding IsDirectory}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Panel>
+                <ctl:Icon Grid.Column="1" Classes="file-icon" Classes.dim="{Binding IsDimmed}" Data="{StaticResource IconFolder}" Size="16"
+                          Margin="2,0,7,0" VerticalAlignment="Center" IsVisible="{Binding IsDirectory}" />
+                <ctl:Icon Grid.Column="1" Classes="file-icon" Classes.dim="{Binding IsDimmed}" Data="{StaticResource IconFile}" Size="16"
+                          Margin="2,0,7,0" VerticalAlignment="Center" IsVisible="{Binding IsFile}" />
+                <TextBlock Grid.Column="2" Classes="file-name" Classes.dim="{Binding IsDimmed}" Classes.deleted="{Binding IsDeleted}"
+                           Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6" Margin="8,0,4,0" VerticalAlignment="Center">
+                  <Ellipse Classes="git-dot folder" IsVisible="{Binding ShowFolderDot}" />
+                  <Ellipse Classes="git-dot" Classes.modified="{Binding IsModified}" Classes.added="{Binding IsAdded}" Classes.removed="{Binding IsRemoved}"
+                           Classes.conflicted="{Binding IsConflicted}" IsVisible="{Binding HasGitMark}" />
+                  <TextBlock Classes="git-letter" Text="{Binding GitLetter}" IsVisible="{Binding HasGitMark}" VerticalAlignment="Center" />
+                </StackPanel>
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+        <TextBlock Classes="muted files-message" Text="{loc:T 'Open a project to browse and edit its files.'}" IsVisible="{Binding Files.ShowNoProject}" />
+      </Panel>
+    </DockPanel>
+
+    <Border Grid.Column="1" Background="{DynamicResource GuiHairline}" />
+
+    <!-- ── Tabs and the editor ── -->
+    <DockPanel Grid.Column="2">
+      <ScrollViewer DockPanel.Dock="Top" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Height="48">
+        <ItemsControl x:Name="EditorTabs" ItemsSource="{Binding Tabs}" Margin="8,8,8,8">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" Spacing="2" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:EditorTabViewModel">
+              <Border Classes="editor-tab" Classes.active="{Binding IsActive}" ToolTip.Tip="{Binding RelativePath}"
+                      AutomationProperties.Name="{Binding Name}" Tapped="OnTabTapped">
+                <Border.ContextMenu>
+                  <ContextMenu>
+                    <MenuItem Header="{loc:T 'Close'}" Command="{Binding CloseCommand}" />
+                    <MenuItem Header="{loc:T 'Close others'}" Command="{Binding Page.CloseOtherTabsCommand}" CommandParameter="{Binding}" />
+                    <Separator />
+                    <MenuItem Header="{loc:T 'Move left'}" Command="{Binding Page.MoveTabLeftCommand}" CommandParameter="{Binding}" />
+                    <MenuItem Header="{loc:T 'Move right'}" Command="{Binding Page.MoveTabRightCommand}" CommandParameter="{Binding}" />
+                  </ContextMenu>
+                </Border.ContextMenu>
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock Classes="tab-name" Text="{Binding Name}" VerticalAlignment="Center" />
+                  <Panel Width="20" Height="20">
+                    <Ellipse Classes="dirty-dot" IsVisible="{Binding IsDirty}" HorizontalAlignment="Center" />
+                    <Button Classes="icon" Width="20" Height="20" Padding="0" Command="{Binding CloseCommand}" IsVisible="{Binding !IsDirty}"
+                            ToolTip.Tip="{loc:T 'Close'}" AutomationProperties.Name="{loc:T 'Close'}">
+                      <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+                    </Button>
+                  </Panel>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+
+      <Border DockPanel.Dock="Top" IsVisible="{Binding HasNotice}" Margin="12,0,12,8" Padding="12,8" CornerRadius="{DynamicResource GuiRadius8}"
+              Background="{DynamicResource GuiFill1}">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Text="{Binding Notice}" TextWrapping="Wrap" VerticalAlignment="Center" />
+          <Button Grid.Column="1" Classes="icon" Command="{Binding DismissNoticeCommand}" AutomationProperties.Name="{loc:T 'Dismiss'}">
+            <ctl:Icon Data="{StaticResource IconClose}" Size="14" />
+          </Button>
+        </Grid>
+      </Border>
+
+      <Panel>
+        <ctl:DocumentEditor x:Name="PageEditor" IsVisible="{Binding HasActiveTab}"
+                            WorkspaceDocument="{Binding ActiveTab.Document}" TargetLine="{Binding ActiveTab.TargetLine}"
+                            LineChanges="{Binding ActiveTab.LineChanges}" LanguageService="{Binding Files.LanguageService}" />
+        <StackPanel Classes="files-state" IsVisible="{Binding ShowEmpty}">
+          <TextBlock Classes="files-title" HorizontalAlignment="Center" Text="{loc:T 'No file open'}" />
+          <TextBlock Classes="muted" TextWrapping="Wrap" TextAlignment="Center"
+                     Text="{loc:T 'Choose a file in the tree, go to a file by name, or find text in all files.'}" />
+          <Button HorizontalAlignment="Center" Command="{Binding QuickOpenCommand}" Content="{loc:T 'Go to file…'}" />
+        </StackPanel>
+      </Panel>
+    </DockPanel>
+  </Grid>
+</UserControl>

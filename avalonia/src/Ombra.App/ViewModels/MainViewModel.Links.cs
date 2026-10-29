@@ -62,7 +62,7 @@ public sealed partial class MainViewModel
                 OpenSignInPage(uri);
                 return;
             case LinkTarget.Panel when !Preview.IsEngineUnavailable:
-                if (IsSettingsOpen || IsBrowserPageOpen || IsTeamPageOpen) ShowChatsCommand.Execute(null);
+                if (IsSettingsOpen || IsBrowserPageOpen || IsTeamPageOpen || IsEditorPageOpen) ShowChatsCommand.Execute(null);
                 IsPreviewOpen = true;
                 if (Preview.OpenUserTab(uri) is { } refused) Notify("IconAlert", Localization.Loc.T("Couldn't open the link"), refused);
                 return;
@@ -97,7 +97,7 @@ public sealed partial class MainViewModel
         if (window) SignInBrowser = browser;
         else
         {
-            if (IsBrowserPageOpen || IsTeamPageOpen) ShowChatsCommand.Execute(null);
+            if (IsBrowserPageOpen || IsTeamPageOpen || IsEditorPageOpen) ShowChatsCommand.Execute(null);
             IsPreviewOpen = true;
         }
         var refused = browser.OpenUserTab(uri);

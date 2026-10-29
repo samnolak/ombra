@@ -23,16 +23,10 @@ public sealed partial class DocumentEditor
     /// <summary>Opens the comment box at the selection (the editor's context menu, "Comment…").</summary>
     internal void BeginMark()
     {
-        if (WorkspaceDocument is not { } document) return;
+        if (WorkspaceDocument is not { } document || SelectedLines() is not { } lines) return;
         var buffer = document.Buffer;
-        var start = Editor.TextArea.Selection.IsEmpty ? Editor.CaretOffset : Editor.SelectionStart;
-        var end = Editor.TextArea.Selection.IsEmpty ? Editor.CaretOffset : Editor.SelectionStart + Editor.SelectionLength;
-        var first = buffer.GetLineByOffset(start).LineNumber;
-        var lastLine = buffer.GetLineByOffset(end);
-        // A selection that ends at the start of a line does not take that line
-        var last = end > start && lastLine.Offset == end && lastLine.LineNumber > first ? lastLine.LineNumber - 1 : lastLine.LineNumber;
+        var (first, last, text) = (lines.FirstLine, lines.LastLine, lines.Text);
         string LineText(int n) => buffer.GetText(buffer.GetLineByNumber(n));
-        var text = string.Join("\n", Enumerable.Range(first, last - first + 1).Select(LineText));
         string[] before = [.. Enumerable.Range(Math.Max(1, first - 2), first - Math.Max(1, first - 2)).Select(LineText)];
         string[] after = [.. Enumerable.Range(last + 1, Math.Max(0, Math.Min(buffer.LineCount, last + 2) - last)).Select(LineText)];
         var sha = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(buffer.Text))).ToLowerInvariant();

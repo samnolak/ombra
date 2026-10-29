@@ -17,11 +17,22 @@ public sealed record SentShare(string ShareId, string Kind, string Title, ulong 
 /// <summary>One recipient's copy of a sent share and that recipient's answer (null while there is none).</summary>
 public sealed record SentCopy(string RecipientMemberId, bool Seen, string? Status, string? Note);
 
-/// <summary>A resource larger than a team blob may be.</summary>
-public sealed class TeamShareTooLargeException(long bytes) : Exception($"{bytes} bytes is more than {TeamShare.MaxContentBytes} bytes")
+/// <summary>A resource larger than its kind may be (<paramref name="limit"/> bytes).</summary>
+public sealed class TeamShareTooLargeException(long bytes, long limit = TeamShare.MaxContentBytes) : Exception($"{bytes} bytes is more than {limit} bytes")
 {
     public long Bytes { get; } = bytes;
+    public long Limit { get; } = limit;
 }
+
+/// <summary>
+/// Lines of code shared from the editor: the project-relative path ('/'), the lines (1-based, inclusive), the language
+/// id, the text, and where it came from when known (project name, git branch, commit).
+/// </summary>
+public sealed record SharedSnippet(string Path, int StartLine, int EndLine, string? Language, string Text,
+    string? Project = null, string? Branch = null, string? Commit = null);
+
+/// <summary>Markdown shared from a chat: an assistant reply (<c>reply</c>) or a comment I sent (<c>comment</c>), its chat and page.</summary>
+public sealed record SharedNote(string Title, string Text, string Source, string? ChatTitle = null, string? Url = null);
 
 /// <summary>
 /// Something to share (P5): sent to each recipient as its own copy (R5-10). Content that does not fit an item (a file,
@@ -206,7 +217,7 @@ public static class TeamShare
     public static ShareContent Edit(string title, string patch, RepoIdentity repo)
     {
         var bytes = Encoding.UTF8.GetByteCount(patch);
-        if (bytes > MaxPatchBytes) throw new TeamShareTooLargeException(bytes);
+        if (bytes > MaxPatchBytes) throw new TeamShareTooLargeException(bytes, MaxPatchBytes);
         return new InlineContent(TeamItemKinds.Edit, title, new JsonObject
         {
             ["baseCommit"] = repo.Commit, ["patch"] = Text(patch), ["repoFingerprint"] = repo.Fingerprint, ["size"] = (ulong)bytes,
@@ -216,6 +227,100 @@ public static class TeamShare
     private static void Check(long bytes)
     {
         if (bytes > MaxContentBytes) throw new TeamShareTooLargeException(bytes);
+    }
+
+    // ───────────── Snippets and notes ─────────────
+    // The core's kinds are closed (itemop.rs), so a snippet or a note travels as a file whose mime names it: its JSON is
+    // the blob. A client that does not know the mime shows a file and saves the JSON on Accept.
+
+    public const string SnippetKind = "snippet";
+    public const string NoteKind = "note";
+    public const string SnippetMime = "application/vnd.ombra.snippet+json";
+    public const string NoteMime = "application/vnd.ombra.note+json";
+    public const string NoteFromReply = "reply";
+    public const string NoteFromComment = "comment";
+
+    /// <summary>The most text a snippet or a note carries (UTF-8 bytes).</summary>
+    public const int MaxSnippetBytes = 200 * 1024;
+    public const int MaxNoteBytes = 200 * 1024;
+
+    private static readonly System.Text.Json.JsonSerializerOptions Json = new(System.Text.Json.JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    /// <summary>What a snippet is called: <c>Program.cs:10-20</c> (one line: <c>Program.cs:10</c>).</summary>
+    public static string SnippetName(SharedSnippet s) =>
+        System.IO.Path.GetFileName(s.Path) + ":" + (s.EndLine > s.StartLine ? $"{s.StartLine}-{s.EndLine}" : $"{s.StartLine}");
+
+    public static ShareContent Snippet(SharedSnippet s)
+    {
+        if (RelativePath(s.Path) is not { } path) throw new ArgumentException("the snippet's path must be relative to the project", nameof(s));
+        if (s.StartLine < 1 || s.EndLine < s.StartLine) throw new ArgumentException("bad line range", nameof(s));
+        var bytes = Encoding.UTF8.GetByteCount(s.Text);
+        if (bytes > MaxSnippetBytes) throw new TeamShareTooLargeException(bytes, MaxSnippetBytes);
+        var snippet = s with { Path = path };
+        return File(SnippetName(snippet), System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(snippet, Json), SnippetMime);
+    }
+
+    public static ShareContent Note(SharedNote n)
+    {
+        if (n.Source is not (NoteFromReply or NoteFromComment)) throw new ArgumentException("unknown note source", nameof(n));
+        var bytes = Encoding.UTF8.GetByteCount(n.Text);
+        if (bytes > MaxNoteBytes) throw new TeamShareTooLargeException(bytes, MaxNoteBytes);
+        var title = CollectionTitle(n.Title) ?? "note";
+        return File(title, System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(n with { Title = title }, Json), NoteMime);
+    }
+
+    /// <summary>A received snippet's JSON; the path must stay inside a project, the text within the cap.</summary>
+    public static SharedSnippet ReadSnippet(byte[] data)
+    {
+        if (data.Length > MaxSnippetBytes * 2) throw new InvalidDataException("the snippet is too large");
+        var s = Deserialize<SharedSnippet>(data);
+        if (s.Text is null || s.Path is null || RelativePath(s.Path) is not { } path || s.StartLine < 1 || s.EndLine < s.StartLine
+            || Encoding.UTF8.GetByteCount(s.Text) > MaxSnippetBytes) throw new InvalidDataException("not a snippet");
+        return s with { Path = path };
+    }
+
+    public static SharedNote ReadNote(byte[] data)
+    {
+        if (data.Length > MaxNoteBytes * 2) throw new InvalidDataException("the note is too large");
+        var n = Deserialize<SharedNote>(data);
+        if (n.Text is null || n.Title is null || n.Source is not (NoteFromReply or NoteFromComment)
+            || Encoding.UTF8.GetByteCount(n.Text) > MaxNoteBytes) throw new InvalidDataException("not a note");
+        return n.Url is { } u && !(Uri.TryCreate(u, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https") ? n with { Url = null } : n;
+    }
+
+    private static T Deserialize<T>(byte[] data)
+    {
+        try { return System.Text.Json.JsonSerializer.Deserialize<T>(data, Json) ?? throw new InvalidDataException("empty"); }
+        catch (System.Text.Json.JsonException e) { throw new InvalidDataException(e.Message, e); }
+    }
+
+    /// <summary>A path inside a project with '/': no root, no drive, no '..'; null otherwise.</summary>
+    public static string? RelativePath(string path)
+    {
+        var p = path.Replace('\\', '/').Trim();
+        var parts = p.Split('/', StringSplitOptions.RemoveEmptyEntries).Where(x => x != ".").ToList();
+        if (p.StartsWith('/') || p.Contains(':') || parts.Count == 0 || parts.Any(x => x == "..")) return null;
+        return string.Join('/', parts);
+    }
+
+    public static string? Mime(TeamItem i) => S(i.Body, "mime");
+
+    /// <summary>The item's kind as the user sees it: a file carrying a snippet or a note is one.</summary>
+    public static string ShownKind(TeamItem i) => i.Kind == TeamItemKinds.File
+        ? Mime(i) switch { SnippetMime => SnippetKind, NoteMime => NoteKind, _ => i.Kind }
+        : i.Kind;
+
+    /// <summary>Writes a snippet's text into <paramref name="folder"/> under its file's name (a free one), atomically; the path.</summary>
+    public static string SaveSnippet(SharedSnippet s, string folder)
+    {
+        Directory.CreateDirectory(folder);
+        var path = FreePath(folder, SafeName(System.IO.Path.GetFileName(s.Path)), isFolder: false);
+        System.IO.File.WriteAllText(path + ".part", s.Text);
+        System.IO.File.Move(path + ".part", path);
+        return path;
     }
 
     /// <summary>Text for the core's JSON→CBOR: a string that starts with <c>hex:</c> would become bytes, so it gets a zero-width prefix.</summary>
@@ -301,7 +406,7 @@ public static class TeamShare
         var mine = items.Where(i => i.IsResource && !i.Deleted && i.AuthorMemberId == me && i.RecipientMemberId is not null).ToList();
         var inCollections = mine.Where(i => i.Kind == TeamItemKinds.Collection).SelectMany(c => Members(c, mine)).Select(m => (m.AuthorMemberId, m.ItemId)).ToHashSet();
         return mine.Where(i => !inCollections.Contains((i.AuthorMemberId, i.ItemId)))
-            .GroupBy(i => (i.Kind, i.CreatedAt, Title(i)))
+            .GroupBy(i => (Kind: ShownKind(i), i.CreatedAt, Title(i)))
             .Select(g => new SentShare($"{g.Key.Kind}/{g.Key.CreatedAt}/{g.Key.Item3}", g.Key.Kind, g.Key.Item3, g.Key.CreatedAt, g.Select(i =>
             {
                 var s = i.Statuses.FirstOrDefault(x => x.RecipientMemberId == i.RecipientMemberId);

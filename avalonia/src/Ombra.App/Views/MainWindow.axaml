@@ -60,6 +60,15 @@
             <TextBlock Grid.Column="1" Text="{loc:T 'Copy as Markdown'}" VerticalAlignment="Center" />
           </Grid>
         </Button>
+        <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsEnabled="{Binding HasText}"
+                Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ShareReplyCommand}" CommandParameter="{Binding}"
+                ToolTip.Tip="{loc:T 'Send this reply to members of your team'}"
+                AutomationProperties.Name="{loc:T 'Send to colleague…'}">
+          <Grid ColumnDefinitions="Auto,*">
+            <ctl:Icon Data="{StaticResource IconUsers}" Size="16" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="{loc:T 'Send to colleague…'}" VerticalAlignment="Center" />
+          </Grid>
+        </Button>
         <Border Classes="menu-separator" />
         <Button Classes="menu-item" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
                 Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ForkFromCommand}" CommandParameter="{Binding}"
@@ -122,8 +131,12 @@
               </Border>
             </Panel>
           </Button>
-          <!-- Other products embedded here (the browser) sit under a hairline, as ChatGPT separates its apps -->
+          <!-- Other products embedded here (the editor, the browser) sit under a hairline, as ChatGPT separates its apps -->
           <Border x:Name="RailProductsSeparator" Classes="rail-separator" />
+          <Button x:Name="RailEditorButton" Classes="rail-item" Classes.on="{Binding IsEditorRailOn}" Command="{Binding OpenEditorPageCommand}"
+                  ToolTip.Tip="{x:Static vm:MainViewModel.EditorRailTip}" AutomationProperties.Name="{loc:T 'Editor'}">
+            <ctl:Icon Data="{StaticResource IconCode}" Size="20" />
+          </Button>
           <Button x:Name="RailBrowserButton" Classes="rail-item" Classes.on="{Binding IsBrowserRailOn}" Command="{Binding OpenBrowserPageCommand}"
                   ToolTip.Tip="{x:Static vm:MainViewModel.BrowserRailTip}" AutomationProperties.Name="{loc:T 'Browser'}">
             <ctl:Icon Data="{StaticResource IconGlobe}" Size="20" />
@@ -671,13 +684,23 @@
                               </ItemsControl.ItemTemplate>
                             </ItemsControl>
                             <SelectableTextBlock Classes="sent-comment-value" Text="{Binding Quote}" IsVisible="{Binding HasQuote}" />
-                            <Button Classes="link sent-comment-open" IsVisible="{Binding CanOpen}" HorizontalAlignment="Left"
-                                    Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenSentCommentCommand}" CommandParameter="{Binding}">
-                              <StackPanel Orientation="Horizontal" Spacing="4">
-                                <TextBlock Text="{Binding OpenLabel}" VerticalAlignment="Center" />
-                                <ctl:Icon Data="{StaticResource IconExternal}" Size="12" VerticalAlignment="Center" />
-                              </StackPanel>
-                            </Button>
+                            <StackPanel Orientation="Horizontal" Spacing="16">
+                              <Button Classes="link sent-comment-open" IsVisible="{Binding CanOpen}" HorizontalAlignment="Left"
+                                      Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).OpenSentCommentCommand}" CommandParameter="{Binding}">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                  <TextBlock Text="{Binding OpenLabel}" VerticalAlignment="Center" />
+                                  <ctl:Icon Data="{StaticResource IconExternal}" Size="12" VerticalAlignment="Center" />
+                                </StackPanel>
+                              </Button>
+                              <Button Classes="link sent-comment-open" HorizontalAlignment="Left"
+                                      Command="{Binding $parent[Window].((vm:MainViewModel)DataContext).ShareSentCommentCommand}" CommandParameter="{Binding}"
+                                      AutomationProperties.Name="{Binding ToggleName, StringFormat={loc:T 'Send to team: {0}'}}">
+                                <StackPanel Orientation="Horizontal" Spacing="4">
+                                  <TextBlock Text="{loc:T 'Send to team…'}" VerticalAlignment="Center" />
+                                  <ctl:Icon Data="{StaticResource IconUsers}" Size="12" VerticalAlignment="Center" />
+                                </StackPanel>
+                              </Button>
+                            </StackPanel>
                           </StackPanel>
                         </StackPanel>
                       </Border>
@@ -2686,6 +2709,17 @@
           </Border>
           <Border x:Name="BrowserWindowEdge" Classes="sheet-frame" Background="Transparent" IsHitTestVisible="False" />
         </Panel>
+      </Panel>
+    </Border>
+
+    <!-- ── Editor (the rail's Editor, ViewModels/EditorPageViewModel.cs; Views/EditorPage): the project's tree, tabs of open
+         files and the editor, in the conversation's and the sidebar's place as the Team page, on a sheet under the band ── -->
+    <Border x:Name="EditorPageHost" Grid.Column="2" Classes="page" IsVisible="{Binding ShowEditorPage}">
+      <Panel>
+        <Border Height="{DynamicResource GuiChromeBand}" VerticalAlignment="Top" Background="Transparent"
+                chrome:WindowDecorationProperties.ElementRole="TitleBar" />
+        <Border Classes="sheet-frame" IsHitTestVisible="False" />
+        <views:EditorPage x:Name="EditorPageView" Margin="{DynamicResource GuiSheetMargin}" DataContext="{Binding EditorPage}" />
       </Panel>
     </Border>
 

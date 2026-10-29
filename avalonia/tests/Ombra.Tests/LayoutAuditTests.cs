@@ -128,7 +128,7 @@ public sealed class LayoutAuditTests
             }
             // The rail's pages: in the sidebar's and the conversation's place (no chats sidebar beside them)
             vm.CloseSettingsCommand.Execute(null);
-            foreach (var (open, name) in new (Action, string)[] { (() => vm.OpenTeamPageCommand.Execute(null), "team"), (() => vm.OpenBrowserPageCommand.Execute(null), "browser") })
+            foreach (var (open, name) in new (Action, string)[] { (() => vm.OpenTeamPageCommand.Execute(null), "team"), (() => vm.OpenEditorPageCommand.Execute(null), "editor"), (() => vm.OpenBrowserPageCommand.Execute(null), "browser") })
             {
                 open();
                 await Settle(400);

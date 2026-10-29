@@ -145,6 +145,57 @@ public partial class MainViewModel
     }
 
     /// <summary>
+    /// Lines of a file from the editor ("Share with team…"): whole lines <paramref name="firstLine"/>–<paramref name="lastLine"/>
+    /// of <paramref name="text"/>, with the path relative to the project (its name only outside it), the project, branch and commit.
+    /// </summary>
+    public void ShareSnippet(string fullPath, int firstLine, int lastLine, string text, string? language)
+    {
+        var project = ProjectFolder;
+        // Both resolved: the editor's document and the project may name the same folder differently (/var vs /private/var)
+        var rel = project is { } root && ProjectFiles.Relative(Ombra.ClientCore.SessionCatalog.ResolveLinks(root), Ombra.ClientCore.SessionCatalog.ResolveLinks(fullPath)) is { Length: > 0 } r
+            ? r.Replace('\\', '/') : Path.GetFileName(fullPath);
+        var snippet = new SharedSnippet(rel, firstLine, lastLine, language, text,
+            project is { } p ? Path.GetFileName(Path.TrimEndingDirectorySeparator(p)) : null);
+        var lines = lastLine > firstLine ? Loc.F("lines {0}-{1}", firstLine, lastLine) : Loc.F("line {0}", firstLine);
+        Share.Begin(TeamShare.SnippetKind, TeamShare.SnippetName(snippet), Loc.F("{0} · {1}", rel, lines), () =>
+        {
+            // Where it is from, read when it is sent (git may be slow or missing: then it goes without)
+            if (project is not null && GitProbe.ReadHeadAsync(RunTool, project, Lifetime).GetAwaiter().GetResult() is (GitProbeState.Ok, { } head, _))
+                snippet = snippet with { Branch = head.Branch, Commit = head.ShortCommit };
+            return TeamShare.Snippet(snippet);
+        }, fullPath);
+    }
+
+    /// <summary>An assistant reply (its menu's "Send to colleague…"): its Markdown as a note titled with the chat.</summary>
+    [RelayCommand]
+    public void ShareReply(AssistantRowViewModel? reply)
+    {
+        if (reply is not { HasText: true }) return;
+        var note = new SharedNote(SessionTitle, reply.Text, TeamShare.NoteFromReply, SessionTitle);
+        Share.Begin(TeamShare.NoteKind, SessionTitle, Excerpt(reply.Text), () => TeamShare.Note(note));
+    }
+
+    /// <summary>A comment I sent with a message ("Send to team…" on its row): its note, place and details, and the page.</summary>
+    [RelayCommand]
+    public void ShareSentComment(SentCommentViewModel? comment)
+    {
+        if (comment?.Model is not { } c) return;
+        var place = c.Url ?? (c.Path is { } path ? ShownPath(path) + (c.Line is { } l ? $":{l}" : "") : c.Where);
+        var text = (c.Note.Length > 0 ? c.Note : Loc.T("(no note)")) + "\n\n" + Loc.F("On {0}", comment.Where)
+            + (c.Details.Count > 0 ? "\n\n" + (c.Url is null ? TeamShareViewModel.Fenced(string.Join('\n', c.Details), null) : string.Join('\n', c.Details.Select(d => "- " + d))) : "");
+        var title = c.Note.Length > 0 ? c.Note : comment.Where;
+        var note = new SharedNote(title, text, TeamShare.NoteFromComment, SessionTitle, c.Url);
+        Share.Begin(TeamShare.NoteKind, title, place, () => TeamShare.Note(note));
+    }
+
+    /// <summary>The start of a text for the Share dialog's detail line.</summary>
+    private static string Excerpt(string text)
+    {
+        var plain = Markdig.Markdown.ToPlainText(text).ReplaceLineEndings(" ").Trim();
+        return plain.Length > 160 ? plain[..160] + "…" : plain;
+    }
+
+    /// <summary>
     /// Where omp finds a skill named <paramref name="name"/>: its user folder, the project's .omp/.claude/.agents
     /// folders, the other agents' user folders and the custom ones; a folder of that name with SKILL.md, or one whose
     /// SKILL.md says <c>name: …</c>.

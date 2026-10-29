@@ -39,6 +39,7 @@ public partial class MainViewModel
     {
         if (IsSettingsOpen) CloseSettingsCommand.Execute(null);
         IsBrowserPageOpen = false;
+        IsEditorPageOpen = false;
         IsTeamPageOpen = true;
     }
 
