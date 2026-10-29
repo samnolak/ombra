@@ -2,7 +2,10 @@ name: server-release
 
 # Builds, signs and publishes a team-server release (server-v<version>) that Ombra installs over SSH.
 # The release is a prerelease and never the repo's Latest: the app updater reads Latest.
+# Triggers: pushing tag server-v<version>, or dispatch (works once this file is on the default branch).
 on:
+  push:
+    tags: ['server-v*']
   workflow_dispatch:
     inputs:
       version:
@@ -17,7 +20,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     env:
-      VERSION: ${{ inputs.version }}
+      VERSION: ${{ inputs.version || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -29,6 +32,7 @@ jobs:
           SIGNING_KEY: ${{ secrets.SERVER_RELEASE_SIGNING_KEY }}
         run: |
           set -euo pipefail
+          VERSION="${VERSION#server-v}"; echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad version: $VERSION" >&2; exit 1; }
           KEY="$RUNNER_TEMP/release-key.pem"
           trap 'rm -f "$KEY"' EXIT
