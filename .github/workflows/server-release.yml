@@ -1,0 +1,62 @@
+name: server-release
+
+# Builds, signs and publishes a team-server release (server-v<version>) that Ombra installs over SSH.
+# The release is a prerelease and never the repo's Latest: the app updater reads Latest.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Server version
+        required: true
+        default: 0.1.0
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build and sign
+        env:
+          SIGNING_KEY: ${{ secrets.SERVER_RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad version: $VERSION" >&2; exit 1; }
+          KEY="$RUNNER_TEMP/release-key.pem"
+          trap 'rm -f "$KEY"' EXIT
+          ( umask 077; printf '%s\n' "$SIGNING_KEY" > "$KEY" )
+          ./server/deploy/make-release.sh "$VERSION" "$PWD/ombra-server-$VERSION" "$KEY"
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release-key.pem"
+      - name: Verify and package
+        run: |
+          set -euo pipefail
+          ( cd "ombra-server-$VERSION" \
+            && openssl dgst -sha256 -verify "$GITHUB_WORKSPACE/server/deploy/release.pub" -signature SHA256SUMS.sig SHA256SUMS \
+            && sha256sum -c --quiet SHA256SUMS )
+          tar -czf "ombra-server-$VERSION.tar.gz" "ombra-server-$VERSION"
+          sha256sum "ombra-server-$VERSION.tar.gz"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > notes.md <<EOF
+          Ombra team server $VERSION. Ombra installs it over SSH from the Team page (Create a team); not the desktop app.
+
+          Signature: the tarball's top directory holds SHA256SUMS signed with the publisher key \`server/deploy/release.pub\`. Check before installing by hand:
+
+              openssl dgst -sha256 -verify release.pub -signature SHA256SUMS.sig SHA256SUMS && sha256sum -c SHA256SUMS
+          EOF
+          gh release create "server-v$VERSION" "ombra-server-$VERSION.tar.gz" \
+            --target "$GITHUB_SHA" --title "Ombra team server $VERSION" --notes-file notes.md \
+            --prerelease --latest=false
