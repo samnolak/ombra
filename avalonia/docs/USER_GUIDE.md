@@ -818,15 +818,35 @@ organisations or repositories. What members send each other — names, shared it
 end-to-end encrypted between their devices; the server passes it on without seeing names or contents. The page
 refreshes every 15 seconds.
 
-- **Create a team** — *Your team server: its address and, for an IP address, the certificate pin install.sh printed.
-  The first team needs the one-time bootstrap code.* Fill in **Server** (`203.0.113.7` or `team.example.com`),
-  **Certificate pin** (for a server reached by IP address; one with a domain certificate needs none) and **Bootstrap
-  code**, then press **Create team**. You are its owner. The **Owner recovery key** is shown once: *Write it down or
-  print it and keep it offline. It is shown only now: Ombra does not keep it. Without it a lost owner device cannot be
-  replaced.* **Copy** copies it; **I saved it** removes it from the screen.
+Signed out, the page shows **Join a team**, then **Create a team**, then the folded **I'm already in a team on another
+computer**.
+
 - **Join a team** — an admin sends you an invite link (`ombra://join?…`; it names the server and its pin). Paste it
   and press **Ask to join**: *Your request to join was sent. An admin of the team has to approve it; this page
   updates by itself.* Admins see it under **Join requests** (the role and how many devices) and press **Approve**.
+- **Create a team** — *Ombra installs the team server on your own Linux server over SSH and makes you its owner.*
+  The server needs Debian or Ubuntu on x86_64 and an SSH login as `root` or a user with passwordless `sudo`. Fill in
+  **Server address** (`203.0.113.7` or `team.example.com`), **SSH user** (`root` by default), **Port** (22) and
+  **SSH key** (the first of `~/.ssh/id_ed25519`, `id_ecdsa`, `id_rsa` that exists; **Choose…** picks another). For a
+  domain, **Email for the certificate** appears (optional, for Let's Encrypt). **Install server and create team**
+  then shows the steps — *Connecting*, *Preparing the server*, *Downloading*, *Verifying*, *Installing*, *Creating
+  the team* — with the current one marked, **Cancel**, and the folded **Installer log**. Ombra downloads the signed
+  server release, checks its signature, installs it, reads the certificate pin and the one-time bootstrap code from
+  the installer itself, signs in and creates the team; you are its owner. If something fails, the message and the
+  log stay on the page with **Retry** and **Change settings**. The **Owner recovery key** is shown once: *Write it
+  down or print it and keep it offline. It is shown only now: Ombra does not keep it. Without it a lost owner device
+  cannot be replaced.* **Copy** copies it; **I saved it** removes it from the screen.
+- **My server is already installed** (folded, under Create a team) — for a server you installed yourself with
+  `install.sh`: **Server**, **Certificate pin** (for a server reached by IP address; one with a domain certificate
+  needs none) and **Bootstrap code** as `install.sh` printed them, then **Create team**. When the install finds a
+  server already on the host, this part opens by itself.
+- **I'm already in a team on another computer** (folded) — to add this computer to your account: 1. on that
+  computer, **Team › My devices › Pair a device**; 2. paste the link it shows here and press **Pair**; 3. check that
+  both computers show the same six words and press **The words match**.
+- **Several teams** — in two teams or more, a switcher next to the page title picks the team the page shows
+  (members, devices, invites, shared items and comments follow it); Ombra remembers the choice. The owner sees
+  **Create another team**, which creates one more team on the same server with its own recovery key, shown once like
+  the first. Only the server's owner can create teams; anyone else gets *Only the server's owner can create teams.*
 - **Invite** (admins) — choose **Member** or **Admin** and press **Create link**: *One-time link ready · Member ·
   valid until it is used*, with **Copy link** and **Show link**. Send it over a channel you trust.
 - **Members** — each with their name, role (*Owner*, *Admin*, *Member*) and *You* on your own row; the member ID is
@@ -835,9 +855,9 @@ refreshes every 15 seconds.
   them first.*), and **Numbers match** confirms it. Admins **Remove** a member (never the owner). The owner hands the
   team over with **Make owner**: that member sees *The owner offers you the ownership of the team.* with **Accept**.
 - **My devices** — the computers on your account (*This device*, *Revoked*); **Revoke** cuts one off. To add one:
-  **Pair a device** shows a one-time link and a QR code; on the new computer, under **Add this computer to your
-  account**, paste the link and press **Pair**. Both screens then show six words; if they are the same, press **The
-  words match** on both.
+  **Pair a device** shows a one-time link and a QR code; on the new computer, under **I'm already in a team on
+  another computer**, paste the link and press **Pair**. Both screens then show six words; if they are the same,
+  press **The words match** on both.
 - **Technical details** (folded) — **Team ID** and **My ID**, each with **Copy**.
 - **Banners** — *You were removed from the team. Its data on this device was erased (keys, messages and shared
   items).* (**Dismiss**). When neither the owner nor enough admins confirmed the team's state in the last 72 hours,

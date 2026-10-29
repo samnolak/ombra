@@ -12,10 +12,28 @@
              xmlns:team="using:Ombra.App.Views.Team"
              x:Class="Ombra.App.Views.Team.TeamPage"
              x:DataType="vm:MainViewModel">
+  <UserControl.Styles>
+    <!-- The install step that runs now reads a step heavier than the others -->
+    <Style Selector="TextBlock.install-step.current">
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+  </UserControl.Styles>
   <ScrollViewer HorizontalScrollBarVisibility="Disabled">
     <StackPanel MaxWidth="760" Margin="32,24,32,32" Spacing="24">
       <StackPanel x:Name="TeamBody" DataContext="{Binding Team}" x:DataType="vm:TeamViewModel" Spacing="24">
-        <TextBlock Classes="page-title" Text="{loc:T 'Team'}" />
+        <Grid x:Name="TeamHeader" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+          <TextBlock Classes="page-title" Text="{loc:T 'Team'}" VerticalAlignment="Center" />
+          <ComboBox x:Name="TeamSwitcher" Grid.Column="1" Classes="chip" ItemsSource="{Binding TeamChoices}" SelectedItem="{Binding SelectedTeamChoice}"
+                    IsVisible="{Binding HasSeveralTeams}" MaxWidth="280" VerticalAlignment="Center" AutomationProperties.Name="{loc:T 'Team'}">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:TeamChoice">
+                <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <Button x:Name="CreateAnotherTeamButton" Grid.Column="2" Classes="outline" Content="{loc:T 'Create another team'}" Command="{Binding CreateAnotherTeamCommand}"
+                  IsVisible="{Binding CanCreateAnotherTeam}" IsEnabled="{Binding !IsBusy}" VerticalAlignment="Center" />
+        </Grid>
 
         <!-- errors -->
         <Border x:Name="TeamError" Classes="ws-note error" IsVisible="{Binding HasError}">
@@ -81,28 +99,110 @@
               </StackPanel>
             </Border>
           </StackPanel>
-          <StackPanel Spacing="8" IsVisible="{Binding !IsWaitingForApproval}">
+          <!-- create: Ombra installs the server over SSH; the manual fields stay folded under "already installed" -->
+          <StackPanel x:Name="CreateTeamCard" Spacing="8" IsVisible="{Binding !IsWaitingForApproval}">
             <Grid Classes="list-head"><TextBlock Classes="section" Text="{loc:T 'Create a team'}" /></Grid>
             <Border Classes="plug-list">
-              <StackPanel Classes="plug-body" Spacing="12">
-                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'Your team server: its address and, for an IP address, the certificate pin install.sh printed. The first team needs the one-time bootstrap code.'}" />
-                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="16" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
-                  <TextBlock Classes="muted" Text="{loc:T 'Server'}" VerticalAlignment="Center" />
-                  <TextBox x:Name="ServerAddressBox" Grid.Column="1" Text="{Binding ServerAddress}" Watermark="203.0.113.7 · team.example.com" IsEnabled="{Binding IsSignedOut}" />
-                  <TextBlock Grid.Row="1" Classes="muted" Text="{loc:T 'Certificate pin'}" VerticalAlignment="Center" />
-                  <TextBox x:Name="ServerPinBox" Grid.Row="1" Grid.Column="1" Text="{Binding ServerPin}" Watermark="sha256 SPKI (64 hex)" IsEnabled="{Binding IsSignedOut}" />
-                  <TextBlock Grid.Row="2" Classes="muted" Text="{loc:T 'Bootstrap code'}" VerticalAlignment="Center" />
-                  <TextBox x:Name="BootstrapBox" Grid.Row="2" Grid.Column="1" Text="{Binding BootstrapCode}" Watermark="XXXXX-XXXXX-…" />
-                </Grid>
-                <Button x:Name="CreateTeamButton" Classes="accent" HorizontalAlignment="Left" Content="{loc:T 'Create team'}" Command="{Binding CreateTeamCommand}" IsEnabled="{Binding !IsBusy}" />
+              <StackPanel>
+                <StackPanel x:Name="InstallForm" Classes="plug-body" Spacing="12" IsVisible="{Binding ShowInstallForm}">
+                  <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'Ombra installs the team server on your own Linux server over SSH and makes you its owner. Debian or Ubuntu, x86_64.'}" />
+                  <Grid ColumnDefinitions="Auto,*" ColumnSpacing="16" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8">
+                    <TextBlock Classes="muted" Text="{loc:T 'Server address'}" VerticalAlignment="Center" />
+                    <TextBox x:Name="InstallAddressBox" Grid.Column="1" Text="{Binding InstallAddress}" Watermark="203.0.113.7 · team.example.com" />
+                    <TextBlock Grid.Row="1" Classes="muted" Text="{loc:T 'SSH user'}" VerticalAlignment="Center" />
+                    <Grid Grid.Row="1" Grid.Column="1" ColumnDefinitions="*,Auto,72" ColumnSpacing="8">
+                      <TextBox x:Name="SshUserBox" Text="{Binding SshUser}" Watermark="root" />
+                      <TextBlock Grid.Column="1" Classes="muted" Text="{loc:T 'Port'}" VerticalAlignment="Center" />
+                      <TextBox x:Name="SshPortBox" Grid.Column="2" Text="{Binding SshPort}" Watermark="22" />
+                    </Grid>
+                    <TextBlock Grid.Row="2" Classes="muted" Text="{loc:T 'SSH key'}" VerticalAlignment="Center" />
+                    <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                      <TextBox x:Name="SshKeyBox" Text="{Binding SshKeyPath}" Watermark="~/.ssh/id_ed25519" />
+                      <Button Grid.Column="1" Classes="outline" Content="{loc:T 'Choose…'}" Command="{Binding BrowseSshKeyCommand}" VerticalAlignment="Center" />
+                    </Grid>
+                    <TextBlock Grid.Row="3" Classes="muted" Text="{loc:T 'Email for the certificate'}" VerticalAlignment="Center" IsVisible="{Binding IsDomainAddress}" />
+                    <TextBox x:Name="AcmeEmailBox" Grid.Row="3" Grid.Column="1" Text="{Binding AcmeEmail}" Watermark="you@example.com" IsVisible="{Binding IsDomainAddress}" />
+                  </Grid>
+                  <Button x:Name="InstallServerButton" Classes="accent" HorizontalAlignment="Left" Content="{loc:T 'Install server and create team'}" Command="{Binding InstallServerCommand}" IsEnabled="{Binding !IsBusy}" />
+                </StackPanel>
+                <!-- installing / failed: the steps, the log folded, Cancel or Retry -->
+                <StackPanel x:Name="InstallProgress" Classes="plug-body" Spacing="12" IsVisible="{Binding ShowInstallSteps}">
+                  <ItemsControl x:Name="InstallStepList" ItemsSource="{Binding InstallSteps}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:InstallStepRow">
+                        <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,3">
+                          <Panel Width="16" Height="16" VerticalAlignment="Center">
+                            <ctl:Icon Classes="unknown-mark" Data="{StaticResource IconDashCircle}" Size="16" IsVisible="{Binding IsPending}" />
+                            <ctl:Icon Classes="menu-check" Data="{StaticResource IconSpinner}" Size="16" IsVisible="{Binding IsCurrent}" />
+                            <ctl:Icon Classes="ok-mark" Data="{StaticResource IconCheckCircle}" Size="16" IsVisible="{Binding IsDone}" />
+                            <ctl:Icon Classes="error-mark" Data="{StaticResource IconCrossCircle}" Size="16" IsVisible="{Binding IsFailed}" />
+                          </Panel>
+                          <TextBlock Classes="install-step" Text="{Binding Title}" VerticalAlignment="Center" Classes.muted="{Binding IsPending}" Classes.current="{Binding IsCurrent}" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <Border x:Name="InstallErrorNote" Classes="ws-note error" IsVisible="{Binding HasInstallFailed}">
+                    <SelectableTextBlock x:Name="InstallErrorText" Text="{Binding InstallError}" TextWrapping="Wrap" />
+                  </Border>
+                  <StackPanel Spacing="8" IsVisible="{Binding HasInstallLog}">
+                    <ToggleButton x:Name="InstallLogToggle" Classes="thinking-toggle" IsChecked="{Binding HasInstallFailed, Mode=OneWay}" AutomationProperties.Name="{loc:T 'Installer log'}">
+                      <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="{loc:T 'Installer log'}" VerticalAlignment="Center" />
+                        <ctl:Icon Classes="chevron" Data="{StaticResource IconChevronRight}" Size="16" />
+                      </StackPanel>
+                    </ToggleButton>
+                    <Border Classes="conn-inset" IsVisible="{Binding #InstallLogToggle.IsChecked}" MaxHeight="220">
+                      <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+                        <SelectableTextBlock x:Name="InstallLogText" Classes="mono" Text="{Binding InstallLog}" FontSize="{DynamicResource GuiFontCaption}" TextWrapping="Wrap" />
+                      </ScrollViewer>
+                    </Border>
+                  </StackPanel>
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="CancelInstallButton" Classes="outline" Content="{loc:T 'Cancel'}" Command="{Binding CancelInstallCommand}" IsVisible="{Binding IsInstalling}" />
+                    <Button x:Name="RetryInstallButton" Classes="accent" Content="{loc:T 'Retry'}" Command="{Binding RetryInstallCommand}" IsVisible="{Binding HasInstallFailed}" />
+                    <Button Classes="flat" Content="{loc:T 'Change settings'}" Command="{Binding EditInstallCommand}" IsVisible="{Binding HasInstallFailed}" />
+                  </StackPanel>
+                </StackPanel>
+                <Border Classes="plug-sep flush" />
+                <StackPanel Classes="plug-body" Spacing="12">
+                  <ToggleButton x:Name="ManualSetupToggle" Classes="thinking-toggle" IsChecked="{Binding IsManualSetupOpen}" AutomationProperties.Name="{loc:T 'My server is already installed'}">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                      <TextBlock Text="{loc:T 'My server is already installed'}" VerticalAlignment="Center" />
+                      <ctl:Icon Classes="chevron" Data="{StaticResource IconChevronRight}" Size="16" />
+                    </StackPanel>
+                  </ToggleButton>
+                  <StackPanel x:Name="ManualSetup" Spacing="12" IsVisible="{Binding IsManualSetupOpen}">
+                    <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'Your team server: its address and, for an IP address, the certificate pin install.sh printed. The first team needs the one-time bootstrap code.'}" />
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="16" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+                      <TextBlock Classes="muted" Text="{loc:T 'Server'}" VerticalAlignment="Center" />
+                      <TextBox x:Name="ServerAddressBox" Grid.Column="1" Text="{Binding ServerAddress}" Watermark="203.0.113.7 · team.example.com" IsEnabled="{Binding IsSignedOut}" />
+                      <TextBlock Grid.Row="1" Classes="muted" Text="{loc:T 'Certificate pin'}" VerticalAlignment="Center" />
+                      <TextBox x:Name="ServerPinBox" Grid.Row="1" Grid.Column="1" Text="{Binding ServerPin}" Watermark="sha256 SPKI (64 hex)" IsEnabled="{Binding IsSignedOut}" />
+                      <TextBlock Grid.Row="2" Classes="muted" Text="{loc:T 'Bootstrap code'}" VerticalAlignment="Center" />
+                      <TextBox x:Name="BootstrapBox" Grid.Row="2" Grid.Column="1" Text="{Binding BootstrapCode}" Watermark="XXXXX-XXXXX-…" />
+                    </Grid>
+                    <Button x:Name="CreateTeamButton" Classes="outline" HorizontalAlignment="Left" Content="{loc:T 'Create team'}" Command="{Binding CreateTeamCommand}" IsEnabled="{Binding !IsBusy}" />
+                  </StackPanel>
+                </StackPanel>
               </StackPanel>
             </Border>
           </StackPanel>
-          <StackPanel Spacing="8" IsVisible="{Binding !IsWaitingForApproval}">
-            <Grid Classes="list-head"><TextBlock Classes="section" Text="{loc:T 'Add this computer to your account'}" /></Grid>
-            <Border Classes="plug-list">
+          <!-- pairing this computer: folded away, it is the rare case on this screen -->
+          <StackPanel x:Name="PairDisclosure" Spacing="12" IsVisible="{Binding !IsWaitingForApproval}">
+            <ToggleButton x:Name="PairDisclosureToggle" Classes="thinking-toggle" IsChecked="{Binding IsPairDisclosureOpen}" AutomationProperties.Name="{loc:T 'I’m already in a team on another computer'}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <TextBlock Text="{loc:T 'I’m already in a team on another computer'}" VerticalAlignment="Center" />
+                <ctl:Icon Classes="chevron" Data="{StaticResource IconChevronRight}" Size="16" />
+              </StackPanel>
+            </ToggleButton>
+            <Border x:Name="PairBox" Classes="plug-list" IsVisible="{Binding IsPairDisclosureOpen}">
               <StackPanel Classes="plug-body" Spacing="12">
-                <TextBlock Classes="muted" TextWrapping="Wrap" Text="{loc:T 'On a device already in the team: Team › My devices › Pair a device, then paste its link here.'}" />
+                <StackPanel Spacing="4">
+                  <TextBlock TextWrapping="Wrap" Text="{loc:T '1. On that computer: Team › My devices › Pair a device.'}" />
+                  <TextBlock TextWrapping="Wrap" Text="{loc:T '2. Paste the link it shows here and press Pair.'}" />
+                  <TextBlock TextWrapping="Wrap" Text="{loc:T '3. Check that both computers show the same six words.'}" />
+                </StackPanel>
                 <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                   <TextBox x:Name="PairLinkBox" Classes="sm" Text="{Binding PairLinkText}" Watermark="ombra://pair?…" VerticalAlignment="Center" />
                   <Button x:Name="PairThisButton" Grid.Column="1" Classes="outline" Content="{loc:T 'Pair'}" Command="{Binding PairThisDeviceCommand}" IsEnabled="{Binding !IsBusy}" VerticalAlignment="Center" />
@@ -340,7 +440,7 @@
                       <Image x:Name="PairingQr" Source="{Binding PairingQr}" Width="168" Height="168" RenderOptions.BitmapInterpolationMode="None" />
                     </Border>
                     <StackPanel Grid.Column="1" Spacing="10">
-                      <TextBlock TextWrapping="Wrap" Text="{loc:T 'On the new device: Team › Add this computer, paste this link (or scan the code).'}" />
+                      <TextBlock TextWrapping="Wrap" Text="{loc:T 'On the new computer: Team › I’m already in a team on another computer, then paste this link (or scan the code).'}" />
                       <TextBlock x:Name="PairingLinkStatus" Classes="muted" Text="{loc:T 'One-time pairing link ready.'}" />
                       <StackPanel Orientation="Horizontal" Spacing="8">
                         <Button Classes="outline" Content="{loc:T 'Copy link'}" Command="{Binding CopyPairingLinkCommand}" />

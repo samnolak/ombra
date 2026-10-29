@@ -71,13 +71,17 @@ public sealed partial class TeamViewModel : ObservableObject
     private ExistingDevicePairing? _pairing;
     private NewDevicePairing? _newPairing;
     private TeamSnapshot? _snapshot;
+    private string? _selectedTeamId;
 
-    public TeamViewModel(string root, ITeamsKeyStore keys, IMachineIdentity machine, Func<string, Task> copy)
+    public TeamViewModel(string root, ITeamsKeyStore keys, IMachineIdentity machine, Func<string, Task> copy, ServerInstall? install = null)
     {
         _root = root;
         _keys = keys;
         _machine = machine;
         _copy = copy;
+        Installer = install ?? new TeamServerInstaller().InstallAsync;
+        CreateOnServerAsync = CreateOnServer;
+        SshKeyPath = DefaultSshKey(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)) ?? "";
     }
 
     /// <summary>The machine-local teams root (account.json and each server's profile).</summary>
@@ -114,11 +118,24 @@ public sealed partial class TeamViewModel : ObservableObject
     [ObservableProperty, NotifyPropertyChangedFor(nameof(HasInvite))] private string? _invite;
     public bool HasInvite => Invite is not null;
 
-    public string? SelectedTeamId => _snapshot?.Teams.FirstOrDefault()?.TeamId;
+    /// <summary>The team the page shows: the one picked in the header's switcher (remembered in account.json), else the first.</summary>
+    public string? SelectedTeamId => Team?.TeamId;
     public Guid? MyMemberId => _snapshot?.MemberId;
     public IReadOnlyList<TeamMember> Members => Team?.Roster.Members ?? [];
-    private TeamView? Team => _snapshot?.Teams.FirstOrDefault();
+    private TeamView? Team => _snapshot?.Teams is { Count: > 0 } teams
+        ? teams.FirstOrDefault(t => t.TeamId == _selectedTeamId) ?? teams[0] : null;
     public bool HasTeam => Team is not null;
+
+    /// <summary>The header's team switcher: shown when the account is in two teams or more.</summary>
+    public IReadOnlyList<TeamChoice> TeamChoices { get; private set; } = [];
+    public bool HasSeveralTeams => TeamChoices.Count > 1;
+    public TeamChoice? SelectedTeamChoice
+    {
+        get => TeamChoices.FirstOrDefault(c => c.TeamId == SelectedTeamId);
+        set { if (value is not null && value.TeamId != SelectedTeamId) SelectTeam(value.TeamId); }
+    }
+    /// <summary>The team's owner may create another team on this server (the server refuses anyone but its owner device).</summary>
+    public bool CanCreateAnotherTeam => IsOwner;
     public bool NoTeam => IsSignedIn && Team is null && !IsWaitingForApproval;
     public bool IsWaitingForApproval => _snapshot?.WaitingForApproval.Count > 0 && Team is null;
     public bool IsAdmin => Team?.IsAdmin == true;
@@ -218,6 +235,7 @@ public sealed partial class TeamViewModel : ObservableObject
     private void Attach(TeamSession? s)
     {
         Session = s;
+        _selectedTeamId = s?.Account.SelectedTeam;
         if (s is not null)
         {
             DisplayName = s.Account.Name ?? "";
@@ -234,6 +252,23 @@ public sealed partial class TeamViewModel : ObservableObject
     internal void Show(TeamSnapshot? snap)
     {
         _snapshot = snap;
+        TeamChoices = snap?.Teams.Select(TeamChoice.Of).ToList() ?? [];
+        Rebuild();
+    }
+
+    /// <summary>Shows another of my teams: members, devices, invites and shared features follow it.</summary>
+    internal void SelectTeam(string teamId)
+    {
+        if (_snapshot?.Teams.Any(t => t.TeamId == teamId) != true) return;
+        _selectedTeamId = teamId;
+        Invite = null;
+        Rebuild();
+        if (Session is { } s) _ = s.SelectTeamAsync(teamId).ContinueWith(t => Dispatcher.UIThread.Post(() => Error = t.Exception!.GetBaseException().Message),
+            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+    }
+
+    private void Rebuild()
+    {
         MemberRows.Clear();
         DeviceRows.Clear();
         JoinRows.Clear();
@@ -273,12 +308,46 @@ public sealed partial class TeamViewModel : ObservableObject
     private Task Connect() => Run(async () => Attach(await Task.Run(() => TeamSession.ConnectAsync(_root, ServerAddress, ServerPin, _keys, _machine))));
 
     [RelayCommand]
-    private Task CreateTeam() => Run(async () =>
+    private Task CreateTeam() => Run(() => CreateOnServerAsync(ServerAddress, ServerPin, BootstrapCode));
+
+    /// <summary>
+    /// Signs in to <paramref name="server"/> (unless already signed in there) and creates a team with the server's
+    /// one-time bootstrap code; the recovery key card follows. Tests replace it through <see cref="CreateOnServerAsync"/>
+    /// (no team server in Ombra.Tests).
+    /// </summary>
+    private async Task CreateOnServer(string server, string? pin, string code)
     {
-        if (Session is null) Attach(await Task.Run(() => TeamSession.ConnectAsync(_root, ServerAddress, ServerPin, _keys, _machine)));
-        var t = await Task.Run(() => Session!.CreateTeamAsync(BootstrapCode));
+        if (Session is null || (!string.IsNullOrWhiteSpace(server)
+            && !string.Equals(Session.Account.Server, ServerEndpoint.Parse(server, NullIfBlank(pin)).ToString(), StringComparison.OrdinalIgnoreCase)))
+        {
+            var s = await Task.Run(() => TeamSession.ConnectAsync(_root, server, pin, _keys, _machine));
+            Session?.Dispose();
+            Attach(s);
+        }
+        var t = await Task.Run(() => Session!.CreateTeamAsync(code));
         BootstrapCode = "";
         RecoveryKey = t.RecoveryKeyText;
+        _selectedTeamId = t.TeamId;
+        await RefreshNow();
+    }
+
+    internal Func<string, string?, string, Task> CreateOnServerAsync { get; set; }
+
+    private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    /// <summary>The owner's next team on the same server: no bootstrap code, its own recovery key shown once.</summary>
+    [RelayCommand]
+    private Task CreateAnotherTeam() => Run(async () =>
+    {
+        TeamCreated t;
+        try { t = await Task.Run(() => Session!.CreateTeamAsync(null)); }
+        catch (TeamsServerException e) when (e.Status is 401 or 403)
+        {
+            throw new InvalidOperationException(Loc.T("Only the server’s owner can create teams."), e);
+        }
+        RecoveryKey = t.RecoveryKeyText;
+        _selectedTeamId = t.TeamId;
+        await Session!.SelectTeamAsync(t.TeamId);
         await RefreshNow();
     });
 

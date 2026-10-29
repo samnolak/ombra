@@ -16,6 +16,8 @@ public sealed class TeamAccount
     public List<string> PendingJoins { get; set; } = [];
     /// <summary>teamId → memberId hex → root fingerprint last accepted (N9: a change freezes the pair until compared).</summary>
     public Dictionary<string, Dictionary<string, string>> Fingerprints { get; set; } = [];
+    /// <summary>The team the Team page shows when the account is in several (null: the first).</summary>
+    public string? SelectedTeam { get; set; }
 }
 
 /// <summary>One team as the Team page shows it.</summary>
@@ -138,6 +140,10 @@ public sealed class TeamSession : IDisposable
 
     /// <summary>Any other team operation, serialised with the refresh (one ombra-core state, one caller at a time).</summary>
     public Task<T> RunAsync<T>(Func<TeamClient, Task<T>> f, CancellationToken ct = default) => Locked(() => f(Client), ct);
+
+    /// <summary>Remembers the team the page shows (account.json, serialised with the other saves).</summary>
+    public Task SelectTeamAsync(string teamId, CancellationToken ct = default) =>
+        Locked(() => { Account.SelectedTeam = teamId; Save(); return Task.CompletedTask; }, ct);
 
     // ---------------- team lifecycle ----------------
 

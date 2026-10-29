@@ -85,11 +85,32 @@ public sealed class TeamUiTests
             Assert.True(Named<Control>(w, "SignedOutForms").IsVisible);
             Assert.False(Named<Control>(w, "TeamSections").IsVisible);
             Assert.True(Named<TextBox>(w, "InviteLinkBox").IsEffectivelyVisible);
-            Assert.True(Named<TextBox>(w, "ServerAddressBox").IsEffectivelyVisible);
+            Assert.True(Named<TextBox>(w, "InstallAddressBox").IsEffectivelyVisible);
+            Assert.True(Named<Button>(w, "InstallServerButton").IsEffectivelyVisible);
+            Assert.Equal("22", vm.Team.SshPort);
+            Assert.Equal("root", vm.Team.SshUser);
+            // The certificate email only for a domain
+            Assert.False(Named<TextBox>(w, "AcmeEmailBox").IsEffectivelyVisible);
+            vm.Team.InstallAddress = "team.example.com";
+            Settle(w);
+            Assert.True(Named<TextBox>(w, "AcmeEmailBox").IsEffectivelyVisible);
+            vm.Team.InstallAddress = "";
+            // The manual fields and the pairing box are folded away until asked for
+            Assert.False(Named<TextBox>(w, "ServerAddressBox").IsEffectivelyVisible);
+            Assert.True(Named<Control>(w, "PairDisclosureToggle").IsEffectivelyVisible);
+            Assert.False(Named<TextBox>(w, "PairLinkBox").IsEffectivelyVisible);
+            Named<ToggleButton>(w, "PairDisclosureToggle").IsChecked = true;
+            Named<ToggleButton>(w, "ManualSetupToggle").IsChecked = true;
+            Settle(w);
             Assert.True(Named<TextBox>(w, "PairLinkBox").IsEffectivelyVisible);
-            Shot(w, "team-signed-out-dark");
+            Assert.True(Named<TextBox>(w, "ServerAddressBox").IsEffectivelyVisible);
             vm.SettingsTheme = "light";
+            Shot(w, "team-signed-out-open-light");
+            Named<ToggleButton>(w, "PairDisclosureToggle").IsChecked = false;
+            Named<ToggleButton>(w, "ManualSetupToggle").IsChecked = false;
             Shot(w, "team-signed-out-light");
+            vm.SettingsTheme = "dark";
+            Shot(w, "team-signed-out-dark");
 
             vm.ShowChatsCommand.Execute(null);
             Assert.False(vm.ShowTeamPage);
@@ -316,6 +337,147 @@ public sealed class TeamUiTests
             Assert.True(Named<Control>(w, "RemovedBanner").IsEffectivelyVisible);
             Assert.False(Named<Control>(w, "TeamSections").IsVisible);
             Shot(w, "team-removed-dark");
+        }
+        finally { await vm.DisposeAsync(); w.Close(); }
+    }
+
+    private static async Task Until(Window w, Func<bool> done)
+    {
+        for (var i = 0; i < 200 && !done(); i++) { Settle(w); await Task.Delay(10); }
+        Settle(w);
+        Assert.True(done());
+    }
+
+    /// <summary>Create a team: the installer's steps and log on the page, then its code goes to team creation.</summary>
+    [AvaloniaFact]
+    public async Task Install_success_creates_the_team_with_the_installers_code()
+    {
+        var (w, vm) = await OpenAsync();
+        try
+        {
+            vm.OpenTeamPageCommand.Execute(null);
+            var gate = new TaskCompletionSource<ServerInstallResult>();
+            ServerInstallRequest? asked = null;
+            vm.Team.Installer = (r, p, _) =>
+            {
+                asked = r;
+                p?.Report(new ServerInstallProgress(ServerInstallStep.Downloading, "fetching release 0.1.0"));
+                return gate.Task;
+            };
+            (string Server, string? Pin, string Code)? created = null;
+            vm.Team.CreateOnServerAsync = (s, pin, code) => { created = (s, pin, code); return Task.CompletedTask; };
+            vm.Team.InstallAddress = "203.0.113.7";
+            vm.Team.SshKeyPath = "/Users/me/.ssh/id_ed25519";
+            var run = vm.Team.InstallServerCommand.ExecuteAsync(null);
+            await Until(w, () => vm.Team.InstallSteps[2].IsCurrent);
+            Assert.True(Named<Control>(w, "InstallProgress").IsEffectivelyVisible);
+            Assert.False(Named<Control>(w, "InstallForm").IsVisible);
+            Assert.True(Named<Control>(w, "CancelInstallButton").IsEffectivelyVisible);
+            Assert.True(vm.Team.InstallSteps[0].IsDone);
+            Assert.Contains("fetching release", vm.Team.InstallLog);
+            Assert.Equal(new ServerInstallRequest("203.0.113.7", "root", 22, "/Users/me/.ssh/id_ed25519"), asked);
+            Named<ToggleButton>(w, "InstallLogToggle").IsChecked = true;
+            vm.SettingsTheme = "light";
+            Shot(w, "team-installing-light");
+            vm.SettingsTheme = "dark";
+            Shot(w, "team-installing-dark");
+            gate.SetResult(new ServerInstallResult("https://203.0.113.7", new string('e', 64), "ABCDE-FGHIJ-KLMNO-PQRST-UVWXY-Z", "srv"));
+            await run;
+            Assert.Equal(("https://203.0.113.7", new string('e', 64), "ABCDE-FGHIJ-KLMNO-PQRST-UVWXY-Z"), created);
+            Assert.False(vm.Team.IsInstalling);
+            Assert.False(vm.Team.HasInstallFailed);
+        }
+        finally { await vm.DisposeAsync(); w.Close(); }
+    }
+
+    [AvaloniaFact]
+    public async Task Install_failure_shows_the_message_the_log_and_retry()
+    {
+        var (w, vm) = await OpenAsync();
+        try
+        {
+            vm.OpenTeamPageCommand.Execute(null);
+            var calls = 0;
+            vm.Team.Installer = (_, p, _) =>
+            {
+                calls++;
+                p?.Report(new ServerInstallProgress(ServerInstallStep.PreparingHost, null));
+                return Task.FromException<ServerInstallResult>(new ServerInstallException("Server install failed (exit 1).",
+                    "##OMBRA-STEP PreparingHost\ninstall FAILED: unsupported OS: Fedora 40 (Debian or Ubuntu required)"));
+            };
+            var createdWith = new List<string>();
+            vm.Team.CreateOnServerAsync = (_, _, code) => { createdWith.Add(code); return Task.CompletedTask; };
+            vm.Team.InstallAddress = "203.0.113.7";
+            await vm.Team.InstallServerCommand.ExecuteAsync(null);
+            Settle(w);
+            Assert.True(vm.Team.HasInstallFailed);
+            Assert.Equal("Server install failed (exit 1).", Named<SelectableTextBlock>(w, "InstallErrorText").Text);
+            Assert.Contains("unsupported OS", vm.Team.InstallLog);
+            Assert.True(Named<SelectableTextBlock>(w, "InstallLogText").IsEffectivelyVisible);
+            Assert.True(Named<Control>(w, "RetryInstallButton").IsEffectivelyVisible);
+            Assert.Contains(vm.Team.InstallSteps, s => s.IsFailed);
+            Assert.Empty(createdWith);
+            vm.SettingsTheme = "light";
+            Shot(w, "team-install-failed-light");
+            vm.SettingsTheme = "dark";
+            Shot(w, "team-install-failed-dark");
+
+            // Retry runs the installer again; this time it works
+            vm.Team.Installer = (_, _, _) => { calls++; return Task.FromResult(new ServerInstallResult("https://203.0.113.7", new string('e', 64), "CODE2", "srv")); };
+            await vm.Team.RetryInstallCommand.ExecuteAsync(null);
+            Assert.Equal(2, calls);
+            Assert.Equal(["CODE2"], createdWith);
+            Assert.False(vm.Team.HasInstallFailed);
+
+            // A server already there: the manual fields open with the address filled in
+            vm.Team.Installer = (_, _, _) => Task.FromException<ServerInstallResult>(new ServerAlreadyInstalledException("an Ombra server is already installed"));
+            await vm.Team.InstallServerCommand.ExecuteAsync(null);
+            Settle(w);
+            Assert.False(vm.Team.HasInstallFailed);
+            Assert.True(vm.Team.IsManualSetupOpen);
+            Assert.Equal("203.0.113.7", vm.Team.ServerAddress);
+            Assert.True(vm.Team.HasError);
+            Assert.True(Named<TextBox>(w, "ServerPinBox").IsEffectivelyVisible);
+        }
+        finally { await vm.DisposeAsync(); w.Close(); }
+    }
+
+    /// <summary>Two teams: the header's switcher picks the shown one; members follow it.</summary>
+    [AvaloniaFact]
+    public async Task Two_teams_switcher_changes_the_selected_team_and_its_members()
+    {
+        var (w, vm) = await OpenAsync();
+        try
+        {
+            vm.OpenTeamPageCommand.Execute(null);
+            var first = Snapshot();
+            var nina = Guid.Parse("0190a000-0000-7000-8000-000000000005");
+            var me = first.Teams[0].Roster.Members[0];
+            var roster2 = new TeamRoster("9b2e000000000000000000000000000000000000000000000000000000c0ffee", 2, Me, [me, new(nina, "member", "Nina", [], false, "dd")], true);
+            var second = new TeamView(roster2.TeamId, roster2, true, true, new TeamConfirmation(true, false, 0, 1), [], null, null, []);
+            vm.Team.Show(first with { Teams = [first.Teams[0], second] });
+            Settle(w);
+            Assert.Equal(first.Teams[0].TeamId, vm.Team.SelectedTeamId);
+            var switcher = Named<ComboBox>(w, "TeamSwitcher");
+            Assert.True(switcher.IsEffectivelyVisible);
+            Assert.Equal(2, vm.Team.TeamChoices.Count);
+            Assert.True(Named<Button>(w, "CreateAnotherTeamButton").IsEffectivelyVisible);
+            vm.SettingsTheme = "light";
+            Shot(w, "team-two-teams-light");
+            vm.SettingsTheme = "dark";
+            Shot(w, "team-two-teams-dark");
+            switcher.SelectedItem = vm.Team.TeamChoices[1];
+            Settle(w);
+            Assert.Equal(roster2.TeamId, vm.Team.SelectedTeamId);
+            Assert.Equal(["Olga", "Nina"], vm.Team.MemberRows.Select(r => r.Name));
+            Assert.Empty(vm.Team.JoinRows);
+            // A refresh keeps the choice
+            vm.Team.Show(first with { Teams = [first.Teams[0], second] });
+            Assert.Equal(roster2.TeamId, vm.Team.SelectedTeamId);
+            // One team: no switcher
+            vm.Team.Show(first);
+            Settle(w);
+            Assert.False(switcher.IsVisible);
         }
         finally { await vm.DisposeAsync(); w.Close(); }
     }
