@@ -317,6 +317,12 @@ public sealed class UiTests
         }
         w.KeyPress(Key.B, RawInputModifiers.None, PhysicalKey.B, "b");
         Assert.NotEqual(TimeSpan.Zero, composer.CaretBlinkInterval); // back on the next key
+        // Deactivation hides the caret even when the composer keeps logical focus.
+        composer.CaretBlinkInterval = TimeSpan.Zero;
+        presenter.HideCaret();
+        Assert.True(composer.IsFocused);
+        w.KeyPress(Key.LeftShift, RawInputModifiers.None, PhysicalKey.ShiftLeft, "");
+        Assert.True((bool)blink.GetValue(presenter)!, "caret hidden after input resumes without moving it");
         await CloseAsync(w, vm);
     }
 }

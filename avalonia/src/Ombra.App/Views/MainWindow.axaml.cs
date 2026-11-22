@@ -596,6 +596,9 @@ public sealed partial class MainWindow : Window
     }
     private TimeSpan _caretIdleTimeout = TimeSpan.FromSeconds(10);
 
+    private Avalonia.Controls.Presenters.TextPresenter? ComposerPresenter =>
+        Composer.GetVisualDescendants().OfType<Avalonia.Controls.Presenters.TextPresenter>().FirstOrDefault();
+
     /// <summary>
     /// Stops the blink with the caret drawn (idle: it stays where you type) or not (another window is active). A zero
     /// interval alone froze the caret in whatever phase the blink was in, so half the time it vanished from the box.
@@ -603,14 +606,17 @@ public sealed partial class MainWindow : Window
     private void StopCaretBlink(bool visible)
     {
         Composer.CaretBlinkInterval = TimeSpan.Zero;
-        if (Composer.GetVisualDescendants().OfType<Avalonia.Controls.Presenters.TextPresenter>().FirstOrDefault() is not { } presenter) return;
+        if (ComposerPresenter is not { } presenter) return;
         if (visible && Composer.IsFocused) presenter.ShowCaret();
         else presenter.HideCaret();
     }
 
     private void ResumeCaret()
     {
+        var wasPaused = Composer.CaretBlinkInterval == TimeSpan.Zero;
         Composer.ClearValue(TextBox.CaretBlinkIntervalProperty);
+        // Restoring the interval alone leaves the presenter hidden after deactivation.
+        if (wasPaused && Composer.IsFocused) ComposerPresenter?.ShowCaret();
         _caretIdle.Stop();
         _caretIdle.Start();
     }
