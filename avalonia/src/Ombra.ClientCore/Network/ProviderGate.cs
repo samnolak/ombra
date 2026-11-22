@@ -132,7 +132,11 @@ public static class ProviderGate
 
         const out = {};
         for (const [p, e] of hosts) out[p] = { api: [...e.api].sort(), signIn: [...e.signIn].sort() };
-        console.log(JSON.stringify({ added: [...added].sort(), userDisabled: userDisabled.sort(), disabled: [...disabled].sort(), hosts: out }));
+        // Bun can exit before a write larger than the stdout pipe buffer has drained.
+        const reply = JSON.stringify({ added: [...added].sort(), userDisabled: userDisabled.sort(), disabled: [...disabled].sort(), hosts: out });
+        await new Promise((resolve, reject) => {
+          process.stdout.write(reply + "\n", error => error ? reject(error) : resolve());
+        });
         """;
 
     /// <summary>
