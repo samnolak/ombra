@@ -172,7 +172,7 @@ Nothing critical depends on UI timers, focus or rendering. No OS checks outside 
 | Deltas build text, `message_end` settles it | omp 18.2.0 serializes the partial lazily (`message_start` may contain the first delta) |
 | Settle probe after non-terminal `agent_end` | `UPSTREAM OMP ISSUE`: 18.2.0 can go idle without a terminal `agent_end`; `session_settled` honoured for newer omp |
 | UI delivery paused while minimized + young-gen GC bound | Avalonia queues dirty visuals until the next frame (none while minimized); the workstation GC's gen0 budget is large |
-| Caret blinks only in the active window and stops after 10 s without input | a blinking caret repaints: 2–5% CPU idle under software rendering; some window systems do not report deactivation |
+| The focused composer's caret reappears on activation or input and stays visible without blinking after 10 s idle | a blinking caret repaints: 2–5% CPU idle under software rendering. `MainWindow.ResumeCaret` redraws it after deactivation hid it |
 | Client-managed internal engine pack | pinned Bun 1.4.2/npm dependencies plus complete owned sources, manifest hashes, staged installation and real host self-check; no separate omp application required |
 | Own updater, not Velopack or Sparkle / Squirrel | the client ships as a plain folder / `.app` in an archive; an in-place swap of that folder keeps its path and needs no installer format per OS. The manifest is signed with ECDSA P-256, because .NET verifies it without extra libraries and Ed25519 is not built into .NET 10. Installing waits for the user |
 | Engine updates only with the client | each client pins a compatible pack; activation does not silently fall back to an incompatible older CLI |
